@@ -41,7 +41,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..), ImageAnalysis(..), ImageKind(.
 import qualified Graphos.Infrastructure.Config as Cfg
 import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
@@ -207,7 +207,7 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
           case result of
             Nothing -> pure Nothing
             Just nodes -> Just <$> withImportEdges grammar filePath nodes
-                                     (tsNodesToExtraction gran filePath nodes)
+                                     (tsNodesToExtraction (mkSourceFile filePath "") gran defaultTruncationBudget nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
