@@ -19,7 +19,7 @@ import Data.Text.Short (toText)
 import Graphos.Domain.Config (Granularity(..), ExtractorConfig(..), defaultExtractors)
 import Graphos.Domain.Types (Node(..))
 import Graphos.Domain.Types.Graph (extractionNodes)
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Wiring (getGrammarPtr)
 
@@ -34,7 +34,7 @@ extract grammar gran path src =
         Nothing -> expectationFailure ("parse failed for " ++ grammar) >> pure []
         Just ts -> pure
           [ (maybe "" toText (nodeKind n), toText (nodeLabel n))
-          | n <- Map.elems (extractionNodes (tsNodesToExtraction gran path ts)) ]
+          | n <- Map.elems (extractionNodes (tsNodesToExtraction (mkSourceFile path "") gran defaultTruncationBudget ts)) ]
 
 -- | Assert that some node has @kind@ and a label containing @needle@.
 hasNode :: [(Text, Text)] -> Text -> Text -> Expectation
