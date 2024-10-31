@@ -26,6 +26,7 @@ import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.FilePath (takeBaseName)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
 import Data.Word (Word64)
@@ -199,10 +200,7 @@ sourceDirHash (SourceFile p _) =
 -- | File stem without extension, used as the id prefix.
 sourceStem :: SourceFile -> Text
 sourceStem (SourceFile p _) =
-  let rev = T.reverse p
-      fname = T.dropWhile (/= '/') rev       -- last path component, reversed
-      nameRevNoExt = T.drop 1 (T.dropWhile (/='.') fname)  -- skip '.', drop extension
-  in T.reverse nameRevNoExt
+  T.pack (takeBaseName (T.unpack p))
 
 -- | The parsed file path as a plain FilePath.
 sourceFilePathStr :: SourceFile -> FilePath
