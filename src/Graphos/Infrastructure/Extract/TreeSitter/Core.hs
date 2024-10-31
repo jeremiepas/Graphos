@@ -212,9 +212,8 @@ sourceDirHash (SourceFile p _) =
 sourceStem :: SourceFile -> Text
 sourceStem (SourceFile p _) =
   let rev = T.reverse p
-      fname = T.takeWhile (/= '/') rev       -- last path component, reversed
-      nameRevNoExt = let (_, afterDot) = T.break (== '.') fname
-                      in if T.null afterDot then fname else T.drop 1 afterDot   -- skip '.', drop extension
+      fname = T.dropWhile (/= '/') rev       -- last path component, reversed
+      nameRevNoExt = T.drop 1 (T.dropWhile (/='.') fname)  -- skip '.', drop extension
   in T.reverse nameRevNoExt
 
 -- | The parsed file path as a plain FilePath.
