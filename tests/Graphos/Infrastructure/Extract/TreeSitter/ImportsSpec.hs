@@ -21,7 +21,7 @@ import System.IO.Temp (withSystemTempDirectory)
 
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Extraction(..))
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports
 import Graphos.Infrastructure.Wiring (getGrammarPtr)
@@ -43,7 +43,7 @@ extractFile grammar path = do
       parsed <- parseWithGrammar lang src
       case parsed of
         Nothing -> fail ("parse failed: " ++ path)
-        Just ts -> withImportEdges grammar path ts (tsNodesToExtraction GranularityFunction path ts)
+        Just ts -> withImportEdges grammar path ts (tsNodesToExtraction (mkSourceFile path "") GranularityFunction defaultTruncationBudget ts)
 
 -- | (target source_file, weight, extra) of every imports edge.
 importTargets :: Extraction -> [(Text, Double, Value)]

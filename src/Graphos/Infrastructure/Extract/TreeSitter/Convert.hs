@@ -48,7 +48,7 @@ import Data.Bits ((.|.))
 import Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..), SourceFile(..), mkSourceFile
   , normalizeText, sourceDirHash, sourceStem, sourceFilePathStr
-  , extractIdentifier, defaultTruncationBudget, truncateWithElision )
+  , extractIdentifier, defaultTruncationBudget, truncateText, truncateWithElision )
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- ───────────────────────────────────────────────
@@ -169,9 +169,9 @@ descendInto GranularityFine     _     _    = True
 nodeIdentifier :: SourceFile -> Granularity -> TSNodeInfo -> Maybe Text
 nodeIdentifier sf _ node =
   case tsnType node of
-    t | t `elem` moduleTypes       -> Just (sourceStem sf)
-      | t `elem` importExportTypes -> Just $ fromMaybe "" (extractSpecifier sf node)
-      | otherwise                  -> extractIdentifier node
+    t | t `elem` moduleTypes       -> Just (truncateText defaultTruncationBudget (sourceStem sf))
+      | t `elem` importExportTypes -> Just (truncateText defaultTruncationBudget (fromMaybe "" (extractSpecifier sf node)))
+      | otherwise                  -> fmap (truncateText defaultTruncationBudget) (extractIdentifier node)
 
 -- | Display label for a node: its identifier (falling back to the normalized
 -- node text when no identifier resolves).
@@ -197,7 +197,7 @@ tsNodeSignature sf gran budget node =
       | otherwise ->
           let norm = normalizeText (tsnText node)
           in if T.length norm <= budget then Just norm
-               else Just (truncateWithElision budget norm norm)
+               else Just (truncateText budget norm)
   where
     sigWithTail :: Int -> Text -> Text -> Text
     sigWithTail b raw tailText
@@ -244,17 +244,15 @@ findStringLiteral = go
 -- | The last single- or double-quoted token in a declaration (backticks are
 -- excluded: they denote template literals, never module specifiers).
 lastQuoted :: Text -> Maybe Text
-lastQuoted t0
-  | T.null t0 = Nothing
-  | otherwise = scan (T.length t0 - 1)
-  where
-    scan i
-      | i < 0     = Nothing
-      | otherwise = case T.unpack t0 !! i of
-          '\'' -> Just (quoteToken "'" t0)
-          '"'  -> Just (quoteToken '"' t0)
-          _    -> scan (i - 1)
-    quoteToken q t = T.reverse (T.drop 1 (T.takeWhile (/= q) (T.reverse t)))
+lastQuoted t =
+  case T.unsnoc t of
+    Just (_, q) | q == '\'' || q == '"' ->
+      let headPart = T.init t
+          prev = lastQuoteIdx q headPart
+      in case prev of
+           Just j  -> Just (T.drop j t)
+           Nothing -> Nothing
+    _ -> Nothing
 
 -- | Strip matching surrounding single / double quotes from a specifier.
 stripQuotes :: Text -> Text
@@ -338,7 +336,7 @@ tsNodesToExtraction sf gran budget nodes =
 resolveCollisions :: SourceFile -> [RawNode] -> [(RawNode, NodeId)]
 resolveCollisions sf raws =
   concatMap resolveGroup
-    (groupBy (comparing rnBaseId) (sortBy (comparing rnBaseId) raws))
+    (groupBy (\a b -> rnBaseId a == rnBaseId b) (sortBy (comparing rnBaseId) raws))
   where
     resolveGroup rs =
       let sorted = sortBy (comparing rnLine) rs
@@ -367,7 +365,7 @@ traverseNode sf gran budget parentEmitted isExported node =
   let tType   = tsnType node
       isDef   = tType `elem` typesFor gran && tsnIsNamed node
       ident   = nodeIdentifier sf gran node
-      kind    = fromText (T.pack (tsTypeToKind tType))
+      kind    = T.pack (tsTypeToKind tType)
       baseId  = maybe "" (\i -> makeNodeId sf kind i) ident
       sig     = tsNodeSignature sf gran budget node
       marker  = if isExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
@@ -385,18 +383,18 @@ traverseNode sf gran budget parentEmitted isExported node =
         else
           let emitNode = Node
                 { nodeId           = baseId
-                , nodeLabel        = fromText (fromMaybe "" ident)
+                , nodeLabel        = fromText (tsNodeLabel sf gran node)
                 , nodeFileType     = CodeFile
-                , nodeSourceFile   = fromText (sourceFilePathStr sf)
+                , nodeSourceFile   = fromText (T.pack (sourceFilePathStr sf))
                 , nodeSource       = Nothing
                 , nodeLineStart    = Just (tsnStartRow node + 1)
                 , nodeLineEnd      = Just (tsnEndRow node + 1)
-                , nodeSignature    = sig
+                , nodeSignature    = fmap fromText sig
                 , nodeCommunityId  = Nothing
                 , nodeDegree       = Nothing
                 , nodeIsBridge     = Nothing
                 , nodeExtra        = marker
-                , nodeKind         = Just kind
+                , nodeKind         = Just (fromText kind)
                 , nodePresentBits  = presentBits sig isExported
                 }
               rawNode = RawNode { rnNode = emitNode, rnBaseId = baseId, rnLine = tsnStartRow node }
@@ -409,15 +407,15 @@ importPartsFor :: SourceFile -> Text -> String -> TSNodeInfo -> [(NodeId, Import
 importPartsFor sf parentBase tType node =
   case extractSpecifier sf node of
     Just spec ->
-      let impPath = case resolveImport (sourceFilePathStr sf) spec of
+      let impPath = case resolveImport (sourceFilePathStr sf) (T.unpack spec) of
                       Just (p, _) -> p
                       Nothing -> "external:" ++ T.unpack spec
-          impName = case resolveImport (sourceFilePathStr sf) spec of
-                      Just (_, n) -> T.pack n
-                      Nothing -> fromText spec
+          impName = case resolveImport (sourceFilePathStr sf) (T.unpack spec) of
+                      Just (_, n) -> n
+                      Nothing -> spec
       in [ (parentBase, ImportTarget
             { itPath = impPath
-            , itName = fromMaybe spec impName
+            , itName = impName
             , itIsReExport = not (tType `elem` ["import_declaration", "import_statement", "import_from_statement"]) }) ]
     Nothing -> []
 
@@ -500,8 +498,18 @@ importTargetNodes sf targets =
 presentBits :: Maybe Text -> Bool -> Word64
 presentBits sig isExported =
   bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
-  .| maybe 0 bitNodeSignature sig
-  .| (if isExported then bitNodeExtra else 0)
+  .|. maybe 0 (\_ -> bitNodeSignature) sig
+  .|. (if isExported then bitNodeExtra else 0)
+
+
+-- | Index of the last occurrence of a character in a text, 0-based.
+lastQuoteIdx :: Char -> Text -> Maybe Int
+lastQuoteIdx q t =
+  let go i acc
+        | i < 0     = acc
+        | T.index t i == q = go (i - 1) (Just i)
+        | otherwise        = go (i - 1) acc
+  in go (T.length t - 1) Nothing
 
 -- | Convert tree-sitter type to human-readable kind.
 tsTypeToKind :: String -> String
