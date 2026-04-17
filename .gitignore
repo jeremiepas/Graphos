@@ -1,0 +1,15 @@
+dist/
+dist-newstyle/
+*.o
+*.hi
+*.hie
+*.chi
+*.chs.h
+*.dyn_o
+*.dyn_hi
+.graphos-out/
+.stack-work/
+cabal.project.local
+cabal.project.local~
+.ghc.environment.*
+graphos-out/
