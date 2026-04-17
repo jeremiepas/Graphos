@@ -3,10 +3,8 @@ module Graphos.UseCase.Report
   ( generateReport
   ) where
 
-import Data.List (intercalate, sortOn)
-import Data.Map.Strict (Map)
+import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -17,7 +15,7 @@ import Graphos.Domain.Community (cohesionScore)
 
 -- | Generate a markdown report
 generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Text
-generateReport g analysis config detection =
+generateReport g analysis _config _detection =
   T.unlines
     [ "# Graph Report"
     , ""

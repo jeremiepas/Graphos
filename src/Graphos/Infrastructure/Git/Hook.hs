@@ -6,7 +6,6 @@ module Graphos.Infrastructure.Git.Hook
   ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import System.Directory (doesFileExist, doesDirectoryExist, createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Data.List (isInfixOf)

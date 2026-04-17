@@ -10,7 +10,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, degree)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 
 -- | Export graph as SVG
 exportSVG :: Graph -> Analysis -> FilePath -> IO ()
@@ -25,8 +25,8 @@ generateSVG :: Graph -> Analysis -> Text
 generateSVG g analysis =
   let nodes = Map.toList (gNodes g)
       nodeCount = length nodes
-      width = max 800 (nodeCount * 8 + 200)
-      height = max 600 (nodeCount * 6 + 200)
+      width = max 800 (nodeCount * 8 + 200) :: Int
+      height = max 600 (nodeCount * 6 + 200) :: Int
       cx = width `div` 2
       cy = height `div` 2
       radius = min cx cy - 50

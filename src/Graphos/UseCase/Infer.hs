@@ -28,7 +28,6 @@ import qualified Data.Text as T
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph
-import Graphos.Domain.Graph
   ( Graph, gNodes, gEdges, neighbors, degree
   , articulationPoints, biconnectedComponents
   , edgeBetweenness
@@ -153,8 +152,8 @@ communityCentroids g commMap = Map.fromList
   ]
   where
     centroidOf g' members =
-      let scored = sortOn (\n -> negate (fromIntegral (degree g' n))) members
-      in head scored
+      let scored = sortOn (\n -> negate (fromIntegral (degree g' n) :: Double)) members
+      in case scored of (x:_) -> x; [] -> error "centroidOf: empty community"
 
 -- | Check if an edge already exists between two nodes (in either direction)
 notEdgeAlready :: Graph -> NodeId -> NodeId -> Bool

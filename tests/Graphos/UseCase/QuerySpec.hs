@@ -2,11 +2,9 @@ module Graphos.UseCase.QuerySpec where
 
 import Test.Hspec
 import Data.Text (Text)
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (buildGraph, gNodes, gEdges)
+import Graphos.Domain.Graph (buildGraph)
 import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..))
 
 -- Helper: create a test node

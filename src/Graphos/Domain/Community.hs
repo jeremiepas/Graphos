@@ -64,8 +64,7 @@ detectCommunities g = detectCommunitiesWithResolution g defaultResolution
 detectCommunitiesWithResolution :: Graph -> Resolution -> CommunityMap
 detectCommunitiesWithResolution g res =
   let raw = leidenPhase g res (initialAssignment g)
-      merged = mergeSmallCommunities g res raw
-  in merged
+  in mergeSmallCommunities g res raw
   where
     initialAssignment gr = Map.fromList $ zip (Map.keys (gNodes gr)) [0..]
 
@@ -100,8 +99,6 @@ leidenPhase' g res assignment remaining =
 localMoving :: Graph -> Resolution -> Map NodeId CommunityId -> Map NodeId CommunityId
 localMoving g res assignment = go assignment (Map.keys (gNodes g))
   where
-    gamma = resGamma res
-
     go assign [] = assign
     go assign (nid:nids) =
       let currentComm = Map.findWithDefault 0 nid assign
@@ -131,12 +128,12 @@ refineCommunities g assignment =
         let wellConnected = [nid | nid <- members
                                   , cohesionToCommunity g assignment nid cid > 0.5]
         in if length wellConnected < length members `div` 2
-           then (foldl' (\a nid -> Map.insert nid cidCounter a) acc wellConnected, cidCounter + 1)
+           then (foldlStrict (\a nid -> Map.insert nid cidCounter a) acc wellConnected, cidCounter + 1)
            else (acc, cidCounter)
         ) (assignment, maxCid + 1) commMap
   in finalAssign
   where
-    foldl' f z xs = go z xs
+    foldlStrict f z xs = go z xs
       where
         go acc []     = acc
         go acc (x:xs') = let acc' = f acc x in acc' `seq` go acc' xs'
@@ -157,15 +154,15 @@ mergeSmallCommunities g res commMap =
                                    , length members < minSize]
   in if null smallComms
      then commMap
-     else foldl' (\acc small -> mergeOne g strategy acc small acc) commMap smallComms
+     else foldlStrict (\acc small -> mergeOne g strategy acc small acc) commMap smallComms
   where
-    foldl' f z []     = z
-    foldl' f z (x:xs) = let z' = f z x in z' `seq` foldl' f z' xs
+    foldlStrict _f z []     = z
+    foldlStrict f z (x:xs) = let z' = f z x in z' `seq` foldlStrict f z' xs
 
 -- | Merge a single small community into its best neighbor
 -- allComms is now the current accumulator (not the original commMap)
 mergeOne :: Graph -> MergeStrategy -> CommunityMap -> (CommunityId, [NodeId]) -> CommunityMap -> CommunityMap
-mergeOne g strategy allComms (smallCid, smallMembers) _acc =
+mergeOne g strategy allComms (smallCid, smallMembers) _ =
   let -- Find the best target community using the current state
       targetCid = case strategy of
         MergeToLargest  -> largestCommunity allComms smallCid
@@ -253,7 +250,7 @@ cohesionScore g members =
                               , n `Set.member` memberSet
                               , nid < n]  -- count each edge once
       totalPossible = max 1 (length members * (length members - 1) `div` 2)
-  in fromIntegral (internalEdges :: Int) / fromIntegral totalPossible
+  in fromIntegral internalEdges / fromIntegral totalPossible
 
 -- | Score all communities
 scoreAllCohesion :: Graph -> CommunityMap -> CohesionMap

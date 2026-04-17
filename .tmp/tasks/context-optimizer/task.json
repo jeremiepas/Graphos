@@ -1,0 +1,35 @@
+{
+  "id": "context-optimizer",
+  "name": "Graphos as LLM Context Optimizer",
+  "status": "active",
+  "objective": "Implement a two-tier LLM context optimization pipeline using Graphos's knowledge graph as a semantic filter. Small local LLM selects relevant subgraph → builds minimal context → Big LLM receives only what matters. Conversation exchanges become graph nodes for persistent cross-session memory.",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/core/standards/test-coverage.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "docs/brainstorm-context-optimization.md",
+    "src/Graphos/UseCase/Query.hs",
+    "src/Graphos/UseCase/Query/Normalize.hs",
+    "src/Graphos/Domain/Types.hs",
+    "src/Graphos/Domain/Graph.hs",
+    "src/Graphos/Domain/Community.hs",
+    "src/Graphos/Domain/Analysis.hs",
+    "src/Graphos/Infrastructure/Server/MCP.hs"
+  ],
+  "exit_criteria": [
+    "Domain types for context selection (ContextBudget, QueryComplexity, SelectedContext, ConversationNode)",
+    "Pure context selection function using community-aware + relevance-weighted strategies",
+    "Compact formatter producing LLM-optimized text output",
+    "Token budgeting based on query complexity",
+    "Conversation node types + persistence in infrastructure",
+    "MCP tools: select_context, add_conversation, conversation_history",
+    "Hspec tests for all pure functions",
+    "cabal build && cabal test passes"
+  ],
+  "subtask_count": 8,
+  "completed_count": 0,
+  "created_at": "2026-04-17T18:00:00Z",
+  "completed_at": null
+}

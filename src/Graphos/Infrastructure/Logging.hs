@@ -73,12 +73,6 @@ defaultLogEnv level = do
   ref <- newIORef level
   pure LogEnv { leLevel = ref, lePrefix = "graphos" }
 
--- | Create a log environment with a custom prefix
-prefixedLogEnv :: LogLevel -> Text -> IO LogEnv
-prefixedLogEnv level prefix = do
-  ref <- newIORef level
-  pure LogEnv { leLevel = ref, lePrefix = prefix }
-
 -- | Run an action with a log environment
 runWithLog :: LogLevel -> (LogEnv -> IO a) -> IO a
 runWithLog level action = do
@@ -145,9 +139,7 @@ withTiming env label action = do
   logInfo env $ label <> " completed in " <> T.pack elapsed
   pure result
   where
-    diffTimeSec t2 t1 = realToFrac (diffUTCTime t2 t1)
-
--- | Time an action and log at DEBUG level
+    diffTimeSec t2 t1 = realToFrac (diffUTCTime t2 t1) :: Double
 withTimingDebug :: LogEnv -> Text -> IO a -> IO a
 withTimingDebug env label action = do
   start <- getCurrentTime
@@ -157,4 +149,4 @@ withTimingDebug env label action = do
   logDebug env $ label <> " completed in " <> T.pack elapsed
   pure result
   where
-    diffTimeSec t2 t1 = realToFrac (diffUTCTime t2 t1)
+    diffTimeSec t2 t1 = realToFrac (diffUTCTime t2 t1) :: Double

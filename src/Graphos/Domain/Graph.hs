@@ -46,7 +46,7 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
-import Data.Graph.Inductive.Graph (labNodes, labEdges)
+import Data.Graph.Inductive.Graph (labNodes)
 import qualified Data.Graph.Inductive.Graph as FGL
 import Data.Graph.Inductive.PatriciaTree (Gr)
 import Data.Graph.Inductive.Query.BFS (bfs, esp)
@@ -293,7 +293,7 @@ edgeBetweenness g =
                   , srcIdx < tgtIdx
                   , let path = esp srcIdx tgtIdx gr
                   , not (null path)
-                  , edge <- zip path (tail path)]
+                  , edge <- zip path (drop 1 path)]
       edgeCounts = Map.fromListWith (+) [
         ((Map.findWithDefault (T.pack "???") s nidMap,
           Map.findWithDefault (T.pack "???") t nidMap), 1.0)

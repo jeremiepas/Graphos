@@ -11,21 +11,18 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, catMaybes, listToMaybe)
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import System.IO (hFlush, stdout, isEOF)
-import System.Exit (exitSuccess)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, degree, shortestPath, godNodes, articulationPoints)
 import Graphos.UseCase.Query (queryGraph, pathQuery, QueryResult(..))
-import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion)
+import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities)
 
 -- | Start MCP server from a graph file
 startMCPServerFromFile :: FilePath -> IO ()
@@ -226,10 +223,11 @@ sendError code msg mid = do
 
 sendToolResult :: Value -> Value -> IO ()
 sendToolResult reqId content = do
-  let resp = object
+  let contentText = TE.decodeUtf8 (BSL.toStrict (encode content))
+      resp = object
         [ "jsonrpc" .= ("2.0" :: Text)
         , "id" .= reqId
-        , "result" .= object ["content" .= [object ["type" .= ("text" :: Text), "text" .= content]]]
+        , "result" .= object ["content" .= [object ["type" .= ("text" :: Text), "text" .= contentText]]]
         ]
   sendBSL (encode resp)
 

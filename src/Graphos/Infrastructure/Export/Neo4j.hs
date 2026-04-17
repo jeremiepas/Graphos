@@ -9,7 +9,6 @@ import Control.Exception (catch, SomeException)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Char (chr, ord)
 import Data.List (intercalate)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -42,7 +41,7 @@ pushToNeo4j g uri user password = do
   let failures = [err | Left err <- results]
   if null failures
     then pure (T.pack $ "Pushed " ++ show nodeCount ++ " nodes, " ++ show edgeCount ++ " edges in " ++ show (length batches) ++ " batches", nodeCount, edgeCount)
-    else pure (T.pack $ "Completed with " ++ show (length failures) ++ " errors: " ++ T.unpack (T.take 200 (head failures)), nodeCount, edgeCount)
+    else pure (T.pack $ "Completed with " ++ show (length failures) ++ " errors: " ++ T.unpack (T.take 200 (case failures of (f:_) -> f; [] -> "")), nodeCount, edgeCount)
 
 -- | Send a batch of Cypher statements via raw HTTP POST to Neo4j transactional endpoint.
 sendBatch :: Text -> Text -> Text -> [Text] -> IO (Either Text ())

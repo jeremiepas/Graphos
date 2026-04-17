@@ -14,11 +14,11 @@ import System.Directory (createDirectoryIfMissing)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (gNodes, gEdges, mergeExtractions, buildGraph)
-import Graphos.Infrastructure.Logging (LogLevel(..), LogEnv(..), defaultLogEnv, logInfo, logDebug, logTrace, logWarn)
+import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logTrace)
 import Graphos.UseCase.Detect (detectFiles)
 import Graphos.UseCase.Extract (extractAll)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
-import Graphos.UseCase.Cluster (clusterGraph, clusterGraphWithResolution)
+import Graphos.UseCase.Cluster (clusterGraphWithResolution)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferEdges)
@@ -71,7 +71,7 @@ runPipeline config = catch (do
       let res = Resolution { resGamma = cfgResolution config
                            , resMinSize = cfgMinCommSize config
                            , resMergeInto = MergeToNeighbor }
-          (commMap, cohesion) = clusterGraphWithResolution graph res
+          (commMap, _cohesion) = clusterGraphWithResolution graph res
 
       -- Step 4b: Infer additional edges based on density setting
       let allInferred = inferEdges (cfgEdgeDensity config) graph commMap

@@ -1,0 +1,35 @@
+{
+  "id": "context-optimizer-07",
+  "title": "Tests for formatter and conversation memory",
+  "status": "pending",
+  "depends_on": ["03", "04"],
+  "seq": "07",
+  "parallel": true,
+  "suggested_agent": "test-engineer",
+  "context_files": [
+    ".opencode/context/core/standards/test-coverage.md",
+    ".opencode/context/core/standards/code-quality.md"
+  ],
+  "reference_files": [
+    "src/Graphos/UseCase/FormatContext.hs",
+    "src/Graphos/UseCase/Conversation.hs",
+    "src/Graphos/Infrastructure/FileSystem/Conversation.hs"
+  ],
+  "acceptance_criteria": [
+    "Hspec tests for formatContextForLLM (output is valid markdown with expected sections)",
+    "Hspec tests for countContextTokens (approximate token count matches expectations)",
+    "Hspec tests for formatNodeCompact, formatEdgeCompact (compact output within token budget)",
+    "Hspec tests for addConversationNode (node added to graph, edges created)",
+    "Hspec tests for queryConversations (finds matching conversations from graph)",
+    "Hspec tests for ConversationNode JSON round-trip (ToJSON/FromJSON symmetry)",
+    "QuickCheck: formatted context token count <= budget for varied inputs",
+    "Integration test: save + load conversation file round-trip"
+  ],
+  "deliverables": [
+    "tests/UseCase/FormatContextSpec.hs",
+    "tests/UseCase/ConversationSpec.hs"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

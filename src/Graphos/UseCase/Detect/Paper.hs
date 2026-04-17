@@ -16,7 +16,7 @@ looksLikePaper content =
       hasAbstract = any (`T.isInfixOf` lower) abstractPatterns
       hasCitations = any (`T.isInfixOf` lower) citationPatterns
       hasReferences = any (`T.isInfixOf` lower) referencePatterns
-      score = sum [1 | hasArxiv] + sum [1 | hasDoi] + sum [1 | hasAbstract] + sum [1 | hasCitations] + sum [1 | hasReferences]
+      score = sum [1 :: Int | hasArxiv] + sum [1 :: Int | hasDoi] + sum [1 :: Int | hasAbstract] + sum [1 :: Int | hasCitations] + sum [1 :: Int | hasReferences]
   in score >= 2
 
 -- | ArXiv ID patterns
