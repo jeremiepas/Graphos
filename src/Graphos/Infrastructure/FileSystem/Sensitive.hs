@@ -4,7 +4,7 @@ module Graphos.Infrastructure.FileSystem.Sensitive
   , sensitivePatterns
   ) where
 
-import Data.List (isPrefixOf, isSuffixOf, isInfixOf)
+import Data.List (isSuffixOf, isInfixOf)
 import System.FilePath (takeFileName, takeDirectory)
 
 -- | Check if a file path matches sensitive/secret patterns
@@ -56,7 +56,7 @@ directoryPatterns =
 -- | Match a pattern against a filename or path
 matchSensitive :: String -> FilePath -> Bool
 matchSensitive pattern target
-  | headOrDefault pattern == '.' && '.' `elem` tail pattern =
+  | not (null pattern) && headOrDefault pattern == '.' && '.' `elem` drop 1 pattern =
       pattern `isSuffixOf` target || pattern `isInfixOf` target
   | otherwise =
       target == pattern || pattern `isInfixOf` target

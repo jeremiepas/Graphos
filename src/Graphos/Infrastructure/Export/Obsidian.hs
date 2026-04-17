@@ -5,10 +5,8 @@ module Graphos.Infrastructure.Export.Obsidian
   ) where
 
 import Data.List (intercalate, sortOn)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -94,7 +92,7 @@ writeCanvasFile g dir commMap = do
   writeFile filepath canvas
 
 formatCanvasNodesInCommunity :: Graph -> CommunityId -> [NodeId] -> [String]
-formatCanvasNodesInCommunity g cid members =
+formatCanvasNodesInCommunity _g cid members =
   [ "  - id: " ++ show (cid * 1000 + idx) ++ "\n    node: " ++ T.unpack nid ++ "\n    community: " ++ show cid
   | (idx, nid) <- zip [0..] members
   ]

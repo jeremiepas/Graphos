@@ -11,7 +11,6 @@ module Graphos.Infrastructure.FileSystem.Cache
 
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Char8 as B8
 import Data.List (foldl')
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -135,13 +134,13 @@ fileHash path root = do
     safeChar '/' = '_'
     safeChar '.' = '_'
     safeChar c   = c
-    makeRelative root path
-      | takeFileName root `isPrefixOf` path = drop (length (takeFileName root) + 1) path
-      | otherwise = path
+    makeRelative root' path'
+      | takeFileName root' `isPrefixOf` path' = drop (length (takeFileName root') + 1) path'
+      | otherwise = path'
     isPrefixOf _ "" = True
     isPrefixOf [] _ = True
     isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
-    isPrefixOf _ _ = False
+    isPrefixOf _ (_:_) = False
 
 -- | Group nodes/edges/hyperedges by source_file
 groupBySourceFile :: [Node] -> [Edge] -> [Hyperedge] -> Map FilePath ([Node], [Edge], [Hyperedge])

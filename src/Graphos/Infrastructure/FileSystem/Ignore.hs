@@ -6,8 +6,7 @@ module Graphos.Infrastructure.FileSystem.Ignore
   ) where
 
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf)
-import Data.Text (Text)
-import qualified Data.Text as T
+import System.Directory (doesFileExist)
 import System.Directory (doesFileExist)
 
 -- | A simplified ignore pattern
@@ -31,7 +30,7 @@ loadGraphosignore root = do
   where
     isCommentOrBlank line =
       let trimmed = dropWhile (== ' ') line
-      in null trimmed || head trimmed == '#'
+      in null trimmed || case trimmed of ('#':_) -> True; _ -> False
 
 -- | Parse a single ignore line into a pattern
 parsePattern :: String -> IgnorePattern

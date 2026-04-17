@@ -4,7 +4,7 @@ module Graphos.Infrastructure.Export.JSON
   , exportGraphWithLabels
   ) where
 
-import Data.Aeson (toJSON, encode, object, (.=))
+import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map

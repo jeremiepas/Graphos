@@ -392,7 +392,8 @@ parseSymbolsFromResponse (Object o) =
               , dsrRange = range
               , dsrChildren = []  -- flat list, we track parent→child in edges
               }
-              : concatMap (flattenSymbols (name : parents)) childrenVals
+               : concatMap (flattenSymbols (name : parents)) childrenVals
+    flattenSymbols _ _ = []  -- ignore non-object values
 
     parseSingleSymbol s =
       let name = case KM.lookup "name" s of

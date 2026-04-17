@@ -1,0 +1,39 @@
+{
+  "id": "context-optimizer-02",
+  "seq": "02",
+  "title": "Pure context selection engine",
+  "status": "pending",
+  "depends_on": ["01"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "src/Graphos/Domain/Context.hs",
+    "src/Graphos/UseCase/Query.hs",
+    "src/Graphos/Domain/Types.hs",
+    "src/Graphos/Domain/Graph.hs",
+    "src/Graphos/Domain/Community.hs",
+    "src/Graphos/Domain/Analysis.hs",
+    "docs/brainstorm-context-optimization.md"
+  ],
+  "acceptance_criteria": [
+    "selectContext pure function: Graph -> CommunityMap -> Analysis -> Text -> ContextBudget -> SelectedContext",
+    "Strategy 1: Community-aware selection (find matching node -> get community -> include bridge nodes)",
+    "Strategy 2: Relevance-weighted BFS (score nodes by matchScore + confidenceScore + community + bridge/god status)",
+    "Strategy 3: Path-based selection for cross-module queries (shortest_path + neighbors + communities)",
+    "classifyComplexity function: Text -> QueryComplexity (simple heuristic based on query terms and match count)",
+    "computeBudget: QueryComplexity -> Int -> ContextBudget (dynamic ratio per complexity level)",
+    "All functions are pure (no IO)",
+    "Reuse existing findBestNode, matchScore, confidenceScore where possible",
+    "Explicit exports, type signatures on all top-level definitions"
+  ],
+  "deliverables": [
+    "src/Graphos/UseCase/SelectContext.hs"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

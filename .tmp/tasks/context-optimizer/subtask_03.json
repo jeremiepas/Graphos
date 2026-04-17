@@ -1,0 +1,33 @@
+{
+  "id": "context-optimizer-03",
+  "title": "Compact context formatter for LLM consumption",
+  "status": "pending",
+  "depends_on": ["01"],
+  "seq": "03",
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "src/Graphos/Domain/Context.hs",
+    "src/Graphos/Domain/Types.hs",
+    "docs/brainstorm-context-optimization.md"
+  ],
+  "acceptance_criteria": [
+    "formatContextForLLM: SelectedContext -> Text (produces compact markdown representation)",
+    "~50 tokens per node, ~20 tokens per edge, ~100 tokens per community",
+    "Includes: community header with stats, key nodes (label + type + degree), key edges (source -> target [relation, confidence]), bridge nodes, suggested expansion paths",
+    "countContextTokens: Text -> Int (approximate token count for budget enforcement)",
+    "formatNodeCompact: Node -> Text, formatEdgeCompact: Edge -> Text (individual formatters)",
+    "All pure functions (no IO)",
+    "Explicit exports, type signatures on all top-level definitions"
+  ],
+  "deliverables": [
+    "src/Graphos/UseCase/FormatContext.hs"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

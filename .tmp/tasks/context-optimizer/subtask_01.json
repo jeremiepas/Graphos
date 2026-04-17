@@ -1,0 +1,33 @@
+{
+  "id": "context-optimizer-01",
+  "seq": "01",
+  "title": "Domain types for context optimization",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "src/Graphos/Domain/Types.hs",
+    "docs/brainstorm-context-optimization.md"
+  ],
+  "acceptance_criteria": [
+    "QueryComplexity ADT with 5 constructors (Focused, ModuleLevel, CrossModule, Architectural, Exploratory)",
+    "ContextBudget type with token budget, graph ratio, and complexity level",
+    "SelectedContext type containing selected nodes, edges, communities, bridge nodes, god nodes",
+    "ConversationNode type with convId, convQuestion, convSummary, convTimestamp, convRelevantNodes, convTokensUsed",
+    "ConversationEdge type linking conversations to code nodes",
+    "All types have ToJSON/FromJSON instances where appropriate",
+    "All types are in Domain layer (no IO)",
+    "Explicit exports from new module"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Context.hs"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

@@ -16,7 +16,5 @@ import Data.Map.Strict           as X (Map)
 import Data.Maybe                as X (fromMaybe, catMaybes, mapMaybe, isJust, isNothing)
 import Data.Set                  as X (Set)
 import Data.Text                 as X (Text)
-import qualified Data.Text as T
 import Data.Traversable          as X
-import Data.Word                  (Word8)
 import GHC.Generics             as X (Generic)
