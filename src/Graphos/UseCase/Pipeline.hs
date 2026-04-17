@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import System.Directory (createDirectoryIfMissing)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (gNodes, gEdges, mergeExtractions, buildGraph)
+import Graphos.Domain.Graph (gNodes, gEdges)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logTrace)
 import Graphos.UseCase.Detect (detectFiles)
 import Graphos.UseCase.Extract (extractAll)

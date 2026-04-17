@@ -5,21 +5,20 @@ module Graphos.UseCase.Extract
   , extractFromFile
   ) where
 
-import Control.Concurrent (threadDelay, QSemN, newQSemN, waitQSemN, signalQSemN)
+import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (bracket_, SomeException, catch)
-import Data.Char (isAlphaNum, isSpace)
-import Data.List (nub, sort, groupBy, isPrefixOf, find)
+import Data.Char (isAlphaNum)
+import Data.List (nub, sort, isPrefixOf, find)
 import qualified Data.Map.Strict as Map
-import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Extraction (validateExtraction)
+import Graphos.Domain.Extraction ()
 import Graphos.Domain.Graph (mergeExtractions)
-import Graphos.Infrastructure.LSP.Client (LSPClient(..), extractViaLSP, findLSPServer, LSPClientConfig(..), connectToLSP, disconnectLSP, languageServerCommands, extractWorkspaceSymbols, parseServerCapabilities, workspaceSymbolsToDocumentSymbols, symbolToNodes, symbolTreeToEdges)
+import Graphos.Infrastructure.LSP.Client (LSPClient(..), extractViaLSP, findLSPServer, LSPClientConfig(..), connectToLSP, disconnectLSP, languageServerCommands, extractWorkspaceSymbols, workspaceSymbolsToDocumentSymbols, symbolToNodes, symbolTreeToEdges)
 import Graphos.Infrastructure.LSP.Protocol (scpWorkspaceSymbolProvider, DocumentSymbolResult(..))
 import Graphos.Infrastructure.Logging (LogEnv, logInfo, logDebug, logTrace, logWarn)
 
@@ -502,14 +501,14 @@ docTagNodes filePath content =
 extractTags :: String -> [String]
 extractTags text =
   [ tag
-  | (i, c) <- zip [0..] text
-  , c == '#'
+  | (i, ch) <- zip [0..] text
+  , ch == '#'
   , i > 0  -- not start of line header
   , let prev = if i > 0 then text !! (i-1) else ' '
   , prev == ' ' || prev == '\n' || prev == ','
-  , let afterHash = takeWhile (\c -> isAlphaNum c || c `elem` ("_/-" :: String)) (drop (i+1) text)
+  , let afterHash = takeWhile (\ch' -> isAlphaNum ch' || ch' `elem` ("_/-" :: String)) (drop (i+1) text)
   , not (null afterHash)
-  , case afterHash of (c:_) -> c `notElem` (" " :: String); [] -> True  -- not a header
+  , case afterHash of (c':_) -> c' `notElem` (" " :: String); [] -> True  -- not a header
   , let tag = afterHash
   , length tag >= 2
   ]

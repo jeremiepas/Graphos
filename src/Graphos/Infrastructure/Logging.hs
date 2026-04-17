@@ -21,7 +21,7 @@ module Graphos.Infrastructure.Logging
   , withTimingDebug
   ) where
 
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale, diffUTCTime)

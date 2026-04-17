@@ -39,7 +39,6 @@ import Data.Graph.Inductive.PatriciaTree (Gr)
 import Graphos.Domain.Types
   ( NodeId, Node(..), Edge(..), Relation, Confidence
   , edgeSource, edgeTarget, edgeRelation, edgeConfidence
-  , nodeLabel, nodeId
   )
 
 -- | Node label in fgl representation: (NodeId, Node)

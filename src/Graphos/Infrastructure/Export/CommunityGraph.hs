@@ -10,7 +10,6 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.List (sortOn, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -124,7 +123,7 @@ communityLabel g members =
 -- ───────────────────────────────────────────────
 
 buildCommunityEdges :: Graph -> CommunityMap -> Map NodeId CommunityId -> [CommunityEdge]
-buildCommunityEdges g commMap reverseIdx =
+buildCommunityEdges g _commMap reverseIdx =
   let -- Count edges between communities
       edgeCounts :: Map (CommunityId, CommunityId) (Int, [NodeId])
       edgeCounts = Map.fromListWith (\(c1, b1) (c2, b2) -> (c1 + c2, nub (b1 ++ b2)))

@@ -6,13 +6,11 @@ module Graphos.Domain.Community.Label
   , labelFromNodes
   ) where
 
-import Data.List (sortOn, nub)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Function (on)
-
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, degree)
 import qualified Data.Set as Set

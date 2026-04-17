@@ -38,7 +38,7 @@ module Graphos.Infrastructure.LSP.Protocol
   , languageIdFromExt
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, (.=), (.:), withObject, (.:?), (.!=))
+import Data.Aeson (ToJSON(..), Value, object, (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 

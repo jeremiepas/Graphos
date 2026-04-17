@@ -4,7 +4,7 @@ module Graphos.UseCase.Query.Normalize
   , stripDiacritics
   ) where
 
-import Data.Char (isAlpha, toLower)
+import Data.Char ()
 import Data.Text (Text)
 import qualified Data.Text as T
 

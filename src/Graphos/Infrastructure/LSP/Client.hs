@@ -31,7 +31,7 @@ module Graphos.Infrastructure.LSP.Client
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
 import Control.Concurrent (threadDelay)
 import Control.Exception (catch, try, SomeException(..))
-import Data.Aeson (ToJSON, encode, eitherDecode, Value(..), Key)
+import Data.Aeson (ToJSON, encode, eitherDecode, Value(..))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AK (fromText)
 import qualified Data.Aeson.KeyMap as KM
@@ -47,7 +47,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (findExecutable)
 import System.Process (ProcessHandle, createProcess, proc, std_in, std_out, std_err, StdStream(CreatePipe), terminateProcess)
-import System.IO (Handle, hFlush, hIsEOF)
+import System.IO (Handle, hFlush)
 import System.Timeout (timeout)
 
 import Graphos.Domain.Types

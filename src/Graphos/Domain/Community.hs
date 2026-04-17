@@ -245,7 +245,7 @@ buildCommunityMap assignment =
 cohesionScore :: Graph -> [NodeId] -> Double
 cohesionScore g members =
   let memberSet = Set.fromList members
-      internalEdges = length [1 | nid <- members
+      internalEdges = length [1 :: Int | nid <- members
                               , n <- Set.toList (neighbors g nid)
                               , n `Set.member` memberSet
                               , nid < n]  -- count each edge once

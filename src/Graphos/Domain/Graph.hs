@@ -48,7 +48,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Graph.Inductive.Graph (labNodes)
 import qualified Data.Graph.Inductive.Graph as FGL
-import Data.Graph.Inductive.PatriciaTree (Gr)
+import Data.Graph.Inductive.PatriciaTree ()
 import Data.Graph.Inductive.Query.BFS (bfs, esp)
 import Data.Graph.Inductive.Query.DFS (dfs)
 import Data.Graph.Inductive.Query.ArtPoint (ap)
@@ -57,7 +57,7 @@ import Data.Graph.Inductive.Query.Dominators (dom)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph.FGL
-  ( toFGL, fromFGL, FGLNodeLabel, FGLEdgeLabel, FGLGraph, nidToInt )
+  ( toFGL, FGLGraph )
 
 -- ───────────────────────────────────────────────
 -- Internal graph representation

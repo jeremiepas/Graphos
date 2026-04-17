@@ -5,8 +5,6 @@ module Graphos.UseCase.Benchmark
   , printBenchmark
   ) where
 
-import qualified Data.Text as T
-
 -- | Benchmark result
 data BenchmarkResult = BenchmarkResult
   { brCorpusWords    :: Int
@@ -34,4 +32,4 @@ printBenchmark result = do
   putStrLn "\n=== Token Reduction Benchmark ==="
   putStrLn $ "Full corpus:     " ++ show (brCorpusWords result) ++ " words (~" ++ show (brCorpusWords result `div` 250) ++ " tokens)"
   putStrLn $ "Typical subgraph: ~" ++ show (brSubgraphTokens result) ++ " tokens"
-  putStrLn $ "Token savings:    " ++ show (round (brSavingsPercent result :: Double)) ++ "%"
+  putStrLn $ "Token savings:    " ++ show (round (brSavingsPercent result) :: Int) ++ "%"
