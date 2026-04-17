@@ -6,8 +6,6 @@ module Graphos.Infrastructure.Export.HTML
 
 import Data.Aeson (ToJSON(..), object, (.=), encode)
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (sortOn)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T

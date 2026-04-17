@@ -7,8 +7,6 @@ module Graphos.Infrastructure.FileSystem.Manifest
 
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BSL
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (doesFileExist, createDirectoryIfMissing)

@@ -11,7 +11,6 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import System.Directory (doesFileExist, canonicalizePath)
 import System.FilePath ((</>), takeExtension, normalise, makeRelative)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Control.Exception (catch, SomeException(..))
 

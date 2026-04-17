@@ -10,7 +10,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, godNodes, gNodes, gEdges, neighbors, articulationPoints, biconnectedComponents)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, articulationPoints, biconnectedComponents)
 import Graphos.Domain.Community (cohesionScore)
 
 -- | Generate a markdown report

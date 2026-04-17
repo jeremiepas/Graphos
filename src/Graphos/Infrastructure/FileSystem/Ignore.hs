@@ -7,7 +7,6 @@ module Graphos.Infrastructure.FileSystem.Ignore
 
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf)
 import System.Directory (doesFileExist)
-import System.Directory (doesFileExist)
 
 -- | A simplified ignore pattern
 data IgnorePattern

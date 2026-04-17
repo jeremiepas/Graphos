@@ -3,14 +3,13 @@ module Graphos.Infrastructure.Export.SVG
   ( exportSVG
   ) where
 
-import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 
 -- | Export graph as SVG
 exportSVG :: Graph -> Analysis -> FilePath -> IO ()
@@ -33,9 +32,10 @@ generateSVG g analysis =
       -- Assign positions in a circle
       positions :: Map NodeId (Int, Int)
       positions = Map.fromList
-        [ (nid, (cx + round (fromIntegral radius * cos (2 * pi * fromIntegral i / fromIntegral nodeCount))
-                , cy + round (fromIntegral radius * sin (2 * pi * fromIntegral i / fromIntegral nodeCount))))
-        | (i, (nid, _)) <- zip [0..] nodes ]
+         [ (nid, let i' = i :: Int in
+                 (cx + round (fromIntegral radius * cos (2 * pi * fromIntegral i' / fromIntegral nodeCount) :: Double)
+                 , cy + round (fromIntegral radius * sin (2 * pi * fromIntegral i' / fromIntegral nodeCount) :: Double)))
+         | (i, (nid, _)) <- zip [0 :: Int ..] nodes ]
       commMap = analysisCommunities analysis
       -- Build SVG elements
       edgeSvg = T.concat [renderEdge positions src tgt | ((src, tgt), _) <- Map.toList (gEdges g)]

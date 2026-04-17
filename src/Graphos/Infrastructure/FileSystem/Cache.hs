@@ -11,10 +11,8 @@ module Graphos.Infrastructure.FileSystem.Cache
 
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (foldl')
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (doesFileExist, createDirectoryIfMissing, removeFile, renameFile)
 import System.FilePath (takeFileName, (</>))
@@ -60,7 +58,7 @@ checkSemanticCache files root = do
     checkOne f = do
       mExt <- loadCached f root
       pure (f, mExt)
-    classify (cached, uncached) (f, Just ext) = (ext : cached, uncached)
+    classify (cached, uncached) (_f, Just ext) = (ext : cached, uncached)
     classify (cached, uncached) (f, Nothing)   = (cached, f : uncached)
 
 -- | Save semantic extraction results grouped by source_file
@@ -140,7 +138,6 @@ fileHash path root = do
     isPrefixOf _ "" = True
     isPrefixOf [] _ = True
     isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
-    isPrefixOf _ (_:_) = False
 
 -- | Group nodes/edges/hyperedges by source_file
 groupBySourceFile :: [Node] -> [Edge] -> [Hyperedge] -> Map FilePath ([Node], [Edge], [Hyperedge])

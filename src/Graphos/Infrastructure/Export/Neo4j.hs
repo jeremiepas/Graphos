@@ -8,12 +8,10 @@ module Graphos.Infrastructure.Export.Neo4j
 import Control.Exception (catch, SomeException)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Char (chr, ord)
-import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import Network.Socket (AddrInfo(..), SocketType(..), Family(..), defaultProtocol, getAddrInfo, socket, connect, close, socketToHandle)
+import Network.Socket (AddrInfo(..), SocketType(..), defaultProtocol, getAddrInfo, socket, connect, close, socketToHandle)
 import System.IO (hPutStr, hFlush, hGetContents', IOMode(..))
 
 import Graphos.Domain.Types

@@ -1,7 +1,8 @@
+{-# OPTIONS_GHC -Wno-x-partial #-}
 module Graphos.Domain.GraphSpec where
 
 import Test.Hspec
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -136,7 +137,7 @@ spec = do
       -- In a fully connected 3-node undirected graph, all have degree 2
       -- All non-file, non-concept nodes with degree > 0 are included
       length result `shouldBe` 3
-      gnEdges (head result) `shouldBe` 2
+      gnEdges (fromJust (listToMaybe result)) `shouldBe` 2
 
     it "excludes file nodes from results" $ do
       let fileNode = Node
@@ -167,7 +168,7 @@ spec = do
           g = buildGraph False ext
           result = godNodes g 2
       length result `shouldBe` 2
-      gnId (head result) `shouldBe` "a"  -- highest degree
+      gnId (fromJust (listToMaybe result)) `shouldBe` "a"  -- highest degree
 
   describe "neighbors" $ do
     it "returns connected nodes" $ do
@@ -197,7 +198,7 @@ spec = do
           gNew = buildGraph False new
           diff = graphDiff gOld gNew
       length (gdNewNodes diff) `shouldBe` 1
-      nodeId (head (gdNewNodes diff)) `shouldBe` "c"
+      nodeId (fromJust (listToMaybe (gdNewNodes diff))) `shouldBe` "c"
 
     it "detects removed nodes" $ do
       let old = emptyExtraction { extractionNodes = [testNode "a", testNode "b"] }
@@ -206,7 +207,7 @@ spec = do
           gNew = buildGraph False new
           diff = graphDiff gOld gNew
       length (gdRemovedNodes diff) `shouldBe` 1
-      fst (head (gdRemovedNodes diff)) `shouldBe` "b"
+      fst (fromJust (listToMaybe (gdRemovedNodes diff))) `shouldBe` "b"
 
     it "detects new edges" $ do
       let old = emptyExtraction

@@ -6,7 +6,7 @@ module Graphos.Infrastructure.Export.GraphML
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Graphos.Domain.Types
+import Graphos.Domain.Types ()
 import Graphos.Domain.Graph (Graph)
 
 -- | Export graph as GraphML

@@ -2,8 +2,6 @@ module Graphos.Domain.AnalysisSpec where
 
 import Test.Hspec
 import Data.Text (Text)
-import qualified Data.Map.Strict as Map
-
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion)
