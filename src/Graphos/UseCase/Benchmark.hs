@@ -5,7 +5,6 @@ module Graphos.UseCase.Benchmark
   , printBenchmark
   ) where
 
-import Data.Text (Text)
 import qualified Data.Text as T
 
 -- | Benchmark result
@@ -21,7 +20,7 @@ runBenchmark :: Int    -- ^ Corpus word count
              -> BenchmarkResult
 runBenchmark corpusWords subgraphTokens =
   let savings = if corpusWords > 0
-                then 100.0 * (1.0 - fromIntegral subgraphTokens / (fromIntegral corpusWords * 4 / 1000))
+                then 100.0 * (1.0 - fromIntegral subgraphTokens / (fromIntegral corpusWords * 4.0 / 1000.0))
                 else 0.0
   in BenchmarkResult
     { brCorpusWords    = corpusWords

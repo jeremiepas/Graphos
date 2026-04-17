@@ -1,0 +1,36 @@
+{
+  "id": "context-optimizer-05",
+  "title": "MCP tool integration: select_context, add_conversation, conversation_history",
+  "status": "pending",
+  "depends_on": ["02", "03", "04"],
+  "seq": "05",
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "src/Graphos/Infrastructure/Server/MCP.hs",
+    "src/Graphos/UseCase/SelectContext.hs",
+    "src/Graphos/UseCase/FormatContext.hs",
+    "src/Graphos/UseCase/Conversation.hs",
+    "src/Graphos/Infrastructure/FileSystem/Conversation.hs",
+    "docs/brainstorm-context-optimization.md"
+  ],
+  "acceptance_criteria": [
+    "New MCP tool: select_context — params: query (Text), budget (Int, optional default 3000) → returns compact formatted context string",
+    "New MCP tool: add_conversation — params: question (Text), answer_summary (Text), source_nodes ([Text]) → stores conversation node + edges",
+    "New MCP tool: conversation_history — params: query (Text), limit (Int, optional default 10) → returns matching past conversations",
+    "Tools registered in tools/list response with proper descriptions",
+    "Tool dispatch in handleToolCall follows existing pattern in MCP.hs",
+    "Conversations are persisted to graphos-out/memory/ directory (reuse existing pattern)",
+    "No breaking changes to existing MCP tools"
+  ],
+  "deliverables": [
+    "src/Graphos/Infrastructure/Server/MCP.hs (updated)"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

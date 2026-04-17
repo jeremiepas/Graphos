@@ -1,0 +1,38 @@
+{
+  "id": "context-optimizer-06",
+  "title": "Tests for domain types and context selection",
+  "status": "pending",
+  "depends_on": ["01", "02"],
+  "seq": "06",
+  "parallel": false,
+  "suggested_agent": "test-engineer",
+  "context_files": [
+    ".opencode/context/core/standards/test-coverage.md",
+    ".opencode/context/core/standards/code-quality.md"
+  ],
+  "reference_files": [
+    "src/Graphos/Domain/Context.hs",
+    "src/Graphos/UseCase/SelectContext.hs",
+    "src/Graphos/Domain/Types.hs",
+    "src/Graphos/Domain/Graph.hs"
+  ],
+  "acceptance_criteria": [
+    "Hspec tests for QueryComplexity classification (each constructor)",
+    "Hspec tests for computeBudget (each complexity level produces correct ratio)",
+    "Hspec tests for selectContext with community-aware strategy (build test graph with communities)",
+    "Hspec tests for selectContext with relevance-weighted BFS",
+    "Hspec tests for selectContext with path-based strategy",
+    "Hspec tests for selectContext respects token budget (output does not exceed budget)",
+    "QuickCheck properties: selectContext is deterministic (same input = same output)",
+    "QuickCheck properties: budget never negative",
+    "All tests use Arrange-Act-Assert pattern",
+    "Test graph fixtures with known structure for repeatable tests"
+  ],
+  "deliverables": [
+    "tests/Domain/ContextSpec.hs",
+    "tests/UseCase/SelectContextSpec.hs"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

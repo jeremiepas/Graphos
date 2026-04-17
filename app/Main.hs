@@ -13,11 +13,13 @@ import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, degree, shortestPath)
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
-import Graphos.Infrastructure.Logging (LogLevel(..), LogEnv(..), defaultLogEnv, logInfo, logDebug, logTrace, logError, logWarn, withTiming)
+import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
 
+import Graphos.Infrastructure.Server.Static (startStaticServer)
+import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Maybe (listToMaybe)
+import Data.Maybe (listToMaybe, fromMaybe)
 import Data.Foldable (asum)
 
 -- ───────────────────────────────────────────────
@@ -29,7 +31,8 @@ data Command
   | QueryCmd Text Text Int FilePath
   | PathCmd Text Text FilePath
   | ExplainCmd Text FilePath
-  | LServers             -- list available LSP servers
+  | LServers
+  | Serve FilePath Int
 
 pipelineOpts :: Parser PipelineConfig
 pipelineOpts = PipelineConfig
@@ -44,7 +47,7 @@ pipelineOpts = PipelineConfig
   <*> optional (strOption (long "obsidian-dir" <> help "Obsidian vault output directory"))
   <*> switch (long "neo4j" <> help "Generate Cypher for Neo4j")
   <*> optional (strOption (long "neo4j-push" <> help "Push to Neo4j at URI"))
-  <*> switch (long "mcp" <> help "Start MCP server")
+  <*> optional (strOption (long "mcp" <> metavar "GRAPH_JSON" <> help "Start MCP server with graph file"))
   <*> switch (long "svg" <> help "Export SVG")
   <*> switch (long "graphml" <> help "Export GraphML")
   <*> switch (long "watch" <> help "Watch for file changes")
@@ -70,13 +73,19 @@ pathOpts = PathCmd
   <*> argument str (metavar "TO")
   <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
 
+serveOpts :: Parser Command
+serveOpts = Serve
+  <$> strOption (long "dir" <> value "graphos-out" <> help "Directory to serve (default: graphos-out)")
+  <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
-  <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
+ <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
  <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
-   )
+ <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
+  )
  <|> Run <$> pipelineOpts
 
 main :: IO ()
@@ -84,27 +93,33 @@ main = do
   cmd <- execParser opts
   case cmd of
     Run config -> do
-      let logLevel = if cfgDebug config then LevelTrace
-                     else if cfgVerbose config then LevelDebug
-                     else LevelInfo
-      env <- defaultLogEnv logLevel
-      logInfo env "Starting pipeline..."
-      logDebug env $ "Config: " <> T.pack (show config)
-      result <- runPipeline config
-      case result of
-        Left err -> do
-          logError env $ "Pipeline failed: " <> err
-          exitWith (ExitFailure 1)
-        Right res -> do
-          logInfo env "Graph complete!"
-          logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
-          logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
-          logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
-          logInfo env $ T.pack $ "  Report: " ++ prReportPath res
-          logInfo env $ T.pack $ "  Graph: " ++ prGraphPath res
-          case prHtmlPath res of
-            Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
-            Nothing  -> pure ()
+      -- MCP mode: start MCP server and exit
+      case cfgMCP config of
+        Just graphPath -> do
+          putStrLn $ "[graphos] Starting MCP server with " ++ graphPath
+          startMCPServerFromFile graphPath
+        Nothing -> do
+          let logLevel = if cfgDebug config then LevelTrace
+                         else if cfgVerbose config then LevelDebug
+                         else LevelInfo
+          env <- defaultLogEnv logLevel
+          logInfo env "Starting pipeline..."
+          logDebug env $ "Config: " <> T.pack (show config)
+          result <- runPipeline config
+          case result of
+            Left err -> do
+              logError env $ "Pipeline failed: " <> err
+              exitWith (ExitFailure 1)
+            Right res -> do
+              logInfo env "Graph complete!"
+              logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
+              logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
+              logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
+              logInfo env $ T.pack $ "  Report: " ++ prReportPath res
+              logInfo env $ T.pack $ "  Graph: " ++ prGraphPath res
+              case prHtmlPath res of
+                Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
+                Nothing  -> pure ()
 
     QueryCmd question mode budget graphPath -> do
       env <- defaultLogEnv LevelInfo
@@ -154,8 +169,10 @@ main = do
                     Just n  -> putStrLn $ "  " ++ T.unpack (nodeLabel n)
                     Nothing -> putStrLn $ "  " ++ T.unpack nid
                   go (nid:ns) = do
-                    let mNext = head ns
-                        mEdge = Map.lookup (nid, mNext) (gEdges g)
+                    let mNext = case ns of
+                          (n':_) -> Just n'
+                          []     -> Nothing
+                        mEdge = maybe Nothing (\nxt -> Map.lookup (nid, nxt) (gEdges g)) mNext
                     case Map.lookup nid (gNodes g) of
                       Just n -> do
                         let relLabel = maybe "references" (T.unpack . relationToText . edgeRelation) mEdge
@@ -212,6 +229,10 @@ main = do
         else do
           putStrLn $ "  Found " ++ show (length servers) ++ " LSP server(s):"
           mapM_ (\s -> putStrLn $ "    " ++ T.unpack (lsiName s) ++ " (" ++ lsiCommand s ++ ") - " ++ show (lsiExtensions s)) servers
+
+    Serve dir port -> do
+      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
+      startStaticServer dir port
 
   where
     opts = info (commandOpts <**> helper)

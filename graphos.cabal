@@ -89,8 +89,9 @@ library
                      Graphos.Infrastructure.Export.CommunityGraph
                      Graphos.Infrastructure.Export.SVG
                     Graphos.Infrastructure.Export.Report
-                    -- Infrastructure - Server
-                    Graphos.Infrastructure.Server.MCP
+                     -- Infrastructure - Server
+                     Graphos.Infrastructure.Server.MCP
+                     Graphos.Infrastructure.Server.Static
                     -- Infrastructure - Tracking
                     Graphos.Infrastructure.Tracking.Cost
                     -- Infrastructure - Git
@@ -131,6 +132,9 @@ library
     , vector               >= 0.12
     , yaml                 >= 0.11
     , fsnotify             >= 0.4
+    , wai                  >= 3.2
+    , warp                 >= 3.3
+    , http-types           >= 0.12
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -139,6 +143,7 @@ executable graphos
   import:         shared
   main-is:        Main.hs
   hs-source-dirs: app
+  ghc-options:    -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base
     , graphos

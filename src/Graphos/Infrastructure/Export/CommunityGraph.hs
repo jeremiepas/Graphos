@@ -16,10 +16,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-  ( NodeId, CommunityId, CommunityMap, Node(..), Edge(..)
-  , edgeSource, edgeTarget, edgeRelation, edgeConfidence
-  , nodeLabel, nodeId )
-import qualified Data.Text as T
+  ( NodeId, CommunityId, CommunityMap, Node(..)
+  , edgeSource, edgeTarget
+  , nodeLabel )
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 import Graphos.Domain.Community (cohesionScore)
 

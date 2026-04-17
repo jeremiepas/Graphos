@@ -1,0 +1,35 @@
+{
+  "id": "context-optimizer-04",
+  "title": "Conversation memory persistence",
+  "status": "pending",
+  "depends_on": ["01"],
+  "seq": "04",
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "src/Graphos/Domain/Context.hs",
+    "src/Graphos/UseCase/Query.hs",
+    "docs/brainstorm-context-optimization.md"
+  ],
+  "acceptance_criteria": [
+    "addConversationNode: ConversationNode -> [NodeId] -> Graph -> Graph (pure: adds conversation node + edges to graph)",
+    "queryConversations: Graph -> Text -> [ConversationNode] (find conversations matching query terms)",
+    "linkConversationToCode: ConversationNode -> NodeId -> ConversationEdge (create edge linking conversation to code)",
+    "summarizeConversation: ConversationNode -> Text (compact summary for context)",
+    "saveConversationToFile: FilePath -> ConversationNode -> IO () (infrastructure: persist as markdown with YAML frontmatter, similar to saveQueryResult in Query.hs)",
+    "loadConversationsFromDir: FilePath -> IO [ConversationNode] (infrastructure: load from memory/ directory)",
+    "Pure functions in UseCase layer, IO in Infrastructure layer",
+    "Explicit exports, type signatures on all top-level definitions"
+  ],
+  "deliverables": [
+    "src/Graphos/UseCase/Conversation.hs",
+    "src/Graphos/Infrastructure/FileSystem/Conversation.hs"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

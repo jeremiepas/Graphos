@@ -10,7 +10,6 @@ import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (bracket_, SomeException, catch)
 import Data.Char (isAlphaNum, isSpace)
 import Data.List (nub, sort, groupBy, isPrefixOf, find)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -116,7 +115,7 @@ extractGroup env absRoot (serverCmd, files) =
 -- Falls back to per-file documentSymbol if workspace/symbol fails or isn't supported.
 doExtractWithSharedLSP :: LogEnv -> FilePath -> String -> [FilePath] -> IO [Extraction]
 doExtractWithSharedLSP env absRoot serverCmd files = do
-  mbLSPOpts <- findLSPServer (takeExtension (head files))
+  mbLSPOpts <- findLSPServer (takeExtension (case files of (f:_) -> f; [] -> ""))
   case mbLSPOpts of
     Nothing -> -- Fallback to stubs
       mapM (\fp -> do
@@ -359,7 +358,7 @@ parseHaskellDecls content =
     isTopLevelDecl line =
       let trimmed = dropWhile (== ' ') line
       in not (null trimmed)
-         && head trimmed `notElem` ("-{-#" :: String)
+         && case trimmed of (c:_) -> c `notElem` ("-{-#" :: String); [] -> False
          && not ("module " `isPrefixOf` trimmed)
          && not ("import " `isPrefixOf` trimmed)
          && not ("where" `isPrefixOf` trimmed)
@@ -374,8 +373,8 @@ parseHaskellDecls content =
     extractDeclName line =
       let trimmed = dropWhile (== ' ') line
           -- Handle data/newtype/class/type/instance
-          (prefix, rest) = case trimmed of
-            s | "data " `isPrefixOf` s -> (5, drop 5 s)
+          (_prefixLen, rest) = case trimmed of
+            s | "data " `isPrefixOf` s -> (5 :: Int, drop 5 s)
               | "newtype " `isPrefixOf` s -> (8, drop 8 s)
               | "type " `isPrefixOf` s -> (5, drop 5 s)
               | "class " `isPrefixOf` s -> (6, drop 6 s)
@@ -497,7 +496,7 @@ docTagNodes filePath content =
   in [ mkTagNode filePath tag | tag <- tags ]
   where
     parseTags :: String -> [String]
-    parseTags text = [ tag | tag <- extractTags text, not (isHeaderTag text tag) ]
+    parseTags txt = [ tag | tag <- extractTags txt, not (isHeaderTag txt tag) ]
 
 -- | Extract #tags from text (but exclude # headers)
 extractTags :: String -> [String]
@@ -510,7 +509,7 @@ extractTags text =
   , prev == ' ' || prev == '\n' || prev == ','
   , let afterHash = takeWhile (\c -> isAlphaNum c || c `elem` ("_/-" :: String)) (drop (i+1) text)
   , not (null afterHash)
-  , head afterHash `notElem` (" " :: String)  -- not a header
+  , case afterHash of (c:_) -> c `notElem` (" " :: String); [] -> True  -- not a header
   , let tag = afterHash
   , length tag >= 2
   ]

@@ -1,0 +1,36 @@
+{
+  "id": "context-optimizer-08",
+  "title": "Cabal configuration update and build verification",
+  "status": "pending",
+  "depends_on": ["05", "06", "07"],
+  "seq": "08",
+  "parallel": false,
+  "suggested_agent": "build-agent",
+  "context_files": [
+    ".opencode/context/core/standards/code-quality.md",
+    ".opencode/context/project-intelligence/technical-domain.md"
+  ],
+  "reference_files": [
+    "graphos.cabal",
+    "src/Graphos/Domain/Context.hs",
+    "src/Graphos/UseCase/SelectContext.hs",
+    "src/Graphos/UseCase/FormatContext.hs",
+    "src/Graphos/UseCase/Conversation.hs",
+    "src/Graphos/Infrastructure/FileSystem/Conversation.hs",
+    "src/Graphos/Infrastructure/Server/MCP.hs"
+  ],
+  "acceptance_criteria": [
+    "All new modules exposed in graphos.cabal",
+    "test suite includes all new test modules",
+    "cabal build succeeds with no warnings",
+    "cabal test passes all tests (existing + new)",
+    "No circular dependencies introduced",
+    "Clean architecture layer boundaries verified (no IO in Domain/UseCase)"
+  ],
+  "deliverables": [
+    "graphos.cabal (updated)"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

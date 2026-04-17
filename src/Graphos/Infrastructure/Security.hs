@@ -5,12 +5,10 @@ module Graphos.Infrastructure.Security
   , validateGraphPath
   ) where
 
-import Data.Char (isControl, isSpace, ord)
-import Data.List (isPrefixOf)
+import Data.Char (isControl)
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.FilePath (takeDirectory, splitDirectories, (</>))
-import System.Directory (canonicalizePath)
+import System.FilePath (splitDirectories)
 
 -- | Validate a URL - must be http/https, no file:// scheme
 validateUrl :: Text -> Either Text Text

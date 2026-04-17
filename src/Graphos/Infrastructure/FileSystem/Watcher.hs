@@ -7,9 +7,9 @@ module Graphos.Infrastructure.FileSystem.Watcher
   ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, takeMVar, tryPutMVar)
 import Control.Concurrent.Async (race)
-import Control.Exception (bracket, SomeException(..), catch)
+import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
+import Control.Exception (SomeException(..), catch)
 import Control.Monad (void, when)
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -40,7 +40,6 @@ watchDirectory dir onChange config shutdownVar = do
   -- State for debouncing
   changedFiles <- newMVar Set.empty
   let debounceDelay = gwcDebounceDelay config
-      batchSize = gwcBatchSize config
   
   -- Start the watcher in a bracket to ensure cleanup
   withManager $ \mgr -> do
@@ -82,15 +81,3 @@ defaultGraphosWatchConfig = GraphosWatchConfig
   { gwcDebounceDelay = 200
   , gwcBatchSize     = 100
   }
-
--- ───────────────────────────────────────────────
--- Convenience wrapper (legacy API)
--- ───────────────────────────────────────────────
-
--- | Watch a directory for file changes (placeholder)
--- This is the original API. It uses default config and creates a shutdown MVar.
--- To stop watching, you must interrupt the thread externally (e.g., async cancel).
-watchDirectorySimple :: FilePath -> (FilePath -> IO ()) -> IO ()
-watchDirectorySimple dir onChange = do
-  shutdown <- newEmptyMVar
-  watchDirectory dir onChange defaultGraphosWatchConfig shutdown

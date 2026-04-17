@@ -432,7 +432,7 @@ data PipelineConfig = PipelineConfig
   , cfgObsidianDir  :: Maybe FilePath
   , cfgNeo4j        :: Bool
   , cfgNeo4jPush    :: Maybe Text  -- URI
-  , cfgMCP          :: Bool
+  , cfgMCP          :: Maybe FilePath
   , cfgSVG          :: Bool
   , cfgGraphML      :: Bool
   , cfgWatch        :: Bool
@@ -468,7 +468,7 @@ defaultConfig = PipelineConfig
   , cfgObsidianDir  = Nothing
   , cfgNeo4j        = False
   , cfgNeo4jPush    = Nothing
-  , cfgMCP          = False
+  , cfgMCP          = Nothing
   , cfgSVG          = False
   , cfgGraphML      = False
   , cfgWatch        = False

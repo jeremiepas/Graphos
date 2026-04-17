@@ -4,16 +4,16 @@ module Graphos.Infrastructure.Export.HTML
   ( exportHTML
   ) where
 
-import Data.Aeson (ToJSON(..), Value, object, (.=), encode)
+import Data.Aeson (ToJSON(..), object, (.=), encode)
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (intercalate, sortOn)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, articulationPoints)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints)
 import Graphos.Domain.Community (cohesionScore)
 import qualified Data.Set as Set
 
@@ -28,10 +28,6 @@ communityColors =
 
 colorForCommunity :: Int -> Text
 colorForCommunity cid = communityColors !! (cid `mod` length communityColors)
-
--- | Escape strings for safe JSON embedding
-escapeLabel :: Text -> Text
-escapeLabel t = T.replace "\\" "\\\\" (T.replace "\"" "\\\"" (T.replace "\n" " " t))
 
 -- | Export graph as interactive HTML with vis.js
 -- Writes three files: graph.html, graph_nodes.json, graph_edges.json
