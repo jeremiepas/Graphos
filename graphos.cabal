@@ -1,0 +1,178 @@
+cabal-version: 3.0
+name:          graphos
+version:       0.1.0.0
+synopsis:      Universal knowledge graph builder using LSP for language-agnostic AST extraction
+description:   Graphos turns any folder of code, docs, papers, or images into a navigable
+               knowledge graph with community detection. Unlike tree-sitter based tools,
+               Graphos uses the Language Server Protocol to extract structure from ANY
+               programming language — no grammar limitations.
+category:      Development
+license:       MIT
+license-file:  LICENSE
+author:        Graphos Contributors
+maintainer:    graphos@dev
+build-type:    Simple
+extra-doc-files: README.md
+                 CHANGELOG.md
+
+source-repository head
+  type:     git
+  location: https://github.com/graphos/graphos
+
+common shared
+  default-language: Haskell2010
+  default-extensions: LambdaCase
+                      DeriveGeneric
+                      OverloadedStrings
+                      TypeApplications
+  ghc-options:      -Wall -Wcompat -Wincomplete-uni-patterns
+                    -Wincomplete-record-updates -Wredundant-constraints
+  if flag(dev)
+    ghc-options: -Werror
+
+flag dev
+  description: Enable development mode (warnings as errors)
+  default:     False
+
+-- ───────────────────────────────────────────────
+-- Library
+-- ───────────────────────────────────────────────
+library
+  import:          shared
+  hs-source-dirs:  src
+  exposed-modules:
+                    Graphos.Prelude
+                    -- Domain
+                    Graphos.Domain.Types
+                    Graphos.Domain.Graph
+                    Graphos.Domain.Graph.FGL
+                    Graphos.Domain.Community
+                   Graphos.Domain.Analysis
+                   Graphos.Domain.Extraction
+                   -- Use Cases
+                   Graphos.UseCase.Pipeline
+                   Graphos.UseCase.Detect
+                   Graphos.UseCase.Extract
+                   Graphos.UseCase.Build
+                    Graphos.UseCase.Cluster
+                    Graphos.UseCase.Analyze
+                    Graphos.UseCase.Report
+                    Graphos.UseCase.Export
+                    Graphos.UseCase.Infer
+                      Graphos.UseCase.Query
+                     Graphos.UseCase.Load
+                     Graphos.UseCase.Ingest
+                     Graphos.UseCase.Benchmark
+                     -- UseCase - Query submodules
+                     Graphos.UseCase.Query.Normalize
+                     -- UseCase - Detect submodules
+                     Graphos.UseCase.Detect.Paper
+                   -- Infrastructure - LSP
+                   Graphos.Infrastructure.LSP.Client
+                   Graphos.Infrastructure.LSP.Protocol
+                   Graphos.Infrastructure.LSP.Capabilities
+                    -- Infrastructure - FileSystem
+                    Graphos.Infrastructure.FileSystem.Watcher
+                    Graphos.Infrastructure.FileSystem.Cache
+                    Graphos.Infrastructure.FileSystem.Ignore
+                    Graphos.Infrastructure.FileSystem.Sensitive
+                     Graphos.Infrastructure.FileSystem.Manifest
+                     Graphos.Infrastructure.FileSystem.OfficeConvert
+                     -- Infrastructure - Security
+                    Graphos.Infrastructure.Security
+                    -- Infrastructure - Export
+                    Graphos.Infrastructure.Export.JSON
+                    Graphos.Infrastructure.Export.HTML
+                    Graphos.Infrastructure.Export.Obsidian
+                    Graphos.Infrastructure.Export.Neo4j
+                     Graphos.Infrastructure.Export.GraphML
+                     Graphos.Infrastructure.Export.CommunityGraph
+                     Graphos.Infrastructure.Export.SVG
+                    Graphos.Infrastructure.Export.Report
+                    -- Infrastructure - Server
+                    Graphos.Infrastructure.Server.MCP
+                    -- Infrastructure - Tracking
+                    Graphos.Infrastructure.Tracking.Cost
+                    -- Infrastructure - Git
+                    Graphos.Infrastructure.Git.Hook
+                    -- Infrastructure - Logging
+                    Graphos.Infrastructure.Logging
+                    -- Domain - Community
+                     Graphos.Domain.Community.Label
+
+  other-modules:
+                    Paths_graphos
+
+  build-depends:
+      aeson                >= 2.0
+    , array                >= 0.5
+    , async                >= 2.2
+    , base                 >= 4.17 && < 5
+    , bytestring           >= 0.11
+    , containers           >= 0.6
+    , directory            >= 1.3
+    , fgl                  >= 5.8
+    , filepath             >= 1.4
+    , hashmap              >= 0.3
+    , lens                 >= 5.0
+    , lens-aeson           >= 1.1
+    , lsp                  >= 2.0
+    , lsp-types            >= 2.0
+    , mtl                  >= 2.2
+    , network              >= 3.1
+    , optparse-applicative >= 0.17
+    , process              >= 1.6
+    , sorted-list          >= 0.2
+    , stm                  >= 2.5
+    , text                 >= 1.2
+    , time                 >= 1.11
+    , transformers         >= 0.5
+    , unordered-containers >= 0.2
+    , vector               >= 0.12
+    , yaml                 >= 0.11
+    , fsnotify             >= 0.4
+
+-- ───────────────────────────────────────────────
+-- Executable
+-- ───────────────────────────────────────────────
+executable graphos
+  import:         shared
+  main-is:        Main.hs
+  hs-source-dirs: app
+  build-depends:
+      base
+    , graphos
+    , optparse-applicative >= 0.17
+    , text
+    , containers
+    , aeson
+
+-- ───────────────────────────────────────────────
+-- Test Suite
+-- ───────────────────────────────────────────────
+test-suite graphos-test
+  import:         shared
+  type:           exitcode-stdio-1.0
+  main-is:        Spec.hs
+  hs-source-dirs: tests
+  other-modules:
+                    Graphos.Domain.TypesSpec
+                    Graphos.Domain.GraphSpec
+                    Graphos.Domain.CommunitySpec
+                    Graphos.Domain.Community.LabelSpec
+                    Graphos.Domain.AnalysisSpec
+                    Graphos.UseCase.PipelineSpec
+                    Graphos.UseCase.ExtractSpec
+                    Graphos.UseCase.QuerySpec
+                    Graphos.Infrastructure.LSP.ClientSpec
+
+  build-depends:
+      base
+    , graphos
+    , hspec                >= 2.10
+    , hspec-discover       >= 2.10
+    , QuickCheck           >= 2.14
+    , aeson
+    , containers
+    , fgl-arbitrary        >= 0.2
+    , text
