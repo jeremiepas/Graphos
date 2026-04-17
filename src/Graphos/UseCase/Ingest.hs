@@ -9,7 +9,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
-import System.FilePath (takeExtension, (</>))
+import System.FilePath ((</>))
 
 import Graphos.Infrastructure.Security (validateUrl)
 

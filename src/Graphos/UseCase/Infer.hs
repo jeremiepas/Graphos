@@ -21,9 +21,7 @@ module Graphos.UseCase.Infer
 import Data.List (sortOn, nubBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types

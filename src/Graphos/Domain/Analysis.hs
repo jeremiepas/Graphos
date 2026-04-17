@@ -14,7 +14,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidence(..),
-                            FileType(..), CommunityId, CommunityMap, CohesionMap, GodNode,
+                            FileType(..), CommunityId, CommunityMap, CohesionMap,
                             SurprisingConnection(..), SuggestedQuestion(..),
                             Analysis(..), relationToText)
 import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, gNodes, gEdges, degree)

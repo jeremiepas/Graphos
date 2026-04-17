@@ -4,9 +4,7 @@ module Graphos.Infrastructure.Export.Obsidian
   ( exportObsidian
   ) where
 
-import Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T

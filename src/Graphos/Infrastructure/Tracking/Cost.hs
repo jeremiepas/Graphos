@@ -10,7 +10,7 @@ import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eit
 import qualified Data.ByteString.Lazy as BSL
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, getCurrentTime, formatTime, defaultTimeLocale)
+import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 
 -- | A single run's cost entry

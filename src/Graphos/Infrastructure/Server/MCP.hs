@@ -6,7 +6,7 @@ module Graphos.Infrastructure.Server.MCP
   , startMCPServerFromFile
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), Object, object, (.=), (.:), (.:?), (.!=), withObject, encode, eitherDecode)
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:), (.:?), (.!=), withObject, encode, eitherDecode)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
@@ -20,7 +20,7 @@ import qualified Data.Text.Encoding as TE
 import System.IO (hFlush, stdout, isEOF)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, degree, shortestPath, godNodes, articulationPoints)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articulationPoints)
 import Graphos.UseCase.Query (queryGraph, pathQuery, QueryResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities)
 

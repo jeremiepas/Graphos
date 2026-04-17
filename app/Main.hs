@@ -7,11 +7,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Monad (forM_)
 
-import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Node(..), Edge(..), Confidence(..), relationToText, edgeRelation, edgeConfidence, CommunityMap)
+import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, CommunityMap)
 import Graphos.UseCase.Pipeline (runPipeline, PipelineResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..))
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, degree, shortestPath)
+import Graphos.Domain.Graph (gNodes, gEdges, neighbors, degree)
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
 
@@ -19,8 +19,8 @@ import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Maybe (listToMaybe, fromMaybe)
-import Data.Foldable (asum)
+import Data.Maybe (listToMaybe)
+
 
 -- ───────────────────────────────────────────────
 -- CLI argument parsing
@@ -165,9 +165,6 @@ main = do
               let hops = length path - 1
               putStrLn $ "Shortest path (" ++ show hops ++ " hops):"
               let go []     = pure ()
-                  go [nid]  = case Map.lookup nid (gNodes g) of
-                    Just n  -> putStrLn $ "  " ++ T.unpack (nodeLabel n)
-                    Nothing -> putStrLn $ "  " ++ T.unpack nid
                   go (nid:ns) = do
                     let mNext = case ns of
                           (n':_) -> Just n'

@@ -9,13 +9,11 @@ module Graphos.Infrastructure.FileSystem.Watcher
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
-import Control.Exception (SomeException(..), catch)
 import Control.Monad (void, when)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as T
-import System.FSNotify (Event(..), defaultConfig, withManager, watchTree)
+import System.FSNotify (Event(..), withManager, watchTree)
 
 -- | Watch a directory for file changes (recursive).
 --

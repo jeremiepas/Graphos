@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 module Graphos.Domain.TypesSpec where
 
 import Test.Hspec
@@ -26,6 +27,8 @@ instance Arbitrary Relation where
   arbitrary = elements [Calls, Implements, References, Cites, ConceptuallyRelatedTo
                        ,SharesDataWith, SemanticallySimilarTo, RationaleFor, Imports
                        ,ImportsFrom, Contains, Method, Extends, Overrides, DependsOn]
+  {-# INLINE arbitrary #-}
 
 instance Arbitrary Confidence where
   arbitrary = elements [Extracted, Inferred, Ambiguous]
+  {-# INLINE arbitrary #-}
