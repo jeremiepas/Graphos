@@ -1,10 +1,11 @@
 -- | Conversation memory — pure functions for managing conversation nodes.
--- Conversation exchanges become graph nodes for persistent cross-session memory.
+-- Conversation exchanges are stored in a dedicated "chat history" community
+-- (community 0) that is added AFTER Leiden detection to prevent pollution.
 -- IO operations (file persistence) are in Infrastructure.FileSystem.Conversation.
 module Graphos.UseCase.Conversation
-  ( addConversationNode
+  ( conversationEdges
   , queryConversations
-  , conversationEdges
+  , queryConversationsFromCommunity
   , summarizeConversation
   , matchConversationScore
   ) where
@@ -14,64 +15,24 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), Extraction(..))
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, mergeGraphs, buildGraph)
-import Graphos.Domain.Context (ConversationNode(..))
+import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges)
+import Graphos.Domain.Context (ConversationNode(..), chatCommunityId)
 
 -- ───────────────────────────────────────────────
--- Graph manipulation (pure)
+-- Edge creation (pure, one-way)
 -- ───────────────────────────────────────────────
 
--- | Add a conversation node to the graph, creating edges to referenced code nodes.
--- Returns a new graph with the conversation node and its edges added.
-addConversationNode :: Graph -> ConversationNode -> Graph
-addConversationNode g conv =
-  let convNodeId = convId conv
-      -- Create the conversation node
-      convNode = Node
-        { nodeId           = convNodeId
-        , nodeLabel        = convQuestion conv
-        , nodeFileType     = DocumentFile
-        , nodeSourceFile   = "memory/" <> convNodeId <> ".md"
-        , nodeSourceLocation = Nothing
-        , nodeSourceUrl    = Nothing
-        , nodeCapturedAt   = Just (convTimestamp conv)
-        , nodeAuthor       = Nothing
-        , nodeContributor  = Nothing
-        }
-      -- Create edges from conversation to referenced code nodes
-      convEdges = [ Edge
-        { edgeSource         = convNodeId
-        , edgeTarget         = codeNodeId
-        , edgeRelation       = References
-        , edgeConfidence     = Extracted
-        , edgeConfidenceScore = 1.0
-        , edgeSourceFile     = "memory/" <> convNodeId <> ".md"
-        , edgeSourceLocation = Nothing
-        , edgeWeight         = 1.0
-        }
-        | codeNodeId <- convRelevantNodes conv
-        ]
-      -- Merge into existing graph
-      convExtraction = Extraction
-        { extractionNodes      = convNode : []
-        , extractionEdges      = convEdges
-        , extractionHyperedges = []
-        , extractionInputTokens  = 0
-        , extractionOutputTokens = convTokensUsed conv
-        }
-  in mergeGraphs g (buildGraph False convExtraction)
-
--- | Create conversation edges linking a conversation to code nodes.
--- Returns a list of Edge values suitable for graph construction.
+-- | Create one-way edges linking a conversation to code nodes it references.
+-- Edges go conversation → code only, never the reverse.
 conversationEdges :: ConversationNode -> [Edge]
 conversationEdges conv =
   [ Edge
     { edgeSource         = convId conv
     , edgeTarget         = codeNodeId
     , edgeRelation       = References
-    , edgeConfidence     = Extracted
-    , edgeConfidenceScore = 1.0
+    , edgeConfidence     = Inferred
+    , edgeConfidenceScore = 0.8
     , edgeSourceFile     = "memory/" <> convId conv <> ".md"
     , edgeSourceLocation = Nothing
     , edgeWeight         = 1.0
@@ -97,6 +58,22 @@ queryConversations g query =
                                    , let conv = nodeToConversation n g
                                    , let matchScore = matchConversationScore conv terms
                                    , matchScore > 0]
+      sorted = sortOn (\(_, s) -> negate s) scored
+  in take 10 [conv | (conv, _) <- sorted]
+
+-- | Find conversations that belong to the chat history community (community 0).
+--   More efficient than queryConversations when you know conversations are in
+--   the dedicated chat community.
+queryConversationsFromCommunity :: Graph -> CommunityMap -> Text -> [ConversationNode]
+queryConversationsFromCommunity g commMap query =
+  let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
+      chatMemberIds = Map.findWithDefault [] chatCommunityId commMap
+      convNodes = [(nid, n) | nid <- chatMemberIds
+                            , Just n <- [Map.lookup nid (gNodes g)]]
+      scored = [(conv, score) | (_nid, n) <- convNodes
+                              , let conv = nodeToConversation n g
+                              , let score = matchConversationScore conv terms
+                              , score > 0]
       sorted = sortOn (\(_, s) -> negate s) scored
   in take 10 [conv | (conv, _) <- sorted]
 

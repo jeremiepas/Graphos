@@ -19,8 +19,8 @@ jobs:
     - uses: haskell-actions/setup@v2
       id: setup-haskell
       with:
-        ghc-version: "9.6.7"
-        cabal-version: "3.12"
+        ghc-version: "9.10"
+        cabal-version: "3.14"
 
     - name: Configure
       run: cabal configure --enable-tests --enable-benchmarks --flag dev

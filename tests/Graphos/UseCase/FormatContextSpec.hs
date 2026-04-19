@@ -19,10 +19,13 @@ spec = describe "FormatContext" $ do
     it "includes label and file type" $ do
       let node = Node
             { nodeId           = "test_node"
-            , nodeLabel         = "TestNode"
+            , nodeLabel        = "TestNode"
             , nodeFileType     = CodeFile
             , nodeSourceFile   = "src/Test.hs"
             , nodeSourceLocation = Just "42"
+            , nodeLineEnd      = Nothing
+            , nodeKind         = Nothing
+            , nodeSignature    = Nothing
             , nodeSourceUrl    = Nothing
             , nodeCapturedAt   = Nothing
             , nodeAuthor       = Nothing
