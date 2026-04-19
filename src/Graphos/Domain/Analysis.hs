@@ -172,10 +172,13 @@ fileCategory path
 nodeData :: Graph -> NodeId -> Node
 nodeData g nid = Map.findWithDefault (Node
   { nodeId           = nid
-  , nodeLabel         = T.pack "unknown"
+  , nodeLabel        = T.pack "unknown"
   , nodeFileType     = CodeFile
   , nodeSourceFile   = T.pack ""
   , nodeSourceLocation = Nothing
+  , nodeLineEnd      = Nothing
+  , nodeKind         = Nothing
+  , nodeSignature    = Nothing
   , nodeSourceUrl    = Nothing
   , nodeCapturedAt   = Nothing
   , nodeAuthor       = Nothing

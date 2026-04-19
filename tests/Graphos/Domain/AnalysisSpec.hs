@@ -23,7 +23,7 @@ spec = do
 
 -- Helpers
 testNode :: Text -> Node
-testNode nid = Node nid nid CodeFile "test.hs" (Just "L1") Nothing Nothing Nothing Nothing
+testNode nid = Node nid nid CodeFile "test.hs" (Just "L1") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge src tgt Calls Extracted 1.0 "test.hs" (Just "L1") 1.0

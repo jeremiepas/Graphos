@@ -103,15 +103,20 @@ formatExpansionHints sc =
 -- Individual formatters
 -- ───────────────────────────────────────────────
 
--- | Compact node representation: label [type] — source:file:line
---   Target: ~50 tokens
+-- | Compact node representation: label [kind] — source:file:start-end | signature
+--   Target: ~50-60 tokens
 formatNodeCompact :: Text -> Node -> Text
 formatNodeCompact _nid n =
-  let base = nodeLabel n <> " [" <> showFileType (nodeFileType n) <> "]"
+  let kind = maybe "" (\k -> "[" <> k <> "] ") (nodeKind n)
+      base = nodeLabel n <> " " <> kind <> "[" <> showFileType (nodeFileType n) <> "]"
       src = if T.null (nodeSourceFile n) then ""
             else " — src:" <> nodeSourceFile n
                 <> maybe "" (\loc -> ":" <> loc) (nodeSourceLocation n)
-  in base <> src
+                <> case nodeLineEnd n of
+                     Just end -> "-" <> T.pack (show end)
+                     Nothing -> ""
+      sig = maybe "" (\s -> " | " <> s) (nodeSignature n)
+  in base <> src <> sig
 
 -- | Compact edge representation: source → target [relation, confidence]
 --   Target: ~20 tokens

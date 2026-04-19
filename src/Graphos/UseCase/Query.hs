@@ -77,10 +77,13 @@ explainNode g term =
   let best = findBestNode g term
   in fmap (\nid -> Map.findWithDefault (Node
     { nodeId           = T.pack "unknown"
-    , nodeLabel         = T.pack "unknown"
+    , nodeLabel        = T.pack "unknown"
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack ""
     , nodeSourceLocation = Nothing
+    , nodeLineEnd      = Nothing
+    , nodeKind         = Nothing
+    , nodeSignature    = Nothing
     , nodeSourceUrl    = Nothing
     , nodeCapturedAt   = Nothing
     , nodeAuthor       = Nothing

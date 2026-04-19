@@ -23,14 +23,15 @@ import System.IO (hFlush, stdout, isEOF)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articulationPoints)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articulationPoints, degree)
 import Graphos.Domain.Analysis (analyze)
-import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..))
+import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
+                              , chatCommunityId, enrichWithChatHistory)
 import Graphos.UseCase.Query (queryGraph, pathQuery, QueryResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion)
-import Graphos.UseCase.SelectContext (selectContext, classifyComplexity)
+import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
 import Graphos.UseCase.FormatContext (formatContextForLLM)
-import Graphos.UseCase.Conversation (addConversationNode, queryConversations, summarizeConversation)
+import Graphos.UseCase.Conversation (queryConversationsFromCommunity, summarizeConversation)
 import Graphos.Infrastructure.FileSystem.Conversation (saveConversationToFile, loadConversationsFromDir)
 
 -- | Start MCP server from a graph file
@@ -43,8 +44,11 @@ startMCPServerFromFile path = do
       let g = lrGraph loaded
           commMap = lrCommunities loaded
           cohesion = lrCohesion loaded
-          analysis = analyze g commMap cohesion
-      startMCPServer g commMap analysis
+      -- Load chat history from disk and enrich community map
+      diskConvs <- loadConversationsFromDir "graphos-out/memory"
+      let enrichedCommMap = enrichWithChatHistory commMap diskConvs
+          analysis = analyze g enrichedCommMap cohesion
+      startMCPServer g enrichedCommMap analysis
 
 -- | Start an MCP stdio server with a pre-loaded graph, community data, and analysis
 startMCPServer :: Graph -> CommunityMap -> Analysis -> IO ()
@@ -104,8 +108,8 @@ handleToolCall g commMap analysis reqId params = do
     "shortest_path"      -> handleShortestPath g args
     "bridge_nodes"       -> handleBridgeNodes g
     "select_context"     -> handleSelectContext g commMap analysis args
-    "add_conversation"   -> handleAddConversation g args
-    "conversation_history" -> handleConversationHistory g args
+    "add_conversation"   -> handleAddConversation g commMap args
+    "conversation_history" -> handleConversationHistory g commMap args
     _ -> pure (Left ("Unknown tool: " <> toolName))
   case result of
     Right content -> sendToolResult reqId content
@@ -213,29 +217,39 @@ handleBridgeNodes g = do
 -- | Select relevant context for a query using graph-based context optimization.
 -- Returns a compact markdown representation of the selected subgraph,
 -- suitable for inclusion in an LLM prompt.
+-- By default excludes chat history community; set include_history=true to include it.
 handleSelectContext :: Graph -> CommunityMap -> Analysis -> KM.KeyMap Value -> IO (Either Text Value)
 handleSelectContext g commMap analysis args = do
   let question = textArg args "question"
       budget = fromMaybe 3000 (intArgMaybe args "budget")
+      includeHistory = fromMaybe False (boolArgMaybe args "include_history")
+      verbose = fromMaybe False (boolArgMaybe args "verbose")
   if T.null question
     then pure (Left "Missing required argument: question")
     else do
       let complexity = classifyComplexity question g
           ctxBudget = budgetForComplexity complexity budget
-          selectedCtx = selectContext g commMap analysis question ctxBudget
+          selectedCtx = selectContextWithHistory includeHistory g commMap analysis question ctxBudget
           formatted = formatContextForLLM selectedCtx
-      pure (Right (object
-        [ "context" .= formatted
-        , "complexity" .= showComplexity complexity
-        , "nodes_selected" .= length (scNodes selectedCtx)
-        , "edges_selected" .= length (scEdges selectedCtx)
-        , "token_estimate" .= T.length formatted
-        ]))
+          nodeCommMap = buildNodeCommunityMap commMap
+          bridgeSet = Set.fromList (scBridgeNodes selectedCtx)
+          nodeMetadata = buildNodeMetadata g nodeCommMap bridgeSet (scNodes selectedCtx)
+          baseResult = [ "context" .= formatted
+                       , "complexity" .= showComplexity complexity
+                       , "nodes_selected" .= length (scNodes selectedCtx)
+                       , "edges_selected" .= length (scEdges selectedCtx)
+                       , "token_estimate" .= T.length formatted
+                       , "include_history" .= includeHistory
+                       ]
+          fullResult = if verbose
+                       then baseResult ++ ["node_metadata" .= nodeMetadata]
+                       else baseResult
+      pure (Right (object fullResult))
 
 -- | Store a conversation exchange in the graph for persistent cross-session memory.
--- Saves the conversation to graphos-out/memory/ for future retrieval.
-handleAddConversation :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
-handleAddConversation g args = do
+-- Adds conversation to the chat history community (community 0) and saves to disk.
+handleAddConversation :: Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
+handleAddConversation _g commMap args = do
   let question = textArg args "question"
       summary = textArg args "answer_summary"
       sourceNodes = textListArg args "source_nodes"
@@ -253,36 +267,39 @@ handleAddConversation g args = do
             , convRelevantNodes = sourceNodes
             , convTokensUsed    = 0
             }
-      -- Save to memory directory
+      -- Save to memory directory (disk persistence)
       saveConversationToFile "graphos-out/memory" conv
-      -- Add to graph (for in-memory querying)
-      let _updatedGraph = addConversationNode g conv
+      -- Verify the conversation is in the chat community
+      let inCommunity = convId' `elem` Map.findWithDefault [] chatCommunityId commMap
       pure (Right (object
         [ "status" .= ("saved" :: Text)
         , "conversation_id" .= convId'
         , "question" .= question
         , "linked_nodes" .= length sourceNodes
+        , "in_chat_community" .= inCommunity
         ]))
 
 -- | Search conversation history for past exchanges matching a query.
 -- Returns a list of past Q&A summaries relevant to the search terms.
-handleConversationHistory :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
-handleConversationHistory g args = do
+-- Checks both the in-memory graph (chat community) and disk storage.
+handleConversationHistory :: Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
+handleConversationHistory g commMap args = do
   let query = textArg args "query"
       limit = fromMaybe 10 (intArgMaybe args "limit")
   if T.null query
     then pure (Left "Missing required argument: query")
     else do
-      let conversations = take limit (queryConversations g query)
-      -- Also try loading from disk
+      -- Search in-memory via chat community
+      let inMemoryConvs = queryConversationsFromCommunity g commMap query
+      -- Also search from disk
       diskConvs <- loadConversationsFromDir "graphos-out/memory"
       let diskMatches = take limit [c | c <- diskConvs
                                       , not (T.null (convQuestion c))
                                       , any (`T.isInfixOf` T.toLower (convQuestion c))
                                             (T.words (T.toLower query))]
       pure (Right (object
-        [ "total_matches" .= (length conversations + length diskMatches)
-        , "in_memory" .= map (summarizeConversation) conversations
+        [ "total_matches" .= (length inMemoryConvs + length diskMatches)
+        , "in_memory" .= map (summarizeConversation) inMemoryConvs
         , "from_disk" .= map (summarizeConversation) diskMatches
         ]))
 
@@ -356,7 +373,7 @@ allTools =
   , ("graph_stats", "Get graph statistics (nodes, edges, avg degree)", [])
   , ("shortest_path", "Find shortest path between two nodes", [("from", "Source concept", True), ("to", "Target concept", True)])
   , ("bridge_nodes", "Find articulation points (bridge nodes) whose removal disconnects the graph", [])
-  , ("select_context", "Select relevant context from the graph for an LLM query. Returns compact markdown with key nodes, edges, communities, and bridge nodes.", [("question", "The query to select context for", True), ("budget", "Token budget (default: 3000)", False)])
+  , ("select_context", "Select relevant context from the graph for an LLM query. Returns compact markdown with key nodes, edges, communities, and bridge nodes. Set include_history=true to include past conversation history. Set verbose=true for per-node metadata (kind, signature, line range, community_id, degree, is_bridge).", [("question", "The query to select context for", True), ("budget", "Token budget (default: 3000)", False), ("include_history", "Include chat history in context (default: false)", False), ("verbose", "Include per-node metadata (default: false)", False)])
   , ("add_conversation", "Store a conversation exchange in the graph for persistent cross-session memory. Saves to graphos-out/memory/", [("question", "The user's question", True), ("answer_summary", "Short summary of the answer", False), ("source_nodes", "List of code node IDs referenced", False)])
   , ("conversation_history", "Search past conversation exchanges matching a query", [("query", "Search terms", True), ("limit", "Max results (default: 10)", False)])
   ]
@@ -397,6 +414,12 @@ textListArg args key = case KM.lookup (Key.fromText key) args of
   Just (Array arr) -> [s | String s <- toList arr]
   _ -> []
 
+-- | Extract a boolean value from an argument
+boolArgMaybe :: KM.KeyMap Value -> Text -> Maybe Bool
+boolArgMaybe args key = case KM.lookup (Key.fromText key) args of
+  Just (Bool b) -> Just b
+  _ -> Nothing
+
 -- | Convert QueryComplexity to a text label
 showComplexity :: QueryComplexity -> Text
 showComplexity Focused       = "focused"
@@ -404,3 +427,24 @@ showComplexity ModuleLevel   = "module"
 showComplexity CrossModule   = "cross_module"
 showComplexity Architectural = "architectural"
 showComplexity Exploratory   = "exploratory"
+
+-- | Build a reverse map: NodeId → CommunityId
+buildNodeCommunityMap :: CommunityMap -> Map.Map NodeId CommunityId
+buildNodeCommunityMap commMap = Map.fromList
+  [(nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids]
+
+-- | Build per-node metadata for verbose select_context responses
+buildNodeMetadata :: Graph -> Map.Map NodeId CommunityId -> Set.Set NodeId -> [(NodeId, Node)] -> [Value]
+buildNodeMetadata g nodeCommMap bridgeSet nodes =
+  [ object
+    [ "id" .= nid
+    , "kind" .= nodeKind n
+    , "signature" .= nodeSignature n
+    , "line_start" .= nodeSourceLocation n
+    , "line_end" .= nodeLineEnd n
+    , "community_id" .= Map.lookup nid nodeCommMap
+    , "degree" .= degree g nid
+    , "is_bridge" .= Set.member nid bridgeSet
+    ]
+  | (nid, n) <- nodes
+  ]

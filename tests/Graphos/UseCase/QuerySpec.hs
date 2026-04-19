@@ -11,10 +11,13 @@ import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel         = nid
+  , nodeLabel        = nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
   , nodeSourceLocation = Just "L1"
+  , nodeLineEnd      = Nothing
+  , nodeKind         = Nothing
+  , nodeSignature    = Nothing
   , nodeSourceUrl    = Nothing
   , nodeCapturedAt   = Nothing
   , nodeAuthor       = Nothing

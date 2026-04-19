@@ -444,10 +444,13 @@ symbolToNodes :: FilePath -> [DocumentSymbolResult] -> [Node]
 symbolToNodes filePath symbols =
   [ Node
     { nodeId           = makeNodeId filePath (dsrName sym)
-    , nodeLabel         = dsrName sym
+    , nodeLabel        = dsrName sym
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
     , nodeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange sym))))
+    , nodeLineEnd      = Just $ posLine (rangeEnd (dsrRange sym))
+    , nodeKind         = Just $ symbolKindToText (dsrKind sym)
+    , nodeSignature    = Nothing
     , nodeSourceUrl    = Nothing
     , nodeCapturedAt   = Nothing
     , nodeAuthor       = Nothing
@@ -545,15 +548,50 @@ makeStubNode filePath =
       nodeId' = hashPrefix <> T.pack "_" <> name
   in Node
     { nodeId           = nodeId'
-    , nodeLabel         = name
+    , nodeLabel        = name
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
     , nodeSourceLocation = Nothing
+    , nodeLineEnd      = Nothing
+    , nodeKind         = Nothing
+    , nodeSignature    = Nothing
     , nodeSourceUrl    = Nothing
     , nodeCapturedAt   = Nothing
     , nodeAuthor       = Nothing
     , nodeContributor  = Nothing
     }
+
+-- | Convert LSP SymbolKind integer to a human-readable text label.
+--   See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolKind
+symbolKindToText :: Int -> Text
+symbolKindToText k = case k of
+  1  -> "File"
+  2  -> "Module"
+  3  -> "Namespace"
+  4  -> "Package"
+  5  -> "Class"
+  6  -> "Method"
+  7  -> "Property"
+  8  -> "Field"
+  9  -> "Constructor"
+  10 -> "Enum"
+  11 -> "Interface"
+  12 -> "Function"
+  13 -> "Variable"
+  14 -> "Constant"
+  15 -> "String"
+  16 -> "Number"
+  17 -> "Boolean"
+  18 -> "Array"
+  19 -> "Object"
+  20 -> "Key"
+  21 -> "Null"
+  22 -> "EnumMember"
+  23 -> "Struct"
+  24 -> "Event"
+  25 -> "Operator"
+  26 -> "TypeParameter"
+  _  -> "Unknown"
 
 takeExtension :: FilePath -> String
 takeExtension path =
