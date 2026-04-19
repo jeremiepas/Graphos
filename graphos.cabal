@@ -65,19 +65,24 @@ library
                      Graphos.UseCase.Benchmark
                      -- UseCase - Query submodules
                      Graphos.UseCase.Query.Normalize
-                     -- UseCase - Detect submodules
-                     Graphos.UseCase.Detect.Paper
+                      -- UseCase - Detect submodules
+                      Graphos.UseCase.Detect.Paper
+                     -- UseCase - Context optimization
+                     Graphos.UseCase.SelectContext
+                     Graphos.UseCase.FormatContext
+                     Graphos.UseCase.Conversation
                    -- Infrastructure - LSP
                    Graphos.Infrastructure.LSP.Client
                    Graphos.Infrastructure.LSP.Protocol
                    Graphos.Infrastructure.LSP.Capabilities
-                    -- Infrastructure - FileSystem
-                    Graphos.Infrastructure.FileSystem.Watcher
-                    Graphos.Infrastructure.FileSystem.Cache
-                    Graphos.Infrastructure.FileSystem.Ignore
-                    Graphos.Infrastructure.FileSystem.Sensitive
-                     Graphos.Infrastructure.FileSystem.Manifest
-                     Graphos.Infrastructure.FileSystem.OfficeConvert
+                     -- Infrastructure - FileSystem
+                     Graphos.Infrastructure.FileSystem.Watcher
+                     Graphos.Infrastructure.FileSystem.Cache
+                     Graphos.Infrastructure.FileSystem.Ignore
+                     Graphos.Infrastructure.FileSystem.Sensitive
+                      Graphos.Infrastructure.FileSystem.Manifest
+                      Graphos.Infrastructure.FileSystem.OfficeConvert
+                      Graphos.Infrastructure.FileSystem.Conversation
                      -- Infrastructure - Security
                     Graphos.Infrastructure.Security
                     -- Infrastructure - Export
@@ -99,7 +104,9 @@ library
                     -- Infrastructure - Logging
                     Graphos.Infrastructure.Logging
                     -- Domain - Community
-                     Graphos.Domain.Community.Label
+                      Graphos.Domain.Community.Label
+                     -- Domain - Context optimization
+                     Graphos.Domain.Context
 
   other-modules:
                     Paths_graphos
@@ -169,7 +176,11 @@ test-suite graphos-test
                     Graphos.UseCase.PipelineSpec
                     Graphos.UseCase.ExtractSpec
                     Graphos.UseCase.QuerySpec
-                    Graphos.Infrastructure.LSP.ClientSpec
+                     Graphos.Infrastructure.LSP.ClientSpec
+                     Graphos.Domain.ContextSpec
+                     Graphos.UseCase.SelectContextSpec
+                     Graphos.UseCase.FormatContextSpec
+                     Graphos.UseCase.ConversationSpec
 
   build-depends:
       base
