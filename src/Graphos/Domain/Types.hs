@@ -96,6 +96,9 @@ data Node = Node
   , nodeFileType     :: FileType
   , nodeSourceFile   :: Text
   , nodeSourceLocation :: Maybe Text
+  , nodeLineEnd      :: Maybe Int        -- ^ End line number (for exact code range)
+  , nodeKind         :: Maybe Text       -- ^ Symbol kind: "Function", "Class", "Method", "Interface", etc.
+  , nodeSignature    :: Maybe Text       -- ^ Type signature or declaration header
   , nodeSourceUrl    :: Maybe Text
   , nodeCapturedAt   :: Maybe Text
   , nodeAuthor       :: Maybe Text
@@ -109,6 +112,9 @@ instance ToJSON Node where
     , "file_type"       .= nodeFileType n
     , "source_file"     .= nodeSourceFile n
     , "source_location" .= nodeSourceLocation n
+    , "line_end"        .= nodeLineEnd n
+    , "kind"            .= nodeKind n
+    , "signature"       .= nodeSignature n
     , "source_url"      .= nodeSourceUrl n
     , "captured_at"     .= nodeCapturedAt n
     , "author"          .= nodeAuthor n
@@ -122,6 +128,9 @@ instance FromJSON Node where
     <*> v .: "file_type"
     <*> v .: "source_file"
     <*> v .:? "source_location"
+    <*> v .:? "line_end"
+    <*> v .:? "kind"
+    <*> v .:? "signature"
     <*> v .:? "source_url"
     <*> v .:? "captured_at"
     <*> v .:? "author"

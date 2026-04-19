@@ -12,6 +12,12 @@ module Graphos.Domain.Context
   , ConversationNode(..)
   , ConversationRelation(..)
 
+    -- * Chat history community
+  , chatCommunityId
+  , enrichWithChatHistory
+  , chatEdgesForConversation
+  , conversationNodeToNode
+
     -- * Smart constructors
   , defaultBudget
   , budgetForComplexity
@@ -25,7 +31,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Graphos.Domain.Types (NodeId, CommunityId, Node, Edge, GodNode)
+import Graphos.Domain.Types (NodeId, CommunityId, Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, GodNode)
 
 -- ───────────────────────────────────────────────
 -- Query complexity classification
@@ -234,3 +240,59 @@ instance FromJSON ConversationRelation where
     "relates_to"     -> pure RelatesTo
     "follow_up_from" -> pure FollowUpFrom
     _                -> fail $ "Unknown conversation relation: " ++ T.unpack t
+
+-- ───────────────────────────────────────────────
+-- Chat history community
+-- ───────────────────────────────────────────────
+
+-- | Reserved community ID for chat history nodes.
+--   Added AFTER Leiden detection to prevent polluting community structure.
+--   Chat nodes are placed here so they're discoverable in the graph,
+--   but they don't inflate code node degrees or skew community detection.
+chatCommunityId :: CommunityId
+chatCommunityId = 0
+
+-- | Enrich a CommunityMap with a synthetic chat history community.
+--   This MUST be called after Leiden detection, never before.
+--   Chat nodes are added to community 0 with well-known ID for easy filtering.
+enrichWithChatHistory :: CommunityMap -> [ConversationNode] -> CommunityMap
+enrichWithChatHistory commMap convs =
+  let chatNodeIds = map convId convs
+      existing = Map.findWithDefault [] chatCommunityId commMap
+  in Map.insert chatCommunityId (existing ++ chatNodeIds) commMap
+
+-- | Create one-way edges from a conversation node to the code nodes it references.
+--   Edges go conversation → code (one direction only).
+--   This ensures code nodes don't get inflated degrees from chat references.
+chatEdgesForConversation :: ConversationNode -> [Edge]
+chatEdgesForConversation conv =
+  [ Edge
+    { edgeSource         = convId conv
+    , edgeTarget         = codeNodeId
+    , edgeRelation       = References
+    , edgeConfidence     = Inferred
+    , edgeConfidenceScore = 0.8
+    , edgeSourceFile     = "memory/" <> convId conv <> ".md"
+    , edgeSourceLocation = Nothing
+    , edgeWeight         = 1.0
+    }
+  | codeNodeId <- convRelevantNodes conv
+  ]
+
+-- | Convert a ConversationNode to a graph Node for insertion.
+--   Stored as DocumentFile with "memory/" source prefix for identification.
+conversationNodeToNode :: ConversationNode -> Node
+conversationNodeToNode conv = Node
+  { nodeId           = convId conv
+  , nodeLabel        = convQuestion conv
+  , nodeFileType     = DocumentFile
+  , nodeSourceFile   = "memory/" <> convId conv <> ".md"
+  , nodeSourceLocation = Nothing
+  , nodeLineEnd      = Nothing
+  , nodeKind         = Just "Conversation"
+  , nodeSignature    = Nothing
+  , nodeSourceUrl    = Nothing
+  , nodeCapturedAt   = Just (convTimestamp conv)
+  , nodeAuthor       = Nothing
+  , nodeContributor  = Nothing
+  }

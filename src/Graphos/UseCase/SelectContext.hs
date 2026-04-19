@@ -9,6 +9,7 @@
 -- All functions are pure (no IO).
 module Graphos.UseCase.SelectContext
   ( selectContext
+  , selectContextWithHistory
   , classifyComplexity
   , computeBudget
   , relevanceScore
@@ -16,6 +17,7 @@ module Graphos.UseCase.SelectContext
   , selectRelevanceWeighted
   , selectPathBased
   , getNodeData
+  , filterChatCommunity
   ) where
 
 import Data.List (sortOn, nub)
@@ -37,6 +39,7 @@ import Graphos.Domain.Graph
 import Graphos.Domain.Context
   ( QueryComplexity(..), ContextBudget(..), SelectedContext(..)
   , SelectionStrategy(..), budgetForComplexity, emptySelectedContext
+  , chatCommunityId
   )
 
 -- ───────────────────────────────────────────────
@@ -45,19 +48,43 @@ import Graphos.Domain.Context
 
 -- | Select context from a graph based on a query and budget.
 -- Automatically classifies query complexity and chooses the best strategy.
+-- Excludes chat history community (community 0) by default.
 selectContext :: Graph -> CommunityMap -> Analysis -> Text -> ContextBudget -> SelectedContext
 selectContext g commMap analysis query budget =
-  case classifyComplexity query g of
-    Focused ->
-      selectCommunityAware g commMap analysis query budget
-    ModuleLevel ->
-      selectCommunityAware g commMap analysis query budget
-    CrossModule ->
-      selectPathBased g commMap analysis query budget
-    Architectural ->
-      selectArchitectural g commMap analysis budget
-    Exploratory ->
-      selectRelevanceWeighted g commMap analysis query budget
+  let cleanCommMap = filterChatCommunity commMap
+  in case classifyComplexity query g of
+     Focused ->
+       selectCommunityAware g cleanCommMap analysis query budget
+     ModuleLevel ->
+       selectCommunityAware g cleanCommMap analysis query budget
+     CrossModule ->
+       selectPathBased g cleanCommMap analysis query budget
+     Architectural ->
+       selectArchitectural g cleanCommMap analysis budget
+     Exploratory ->
+       selectRelevanceWeighted g cleanCommMap analysis query budget
+
+-- | Like selectContext but optionally includes chat history community.
+--   When includeHistory is True, chat history nodes may appear in results.
+selectContextWithHistory :: Bool -> Graph -> CommunityMap -> Analysis -> Text -> ContextBudget -> SelectedContext
+selectContextWithHistory includeHistory g commMap analysis query budget =
+  let effectiveCommMap = if includeHistory then commMap else filterChatCommunity commMap
+  in case classifyComplexity query g of
+     Focused ->
+       selectCommunityAware g effectiveCommMap analysis query budget
+     ModuleLevel ->
+       selectCommunityAware g effectiveCommMap analysis query budget
+     CrossModule ->
+       selectPathBased g effectiveCommMap analysis query budget
+     Architectural ->
+       selectArchitectural g effectiveCommMap analysis budget
+     Exploratory ->
+       selectRelevanceWeighted g effectiveCommMap analysis query budget
+
+-- | Remove the chat history community (community 0) from a CommunityMap.
+--   Use this to prevent chat nodes from polluting code-based context selection.
+filterChatCommunity :: CommunityMap -> CommunityMap
+filterChatCommunity = Map.delete chatCommunityId
 
 -- ───────────────────────────────────────────────
 -- Query complexity classification
@@ -310,10 +337,13 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
   where
     unknownNode = Node
       { nodeId           = nid
-      , nodeLabel         = "unknown"
+      , nodeLabel        = "unknown"
       , nodeFileType     = CodeFile
       , nodeSourceFile   = ""
       , nodeSourceLocation = Nothing
+      , nodeLineEnd      = Nothing
+      , nodeKind         = Nothing
+      , nodeSignature    = Nothing
       , nodeSourceUrl    = Nothing
       , nodeCapturedAt   = Nothing
       , nodeAuthor       = Nothing

@@ -13,10 +13,13 @@ import Graphos.Domain.Community.Label (suggestCommunityLabels, labelFromNodes)
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel         = nid
+  , nodeLabel        = nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
   , nodeSourceLocation = Just "L1"
+  , nodeLineEnd      = Nothing
+  , nodeKind         = Nothing
+  , nodeSignature    = Nothing
   , nodeSourceUrl    = Nothing
   , nodeCapturedAt   = Nothing
   , nodeAuthor       = Nothing
