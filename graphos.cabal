@@ -62,8 +62,10 @@ library
                    -- Use Cases
                    Graphos.UseCase.Pipeline
                    Graphos.UseCase.Detect
-                   Graphos.UseCase.Extract
-                   Graphos.UseCase.Build
+                    Graphos.UseCase.Extract
+                    Graphos.UseCase.Extract.Haskell
+                    Graphos.UseCase.Extract.Markdown
+                    Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
                     Graphos.UseCase.Analyze
                     Graphos.UseCase.Report
