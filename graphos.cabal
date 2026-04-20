@@ -71,10 +71,12 @@ library
                      Graphos.UseCase.SelectContext
                      Graphos.UseCase.FormatContext
                      Graphos.UseCase.Conversation
-                   -- Infrastructure - LSP
-                   Graphos.Infrastructure.LSP.Client
-                   Graphos.Infrastructure.LSP.Protocol
-                   Graphos.Infrastructure.LSP.Capabilities
+                    -- Infrastructure - LSP
+                    Graphos.Infrastructure.LSP.Client
+                    Graphos.Infrastructure.LSP.Protocol
+                    Graphos.Infrastructure.LSP.Capabilities
+                      -- Infrastructure - Config
+                      Graphos.Infrastructure.Config
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache
@@ -107,6 +109,8 @@ library
                       Graphos.Domain.Community.Label
                      -- Domain - Context optimization
                      Graphos.Domain.Context
+                     -- Domain - Config
+                     Graphos.Domain.Config
 
   other-modules:
                     Paths_graphos

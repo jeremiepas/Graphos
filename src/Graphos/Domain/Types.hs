@@ -54,6 +54,7 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
 
 -- | Unique identifier for a node (derived from file + entity name)
 type NodeId = Text
@@ -453,6 +454,7 @@ data PipelineConfig = PipelineConfig
   , cfgMinCommSize  :: Int          -- ^ minimum community size; smaller ones get merged (default: 3)
   , cfgThreads      :: Int          -- ^ number of parallel extraction threads (default: 1)
   , cfgCommunityGraph :: Bool      -- ^ export community-level graph JSON for LLM navigation
+  , cfgGraphosConfig :: GraphosConfig  -- ^ LSP servers, language IDs, file extensions (config-driven)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -489,4 +491,5 @@ defaultConfig = PipelineConfig
   , cfgMinCommSize  = 3
   , cfgThreads      = 1
   , cfgCommunityGraph = False
+  , cfgGraphosConfig = defaultGraphosConfig
   }
