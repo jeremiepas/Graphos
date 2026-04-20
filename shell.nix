@@ -16,7 +16,15 @@ let
 
   systemDeps = with pkgs'; [ zlib openssl ];
 
-  tooling = with pkgs'; [ jq pyright python313Packages.pyyaml bun uv ];
+  tooling = with pkgs'; [
+    jq
+    pyright
+    python313Packages.pyyaml
+    bun
+    uv
+    nixd
+    vscode-langservers-extracted
+  ];
 
   libPaths = pkgs'.lib.makeLibraryPath systemDeps;
 

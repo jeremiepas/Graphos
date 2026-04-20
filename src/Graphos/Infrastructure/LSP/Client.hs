@@ -82,9 +82,14 @@ data LSPClient = LSPClient
   }
 
 -- ───────────────────────────────────────────────
--- Language server registry
+-- Language server registry (default / hardcoded)
+-- Prefer using findLSPServerFromConfig with a GraphosConfig
+-- for user-configurable LSP servers. This fallback remains
+-- for cases where no config is available (e.g. tests).
 -- ───────────────────────────────────────────────
 
+-- | Default hardcoded LSP server commands.
+-- Kept for backward compatibility; prefer 'defaultLSPServers' from Domain.Config.
 languageServerCommands :: Map String (String, [String])
 languageServerCommands = Map.fromList
   [ (".ts",  ("typescript-language-server", ["--stdio"]))
@@ -115,8 +120,12 @@ languageServerCommands = Map.fromList
   , (".dart", ("dart", ["analyze", "--stdio"]))
   , (".vue", ("vue-language-server", []))
   , (".svelte", ("svelte-language-server", []))
+  , (".nix", ("nixd", []))
+  , (".json", ("vscode-json-language-server", ["--stdio"]))
   ]
 
+-- | Find an LSP server for a file extension using the default hardcoded registry.
+-- Prefer 'findLSPServerFromConfig' from Infrastructure.Config for user-configurable lookups.
 findLSPServer :: String -> IO (Maybe (String, [String]))
 findLSPServer ext = do
   case Map.lookup ext languageServerCommands of
