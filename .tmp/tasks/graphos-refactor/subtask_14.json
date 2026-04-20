@@ -1,0 +1,27 @@
+{
+  "id": "graphos-refactor-14",
+  "seq": "14",
+  "title": "Split UseCase.Extract — create LSP Orchestrator + thin composition layer",
+  "status": "pending",
+  "depends_on": ["13"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/UseCase/Extract.hs", "src/Graphos/Infrastructure/LSP/Extraction.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/UseCase/Extract/LSPOrchestrator.hs created with: doExtractWithSharedLSP, groupByLSPServer, extractionFromSymbols",
+    "UseCase.Extract becomes composition orchestrator (< 80 lines): extractAll, extractFromFile compose Haskell + Markdown + LSP extractors",
+    "Explicit exports, type signatures",
+    "cabal build succeeds",
+    "cabal test passes",
+    "No stub parsing logic remains in Extract.hs (moved to Haskell.hs)"
+  ],
+  "deliverables": [
+    "src/Graphos/UseCase/Extract/LSPOrchestrator.hs",
+    "Updated src/Graphos/UseCase/Extract.hs (composition orchestrator)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

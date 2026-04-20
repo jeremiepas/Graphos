@@ -1,0 +1,28 @@
+{
+  "id": "graphos-refactor-04",
+  "seq": "04",
+  "title": "Create Domain.Types.Pipeline + Domain.Types.Analysis sub-modules",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Domain/Types.hs", "src/Graphos/Domain/Analysis.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Types/Pipeline.hs created with PipelineConfig, defaultConfig, Detection types",
+    "src/Graphos/Domain/Types/Analysis.hs created with Analysis, GodNode, SurprisingConnection, SuggestedQuestion",
+    "Explicit export lists with type signatures",
+    "No IO (pure domain)",
+    "cabal build succeeds",
+    "Domain.Types re-exports all names from both"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Types/Pipeline.hs",
+    "src/Graphos/Domain/Types/Analysis.hs",
+    "Updated src/Graphos/Domain/Types.hs (re-export hub, all original definitions removed)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

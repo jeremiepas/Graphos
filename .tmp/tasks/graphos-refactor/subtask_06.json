@@ -1,0 +1,27 @@
+{
+  "id": "graphos-refactor-06",
+  "seq": "06",
+  "title": "Create Domain.Graph.Core sub-module",
+  "status": "pending",
+  "depends_on": ["05"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Domain/Graph.hs", "src/Graphos/Domain/Graph/FGL.hs", "src/Graphos/Domain/Types.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Graph/Core.hs created with: Graph record type, buildGraph, mergeGraphs, mergeExtractions, field accessors (gNodes, gEdges, gAdjFwd, gAdjBack, gDirected)",
+    "isFileNode, isConceptNode helper predicates",
+    "Explicit export list, type signatures on all top-level definitions",
+    "No IO (pure domain)",
+    "cabal build succeeds",
+    "Domain.Graph re-exports from Domain.Graph.Core"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Graph/Core.hs",
+    "Updated src/Graphos/Domain/Graph.hs (re-export)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

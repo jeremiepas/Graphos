@@ -1,0 +1,24 @@
+{
+  "id": "graphos-refactor-08",
+  "seq": "08",
+  "title": "Create Domain.Export.Visualization types",
+  "status": "pending",
+  "depends_on": ["05"],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Infrastructure/Export/HTML.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Export/Visualization.hs created with: VisNode, VisEdge types (currently embedded in HTML.hs as domain-level visualization types)",
+    "ToJSON instances for VisNode/VisEdge",
+    "Explicit exports, type signatures, no IO (pure domain)",
+    "cabal build succeeds"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Export/Visualization.hs",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

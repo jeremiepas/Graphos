@@ -1,0 +1,37 @@
+{
+  "id": "graphos-refactor-15",
+  "seq": "15",
+  "title": "Final integration — update CommunityGraph with ExportFormat + full test suite",
+  "status": "pending",
+  "depends_on": ["07", "10", "12", "14"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md", ".opencode/context/core/standards/test-coverage.md"],
+  "reference_files": [
+    "src/Graphos/Infrastructure/Export/CommunityGraph.hs",
+    "src/Graphos/Domain/Export/Format.hs",
+    "src/Graphos/UseCase/Export.hs",
+    "src/Graphos/UseCase/Pipeline.hs",
+    "app/Main.hs",
+    "Graphos.cabal"
+  ],
+  "acceptance_criteria": [
+    "CommunityGraph.hs refactored to use ExportFormat type class instead of direct format knowledge",
+    "Each export format (HTML, JSON, Neo4j, Obsidian, SVG, GraphML) implements ExportFormat",
+    "UseCase.Export updated to use type class dispatch",
+    "cabal build succeeds",
+    "cabal test passes (full suite, zero failures)",
+    "All re-export hubs verified (Domain.Types, Domain.Graph, LSP.Client, UseCase.Extract still importable)",
+    "No IO in Domain or UseCase layers",
+    "New modules added to test suite where appropriate"
+  ],
+  "deliverables": [
+    "Updated src/Graphos/Infrastructure/Export/CommunityGraph.hs",
+    "Updated src/Graphos/UseCase/Export.hs",
+    "Updated Graphos.cabal (final)",
+    "All tests green"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}
