@@ -1,0 +1,142 @@
+# ───────────────────────────────────────────────
+# Graphos Configuration
+# ───────────────────────────────────────────────
+# This file configures LSP servers and file extension categories.
+# Any field left out will fall back to built-in defaults.
+# User values override defaults (for LSP/language_ids maps).
+
+# ──── LSP Servers ─────────────────────────────
+# Map file extension → {command, args, language_id}
+# Set command to "" to explicitly disable an extension's LSP.
+# Unlisted extensions use defaults from Graphos.Domain.Config.
+lsp:
+  ".nix":
+    command: nixd
+    args: []
+    language_id: nix
+  ".json":
+    command: vscode-json-language-server
+    args: ["--stdio"]
+    language_id: json
+  ".hs":
+    command: haskell-language-server
+    args: ["--lsp"]
+    language_id: haskell
+  ".py":
+    command: pyright-langserver
+    args: ["--stdio"]
+    language_id: python
+  ".ts":
+    command: typescript-language-server
+    args: ["--stdio"]
+    language_id: typescript
+  ".tsx":
+    command: typescript-language-server
+    args: ["--stdio"]
+    language_id: typescriptreact
+  ".js":
+    command: typescript-language-server
+    args: ["--stdio"]
+    language_id: javascript
+  ".go":
+    command: gopls
+    args: []
+    language_id: go
+  ".rs":
+    command: rust-analyzer
+    args: []
+    language_id: rust
+  ".c":
+    command: clangd
+    args: []
+    language_id: c
+  ".cpp":
+    command: clangd
+    args: []
+    language_id: cpp
+  # Disable LSP for .text files (no server available)
+  ".text":
+    command: ""
+    args: []
+    language_id: plaintext
+  # RAML — no LSP available, treat as document
+  ".raml":
+    command: ""
+    args: []
+    language_id: raml
+
+# ──── Language IDs ─────────────────────────────
+# Override or add language IDs for file extensions.
+# Unlisted extensions use defaults.
+language_ids:
+  ".nix": nix
+  ".json": json
+  ".text": plaintext
+  ".raml": raml
+
+# ──── File Extension Categories ────────────────
+# Full override for each category (replaces defaults).
+# If you only want to ADD extensions, copy the defaults here and append.
+file_extensions:
+  code:
+    - .py
+    - .ts
+    - .tsx
+    - .js
+    - .jsx
+    - .go
+    - .rs
+    - .java
+    - .c
+    - .cpp
+    - .h
+    - .hpp
+    - .rb
+    - .cs
+    - .kt
+    - .kts
+    - .scala
+    - .php
+    - .swift
+    - .lua
+    - .zig
+    - .hs
+    - .lhs
+    - .ex
+    - .exs
+    - .m
+    - .mm
+    - .jl
+    - .vue
+    - .svelte
+    - .dart
+    - .ps1
+    - .nix        # NEW: Nix expressions
+    - .json       # NEW: JSON documents (symbols via LSP)
+  doc:
+    - .md
+    - .txt
+    - .rst
+    - .adoc
+    - .org
+    - .text       # NEW: plain text documents
+    - .raml       # NEW: RAML API specs (treated as docs)
+  paper:
+    - .pdf
+  image:
+    - .png
+    - .jpg
+    - .jpeg
+    - .webp
+    - .gif
+  video:
+    - .mp4
+    - .mov
+    - .mkv
+    - .webm
+    - .avi
+    - .m4v
+    - .mp3
+    - .wav
+    - .m4a
+    - .ogg
