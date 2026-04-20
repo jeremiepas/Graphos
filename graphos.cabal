@@ -42,9 +42,19 @@ library
   hs-source-dirs:  src
   exposed-modules:
                     Graphos.Prelude
-                    -- Domain
+                    -- Domain - Types sub-modules
                     Graphos.Domain.Types
+                    Graphos.Domain.Types.Node
+                    Graphos.Domain.Types.Edge
+                    Graphos.Domain.Types.Graph
+                    Graphos.Domain.Types.Pipeline
+                    Graphos.Domain.Types.Analysis
+                    -- Domain - Graph
                     Graphos.Domain.Graph
+                    Graphos.Domain.Graph.Core
+                    Graphos.Domain.Graph.Query
+                    Graphos.Domain.Graph.Analysis
+                    Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis

@@ -1,0 +1,32 @@
+{
+  "id": "graphos-refactor-10",
+  "seq": "10",
+  "title": "Refactor Export.HTML — extract JS/CSS/HTML templates",
+  "status": "pending",
+  "depends_on": ["08", "09"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Infrastructure/Export/HTML.hs", "src/Graphos/Domain/Export/Visualization.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "templates/graph.js created with all inline JavaScript extracted from HTML.hs",
+    "templates/graph.css created with all inline CSS extracted from HTML.hs",
+    "templates/graph.html created with HTML shell template (placeholder variables for data injection)",
+    "HTML.hs loads templates at runtime or embeds them via Template Haskell / cabal data-files",
+    "VisNode/VisEdge types now imported from Domain.Export.Visualization",
+    "buildHTML split into smaller functions: renderNodesJSON, renderEdgesJSON, renderPageShell, renderSearchUI, renderCommunitySidebar",
+    "cabal build succeeds",
+    "cabal test passes",
+    "HTML.hs module reduced from 400+ lines to ~100 lines"
+  ],
+  "deliverables": [
+    "templates/graph.js",
+    "templates/graph.css",
+    "templates/graph.html",
+    "Refactored src/Graphos/Infrastructure/Export/HTML.hs",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}
