@@ -17,6 +17,7 @@ import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, log
 
 import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
+import Graphos.Domain.Config (defaultGraphosConfig)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Maybe (listToMaybe)
@@ -59,6 +60,7 @@ pipelineOpts = PipelineConfig
   <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3)")
   <*> option auto (long "threads" <> short 'j' <> value 1 <> help "Number of parallel extraction threads (default: 1)")
   <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
+  <*> pure defaultGraphosConfig  -- placeholder; loaded from graphos.yaml at runtime
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
