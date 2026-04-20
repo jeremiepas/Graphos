@@ -81,12 +81,16 @@ library
                      Graphos.UseCase.SelectContext
                      Graphos.UseCase.FormatContext
                      Graphos.UseCase.Conversation
-                    -- Infrastructure - LSP
-                    Graphos.Infrastructure.LSP.Client
-                    Graphos.Infrastructure.LSP.Protocol
-                    Graphos.Infrastructure.LSP.Capabilities
-                      -- Infrastructure - Config
-                      Graphos.Infrastructure.Config
+                     -- Infrastructure - LSP
+                     Graphos.Infrastructure.LSP.Client
+                     Graphos.Infrastructure.LSP.Protocol
+                     Graphos.Infrastructure.LSP.Capabilities
+                     Graphos.Infrastructure.LSP.ServerMap
+                     Graphos.Infrastructure.LSP.Transport
+                     Graphos.Infrastructure.LSP.CapabilityParse
+                     Graphos.Infrastructure.LSP.Extraction
+                       -- Infrastructure - Config
+                       Graphos.Infrastructure.Config
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache
