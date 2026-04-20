@@ -6,47 +6,88 @@ on:
   pull_request:
     branches: ["main"]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GHC_VERSION: "9.10"
+  CABAL_VERSION: "3.14"
+
 permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
 
     - uses: haskell-actions/setup@v2
       id: setup-haskell
       with:
-        ghc-version: "9.10"
-        cabal-version: "3.14"
+        ghc-version: ${{ env.GHC_VERSION }}
+        cabal-version: ${{ env.CABAL_VERSION }}
 
     - name: Configure
-      run: cabal configure --enable-tests --enable-benchmarks --flag dev
+      run: cabal configure --enable-tests --flag dev -j4
+
+    - name: Freeze dependencies
+      run: cabal freeze
 
     - name: Cache
       uses: actions/cache@v4
-      env:
-        cache-name: cache-cabal
       with:
         path: |
           ${{ steps.setup-haskell.outputs.cabal-store }}
           dist-newstyle
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
+        key: ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-${{ hashFiles('cabal.project.freeze') }}
         restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+          ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-
 
     - name: Install dependencies
-      run: cabal build --only-dependencies all
+      run: cabal build --only-dependencies all -j4
 
     - name: Build
-      run: cabal build all
+      run: cabal build all -j4
 
     - name: Run tests
       run: cabal test all
+
+  haddock:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: build-and-test
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: haskell-actions/setup@v2
+      id: setup-haskell
+      with:
+        ghc-version: ${{ env.GHC_VERSION }}
+        cabal-version: ${{ env.CABAL_VERSION }}
+
+    - name: Configure
+      run: cabal configure --enable-tests --flag dev -j4
+
+    - name: Freeze dependencies
+      run: cabal freeze
+
+    - name: Cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.setup-haskell.outputs.cabal-store }}
+          dist-newstyle
+        key: ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-${{ hashFiles('cabal.project.freeze') }}
+        restore-keys: |
+          ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-
+
+    - name: Build dependencies
+      run: cabal build --only-dependencies all -j4
+
+    - name: Build
+      run: cabal build all -j4
 
     - name: Haddock
       run: cabal haddock all
