@@ -1,0 +1,26 @@
+{
+  "id": "graphos-refactor-13",
+  "seq": "13",
+  "title": "Split UseCase.Extract — create Haskell + Markdown extractors",
+  "status": "pending",
+  "depends_on": ["12"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/UseCase/Extract.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/UseCase/Extract/Haskell.hs created with: parseHaskellImports, parseHaskellDecls, extractHaskellStub, isTopLevelDecl, extractDeclName, extractImportName, FileGroup type",
+    "src/Graphos/UseCase/Extract/Markdown.hs created with: parseHeader, parseTags, parseWikiLinks, extractDocFile, mkHeaderNode, mkTagNode",
+    "Explicit exports, type signatures, no IO implementation in UseCase layer",
+    "cabal build succeeds",
+    "cabal test passes"
+  ],
+  "deliverables": [
+    "src/Graphos/UseCase/Extract/Haskell.hs",
+    "src/Graphos/UseCase/Extract/Markdown.hs",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

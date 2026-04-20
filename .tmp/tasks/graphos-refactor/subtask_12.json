@@ -1,0 +1,28 @@
+{
+  "id": "graphos-refactor-12",
+  "seq": "12",
+  "title": "Split LSP.Client — create CapabilityParse + Extraction sub-modules",
+  "status": "pending",
+  "depends_on": ["11"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Infrastructure/LSP/Client.hs", "src/Graphos/Infrastructure/LSP/Capabilities.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Infrastructure/LSP/CapabilityParse.hs created with: parseServerCapabilities, lookupBoolCaps (merge/enhance existing Capabilities.hs)",
+    "src/Graphos/Infrastructure/LSP/Extraction.hs created with: extractDocumentSymbols, extractCallHierarchy, extractWorkspaceSymbols, symbolToNodes, symbolTreeToEdges, workspaceSymbolsToDocumentSymbols",
+    "LSP.Client is now a thin orchestrator (< 50 lines)",
+    "All explicit exports, type signatures",
+    "cabal build succeeds",
+    "cabal test passes"
+  ],
+  "deliverables": [
+    "src/Graphos/Infrastructure/LSP/CapabilityParse.hs",
+    "src/Graphos/Infrastructure/LSP/Extraction.hs",
+    "Updated src/Graphos/Infrastructure/LSP/Client.hs (thin orchestrator)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}
