@@ -44,7 +44,7 @@ data LSPClientConfig = LSPClientConfig
   { lspCommand    :: FilePath
   , lspArgs       :: [String]
   , lspRootUri    :: FilePath
-  , lspTimeout    :: Int  -- seconds
+  , lspTimeout    :: Int  -- ^ seconds; HLS needs 300s+ due to cabal v2-repl setup
   } deriving (Eq, Show)
 
 defaultLSPConfig :: FilePath -> LSPClientConfig
@@ -52,7 +52,7 @@ defaultLSPConfig root = LSPClientConfig
   { lspCommand = ""
   , lspArgs     = []
   , lspRootUri  = root
-  , lspTimeout  = 60
+  , lspTimeout  = 300  -- 5 min default; HLS needs time for cabal v2-repl
   }
 
 data LSPClient = LSPClient
@@ -172,13 +172,19 @@ connectToLSP config = catch (do
       let initMsg = lspInitialize (lspRootUri config)
       sendLSPMessage inh initMsg
 
-      let initTimeoutMicros = lspTimeout config * 1000000
+      -- HLS needs significantly more time to initialize because it runs
+      -- cabal v2-repl to determine build flags (can take minutes on first run).
+      -- Other LSP servers typically respond within seconds.
+      let initTimeoutMicros = case lspCommand config of
+            cmd | "haskell-language-server" `isInfixOf` cmd -> max (lspTimeout config) 300 * 1000000
+                | otherwise -> lspTimeout config * 1000000
       initResp <- timeout initTimeoutMicros (readLSPResponseForId outh 1)
       case initResp of
         Nothing -> do
-          putStrLn "[lsp] Initialize failed: Timeout waiting for LSP response"
+          putStrLn $ "[lsp] Initialize failed: Timeout (" ++ show (lspTimeout config) ++ "s) waiting for LSP response"
+          putStrLn $ "[lsp] Tip: HLS needs cabal v2-repl to resolve build flags — this can take minutes on first run"
           terminateProcess ph
-          pure $ Left $ T.pack "LSP initialize failed: Timeout waiting for LSP response"
+          pure $ Left $ T.pack $ "LSP initialize failed: Timeout (" ++ show (lspTimeout config) ++ "s) waiting for LSP response"
         Just (Left err) -> do
           putStrLn $ "[lsp] Initialize failed: " ++ err
           terminateProcess ph
