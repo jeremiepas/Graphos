@@ -71,9 +71,10 @@ extractViaLSP client filePath =
       , extractionEdges = []
       }
 
--- | Extract document symbols from a file
+-- | Extract document symbols from a file.
+-- Catches Broken pipe and other IO errors — returns [] instead of crashing.
 extractDocumentSymbols :: LSPClient -> FilePath -> IO [DocumentSymbolResult]
-extractDocumentSymbols client filePath = do
+extractDocumentSymbols client filePath = catch (do
   nextId <- takeMVar (lspMessageId client)
   putMVar (lspMessageId client) (nextId + 1)
   let req = lspDocumentSymbolWithId filePath nextId
@@ -85,6 +86,9 @@ extractDocumentSymbols client filePath = do
       putStrLn $ "[lsp] Failed to get symbols: " ++ err
       pure []
     Right val -> pure $ parseSymbolsFromResponse val
+  ) $ \(e :: SomeException) -> do
+    putStrLn $ "[lsp] Warning: documentSymbol request failed for " ++ filePath ++ ": " ++ show e
+    pure []
 
 -- | Parse symbol tree from JSON-RPC response.
 parseSymbolsFromResponse :: Value -> [DocumentSymbolResult]
