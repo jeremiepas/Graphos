@@ -109,7 +109,7 @@ doExtractWithSharedLSP env absRoot serverCmd files = do
             { lspCommand = cmd
             , lspArgs    = args
             , lspRootUri = absRoot
-            , lspTimeout  = 60
+            , lspTimeout  = 300
             }
       result <- connectToLSP config
       case result of
@@ -172,7 +172,7 @@ extractFromFile env filePath = do
             { lspCommand = cmd
             , lspArgs    = args
             , lspRootUri = absRoot
-            , lspTimeout  = 60
+            , lspTimeout  = 300
             }
       result <- connectToLSP config
       case result of
