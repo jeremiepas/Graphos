@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: haskell-actions/setup@v2
+      id: setup-haskell
+      with:
+        ghc-version: "9.10"
+        cabal-version: "3.14"
+
+    - name: Configure
+      run: cabal configure --enable-tests --flag dev
+
+    - name: Cache
+      uses: actions/cache@v4
+      env:
+        cache-name: cache-cabal
+      with:
+        path: |
+          ${{ steps.setup-haskell.outputs.cabal-store }}
+          dist-newstyle
+        key: ${{ runner.os }}-release-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
+        restore-keys: |
+          ${{ runner.os }}-release-${{ env.cache-name }}-
+          ${{ runner.os }}-release-
+          ${{ runner.os }}-
+
+    - name: Install dependencies
+      run: cabal build --only-dependencies all
+
+    - name: Build
+      run: cabal build all
+
+    - name: Run tests
+      run: cabal test all
+
+    - name: Generate SHA256 checksums
+      run: |
+        mkdir -p dist/release
+        cp "$(cabal list-bin graphos)" dist/release/graphos-linux-x86_64
+        cd dist/release
+        sha256sum graphos-linux-x86_64 > graphos-linux-x86_64.sha256
+
+    - name: Extract version from tag
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Graphos ${{ github.ref_name }}
+        body: |
+          ## Graphos ${{ github.ref_name }}
+
+          **Changes**: See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+
+          ### Assets
+          | File | Description |
+          |------|-------------|
+          | `graphos-linux-x86_64` | Static Linux binary (x86_64) |
+          | `graphos-linux-x86_64.sha256` | SHA256 checksum |
+        files: |
+          dist/release/graphos-linux-x86_64
+          dist/release/graphos-linux-x86_64.sha256
+        draft: false
+        prerelease: false

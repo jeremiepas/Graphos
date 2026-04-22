@@ -1,0 +1,26 @@
+{
+  "id": "graphos-refactor-01",
+  "seq": "01",
+  "title": "Create Domain.Types.Node sub-module",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Domain/Types.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Types/Node.hs created with Node, NodeId, FileType (Code/Doc/Image/Paper/Video) and related smart constructors",
+    "Explicit export list with type signatures on all top-level definitions",
+    "No IO in this module (pure domain)",
+    "cabal build succeeds with new module in exposed-modules",
+    "Domain.Types re-exports all names from Domain.Types.Node"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Types/Node.hs",
+    "Updated src/Graphos/Domain/Types.hs (re-export + removed definitions)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

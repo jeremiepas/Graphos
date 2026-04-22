@@ -1,0 +1,37 @@
+{
+  "id": "graphos-refactor-05",
+  "seq": "05",
+  "title": "Update all imports after Domain.Types split + cabal test",
+  "status": "pending",
+  "depends_on": ["01", "02", "03", "04"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": [
+    "src/Graphos/Domain/Types.hs",
+    "src/Graphos/UseCase/Extract.hs",
+    "src/Graphos/UseCase/Build.hs",
+    "src/Graphos/UseCase/Cluster.hs",
+    "src/Graphos/UseCase/Infer.hs",
+    "src/Graphos/UseCase/Analyze.hs",
+    "src/Graphos/UseCase/Query.hs",
+    "src/Graphos/UseCase/Export.hs",
+    "src/Graphos/UseCase/Report.hs",
+    "src/Graphos/UseCase/Pipeline.hs",
+    "src/Graphos/Infrastructure/Export/HTML.hs",
+    "src/Graphos/Infrastructure/LSP/Client.hs"
+  ],
+  "acceptance_criteria": [
+    "All modules that imported Graphos.Domain.Types still compile (re-export hub ensures compatibility)",
+    "Modules that only need specific types update to import new sub-modules directly",
+    "cabal build succeeds",
+    "cabal test passes"
+  ],
+  "deliverables": [
+    "Updated import statements across all consuming modules",
+    "All tests passing"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}
