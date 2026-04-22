@@ -1,0 +1,28 @@
+{
+  "id": "graphos-refactor-11",
+  "seq": "11",
+  "title": "Split LSP.Client — create ServerMap + Transport sub-modules",
+  "status": "pending",
+  "depends_on": ["05"],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Infrastructure/LSP/Client.hs", "src/Graphos/Infrastructure/LSP/Capabilities.hs", "src/Graphos/Infrastructure/LSP/Protocol.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Infrastructure/LSP/ServerMap.hs created with: languageServerCommands mapping (30+ language→server pairs), lspServerForFile helper",
+    "src/Graphos/Infrastructure/LSP/Transport.hs created with: connectToLSP, disconnectLSP, readLSPMessage, sendLSPMessage (JSON-RPC process management)",
+    "LSP.Client becomes thin orchestrator importing from ServerMap and Transport",
+    "Explicit exports, type signatures on all top-level definitions",
+    "cabal build succeeds",
+    "cabal test passes"
+  ],
+  "deliverables": [
+    "src/Graphos/Infrastructure/LSP/ServerMap.hs",
+    "src/Graphos/Infrastructure/LSP/Transport.hs",
+    "Updated src/Graphos/Infrastructure/LSP/Client.hs (thin orchestrator)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

@@ -42,9 +42,19 @@ library
   hs-source-dirs:  src
   exposed-modules:
                     Graphos.Prelude
-                    -- Domain
+                    -- Domain - Types sub-modules
                     Graphos.Domain.Types
+                    Graphos.Domain.Types.Node
+                    Graphos.Domain.Types.Edge
+                    Graphos.Domain.Types.Graph
+                    Graphos.Domain.Types.Pipeline
+                    Graphos.Domain.Types.Analysis
+                    -- Domain - Graph
                     Graphos.Domain.Graph
+                    Graphos.Domain.Graph.Core
+                    Graphos.Domain.Graph.Query
+                    Graphos.Domain.Graph.Analysis
+                    Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
@@ -52,8 +62,10 @@ library
                    -- Use Cases
                    Graphos.UseCase.Pipeline
                    Graphos.UseCase.Detect
-                   Graphos.UseCase.Extract
-                   Graphos.UseCase.Build
+                    Graphos.UseCase.Extract
+                    Graphos.UseCase.Extract.Haskell
+                    Graphos.UseCase.Extract.Markdown
+                    Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
                     Graphos.UseCase.Analyze
                     Graphos.UseCase.Report
@@ -71,12 +83,16 @@ library
                      Graphos.UseCase.SelectContext
                      Graphos.UseCase.FormatContext
                      Graphos.UseCase.Conversation
-                    -- Infrastructure - LSP
-                    Graphos.Infrastructure.LSP.Client
-                    Graphos.Infrastructure.LSP.Protocol
-                    Graphos.Infrastructure.LSP.Capabilities
-                      -- Infrastructure - Config
-                      Graphos.Infrastructure.Config
+                     -- Infrastructure - LSP
+                     Graphos.Infrastructure.LSP.Client
+                     Graphos.Infrastructure.LSP.Protocol
+                     Graphos.Infrastructure.LSP.Capabilities
+                     Graphos.Infrastructure.LSP.ServerMap
+                     Graphos.Infrastructure.LSP.Transport
+                     Graphos.Infrastructure.LSP.CapabilityParse
+                     Graphos.Infrastructure.LSP.Extraction
+                       -- Infrastructure - Config
+                       Graphos.Infrastructure.Config
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache
@@ -180,7 +196,8 @@ test-suite graphos-test
                     Graphos.UseCase.PipelineSpec
                     Graphos.UseCase.ExtractSpec
                     Graphos.UseCase.QuerySpec
-                     Graphos.Infrastructure.LSP.ClientSpec
+                      Graphos.Infrastructure.LSP.ClientSpec
+                      Graphos.Infrastructure.LSP.TransportSpec
                      Graphos.Domain.ContextSpec
                      Graphos.UseCase.SelectContextSpec
                      Graphos.UseCase.FormatContextSpec
@@ -195,4 +212,5 @@ test-suite graphos-test
     , aeson
     , containers
     , fgl-arbitrary        >= 0.2
+    , process              >= 1.6
     , text
