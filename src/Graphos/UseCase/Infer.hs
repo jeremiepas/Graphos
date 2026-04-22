@@ -6,11 +6,14 @@
 --   * Shared neighbors → SharesDataWith
 --   * Transitive dependencies → DependsOn
 --   * Bridge nodes (articulation points) → RationaleFor
+--   * Code ↔ Documentation linking → References
 module Graphos.UseCase.Infer
   ( -- * Community-bridging inference
     inferCommunityBridges
   , inferTransitiveDeps
   , inferSharedContextEdges
+    -- * Code↔Doc linking
+  , inferCodeDocEdges
     -- * Density-controlled inference
   , inferEdges
     -- * Bridge node classification
@@ -22,6 +25,7 @@ import Data.List (sortOn, nubBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
@@ -203,8 +207,95 @@ makeSharedDataEdge src tgt sharedCount = Edge
   }
 
 -- ───────────────────────────────────────────────
--- Density-controlled inference
+-- Code ↔ Documentation linking
 -- ───────────────────────────────────────────────
+
+-- | Infer edges between code nodes and documentation nodes.
+--
+-- Two linking strategies:
+--
+--   1. **Name alignment**: A doc file references a module/class name
+--      that exists as a code node. E.g. docs mention "Boond.Types"
+--      and there's a code node with label "Boond.Types".
+--
+--   2. **Path alignment**: A doc file lives next to a code file.
+--      E.g. @src/Foo.hs@ ↔ @docs/Foo.md@ share the base name "Foo".
+--
+-- All inferred edges use 'References' relation with 'Inferred' confidence.
+inferCodeDocEdges :: Graph -> [Edge]
+inferCodeDocEdges g =
+  let allNodes = Map.toList (gNodes g)
+      docNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == DocumentFile]
+      codeNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == CodeFile]
+
+      -- Build a label → NodeId index for code nodes (fast lookup)
+      codeLabelIdx :: Map Text [NodeId]
+      codeLabelIdx = Map.fromListWith (++)
+        [ (nodeLabel cn, [nid])
+        | (nid, cn) <- codeNodes
+        ]
+
+      -- Also index by source file base name (without extension)
+      codeBaseIdx :: Map Text [NodeId]
+      codeBaseIdx = Map.fromListWith (++)
+        [ (fileBaseName (nodeSourceFile cn), [nid])
+        | (nid, cn) <- codeNodes
+        , not (T.null (nodeSourceFile cn))
+        ]
+
+      -- Strategy 1: Name alignment
+      -- Doc nodes whose label matches a code node label → References edge
+      nameAlignEdges =
+        [ makeCodeDocEdge codeNid docNid "name-alignment"
+        | (docNid, dn) <- docNodes
+        , codeNid <- Map.findWithDefault [] (nodeLabel dn) codeLabelIdx
+        , notEdgeAlready g docNid codeNid
+        ]
+
+      -- Strategy 2: Path alignment
+      -- Doc file "Foo.md" ↔ Code file "Foo.hs" share base name
+      pathAlignEdges =
+        [ makeCodeDocEdge codeNid docNid "path-alignment"
+        | (docNid, dn) <- docNodes
+        , not (T.null (nodeSourceFile dn))
+        , let docBase = fileBaseName (nodeSourceFile dn)
+        , not (T.null docBase)
+        , codeNid <- Map.findWithDefault [] docBase codeBaseIdx
+        , notEdgeAlready g docNid codeNid
+        ]
+
+  in nubBy (\a b -> edgeSource a == edgeSource b && edgeTarget a == edgeTarget b)
+       (nameAlignEdges ++ pathAlignEdges)
+
+-- | Extract the base name of a file path (without directory or extension).
+-- "src/Foo/Bar.hs" → "Bar"
+fileBaseName :: Text -> Text
+fileBaseName path =
+  let -- Take after last '/'
+      filename = case T.breakOnEnd "/" path of
+        (_, f) | not (T.null f) -> T.dropWhile (== '/') f
+        _                        -> path
+      -- Drop extension (last .xxx segment)
+      base = case T.breakOnEnd "." filename of
+        (_, ext) | not (T.null ext) && T.length ext <= 5 ->
+          case T.breakOnEnd "." (T.dropEnd (T.length ext + 1) filename) of
+            (_, b) | not (T.null b) -> b
+            _ -> filename
+        _ -> filename
+  in base
+
+-- | Make a code↔doc edge
+makeCodeDocEdge :: NodeId -> NodeId -> Text -> Edge
+makeCodeDocEdge src tgt strategy = Edge
+  { edgeSource         = src
+  , edgeTarget         = tgt
+  , edgeRelation       = References
+  , edgeConfidence     = Inferred
+  , edgeConfidenceScore = 0.7
+  , edgeSourceFile     = "inferred:code-doc-" <> strategy
+  , edgeSourceLocation = Nothing
+  , edgeWeight         = 0.7
+  }
 
 -- | Infer edges based on density level.
 --
@@ -213,7 +304,7 @@ makeSharedDataEdge src tgt sharedCount = Edge
 --   * Dense:    Normal + shared-context edges (min 3 shared neighbors)
 --   * Maximum:  Dense + shared-context edges (min 2 shared neighbors)
 inferEdges :: EdgeDensity -> Graph -> CommunityMap -> [Edge]
-inferEdges Sparse   _ _ = []
-inferEdges Normal g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g
-inferEdges Dense   g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3
-inferEdges Maximum g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2
+inferEdges Sparse   g _  = inferCodeDocEdges g
+inferEdges Normal g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g
+inferEdges Dense   g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g
+inferEdges Maximum g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g

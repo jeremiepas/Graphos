@@ -1,0 +1,24 @@
+{
+  "id": "graphos-refactor-09",
+  "seq": "09",
+  "title": "Create Domain.Export.Format type class",
+  "status": "pending",
+  "depends_on": ["05"],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Infrastructure/Export/CommunityGraph.hs", "src/Graphos/UseCase/Export.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Export/Format.hs created with ExportFormat type class: class ExportFormat a where render :: LabeledGraph -> a",
+    "Reduces CommunityGraph mediator coupling — each format implements the type class independently",
+    "Explicit exports, type signatures, no IO (pure domain)",
+    "cabal build succeeds"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Export/Format.hs",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "graphos-refactor-03",
+  "seq": "03",
+  "title": "Create Domain.Types.Graph sub-module",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Domain/Types.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Types/Graph.hs created with LabeledGraph, GraphDiff, Extraction, Hyperedge types",
+    "Explicit export list with type signatures",
+    "No IO (pure domain)",
+    "cabal build succeeds",
+    "Domain.Types re-exports all names from Domain.Types.Graph"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Types/Graph.hs",
+    "Updated src/Graphos/Domain/Types.hs (re-export)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}
