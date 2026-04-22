@@ -12,24 +12,31 @@ module Graphos.Infrastructure.LSP.Transport
 
     -- * Low-level messaging
   , sendLSPMessage
+  , sendLSPMessageSafe
   , readLSPMessage
   , readLSPResponseForId
   , drainNotifications
+
+    -- * Connection state
+  , isProcessAlive
+  , markDisconnected
   ) where
 
 import Control.Concurrent.MVar (MVar, newMVar)
 import Control.Concurrent (threadDelay)
-import Control.Exception (catch, try, SomeException(..))
+import Control.Exception (catch, try, SomeException(..), IOException)
+import Control.Monad (unless, void)
 import Data.Aeson (ToJSON, encode, eitherDecode, Value(..))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as B8
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.Process (ProcessHandle, createProcess, proc, std_in, std_out, std_err, StdStream(CreatePipe), terminateProcess)
+import System.Process (ProcessHandle, createProcess, proc, std_in, std_out, std_err, StdStream(CreatePipe), terminateProcess, getProcessExitCode)
 import System.IO (Handle, hFlush)
 import System.Timeout (timeout)
 
@@ -62,6 +69,7 @@ data LSPClient = LSPClient
   , lspConfig     :: LSPClientConfig
   , lspMessageId  :: MVar Int
   , lspServerCaps :: ServerCapabilities
+  , lspConnected  :: IORef Bool  -- ^ True while the server process is alive and pipes are open
   }
 
 -- ───────────────────────────────────────────────
@@ -76,6 +84,43 @@ sendLSPMessage h msg = do
       header = B8.pack $ "Content-Length: " ++ show contentLen ++ "\r\n\r\n"
   BS.hPut h (header `BS.append` content)
   hFlush h
+
+-- | Check if the LSP server process is still running.
+-- Returns 'Nothing' when the process is still running (no exit code yet).
+isProcessAlive :: ProcessHandle -> IO Bool
+isProcessAlive ph = do
+  mec <- getProcessExitCode ph
+  pure $ case mec of
+    Nothing -> True
+    Just _  -> False
+
+-- | Mark the LSP client as disconnected (e.g. after detecting a dead process).
+markDisconnected :: LSPClient -> IO ()
+markDisconnected client = writeIORef (lspConnected client) False
+
+-- | Send a JSON-RPC message with Broken-pipe protection.
+-- Checks if the server process is alive before writing; on any IOException
+-- (including ResourceVanished / Broken pipe), marks the client as disconnected
+-- and returns 'False'.  Returns 'True' on success.
+sendLSPMessageSafe :: ToJSON a => LSPClient -> a -> IO Bool
+sendLSPMessageSafe client msg = do
+  alive <- readIORef (lspConnected client)
+  if not alive
+    then pure False
+    else do
+      processAlive <- isProcessAlive (lspHandle client)
+      if not processAlive
+        then do
+          markDisconnected client
+          putStrLn "[lsp] Warning: server process is no longer running"
+          pure False
+        else catch (do
+          sendLSPMessage (lspStdin client) msg
+          pure True
+          ) $ \(e :: IOException) -> do
+            markDisconnected client
+            putStrLn $ "[lsp] Warning: failed to send message (connection lost): " ++ show e
+            pure False
 
 -- | Read a byte until newline, stripping \r
 readLineLF :: Handle -> IO String
@@ -168,6 +213,7 @@ connectToLSP config = catch (do
   case (minH, moutH) of
     (Just inh, Just outh) -> do
       idVar <- newMVar 2
+      connectedRef <- newIORef True
 
       let initMsg = lspInitialize (lspRootUri config)
       sendLSPMessage inh initMsg
@@ -210,20 +256,24 @@ connectToLSP config = catch (do
             , lspConfig     = config
             , lspMessageId  = idVar
             , lspServerCaps = caps
+            , lspConnected  = connectedRef
             }
     _ -> pure $ Left $ T.pack "Failed to create LSP process handles"
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "LSP connection error: " ++ show e
 
 disconnectLSP :: LSPClient -> IO ()
 disconnectLSP client = do
-  result <- try $ do
-    sendLSPMessage (lspStdin client) lspShutdown
-    _ <- timeout 3000000 (readLSPResponseForId (lspStdout client) 999)
-    pure ()
-  case result of
-    Left (_ :: SomeException) -> pure ()
-    Right _ -> pure ()
-  catch (sendLSPMessage (lspStdin client) lspExit) $ \(_ :: SomeException) -> pure ()
+  alive <- readIORef (lspConnected client)
+  unless (not alive) $ do
+    result <- try $ do
+      _ <- sendLSPMessageSafe client lspShutdown
+      _ <- timeout 3000000 (readLSPResponseForId (lspStdout client) 999)
+      pure ()
+    case result of
+      Left (_ :: SomeException) -> pure ()
+      Right _ -> pure ()
+    void (catch (sendLSPMessageSafe client lspExit) $ \(_ :: SomeException) -> pure False)
+  markDisconnected client
   threadDelay 100000
   terminateProcess (lspHandle client)
   putStrLn $ "[lsp] Disconnected from " ++ lspCommand (lspConfig client)

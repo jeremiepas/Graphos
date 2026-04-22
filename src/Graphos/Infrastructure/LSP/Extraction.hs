@@ -13,6 +13,7 @@ module Graphos.Infrastructure.LSP.Extraction
 
 import Control.Concurrent.MVar (takeMVar, putMVar)
 import Control.Exception (catch, SomeException(..))
+import Control.Monad (unless)
 import Data.Aeson (Value(..))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
@@ -27,7 +28,7 @@ import Graphos.Domain.Types
 import Graphos.Infrastructure.LSP.Protocol hiding (languageIdFromExt)
 import Graphos.Infrastructure.LSP.Transport
   ( LSPClient(..)
-  , sendLSPMessage
+  , sendLSPMessageSafe
   , drainNotifications
   , readLSPResponseForId
   )
@@ -49,14 +50,16 @@ extractViaLSP client filePath =
     fileContent <- catch (T.pack <$> readFile filePath) $ \(_ :: SomeException) -> pure ""
 
     let openMsg = lspDidOpen filePath langId fileContent
-    catch (sendLSPMessage (lspStdin client) openMsg) $ \(_ :: SomeException) -> pure ()
+    sent <- sendLSPMessageSafe client openMsg
+    unless sent $ putStrLn "[lsp] Warning: could not send didOpen (server disconnected?)"
     catch (drainNotifications (lspStdout client) 500000) $ \(_ :: SomeException) -> pure ()
 
     symbols <- extractDocumentSymbols client filePath
     putStrLn $ "[lsp] Got " ++ show (length symbols) ++ " symbols from " ++ filePath
 
     let closeMsg = lspDidClose filePath
-    catch (sendLSPMessage (lspStdin client) closeMsg) $ \(_ :: SomeException) -> pure ()
+    sentClose <- sendLSPMessageSafe client closeMsg
+    unless sentClose $ putStrLn "[lsp] Warning: could not send didClose (server disconnected?)"
 
     let nodes = symbolToNodes filePath symbols
         edges = symbolTreeToEdges filePath symbols
@@ -78,14 +81,18 @@ extractDocumentSymbols client filePath = catch (do
   nextId <- takeMVar (lspMessageId client)
   putMVar (lspMessageId client) (nextId + 1)
   let req = lspDocumentSymbolWithId filePath nextId
-  sendLSPMessage (lspStdin client) req
-
-  resp <- readLSPResponseForId (lspStdout client) nextId
-  case resp of
-    Left err -> do
-      putStrLn $ "[lsp] Failed to get symbols: " ++ err
+  sent <- sendLSPMessageSafe client req
+  if not sent
+    then do
+      putStrLn $ "[lsp] Warning: could not send documentSymbol request for " ++ filePath ++ " (server disconnected?)"
       pure []
-    Right val -> pure $ parseSymbolsFromResponse val
+    else do
+      resp <- readLSPResponseForId (lspStdout client) nextId
+      case resp of
+        Left err -> do
+          putStrLn $ "[lsp] Failed to get symbols: " ++ err
+          pure []
+        Right val -> pure $ parseSymbolsFromResponse val
   ) $ \(e :: SomeException) -> do
     putStrLn $ "[lsp] Warning: documentSymbol request failed for " ++ filePath ++ ": " ++ show e
     pure []
@@ -320,12 +327,14 @@ extractWorkspaceSymbols client = catch (do
   nextId <- takeMVar (lspMessageId client)
   putMVar (lspMessageId client) (nextId + 1)
   let req = lspWorkspaceSymbolWithId nextId ""
-  sendLSPMessage (lspStdin client) req
-
-  resp <- readLSPResponseForId (lspStdout client) nextId
-  case resp of
-    Left err -> pure $ Left $ T.pack $ "workspace/symbol failed: " ++ err
-    Right val -> pure $ Right $ parseWorkspaceSymbolResponse val
+  sent <- sendLSPMessageSafe client req
+  if not sent
+    then pure $ Left $ T.pack "workspace/symbol failed: server disconnected"
+    else do
+      resp <- readLSPResponseForId (lspStdout client) nextId
+      case resp of
+        Left err -> pure $ Left $ T.pack $ "workspace/symbol failed: " ++ err
+        Right val -> pure $ Right $ parseWorkspaceSymbolResponse val
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "workspace/symbol error: " ++ show e
 
 -- | Parse workspace/symbol response into SymbolInformation list
