@@ -1,0 +1,29 @@
+{
+  "id": "graphos-refactor-07",
+  "seq": "07",
+  "title": "Create Domain.Graph.Query + Domain.Graph.Analysis + Domain.Graph.Diff sub-modules",
+  "status": "pending",
+  "depends_on": ["06"],
+  "parallel": false,
+  "suggested_agent": "coder-agent",
+  "context_files": [".opencode/context/core/standards/code-quality.md"],
+  "reference_files": ["src/Graphos/Domain/Graph.hs", "src/Graphos/Domain/Graph/FGL.hs", "Graphos.cabal"],
+  "acceptance_criteria": [
+    "src/Graphos/Domain/Graph/Query.hs created with: shortestPath, neighbors, degree, breadthFirstSearch, depthFirstSearch, subgraph",
+    "src/Graphos/Domain/Graph/Analysis.hs created with: articulationPoints, biconnectedComponents, godNodes, edgeBetweenness, dominators, components",
+    "src/Graphos/Domain/Graph/Diff.hs created with: graphDiff, LabeledGraph related functions",
+    "All explicit exports, type signatures, no IO",
+    "cabal build succeeds",
+    "Domain.Graph re-exports all from Core, Query, Analysis, Diff + existing FGL"
+  ],
+  "deliverables": [
+    "src/Graphos/Domain/Graph/Query.hs",
+    "src/Graphos/Domain/Graph/Analysis.hs",
+    "src/Graphos/Domain/Graph/Diff.hs",
+    "Updated src/Graphos/Domain/Graph.hs (re-export hub)",
+    "Updated Graphos.cabal"
+  ],
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null
+}
