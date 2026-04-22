@@ -196,7 +196,8 @@ test-suite graphos-test
                     Graphos.UseCase.PipelineSpec
                     Graphos.UseCase.ExtractSpec
                     Graphos.UseCase.QuerySpec
-                     Graphos.Infrastructure.LSP.ClientSpec
+                      Graphos.Infrastructure.LSP.ClientSpec
+                      Graphos.Infrastructure.LSP.TransportSpec
                      Graphos.Domain.ContextSpec
                      Graphos.UseCase.SelectContextSpec
                      Graphos.UseCase.FormatContextSpec
@@ -211,4 +212,5 @@ test-suite graphos-test
     , aeson
     , containers
     , fgl-arbitrary        >= 0.2
+    , process              >= 1.6
     , text
