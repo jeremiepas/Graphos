@@ -21,8 +21,10 @@ import qualified Data.Vector as V
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
+import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.Timeout (timeout)
 
 import Graphos.Domain.Types
 import Graphos.Infrastructure.LSP.Protocol hiding (languageIdFromExt)
@@ -87,12 +89,17 @@ extractDocumentSymbols client filePath = catch (do
       putStrLn $ "[lsp] Warning: could not send documentSymbol request for " ++ filePath ++ " (server disconnected?)"
       pure []
     else do
-      resp <- readLSPResponseForId (lspStdout client) nextId
-      case resp of
-        Left err -> do
-          putStrLn $ "[lsp] Failed to get symbols: " ++ err
+      -- 10s timeout per file: some servers are slow on large/complex files
+      mResp <- timeout 10000000 (readLSPResponseForId (lspStdout client) nextId)
+      case mResp of
+        Nothing -> do
+          putStrLn $ "[lsp] Timeout waiting for symbols: " ++ filePath
           pure []
-        Right val -> pure $ parseSymbolsFromResponse val
+        Just resp -> case resp of
+          Left err -> do
+            putStrLn $ "[lsp] Failed to get symbols: " ++ err
+            pure []
+          Right val -> pure $ parseSymbolsFromResponse val
   ) $ \(e :: SomeException) -> do
     putStrLn $ "[lsp] Warning: documentSymbol request failed for " ++ filePath ++ ": " ++ show e
     pure []
@@ -181,8 +188,8 @@ extractCallHierarchy client _name = do
 symbolToNodes :: FilePath -> [DocumentSymbolResult] -> [Node]
 symbolToNodes filePath symbols =
   [ Node
-    { nodeId           = makeNodeId filePath (dsrName sym)
-    , nodeLabel        = dsrName sym
+    { nodeId           = makeNodeId filePath (safeLabel (dsrName sym))
+    , nodeLabel        = safeLabel (dsrName sym)
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
     , nodeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange sym))))
@@ -197,13 +204,17 @@ symbolToNodes filePath symbols =
   | sym <- symbols
   ]
 
+-- | Sanitize a label for use in node IDs and display: strip newlines, quotes, backticks.
+safeLabel :: Text -> Text
+safeLabel = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`')
+
 -- | Build edges from the symbol tree (parent contains child).
 symbolTreeToEdges :: FilePath -> [DocumentSymbolResult] -> [Edge]
 symbolTreeToEdges filePath flatSymbols =
   let fileEdges =
         [ Edge
           { edgeSource        = T.pack (takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath)
-          , edgeTarget        = makeNodeId filePath (dsrName sym)
+          , edgeTarget        = makeNodeId filePath (safeLabel (dsrName sym))
           , edgeRelation      = Contains
           , edgeConfidence    = Extracted
           , edgeConfidenceScore = 1.0
@@ -217,39 +228,42 @@ symbolTreeToEdges filePath flatSymbols =
   in fileEdges ++ hierarchyEdges
 
 -- | Build parent→child Contains edges from the symbol hierarchy.
+-- Uses sorted interval sweep: O(S log S) instead of O(S²).
+-- Sort symbols by start position, then each symbol's parent is the nearest
+-- preceding symbol whose range still contains it.
 buildHierarchyEdges :: FilePath -> [DocumentSymbolResult] -> [Edge]
 buildHierarchyEdges filePath symbols =
-  let containsPairs = [(parent, child)
-                       | parent <- symbols
-                       , child <- symbols
-                       , dsrName parent /= dsrName child
-                       , rangeContains (dsrRange parent) (dsrRange child)
-                       ]
-      directPairs = [(p, c) | (p, c) <- containsPairs
-                            , not (any (\m -> dsrName m /= dsrName p
-                                          && dsrName m /= dsrName c
-                                          && rangeContains (dsrRange p) (dsrRange m)
-                                          && rangeContains (dsrRange m) (dsrRange c)) symbols)]
-  in [ Edge
-     { edgeSource        = makeNodeId filePath (dsrName parent)
-     , edgeTarget        = makeNodeId filePath (dsrName child)
-     , edgeRelation      = Contains
-     , edgeConfidence    = Extracted
-     , edgeConfidenceScore = 1.0
-     , edgeSourceFile    = T.pack filePath
-     , edgeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange parent))))
-     , edgeWeight        = 1.0
-     }
-     | (parent, child) <- directPairs]
+  let sorted = sortOn (\s -> (posLine (rangeStart (dsrRange s)), posCharacter (rangeStart (dsrRange s)))) symbols
+      go _ [] = []
+      go stack (sym:rest) =
+        let startL = posLine (rangeStart (dsrRange sym))
+            startC = posCharacter (rangeStart (dsrRange sym))
+            endL   = posLine (rangeEnd (dsrRange sym))
+            endC   = posCharacter (rangeEnd (dsrRange sym))
+            startPos = startL * 10000 + startC
+            endPos = endL * 10000 + endC
+            newStack = popStack stack startPos
+        in case newStack of
+             (parent:ps) ->
+               let pStart = posLine (rangeStart (dsrRange parent)) * 10000 + posCharacter (rangeStart (dsrRange parent))
+               in if pStart < startPos && endPos <= posLine (rangeEnd (dsrRange parent)) * 10000 + posCharacter (rangeEnd (dsrRange parent))
+                  then makeEdge parent sym : go ((sym : ps)) rest
+                  else go (sym : ps) rest
+             [] -> go [sym] rest
 
--- | Check if one range fully contains another
-rangeContains :: Range -> Range -> Bool
-rangeContains outer inner =
-  let outerStart = posLine (rangeStart outer) * 10000 + posCharacter (rangeStart outer)
-      outerEnd   = posLine (rangeEnd outer) * 10000 + posCharacter (rangeEnd outer)
-      innerStart = posLine (rangeStart inner) * 10000 + posCharacter (rangeStart inner)
-      innerEnd   = posLine (rangeEnd inner) * 10000 + posCharacter (rangeEnd inner)
-  in innerStart >= outerStart && innerEnd <= outerEnd
+      popStack st startPos = dropWhile (\p -> posLine (rangeEnd (dsrRange p)) * 10000 + posCharacter (rangeEnd (dsrRange p)) <= startPos) st
+
+      makeEdge parent child = Edge
+        { edgeSource        = makeNodeId filePath (safeLabel (dsrName parent))
+        , edgeTarget        = makeNodeId filePath (safeLabel (dsrName child))
+        , edgeRelation      = Contains
+        , edgeConfidence    = Extracted
+        , edgeConfidenceScore = 1.0
+        , edgeSourceFile    = T.pack filePath
+        , edgeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange parent))))
+        , edgeWeight        = 1.0
+        }
+  in go [] sorted
 
 -- ───────────────────────────────────────────────
 -- Helpers
@@ -261,7 +275,8 @@ makeNodeId filePath name =
       dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       hashPrefix = T.pack $ show dirHash
-  in hashPrefix <> T.pack "_" <> stem <> T.pack "_" <> name
+      safeName = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') name
+  in hashPrefix <> T.pack "_" <> stem <> T.pack "_" <> safeName
 
 -- | Create a stub node when LSP extraction fails
 makeStubNode :: FilePath -> Node
@@ -331,10 +346,14 @@ extractWorkspaceSymbols client = catch (do
   if not sent
     then pure $ Left $ T.pack "workspace/symbol failed: server disconnected"
     else do
-      resp <- readLSPResponseForId (lspStdout client) nextId
-      case resp of
-        Left err -> pure $ Left $ T.pack $ "workspace/symbol failed: " ++ err
-        Right val -> pure $ Right $ parseWorkspaceSymbolResponse val
+      -- 30s timeout: workspace/symbol with empty query can take a long time
+      -- on large projects (1000+ files) while tsserver indexes
+      mResp <- timeout 30000000 (readLSPResponseForId (lspStdout client) nextId)
+      case mResp of
+        Nothing -> pure $ Left $ T.pack "workspace/symbol timed out (30s) — project too large or still indexing"
+        Just resp -> case resp of
+          Left err -> pure $ Left $ T.pack $ "workspace/symbol failed: " ++ err
+          Right val -> pure $ Right $ parseWorkspaceSymbolResponse val
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "workspace/symbol error: " ++ show e
 
 -- | Parse workspace/symbol response into SymbolInformation list

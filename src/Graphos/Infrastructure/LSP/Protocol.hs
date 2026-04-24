@@ -326,7 +326,6 @@ languageIdFromExt ext = case ext of
   ".vue"   -> "vue"
   ".svelte" -> "svelte"
   ".nix"   -> "nix"
-  ".json"  -> "json"
   ".text"  -> "plaintext"
   ".raml"  -> "raml"
   _        -> "plaintext"

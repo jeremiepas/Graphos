@@ -1,0 +1,13 @@
+{
+  "name": "ts-lsp-test",
+  "version": "1.0.0",
+  "description": "Minimal TypeScript project for testing Graphos LSP extraction",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -11,7 +11,7 @@
 # Unlisted extensions use defaults from Graphos.Domain.Config.
 lsp:
   ".nix":
-    command: nixd
+    command: ""
     args: []
     language_id: nix
   ".json":
@@ -111,16 +111,16 @@ file_extensions:
     - .svelte
     - .dart
     - .ps1
-    - .nix        # NEW: Nix expressions
-    - .json       # NEW: JSON documents (symbols via LSP)
+    - .nix # NEW: Nix expressions
+    - .json # NEW: JSON documents (symbols via LSP)
   doc:
     - .md
     - .txt
     - .rst
     - .adoc
     - .org
-    - .text       # NEW: plain text documents
-    - .raml       # NEW: RAML API specs (treated as docs)
+    - .text # NEW: plain text documents
+    - .raml # NEW: RAML API specs (treated as docs)
   paper:
     - .pdf
   image:
