@@ -125,21 +125,29 @@ inferTransitiveDeps g =
 
 -- | Infer "shares data with" edges: if two nodes share 2+ common neighbors,
 -- they likely share data.
+-- O(E * avg_degree) instead of O(N²) — iterates over edges and collects
+-- co-occurrences of neighbors rather than enumerating all node pairs.
 inferSharedContextEdges :: Graph -> Int -> [Edge]
 inferSharedContextEdges g minShared =
-  let nodes = Map.keys (gNodes g)
-      -- For each pair of nodes, count shared neighbors
-      pairs = [(n1, n2) | n1 <- nodes, n2 <- nodes, n1 < n2]
-      sharedEdgePairs = [(n1, n2, sharedCount)
-                       | (n1, n2) <- pairs
-                       , let n1Nbrs = neighbors g n1
-                             n2Nbrs = neighbors g n2
-                             shared = Set.intersection n1Nbrs n2Nbrs
-                             sharedCount = Set.size shared
-                       , sharedCount >= minShared
-                       , notEdgeAlready g n1 n2
-                       ]
-  in [makeSharedDataEdge n1 n2 count | (n1, n2, count) <- sharedEdgePairs]
+  let allNodes = Map.keys (gNodes g)
+      coOccurrences :: Map (NodeId, NodeId) Int
+      coOccurrences = Map.fromListWith (+)
+        [ (orderPair n1 n2, 1)
+        | nid <- allNodes
+        , let nbs = Set.toList (neighbors g nid)
+        , length nbs <= 64
+        , (n1, n2) <- pairUp nbs
+        ]
+      pairUp [] = []
+      pairUp (x:xs) = [(x, y) | y <- xs] ++ pairUp xs
+      validPairs = [(n1, n2, count)
+                   | ((n1, n2), count) <- Map.toList coOccurrences
+                   , count >= minShared
+                   , notEdgeAlready g n1 n2
+                   ]
+  in [makeSharedDataEdge n1 n2 count | (n1, n2, count) <- validPairs]
+  where
+    orderPair a b = if a < b then (a, b) else (b, a)
 
 -- ───────────────────────────────────────────────
 -- Helpers

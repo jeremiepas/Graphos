@@ -18,7 +18,7 @@ import Graphos.Infrastructure.LSP.Transport
 -- We spawn a short-lived process (cat) so we can observe the alive check.
 mkTestClient :: IO LSPClient
 mkTestClient = do
-  (Just inh, Just outh, _, ph) <- createProcess (proc "cat" [])
+  (Just inh, Just outh, Just errh, ph) <- createProcess (proc "cat" [])
     { std_in  = CreatePipe
     , std_out = CreatePipe
     , std_err = CreatePipe
@@ -29,6 +29,7 @@ mkTestClient = do
     { lspHandle     = ph
     , lspStdin      = inh
     , lspStdout     = outh
+    , lspStderr     = errh
     , lspConfig     = LSPClientConfig "" [] "" 5
     , lspMessageId  = idVar
     , lspServerCaps = ServerCapabilities False False False False False

@@ -15,3 +15,4 @@ cabal.project.local~
 graphos-out/
 .opencode/
 docs/
+node_modules/

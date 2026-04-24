@@ -14,7 +14,10 @@ let
     hspec-discover
   ];
 
-  systemDeps = with pkgs'; [ zlib openssl ];
+  systemDeps = with pkgs'; [
+    zlib
+    openssl
+  ];
 
   tooling = with pkgs'; [
     jq
@@ -28,7 +31,8 @@ let
 
   libPaths = pkgs'.lib.makeLibraryPath systemDeps;
 
-in pkgs'.mkShell {
+in
+pkgs'.mkShell {
   name = "graphos";
 
   packages = haskellDeps ++ systemDeps ++ tooling;

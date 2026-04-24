@@ -1,4 +1,7 @@
--- | Main pipeline orchestration - detect → extract → build → cluster → analyze → report → export
+-- | Main pipeline orchestration.
+--
+-- Full pipeline: detect → extract → build → cluster → infer → analyze → report → export
+-- With --no-cluster: detect → extract → build → report → export (skip clustering)
 {-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.UseCase.Pipeline
   ( runPipeline
@@ -10,7 +13,7 @@ import Control.Monad (when)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, removeFile)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (gNodes, gEdges)
@@ -24,7 +27,9 @@ import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferEdges)
 import Graphos.UseCase.Report (generateReport)
 import Graphos.UseCase.Export (exportAll, ExportResult(..))
+import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.Export.CommunityGraph (exportCommunityGraph)
+import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
 
 -- | Pipeline result
 data PipelineResult = PipelineResult
@@ -34,6 +39,7 @@ data PipelineResult = PipelineResult
   , prReportPath   :: FilePath
   , prGraphPath    :: FilePath
   , prHtmlPath     :: Maybe FilePath
+  , prNeo4jPath   :: Maybe FilePath
   } deriving (Eq, Show)
 
 -- | Run the full pipeline
@@ -66,26 +72,63 @@ runPipeline config = catch (do
       let graph = buildGraphFromExtractions (cfgDirected config) [extraction]
       logInfo env $ T.pack $ "  Graph: " ++ show (Map.size (gNodes graph)) ++ " nodes, " ++ show (Map.size (gEdges graph)) ++ " edges"
 
-      -- Step 4: Cluster
-      logInfo env "Step 4: Detecting communities..."
-      let res = Resolution { resGamma = cfgResolution config
-                           , resMinSize = cfgMinCommSize config
-                           , resMergeInto = MergeToNeighbor }
-          (commMap, _cohesion) = clusterGraphWithResolution graph res
+      -- Incremental write
+      createDirectoryIfMissing True (cfgOutputDir config)
+      logInfo env $ T.pack $ "  Streaming graph data to " ++ cfgOutputDir config ++ "/graph.json"
+      iw <- Inc.openWriter (cfgOutputDir config ++ "/graph.json")
+      Inc.writeNodes iw (Map.elems (gNodes graph))
+      Inc.writeEdges iw (Map.elems (gEdges graph))
 
-      -- Step 4b: Infer additional edges based on density setting
-      let allInferred = inferEdges (cfgEdgeDensity config) graph commMap
-          enrichedGraph = if null allInferred
-            then graph
-            else buildGraphFromExtractions (cfgDirected config)
-                 [emptyExtraction { extractionNodes = Map.elems (gNodes graph)
-                                   , extractionEdges = Map.elems (gEdges graph) ++ allInferred }]
-      logInfo env $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity config) ++ ")"
+      -- Checkpoint
+      let checkpointPath = cfgOutputDir config ++ "/graph.checkpoint.json"
+      ExportJSON.saveCheckpoint graph checkpointPath
+      logInfo env $ T.pack $ "  Checkpoint saved: " ++ checkpointPath
 
-      -- Step 5: Re-cluster with enriched graph and analyze
-      logInfo env "Step 5: Re-clustering and analyzing..."
-      let (finalCommMap, finalCohesion) = clusterGraphWithResolution enrichedGraph res
-      let analysis = analyzeGraph enrichedGraph finalCommMap finalCohesion
+      -- Steps 4-5: Cluster + Analyze (skipped when --no-cluster)
+      (enrichedGraph, finalCommMap, _finalCohesion, analysis) <-
+        if cfgNoCluster config
+          then do
+            logInfo env "Step 4: Skipping clustering (--no-cluster)"
+            let emptyCommMap = Map.empty :: CommunityMap
+                emptyCohesion = Map.empty :: CohesionMap
+                noAnalysis = analyzeGraph graph emptyCommMap emptyCohesion
+            Inc.writeCommunities iw emptyCommMap
+            Inc.writeCohesion iw emptyCohesion
+            Inc.writeGodNodes iw (analysisGodNodes noAnalysis)
+            Inc.closeWriter iw
+            pure (graph, emptyCommMap, emptyCohesion, noAnalysis)
+          else do
+            -- Step 4: Cluster
+            logInfo env "Step 4: Detecting communities..."
+            let res = Resolution { resGamma = cfgResolution config
+                                 , resMinSize = cfgMinCommSize config
+                                 , resMergeInto = MergeToNeighbor }
+                (commMap, cohesion) = clusterGraphWithResolution graph res
+
+            Inc.writeCommunities iw commMap
+            Inc.writeCohesion iw cohesion
+            Inc.flushWriter iw
+            logDebug env "  Communities and cohesion written incrementally"
+
+            -- Step 4b: Infer additional edges
+            let allInferred = inferEdges (cfgEdgeDensity config) graph commMap
+                enriched = if null allInferred
+                  then graph
+                  else buildGraphFromExtractions (cfgDirected config)
+                       [emptyExtraction { extractionNodes = Map.elems (gNodes graph)
+                                         , extractionEdges = Map.elems (gEdges graph) ++ allInferred }]
+            logInfo env $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity config) ++ ")"
+
+            -- Step 5: Re-cluster and analyze
+            logInfo env "Step 5: Re-clustering and analyzing..."
+            let (finalComm, finalCohes) = clusterGraphWithResolution enriched res
+                anal = analyzeGraph enriched finalComm finalCohes
+
+            Inc.writeGodNodes iw (analysisGodNodes anal)
+            Inc.closeWriter iw
+            pure (enriched, finalComm, finalCohes, anal)
+
+      logInfo env "  graph.json written incrementally"
 
       -- Step 6: Report
       logInfo env "Step 6: Generating report..."
@@ -96,11 +139,18 @@ runPipeline config = catch (do
       createDirectoryIfMissing True (cfgOutputDir config)
       exports <- exportAll enrichedGraph analysis config detection
 
-      -- Step 7b: Community graph export (if enabled)
-      when (cfgCommunityGraph config) $ do
+      -- Neo4j push confirmation
+      when (cfgNeo4j config) $ do
+        logInfo env "  Neo4j: Cypher export + push complete"
+
+      -- Community graph export
+      when (cfgCommunityGraph config && not (cfgNoCluster config)) $ do
         logInfo env "Step 7b: Exporting community-level graph..."
         exportCommunityGraph enrichedGraph finalCommMap (cfgOutputDir config ++ "/community_graph.json")
         logInfo env $ T.pack $ "  Community graph: " ++ cfgOutputDir config ++ "/community_graph.json"
+
+      -- Cleanup checkpoint
+      removeFile checkpointPath `catch` \(_ :: SomeException) -> pure ()
 
       let result = PipelineResult
             { prNodes       = Map.size (gNodes enrichedGraph)
@@ -109,6 +159,7 @@ runPipeline config = catch (do
             , prReportPath  = erReport exports
             , prGraphPath   = erJSON exports
             , prHtmlPath    = erHTML exports
+            , prNeo4jPath  = erNeo4j exports
             }
       logInfo env "Graph complete!"
       pure $ Right result

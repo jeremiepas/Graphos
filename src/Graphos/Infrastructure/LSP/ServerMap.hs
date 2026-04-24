@@ -43,7 +43,6 @@ languageServerCommands = Map.fromList
   , (".vue", ("vue-language-server", []))
   , (".svelte", ("svelte-language-server", []))
   , (".nix", ("nixd", []))
-  , (".json", ("vscode-json-language-server", ["--stdio"]))
   ]
 
 -- | Find an LSP server for a file extension, checking if the command exists
@@ -89,7 +88,6 @@ languageIdFromExt ext = case ext of
   ".vue"   -> "vue"
   ".svelte" -> "svelte"
   ".nix"    -> "nix"
-  ".json"   -> "json"
   _        -> "plaintext"
 
 -- | Extract file extension including the dot

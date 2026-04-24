@@ -19,11 +19,12 @@ module Graphos.Infrastructure.LSP.Transport
 
     -- * Connection state
   , isProcessAlive
+  , isServerConnected
   , markDisconnected
   ) where
 
 import Control.Concurrent.MVar (MVar, newMVar)
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Exception (catch, try, SomeException(..), IOException)
 import Control.Monad (unless, void)
 import Data.Aeson (ToJSON, encode, eitherDecode, Value(..))
@@ -37,7 +38,7 @@ import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Process (ProcessHandle, createProcess, proc, std_in, std_out, std_err, StdStream(CreatePipe), terminateProcess, getProcessExitCode)
-import System.IO (Handle, hFlush)
+import System.IO (Handle, hFlush, hClose, hGetLine, hIsEOF)
 import System.Timeout (timeout)
 
 import Graphos.Infrastructure.LSP.Protocol
@@ -66,6 +67,7 @@ data LSPClient = LSPClient
   { lspHandle     :: ProcessHandle
   , lspStdin      :: Handle
   , lspStdout     :: Handle
+  , lspStderr     :: Handle  -- ^ stderr handle, drained by background thread
   , lspConfig     :: LSPClientConfig
   , lspMessageId  :: MVar Int
   , lspServerCaps :: ServerCapabilities
@@ -85,6 +87,21 @@ sendLSPMessage h msg = do
   BS.hPut h (header `BS.append` content)
   hFlush h
 
+-- | Continuously drain stderr from an LSP server process.
+-- Prevents pipe buffer overflow (~64KB on Linux) which causes the server
+-- to block on write() and appear disconnected.
+drainStderr :: Handle -> FilePath -> IO ()
+drainStderr errh serverCmd = catch loop (\(_ :: SomeException) -> pure ())
+  where
+    loop = do
+      eof <- hIsEOF errh
+      unless eof $ do
+        line <- catch (hGetLine errh) $ \(_ :: SomeException) -> pure ""
+        -- Log stderr lines to help debug server crashes.
+        -- LSP servers emit diagnostics and errors on stderr.
+        unless (null line) $ putStrLn $ "[lsp:" ++ serverCmd ++ "] " ++ line
+        loop
+
 -- | Check if the LSP server process is still running.
 -- Returns 'Nothing' when the process is still running (no exit code yet).
 isProcessAlive :: ProcessHandle -> IO Bool
@@ -93,6 +110,15 @@ isProcessAlive ph = do
   pure $ case mec of
     Nothing -> True
     Just _  -> False
+
+-- | Check if the LSP server is still connected (connection flag + process alive).
+-- Combines the IORef flag check with a process liveness check for reliability.
+isServerConnected :: LSPClient -> IO Bool
+isServerConnected client = do
+  flag <- readIORef (lspConnected client)
+  if not flag
+    then pure False
+    else isProcessAlive (lspHandle client)
 
 -- | Mark the LSP client as disconnected (e.g. after detecting a dead process).
 markDisconnected :: LSPClient -> IO ()
@@ -205,13 +231,19 @@ connectToLSP :: LSPClientConfig -> IO (Either Text LSPClient)
 connectToLSP config = catch (do
   putStrLn $ "[lsp] Starting: " ++ lspCommand config ++ " " ++ unwords (lspArgs config)
   let processSpec = proc (lspCommand config) (lspArgs config)
-  (minH, moutH, _, ph) <- createProcess processSpec
+  (minH, moutH, merrH, ph) <- createProcess processSpec
     { std_in  = CreatePipe
     , std_out = CreatePipe
     , std_err = CreatePipe
     }
-  case (minH, moutH) of
-    (Just inh, Just outh) -> do
+  case (minH, moutH, merrH) of
+    (Just inh, Just outh, Just errh) -> do
+      -- Drain stderr in background to prevent pipe buffer overflow.
+      -- If stderr fills the OS pipe buffer (~64KB), the LSP server blocks
+      -- on write() and appears "disconnected" — this is the root cause of
+      -- "[lsp] Warning: could not send didOpen (server disconnected?)"
+      _ <- forkIO $ drainStderr errh (lspCommand config)
+
       idVar <- newMVar 2
       connectedRef <- newIORef True
 
@@ -241,8 +273,14 @@ connectToLSP config = catch (do
 
           let drainMicros = case lspCommand config of
                 cmd | "haskell-language-server" `isInfixOf` cmd -> 15000000
-                    | otherwise -> 3000000
+                    | otherwise -> 500000  -- 0.5s: short drain, longer drains kill some servers
           drainNotifications outh drainMicros
+          -- Check if the server process survived the drain
+          serverStillAlive <- isProcessAlive ph
+          unless serverStillAlive $ do
+            putStrLn "[lsp] WARNING: Server process died during initialization drain"
+            mec <- getProcessExitCode ph
+            putStrLn $ "[lsp] Exit code: " ++ show mec
 
           let caps = parseServerCapabilities respVal
           putStrLn $ "[lsp] Server capabilities: documentSymbol=" ++ show (scpDocumentSymbolProvider caps)
@@ -253,6 +291,7 @@ connectToLSP config = catch (do
             { lspHandle     = ph
             , lspStdin      = inh
             , lspStdout     = outh
+            , lspStderr     = errh
             , lspConfig     = config
             , lspMessageId  = idVar
             , lspServerCaps = caps
@@ -274,6 +313,8 @@ disconnectLSP client = do
       Right _ -> pure ()
     void (catch (sendLSPMessageSafe client lspExit) $ \(_ :: SomeException) -> pure False)
   markDisconnected client
+  -- Close handles to let the stderr drain thread exit cleanly
+  catch (hClose (lspStderr client)) $ \(_ :: SomeException) -> pure ()
   threadDelay 100000
   terminateProcess (lspHandle client)
   putStrLn $ "[lsp] Disconnected from " ++ lspCommand (lspConfig client)

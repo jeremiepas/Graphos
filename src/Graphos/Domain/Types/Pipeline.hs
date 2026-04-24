@@ -27,6 +27,8 @@ data PipelineConfig = PipelineConfig
   , cfgNoViz        :: Bool
   , cfgUpdate       :: Bool
   , cfgClusterOnly  :: Bool
+  , cfgNoCluster    :: Bool          -- ^ Skip clustering entirely (--no-cluster)
+  , cfgLabel        :: Bool          -- ^ Use LLM to label communities (--label)
   , cfgObsidian     :: Bool
   , cfgObsidianDir  :: Maybe FilePath
   , cfgNeo4j        :: Bool
@@ -65,6 +67,8 @@ defaultConfig = PipelineConfig
   , cfgNoViz        = False
   , cfgUpdate       = False
   , cfgClusterOnly  = False
+  , cfgNoCluster    = False
+  , cfgLabel        = False
   , cfgObsidian     = False
   , cfgObsidianDir  = Nothing
   , cfgNeo4j        = False

@@ -37,6 +37,9 @@ data ConfigFile = ConfigFile
   { cfLsp            :: Maybe (Map String LSPServerConfig)
   , cfLanguageIds     :: Maybe (Map String Text)
   , cfFileExtensions  :: Maybe FileExtensionConfig
+  , cfExtractors      :: Maybe (Map String ExtractorConfig)
+  , cfNeo4j           :: Maybe Neo4jConfig
+  , cfLabeling        :: Maybe LabelingConfig
   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -44,6 +47,9 @@ instance FromJSON ConfigFile where
     <$> v .:? "lsp"
     <*> v .:?  "language_ids"
     <*> v .:? "file_extensions"
+    <*> v .:? "extractors"
+    <*> v .:? "neo4j"
+    <*> v .:? "labeling"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -92,6 +98,15 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcFileExtensions = case cfFileExtensions cfgFile of
       Just userExts -> userExts  -- full override for file extensions
       Nothing       -> gcFileExtensions defaults
+  , gcExtractors = case cfExtractors cfgFile of
+      Just userExt -> Map.union userExt (gcExtractors defaults)
+      Nothing      -> gcExtractors defaults
+  , gcNeo4j = case cfNeo4j cfgFile of
+      Just neo4j  -> neo4j
+      Nothing     -> gcNeo4j defaults
+  , gcLabeling = case cfLabeling cfgFile of
+      Just labeling -> labeling
+      Nothing      -> gcLabeling defaults
   }
 
 -- ───────────────────────────────────────────────

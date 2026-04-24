@@ -1,0 +1,78 @@
+# Graphos — Neo4j Development Server
+#
+# Quick start:
+#   docker compose up -d          # Start Neo4j
+#   docker compose down            # Stop (data preserved in volumes)
+#   docker compose down -v         # Stop and delete data
+#
+# Access:
+#   Browser:  http://localhost:7474   (Neo4j Browser UI)
+#   Bolt:     bolt://localhost:7687   (Cypher queries)
+#
+# Graphos integration:
+#   graphos . --neo4j                          # Export Cypher to graphos-out/
+#   graphos . --neo4j --neo4j-push http://localhost:7474  # Push directly
+#
+# Credentials:
+#   Username: neo4j
+#   Password: graphos_dev
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: graphos-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP — Neo4j Browser + REST API
+      - "7687:7687"   # Bolt — Cypher query protocol
+    environment:
+      # ── Authentication ──────────────────────────────────────────
+      # Format: username/password. Use "none" to disable auth (dev only).
+      - NEO4J_AUTH=neo4j/graphos_dev
+
+      # ── Memory (tuned for development) ─────────────────────────
+      # Default heap/pagecache are only 512M each — too small for real use.
+      # Heap: used for query execution, transaction state, caching.
+      # Pagecache: used for mapping store files to memory.
+      # Rule of thumb: heap + pagecache + 1GB < total container memory.
+      - NEO4J_server_memory_heap_initial__size=256M
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512M
+
+      # ── Plugins ────────────────────────────────────────────────
+      # APOC (Awesome Procedures on Cypher) — graph algorithms, path expansion,
+      # utility functions. Required by many graph analysis workflows.
+      - NEO4J_PLUGINS=["apoc"]
+
+      # ── Network ────────────────────────────────────────────────
+      # Docker automatically maps ports. Advertised address uses the
+      # container hostname so Bolt clients (Graphos, drivers) can connect.
+      - NEO4J_server_bolt_advertised__address=localhost:7687
+      - NEO4J_server_http_advertised__address=localhost:7474
+
+      # ── Security (development) ─────────────────────────────────
+      # Disable strict config validation so Neo4j doesn't fail on
+      # unrecognized settings from plugin defaults. Safe for dev.
+      # TLS is off by default in community edition without certificates.
+      - NEO4J_server_config_strict__validation_enabled=false
+    volumes:
+      - neo4j-data:/data        # Graph database files (persistent)
+      - neo4j-logs:/logs        # Debug and query logs
+      - neo4j-plugins:/plugins  # APOC and custom plugins
+      - neo4j-config:/config    # Neo4j configuration overrides
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p graphos_dev 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  neo4j-data:
+    name: graphos-neo4j-data
+  neo4j-logs:
+    name: graphos-neo4j-logs
+  neo4j-plugins:
+    name: graphos-neo4j-plugins
+  neo4j-config:
+    name: graphos-neo4j-config

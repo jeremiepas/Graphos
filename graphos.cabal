@@ -59,6 +59,7 @@ library
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
+                   Graphos.Domain.Labeling
                    -- Use Cases
                    Graphos.UseCase.Pipeline
                    Graphos.UseCase.Detect
@@ -90,9 +91,13 @@ library
                      Graphos.Infrastructure.LSP.ServerMap
                      Graphos.Infrastructure.LSP.Transport
                      Graphos.Infrastructure.LSP.CapabilityParse
-                     Graphos.Infrastructure.LSP.Extraction
-                       -- Infrastructure - Config
-                       Graphos.Infrastructure.Config
+                       Graphos.Infrastructure.LSP.Extraction
+                         -- Infrastructure - Config
+                         Graphos.Infrastructure.Config
+                         -- Infrastructure - TreeSitter
+                         Graphos.Infrastructure.Extract.TreeSitter.Core
+                         Graphos.Infrastructure.Extract.TreeSitter.Grammar
+                         Graphos.Infrastructure.Extract.TreeSitter.Convert
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache
@@ -101,17 +106,20 @@ library
                       Graphos.Infrastructure.FileSystem.Manifest
                       Graphos.Infrastructure.FileSystem.OfficeConvert
                       Graphos.Infrastructure.FileSystem.Conversation
-                     -- Infrastructure - Security
-                    Graphos.Infrastructure.Security
+                      -- Infrastructure - Security
+                     Graphos.Infrastructure.Security
+                     -- Infrastructure - LLM
+                     Graphos.Infrastructure.LLM.OpenAI
                     -- Infrastructure - Export
-                    Graphos.Infrastructure.Export.JSON
-                    Graphos.Infrastructure.Export.HTML
-                    Graphos.Infrastructure.Export.Obsidian
-                    Graphos.Infrastructure.Export.Neo4j
-                     Graphos.Infrastructure.Export.GraphML
-                     Graphos.Infrastructure.Export.CommunityGraph
-                     Graphos.Infrastructure.Export.SVG
-                    Graphos.Infrastructure.Export.Report
+                     Graphos.Infrastructure.Export.JSON
+                     Graphos.Infrastructure.Export.HTML
+                     Graphos.Infrastructure.Export.Obsidian
+                     Graphos.Infrastructure.Export.Neo4j
+                      Graphos.Infrastructure.Export.GraphML
+                      Graphos.Infrastructure.Export.CommunityGraph
+                      Graphos.Infrastructure.Export.SVG
+                     Graphos.Infrastructure.Export.Report
+                      Graphos.Infrastructure.Export.IncrementalJSON
                      -- Infrastructure - Server
                      Graphos.Infrastructure.Server.MCP
                      Graphos.Infrastructure.Server.Static
@@ -155,6 +163,13 @@ library
     , text                 >= 1.2
     , time                 >= 1.11
     , transformers         >= 0.5
+    , tree-sitter          >= 0.9
+    , tree-sitter-typescript >= 0.5
+    , tree-sitter-python   >= 0.9
+    , tree-sitter-rust      >= 0.1
+    , tree-sitter-go        >= 0.5
+    , tree-sitter-haskell   >= 0.3
+    , tree-sitter-json      >= 0.7
     , unordered-containers >= 0.2
     , vector               >= 0.12
     , yaml                 >= 0.11
@@ -178,6 +193,11 @@ executable graphos
     , text
     , containers
     , aeson
+    , bytestring
+    , directory
+    , yaml
+    , directory
+    , yaml
 
 -- ───────────────────────────────────────────────
 -- Test Suite

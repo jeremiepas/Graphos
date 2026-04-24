@@ -14,7 +14,6 @@ module Graphos.Domain.Graph.Core
   , isConceptNode
   ) where
 
-import Data.List (nubBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -64,7 +63,9 @@ buildGraph directed extraction =
 -- | Merge two extractions (dedup nodes by id, combine edges)
 mergeExtractions :: Extraction -> Extraction -> Extraction
 mergeExtractions a b =
-  let allNodes = nubBy (\x y -> nodeId x == nodeId y) (extractionNodes a ++ extractionNodes b)
+  let nodeMap = Map.fromList [(nodeId n, n) | n <- extractionNodes a]
+                `Map.union` Map.fromList [(nodeId n, n) | n <- extractionNodes b]
+      allNodes = Map.elems nodeMap
       allEdges = extractionEdges a ++ extractionEdges b
       allHyper = extractionHyperedges a ++ extractionHyperedges b
   in Extraction
