@@ -1,5 +1,5 @@
 -- | HTML export - interactive graph visualization with community coloring
--- Uses external JSON data files to avoid 1MB+ inline JSON that breaks browsers.
+-- Embeds JSON data inline for self-contained HTML that works from file://
 module Graphos.Infrastructure.Export.HTML
   ( exportHTML
   ) where
@@ -9,6 +9,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints)
@@ -28,39 +29,24 @@ colorForCommunity :: Int -> Text
 colorForCommunity cid = communityColors !! (cid `mod` length communityColors)
 
 -- | Export graph as interactive HTML with vis.js
--- Writes three files: graph.html, graph_nodes.json, graph_edges.json
+-- Embeds JSON data inline so the HTML is self-contained (works from file://)
 exportHTML :: Graph -> Analysis -> FilePath -> IO ()
 exportHTML g analysis htmlPath = do
-  let baseDir = takeDirectory htmlPath
-      nodesPath = baseDir ++ "/graph_nodes.json"
-      edgesPath = baseDir ++ "/graph_edges.json"
-      -- Use relative filenames for fetch() (same directory as HTML)
-      nodesFetch = "graph_nodes.json"
-      edgesFetch = "graph_edges.json"
-  
-  -- Write node and edge data as separate JSON files
-  BSL.writeFile nodesPath (encode (nodesToJSON g (analysisCommunities analysis) (articulationPoints g)))
-  BSL.writeFile edgesPath (encode (edgesToJSON g))
-  
-  -- Write the HTML that loads them
-  let html = buildHTML g analysis nodesFetch edgesFetch
+  let nodesJSON = TE.decodeUtf8 $ BSL.toStrict $ encode (nodesToJSON g (analysisCommunities analysis) (articulationPoints g))
+      edgesJSON = TE.decodeUtf8 $ BSL.toStrict $ encode (edgesToJSON g)
+      html = buildHTML g analysis nodesJSON edgesJSON
   writeFile htmlPath (T.unpack html)
 
-  where
-    takeDirectory path = case reverse (dropWhile (/= '/') (reverse path)) of
-      ""  -> "."
-      dir -> dir
-
--- | Build the HTML page - loads data via fetch() instead of inlining
-buildHTML :: Graph -> Analysis -> FilePath -> FilePath -> Text
-buildHTML g analysis nodesPath edgesPath =
+-- | Build the HTML page - embedded JSON data for self-contained file
+buildHTML :: Graph -> Analysis -> Text -> Text -> Text
+buildHTML g analysis nodesJSON edgesJSON =
   T.unlines
     [ "<!DOCTYPE html>"
     , "<html lang='en'><head>"
     , "<meta charset='utf-8'>"
     , "<meta name='viewport' content='width=device-width, initial-scale=1'>"
     , "<title>Graphos Knowledge Graph</title>"
-    , "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js'></script>"
+    , "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js' onerror=\"window._visLoadFailed=true\"></script>"
     , "<style>"
     , "  * { box-sizing: border-box; margin: 0; padding: 0; }"
     , "  body { background: #0f0f1a; color: #e0e0e0; font-family: 'Inter', -apple-system, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }"
@@ -157,8 +143,12 @@ buildHTML g analysis nodesPath edgesPath =
     , "  </div>"
     , "</div>"
     , "<script>"
-    , "  let allNodes = [];"
-    , "  let allEdges = [];"
+    , "  // Embedded graph data (self-contained HTML, no fetch needed)"
+    , "  const _nodesData = " <> nodesJSON <> ";"
+    , "  const _edgesData = " <> edgesJSON <> ";"
+    , ""
+    , "  let allNodes = _nodesData;"
+    , "  let allEdges = _edgesData;"
     , "  let network = null;"
     , "  let nodesDataset = null;"
     , "  let edgesDataset = null;"
@@ -321,26 +311,20 @@ buildHTML g analysis nodesPath edgesPath =
     , "    };"
     , "  }"
     , ""
-    , "  async function loadGraph() {"
+    , "  function initGraph() {"
+    , "    // Check if vis-network loaded from CDN"
+    , "    if (typeof vis === 'undefined' || window._visLoadFailed) {"
+    , "      const loading = document.getElementById('loading');"
+    , "      loading.innerHTML = '<div style=\"text-align:center;max-width:400px\">'"
+    , "        + '<div style=\"font-size:18px;color:#f87171;margin-bottom:8px\">Could not load vis-network</div>'"
+    , "        + '<div style=\"font-size:12px;color:#888\">The graph visualization library failed to load from the CDN.</div>'"
+    , "        + '<div style=\"font-size:11px;color:#666;margin-top:8px\">Check your internet connection, or serve via:</div>'"
+    , "        + '<div style=\"font-size:11px;color:#7dd3fc;margin-top:4px;font-family:monospace\">graphos serve --dir graphos-out --port 8080</div>'"
+    , "        + '</div>';"
+    , "      return;"
+    , "    }"
+    , ""
     , "    const container = document.getElementById('graph');"
-    , ""
-    , "    // Fetch JSON data with proper error handling"
-    , "    let nodesResp, edgesResp;"
-    , "    try {"
-    , "      nodesResp = await fetch('" <> T.pack nodesPath <> "');"
-    , "      if (!nodesResp.ok) throw new Error('Cannot load " <> T.pack nodesPath <> " (HTTP ' + nodesResp.status + '). Serve this directory with a web server, not file://.');"
-    , "    } catch(e) {"
-    , "      throw new Error('Fetch failed for " <> T.pack nodesPath <> ": ' + e.message + '. Use: python3 -m http.server in the output directory.');"
-    , "    }"
-    , "    try {"
-    , "      edgesResp = await fetch('" <> T.pack edgesPath <> "');"
-    , "      if (!edgesResp.ok) throw new Error('Cannot load " <> T.pack edgesPath <> " (HTTP ' + edgesResp.status + ').');"
-    , "    } catch(e) {"
-    , "      throw new Error('Fetch failed for " <> T.pack edgesPath <> ": ' + e.message);"
-    , "    }"
-    , ""
-    , "    allNodes = await nodesResp.json();"
-    , "    allEdges = await edgesResp.json();"
     , "    document.getElementById('loading').style.display = 'none';"
     , ""
     , "    // Create vis.js datasets for dynamic updates"
@@ -443,15 +427,7 @@ buildHTML g analysis nodesPath edgesPath =
     , "    });"
     , "  });"
     , ""
-    , "  loadGraph().catch(err => {"
-    , "    const loading = document.getElementById('loading');"
-    , "    loading.innerHTML = '<div style=\"text-align:center;max-width:400px\">'"
-    , "      + '<div style=\"font-size:18px;color:#f87171;margin-bottom:8px\">Error loading graph</div>'"
-    , "      + '<div style=\"font-size:12px;color:#888\">' + escHtml(err.message) + '</div>'"
-    , "      + '<div style=\"font-size:11px;color:#666;margin-top:8px\">Serve the output directory with a web server:</div>'"
-    , "      + '<div style=\"font-size:11px;color:#7dd3fc;margin-top:4px;font-family:monospace\">cd graphos-out && python3 -m http.server 8080</div>'"
-    , "      + '</div>';"
-    , "  });"
+    , "  initGraph();"
     , "</script>"
     , "</body></html>"
     ]
@@ -532,10 +508,12 @@ nodesToJSON :: Graph -> CommunityMap -> [NodeId] -> [VisNode]
 nodesToJSON g commMap artPoints =
   let nodeCommMap = Map.fromList [(nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids]
       artSet = Set.fromList artPoints
+      sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
+      truncateLabel t = if T.length t > 80 then T.take 80 t <> "…" else t
    in [ VisNode
-        { vnId         = nodeId n
-        , vnLabel      = nodeLabel n
-        , vnTitle      = nodeSourceFile n <> " [" <> T.pack (show cid) <> "]"
+        { vnId         = sanitize (nodeId n)
+        , vnLabel      = truncateLabel (sanitize (nodeLabel n))
+        , vnTitle      = sanitize (nodeSourceFile n) <> " [" <> T.pack (show cid) <> "]"
         , vnSourceFile = nodeSourceFile n
         , vnBgColor    = if nid `Set.member` artSet then "#f87171" else colorForCommunity cid
         , vnBorder     = if nid `Set.member` artSet then "#f87171" else "#333"
@@ -543,23 +521,30 @@ nodesToJSON g commMap artPoints =
         , vnGroup      = cid
         }
       | n <- Map.elems (gNodes g)
-      , let nid = nodeId n
+      , let nid = sanitize (nodeId n)
       , let cid = Map.findWithDefault (-1) nid nodeCommMap
       ]
 
 -- | Convert graph edges to JSON (via Aeson, no manual string building)
+-- Filters out edges that reference non-existent nodes to prevent vis.js rendering issues.
 edgesToJSON :: Graph -> [VisEdge]
 edgesToJSON g =
-  [ VisEdge
-    { veFrom   = edgeSource e
-    , veTo     = edgeTarget e
-    , veTitle  = relLabel
-    , veLabel  = relLabel
-    , veDashes = isInferred
-    , veWidth  = if isInferred then 1 else 2
-    , veColor  = if isInferred then "#6a6a8a" else "#8b8baa"
-    }
-  | ((_, _), e) <- Map.toList (gEdges g)
-  , let isInferred = edgeConfidence e == Inferred
-        relLabel = relationToText (edgeRelation e)
-  ]
+  let sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
+      nodeSet = Set.fromList [sanitize (nodeId n) | n <- Map.elems (gNodes g)]
+  in [ VisEdge
+     { veFrom   = sanitize (edgeSource e)
+     , veTo     = sanitize (edgeTarget e)
+     , veTitle  = relLabel
+     , veLabel  = relLabel
+     , veDashes = isInferred
+     , veWidth  = if isInferred then 1 else 2
+     , veColor  = if isInferred then "#6a6a8a" else "#8b8baa"
+     }
+   | ((_, _), e) <- Map.toList (gEdges g)
+   , let src = sanitize (edgeSource e)
+         tgt = sanitize (edgeTarget e)
+         isInferred = edgeConfidence e == Inferred
+         relLabel = relationToText (edgeRelation e)
+   , src `Set.member` nodeSet
+   , tgt `Set.member` nodeSet
+   ]

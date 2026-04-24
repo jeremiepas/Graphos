@@ -99,15 +99,20 @@ dominators g start =
                           , idom <- idomList]
        Nothing -> Map.empty
 
--- | Compute edge betweenness centrality using fgl shortest paths
+-- | Compute edge betweenness centrality using fgl shortest paths.
+-- For large graphs (N > 500), samples a subset of source nodes to keep cost manageable.
 edgeBetweenness :: Graph -> Map (NodeId, NodeId) Double
 edgeBetweenness g =
   let gr = toFGL' g
       nidMap = nidLookup gr
       allNodeIndices = [(idx, nid) | (idx, (nid, _)) <- labNodes gr]
-      -- For each pair of nodes, find shortest path and count edge traversals
+      n = length allNodeIndices
+      maxSamples = 500
+      sampledSources = if n <= maxSamples
+        then allNodeIndices
+        else take maxSamples allNodeIndices
       pathEdges = [edge
-                  | (srcIdx, _) <- allNodeIndices
+                  | (srcIdx, _) <- sampledSources
                   , (tgtIdx, _) <- allNodeIndices
                   , srcIdx < tgtIdx
                   , let path = esp srcIdx tgtIdx gr
@@ -117,6 +122,8 @@ edgeBetweenness g =
         ((Map.findWithDefault (T.pack "???") s nidMap,
           Map.findWithDefault (T.pack "???") t nidMap), 1.0)
         | (s, t) <- pathEdges]
-      n = fromIntegral (length allNodeIndices)
-      normalization = if n > 1 then 2.0 / (n * (n - 1)) else 1.0
-  in fmap (* normalization) edgeCounts
+      normalization = if n > 1 then 2.0 / (fromIntegral n * fromIntegral (n - 1)) else 1.0
+      sampledNormalization = if n <= maxSamples
+        then normalization
+        else normalization * (fromIntegral n / fromIntegral (length sampledSources))
+  in fmap (* sampledNormalization) edgeCounts

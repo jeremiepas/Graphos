@@ -48,6 +48,13 @@ module Graphos.Domain.Types
   , defaultConfig
   , GraphosConfig(..)
   , defaultGraphosConfig
+  , Neo4jConfig(..)
+  , defaultNeo4jConfig
+  , LabelingConfig(..)
+  , defaultLabelingConfig
+  , ExtractorMode(..)
+  , ExtractorConfig(..)
+  , defaultExtractors
   ) where
 
 import Graphos.Domain.Types.Node (NodeId, Node(..), FileType(..))
@@ -55,4 +62,4 @@ import Graphos.Domain.Types.Edge (EdgeId, Edge(..), Relation(..), relationToText
 import Graphos.Domain.Types.Graph (Hyperedge(..), Extraction(..), emptyExtraction, LabeledGraph(..), CommunityId, CommunityMap, CohesionMap, GraphDiff(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..))
-import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig)
+import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, LabelingConfig(..), defaultLabelingConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors)
