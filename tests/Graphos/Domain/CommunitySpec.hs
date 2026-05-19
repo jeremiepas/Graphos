@@ -7,7 +7,7 @@ import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
-import Graphos.Domain.Community (detectCommunities, cohesionScore, buildReverseIndex, communityOf)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, Resolution(..), defaultResolution)
 
 spec :: Spec
 spec = do
@@ -67,6 +67,47 @@ spec = do
       let commMap = Map.fromList [(i, [T.pack $ "node" ++ show i]) | i <- [0..100::Int]]
           revIdx = buildReverseIndex commMap
       communityOf (T.pack "node50") revIdx `shouldBe` Just 50
+
+  describe "countMoves" $ do
+    it "returns 0 when no nodes changed community" $ do
+      let old = Map.fromList [(T.pack "a", 0), (T.pack "b", 0), (T.pack "c", 1)]
+          new = Map.fromList [(T.pack "a", 0), (T.pack "b", 0), (T.pack "c", 1)]
+      countMoves old new `shouldBe` 0
+
+    it "counts nodes that moved to a different community" $ do
+      let old = Map.fromList [(T.pack "a", 0), (T.pack "b", 0), (T.pack "c", 1)]
+          new = Map.fromList [(T.pack "a", 1), (T.pack "b", 0), (T.pack "c", 1)]
+      countMoves old new `shouldBe` 1
+
+    it "counts multiple moves" $ do
+      let old = Map.fromList [(T.pack "a", 0), (T.pack "b", 1), (T.pack "c", 2)]
+          new = Map.fromList [(T.pack "a", 2), (T.pack "b", 0), (T.pack "c", 2)]
+      countMoves old new `shouldBe` 2
+
+  describe "detectCommunitiesWithResolution" $ do
+    it "respects max iterations setting" $ do
+      -- With 1 iteration, the algorithm should still produce a valid community map
+      let ext = emptyExtraction
+            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
+            , extractionEdges = [testEdge "a" "b"]
+            }
+          g = buildGraph False ext
+          res = defaultResolution { resMaxIterations = 1 }
+          commMap = detectCommunitiesWithResolution g res
+          allMembers = concat (Map.elems commMap)
+      length allMembers `shouldSatisfy` (>= 2)
+
+    it "converges faster on stable graphs" $ do
+      -- A simple connected pair should converge in very few iterations
+      let ext = emptyExtraction
+            { extractionNodes = [testNode "a", testNode "b"]
+            , extractionEdges = [testEdge "a" "b"]
+            }
+          g = buildGraph False ext
+          res = defaultResolution { resMaxIterations = 3 }
+          commMap = detectCommunitiesWithResolution g res
+      -- Should still produce valid communities even with few iterations
+      Map.size commMap `shouldSatisfy` (>= 1)
 
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node

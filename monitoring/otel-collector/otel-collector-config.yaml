@@ -1,0 +1,56 @@
+# OpenTelemetry Collector configuration for Graphos
+# Receives OTLP HTTP traces/metrics from Graphos, exports to Prometheus + Loki
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+  # Convert traces to log lines so Loki can store them
+  transform/traces_to_logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["trace_id"], resource.attributes["trace_id"]) where resource.attributes["trace_id"] != nil
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: graphos
+    send_timestamps: true
+    metric_expiration: 180s
+
+  loki:
+    endpoint: "http://loki:3100/loki/api/v1/push"
+    default_labels_enabled:
+      exporter: false
+
+  # Send traces to Loki via OTLP HTTP (Loki 2.9+ supports OTLP natively)
+  otlphttp/loki:
+    endpoint: "http://loki:3100/otlp"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [loki]

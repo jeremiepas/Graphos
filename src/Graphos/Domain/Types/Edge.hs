@@ -1,6 +1,10 @@
 -- | Edge types for the knowledge graph.
 -- Pure data types with no IO dependencies.
-{-# LANGUAGE LambdaCase #-}
+--
+-- All fields are strict (!) to prevent thunk accumulation.
+-- Edge is the most numerous type in the graph (often 3-10× node count),
+-- so thunk overhead here multiplies fastest.
+{-# LANGUAGE StrictData #-}
 module Graphos.Domain.Types.Edge
   ( -- * Edge types
     EdgeId
@@ -12,6 +16,7 @@ module Graphos.Domain.Types.Edge
   , confidenceScore
   ) where
 
+import Control.DeepSeq (NFData(..))
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject, withText)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -93,6 +98,9 @@ textToRelation = \case
 data Confidence = Extracted | Inferred | Ambiguous
   deriving (Eq, Show, Generic, Ord)
 
+instance NFData Confidence
+instance NFData Relation
+
 instance ToJSON Confidence where
   toJSON Extracted = "EXTRACTED"
   toJSON Inferred  = "INFERRED"
@@ -122,6 +130,8 @@ data Edge = Edge
   , edgeSourceLocation :: Maybe Text
   , edgeWeight        :: Double
   } deriving (Eq, Show, Generic)
+
+instance NFData Edge
 
 instance ToJSON Edge where
   toJSON e = object

@@ -45,6 +45,7 @@ module Graphos.Domain.Types
     -- * Configuration
   , PipelineConfig(..)
   , EdgeDensity(..)
+  , Neo4jPushMode(..)
   , defaultConfig
   , GraphosConfig(..)
   , defaultGraphosConfig
@@ -52,6 +53,10 @@ module Graphos.Domain.Types
   , defaultNeo4jConfig
   , LabelingConfig(..)
   , defaultLabelingConfig
+  , ObservabilityConfig(..)
+  , defaultObservabilityConfig
+  , mergeGraphosConfig
+  , mergeObservabilityConfig
   , ExtractorMode(..)
   , ExtractorConfig(..)
   , defaultExtractors
@@ -60,6 +65,6 @@ module Graphos.Domain.Types
 import Graphos.Domain.Types.Node (NodeId, Node(..), FileType(..))
 import Graphos.Domain.Types.Edge (EdgeId, Edge(..), Relation(..), relationToText, textToRelation, Confidence(..), confidenceScore)
 import Graphos.Domain.Types.Graph (Hyperedge(..), Extraction(..), emptyExtraction, LabeledGraph(..), CommunityId, CommunityMap, CohesionMap, GraphDiff(..))
-import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), FileCategory(..))
+import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), defaultConfig, Detection(..), FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..))
-import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, LabelingConfig(..), defaultLabelingConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors)
+import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors)

@@ -4,23 +4,28 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.UseCase.Extract
   ( extractAll
+  , extractChangedFiles
   , extractFromFile
   , extractViaTreeSitterFFI
   , extractorForExt
+  , pushExtractionStreaming
   ) where
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Exception (bracket_, catch, SomeException(..))
-import Control.Monad (unless)
+import Control.Monad (unless, void, when)
 import qualified Data.ByteString as BS
+import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
 import qualified Data.Text as T
 import Foreign.Ptr (Ptr)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, NodeId, Node(..), Edge)
+import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..))
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.Infrastructure.LSP.Client (LSPClient(..), extractViaLSP, findLSPServer, LSPClientConfig(..), connectToLSP, disconnectLSP, languageServerCommands, extractWorkspaceSymbols, workspaceSymbolsToDocumentSymbols, symbolToNodes, symbolTreeToEdges, isServerConnected)
 import Graphos.Infrastructure.LSP.Protocol (scpWorkspaceSymbolProvider, DocumentSymbolResult(..))
@@ -34,6 +39,7 @@ import qualified TreeSitter.Rust as TSRust
 import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Language as TS_LANG
 import Graphos.Infrastructure.Logging (LogEnv, logInfo, logDebug, logTrace, logWarn)
+import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import Graphos.UseCase.Extract.Haskell (makeStubNode, extractHaskellStub)
 import Graphos.UseCase.Extract.Markdown (extractDocFile)
 
@@ -59,69 +65,141 @@ extractAll config detection env = do
   unless (null stubFiles) $
     logDebug env $ T.pack $ "  stub: " ++ show (length stubFiles) ++ " files"
 
+  -- Cap parallelism for large doc corpora to reduce peak memory.
+  -- For 10k+ doc files, each holding ~10-50KB in memory, full 32-way
+  -- parallelism can OOM. Use min(numThreads, 8) for docs.
+  let docThreads = min 8 (max 1 numThreads)
+
   -- Run code extraction and doc extraction concurrently
   -- (docs don't depend on code extraction results)
-  let codeAction :: IO [Extraction]
-      codeAction = do
-        -- Tree-sitter extraction (parallel when -j > 1)
-        tsExtractions <- if numThreads <= 1
-          then mapM (\fp -> extractViaTreeSitterFFI env (grammarForFile config fp) fp) treeSitterFiles
+  --
+  -- Memory-efficient accumulators: use Maps for nodes (O(log n) per key)
+  -- and DList-style accumulation for edges (O(1) append, single flatten at end).
+  -- For a 12k-file codebase, the old list-append approach (edges ++) caused
+  -- O(n²) allocation and GC pressure. DList pattern avoids this entirely.
+  codeNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
+  codeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  docNodeMapRef  <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
+  docEdgeAccRef   <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+
+  let -- Merge a single file's extraction into the accumulator.
+      -- Nodes: Map insertWith for O(log n) per key (dedup by id).
+      -- Edges: DList-style prepend — O(1) append, deferred flatten.
+      accumulateNodes :: IORef (Map.Map NodeId Node) -> [Node] -> IO ()
+      accumulateNodes ref nodes = modifyIORef' ref $ \acc ->
+        List.foldl' (\m n -> Map.insertWith (\_old new -> new) (nodeId n) n m) acc nodes
+
+      accumulateEdges :: IORef ([Edge] -> [Edge]) -> [Edge] -> IO ()
+      accumulateEdges ref edges = modifyIORef' ref $ \acc -> acc . (edges ++)
+
+      accumulate :: IORef (Map.Map NodeId Node) -> IORef ([Edge] -> [Edge]) -> Extraction -> IO ()
+      accumulate nodeRef edgeRef ext = do
+        accumulateNodes nodeRef (extractionNodes ext)
+        accumulateEdges edgeRef (extractionEdges ext)
+
+  void $ concurrently
+    -- Code extraction: merge each result into accumulator immediately
+    (do
+      -- Tree-sitter extraction (parallel when -j > 1)
+      if numThreads <= 1
+        then mapM_ (\fp -> do
+          ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+          pushExtractionStreaming config env ext
+          accumulate codeNodeMapRef codeEdgeAccRef ext
+          ) treeSitterFiles
+        else do
+          sem <- newQSemN numThreads
+          mapM_ (\fp -> bracket_
+            (waitQSemN sem 1)
+            (signalQSemN sem 1)
+            (do ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+                pushExtractionStreaming config env ext
+                accumulate codeNodeMapRef codeEdgeAccRef ext
+            )) treeSitterFiles
+
+      -- LSP extraction
+      let fileGroups = groupByLSPServer lspFiles
+          numGroups = length fileGroups
+      logInfo env $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (threads: " ++ show numThreads ++ ")"
+      if numThreads <= 1
+        then mapM_ (\grp -> do
+          exts <- extractGroup env absRoot config grp
+          mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) exts
+          ) fileGroups
+        else if numGroups <= numThreads
+          then do
+            results <- mapConcurrently (extractGroup env absRoot config) fileGroups
+            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
           else do
             sem <- newQSemN numThreads
-            mapConcurrently (\fp -> bracket_
+            results <- mapConcurrently (\grp -> bracket_
               (waitQSemN sem 1)
               (signalQSemN sem 1)
-              (extractViaTreeSitterFFI env (grammarForFile config fp) fp)) treeSitterFiles
+              (extractGroup env absRoot config grp)) fileGroups
+            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
 
-        -- LSP extraction
-        let fileGroups = groupByLSPServer lspFiles
-            numGroups = length fileGroups
-        logInfo env $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (threads: " ++ show numThreads ++ ")"
-        lspExtractions <- if numThreads <= 1
-          then concatMapM (extractGroup env absRoot) fileGroups
-          else if numGroups <= numThreads
-            then do
-              results <- mapConcurrently (extractGroup env absRoot) fileGroups
-              pure (concat results)
-            else do
-              sem <- newQSemN numThreads
-              results <- mapConcurrently (\grp -> bracket_
-                (waitQSemN sem 1)
-                (signalQSemN sem 1)
-                (extractGroup env absRoot grp)) fileGroups
-              pure (concat results)
+      -- Stub extraction
+      mapM_ (\fp -> do
+        logDebug env $ T.pack $ "  [stub] " ++ fp
+        let ext = emptyExtraction { extractionNodes = [makeStubNode fp] }
+        pushExtractionStreaming config env ext
+        accumulate codeNodeMapRef codeEdgeAccRef ext
+        ) stubFiles
+    )
+    -- Doc extraction: merge each result into accumulator immediately
+    (do
+      logDebug env $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files (threads: " ++ show docThreads ++ ")"
+      if docThreads <= 1
+        then mapM_ (\fp -> do
+          ext <- extractDocFile env fp
+          pushExtractionStreaming config env ext
+          accumulate docNodeMapRef docEdgeAccRef ext
+          ) docFiles
+        else do
+          sem <- newQSemN docThreads
+          let chunks = chunkList 500 docFiles
+          mapM_ (\chunk -> do
+            results <- mapConcurrently (\fp -> bracket_
+              (waitQSemN sem 1)
+              (signalQSemN sem 1)
+              (extractDocFile env fp)) chunk
+            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
+            ) chunks
+      logDebug env "  [doc] Extraction complete"
+    )
 
-        -- Stub extraction
-        stubExtractions <- mapM (\fp -> do
-          logDebug env $ T.pack $ "  [stub] " ++ fp
-          pure emptyExtraction { extractionNodes = [makeStubNode fp] }
-          ) stubFiles
+  logDebug env "  [extract] Code + doc extraction complete"
 
-        logDebug env $ T.pack $ "  [code] ts=" ++ show (length tsExtractions) ++ " lsp=" ++ show (length lspExtractions) ++ " stub=" ++ show (length stubExtractions)
-        pure (tsExtractions ++ lspExtractions ++ stubExtractions)
-
-      docAction :: IO [Extraction]
-      docAction = do
-        logDebug env $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files"
-        docSem <- newQSemN 32
-        results <- mapConcurrently (\fp -> bracket_
-          (waitQSemN docSem 1)
-          (signalQSemN docSem 1)
-          (extractDocFile env fp)) docFiles
-        logDebug env $ T.pack $ "  [doc] Extraction complete: " ++ show (length results) ++ " results"
-        pure results
-
-  -- Run both actions concurrently and merge results
-  logDebug env "  [extract] Waiting for code + doc extraction to complete..."
-  (codeResults, docExtractions) <- concurrently codeAction docAction
-  logDebug env "  [extract] Code + doc extraction complete, merging..."
-
-  let codeExtraction = foldr mergeExtractions emptyExtraction codeResults
-      docExtraction  = foldr mergeExtractions emptyExtraction docExtractions
-      merged         = foldr mergeExtractions docExtraction [codeExtraction]
+  -- Build final Extraction from Map accumulators + DList flattening
+  -- DList flatten is O(n) — just chains the appends without thunk nesting.
+  codeNodeMap <- readIORef codeNodeMapRef
+  codeEdgeAcc <- readIORef codeEdgeAccRef
+  docNodeMap <- readIORef docNodeMapRef
+  docEdgeAcc <- readIORef docEdgeAccRef
+  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap  -- code wins on dupes
+      mergedEdgeList = codeEdgeAcc (docEdgeAcc [])  -- flatten DList: O(n)
+      merged = emptyExtraction
+        { extractionNodes = Map.elems mergedNodeMap
+        , extractionEdges = mergedEdgeList
+        }
 
   logInfo env $ T.pack $ "  Extracted " ++ show (length (extractionNodes merged)) ++ " nodes, " ++ show (length (extractionEdges merged)) ++ " edges"
   pure merged
+
+-- | Push a single extraction to Neo4j if streaming is configured.
+-- This is a no-op when --neo4j-stream is not set.
+pushExtractionStreaming :: PipelineConfig -> LogEnv -> Extraction -> IO ()
+pushExtractionStreaming config env extraction =
+  case cfgNeo4jStreaming config of
+    Nothing -> pure ()
+    Just n4cfg -> do
+      let nNodes = length (extractionNodes extraction)
+          nEdges = length (extractionEdges extraction)
+      when (nNodes > 0 || nEdges > 0) $ do
+        logDebug env $ T.pack $ "  [neo4j-stream] Pushing " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
+        (msg, stmts, _batches) <- Neo4j.pushFileExtraction extraction
+          (neo4jsUri n4cfg) (neo4jsUser n4cfg) (neo4jsPassword n4cfg)
+        logTrace env $ T.pack $ "  [neo4j-stream] " ++ T.unpack msg ++ " (" ++ show stmts ++ " statements)"
 
 -- | Partition code files by their configured extractor mode.
 partitionByExtractor :: PipelineConfig -> [FilePath] -> ([FilePath], [FilePath], [FilePath])
@@ -156,8 +234,8 @@ groupByLSPServer files =
       Nothing       -> "stub"
 
 -- | Extract all files in a group using a single shared LSP connection
-extractGroup :: LogEnv -> FilePath -> FileGroup -> IO [Extraction]
-extractGroup env absRoot (serverCmd, files) =
+extractGroup :: LogEnv -> FilePath -> PipelineConfig -> FileGroup -> IO [Extraction]
+extractGroup env absRoot _config (serverCmd, files) =
   if serverCmd == "stub"
     then mapM (\fp -> do
       logDebug env $ T.pack $ "  [stub] " ++ fp
@@ -281,6 +359,11 @@ extractFromFile env filePath = do
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f = fmap concat . mapM f
 
+-- | Split a list into chunks of given size.
+chunkList :: Int -> [a] -> [[a]]
+chunkList _ [] = []
+chunkList n xs = take n xs : chunkList n (drop n xs)
+
 -- ───────────────────────────────────────────────
 -- Tree-sitter extraction
 -- ───────────────────────────────────────────────
@@ -344,3 +427,37 @@ extractionFromSymbols filePath symbols =
     { extractionNodes = nodes
     , extractionEdges = edges
     }
+
+-- ───────────────────────────────────────────────
+-- Incremental extraction for watch mode
+-- ───────────────────────────────────────────────
+
+-- | Extract only a list of changed files (for --watch mode).
+--
+-- Routes each changed file to its extractor and pushes to Neo4j if streaming is configured.
+-- Returns the merged extraction of all changed files.
+extractChangedFiles :: PipelineConfig -> [FilePath] -> LogEnv -> IO Extraction
+extractChangedFiles config changedFiles env = do
+  absRoot <- canonicalizePath (cfgInputPath config)
+  let (tsFiles, lspFiles, stubFiles) = partitionByExtractor config changedFiles
+
+  -- Tree-sitter files
+  tsExtractions <- mapM (\fp -> extractViaTreeSitterFFI env (grammarForFile config fp) fp) tsFiles
+  mapM_ (\ext -> pushExtractionStreaming config env ext) tsExtractions
+
+  -- LSP files (grouped by server)
+  let fileGroups = groupByLSPServer lspFiles
+  lspExtractions <- concatMapM (extractGroup env absRoot config) fileGroups
+  mapM_ (\ext -> pushExtractionStreaming config env ext) lspExtractions
+
+  -- Stub files
+  stubExtractions <- mapM (\fp -> do
+    logDebug env $ T.pack $ "  [stub] " ++ fp
+    pure emptyExtraction { extractionNodes = [makeStubNode fp] }
+    ) stubFiles
+  mapM_ (\ext -> pushExtractionStreaming config env ext) stubExtractions
+
+  let merged = List.foldl' mergeExtractions emptyExtraction
+                 (tsExtractions ++ lspExtractions ++ stubExtractions)
+  logInfo env $ T.pack $ "  [watch] Extracted " ++ show (length (extractionNodes merged)) ++ " nodes, " ++ show (length (extractionEdges merged)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
+  pure merged

@@ -7,6 +7,8 @@ module Graphos.Infrastructure.Config
   ( -- * Loading
     loadConfig
   , loadConfigFrom
+  , loadConfigWithGlobal
+  , globalConfigPath
 
     -- * Resolution helpers
   , findLSPServerFromConfig
@@ -17,12 +19,14 @@ module Graphos.Infrastructure.Config
   ) where
 
 import Control.Exception (catch, SomeException(..))
+import Control.Monad (when)
 import qualified Data.ByteString as BS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Yaml (FromJSON(..), withObject, (.:?))
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
+import System.FilePath ((</>))
 import qualified Data.Yaml as Yaml
 
 import Graphos.Domain.Config
@@ -40,6 +44,7 @@ data ConfigFile = ConfigFile
   , cfExtractors      :: Maybe (Map String ExtractorConfig)
   , cfNeo4j           :: Maybe Neo4jConfig
   , cfLabeling        :: Maybe LabelingConfig
+  , cfObservability   :: Maybe ObservabilityConfig
   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -50,15 +55,46 @@ instance FromJSON ConfigFile where
     <*> v .:? "extractors"
     <*> v .:? "neo4j"
     <*> v .:? "labeling"
+    <*> v .:? "observability"
 
 -- ───────────────────────────────────────────────
 -- Loading
 -- ───────────────────────────────────────────────
 
--- | Load Graphos configuration from the default path (./graphos.yaml).
--- Falls back to defaults if the file doesn't exist or has parse errors.
+-- | Path to the global user config file.
+-- Falls back to ~/.config/graphos/graphos.yaml (XDG_CONFIG_HOME/graphos/graphos.yaml).
+globalConfigPath :: IO FilePath
+globalConfigPath = do
+  xdgDir <- catch (getXdgDirectory XdgConfig "graphos") (\(_ :: SomeException) -> do
+    home <- getHomeDirectory
+    pure $ home </> ".config" </> "graphos")
+  pure $ xdgDir </> "graphos.yaml"
+
+-- | Load Graphos configuration with the standard layered merge:
+--   1. Built-in defaults
+--   2. Global user config (~/.config/graphos/graphos.yaml)
+--   3. Project config (./graphos.yaml)
+--
+-- Project values override global; global values fill in defaults.
+-- This is the main entry point used by the CLI.
 loadConfig :: IO GraphosConfig
-loadConfig = loadConfigFrom "graphos.yaml"
+loadConfig = loadConfigWithGlobal "graphos.yaml"
+
+-- | Load with a custom project config path (e.g. for testing).
+loadConfigWithGlobal :: FilePath -> IO GraphosConfig
+loadConfigWithGlobal projectPath = do
+  globalPath <- globalConfigPath
+  globalCfg <- loadConfigFrom globalPath
+  projectCfg <- loadConfigFrom projectPath
+  if globalCfg == defaultGraphosConfig && projectCfg == defaultGraphosConfig
+    then pure defaultGraphosConfig
+    else do
+      let merged = mergeGraphosConfig globalCfg projectCfg
+      when (globalCfg /= defaultGraphosConfig) $
+        putStrLn $ "[config] Global: " ++ globalPath
+      when (projectCfg /= defaultGraphosConfig) $
+        putStrLn $ "[config] Project: " ++ projectPath
+      pure merged
 
 -- | Load Graphos configuration from a specific file path.
 -- Falls back to defaults if the file doesn't exist or has parse errors.
@@ -66,9 +102,7 @@ loadConfigFrom :: FilePath -> IO GraphosConfig
 loadConfigFrom path = do
   exists <- doesFileExist path
   if not exists
-    then do
-      putStrLn $ "[config] No config file at " ++ path ++ " — using defaults"
-      pure defaultGraphosConfig
+    then pure defaultGraphosConfig
     else do
       result <- catch
         (do content <- BS.readFile path
@@ -79,10 +113,9 @@ loadConfigFrom path = do
         $ \(e :: SomeException) -> pure $ Left $ "Config read error: " ++ show e
       case result of
         Left err -> do
-          putStrLn $ "[config] " ++ err ++ " — using defaults"
+          putStrLn $ "[config] " ++ path ++ ": " ++ err ++ " — using defaults"
           pure defaultGraphosConfig
-        Right cfgFile -> do
-          putStrLn $ "[config] Loaded " ++ path
+        Right cfgFile ->
           pure $ mergeConfig cfgFile defaultGraphosConfig
 
 -- | Merge user config overrides onto defaults.
@@ -107,6 +140,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcLabeling = case cfLabeling cfgFile of
       Just labeling -> labeling
       Nothing      -> gcLabeling defaults
+  , gcObservability = case cfObservability cfgFile of
+      Just obs  -> obs
+      Nothing   -> gcObservability defaults
   }
 
 -- ───────────────────────────────────────────────
