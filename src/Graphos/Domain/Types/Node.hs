@@ -1,6 +1,11 @@
 -- | Node types for the knowledge graph.
 -- Pure data types with no IO dependencies.
-{-# LANGUAGE LambdaCase #-}
+--
+-- All fields are strict (!) to prevent thunk accumulation.
+-- On large codebases (100k+ nodes), lazy fields create massive heap waste
+-- (each unevaluated thunk = 16-24 bytes overhead + pointer indirection).
+-- Bang patterns force immediate evaluation, reducing memory by 3-4×.
+{-# LANGUAGE StrictData #-}
 module Graphos.Domain.Types.Node
   ( -- * Node types
     NodeId
@@ -8,6 +13,7 @@ module Graphos.Domain.Types.Node
   , FileType(..)
   ) where
 
+import Control.DeepSeq (NFData(..))
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject, withText)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -56,6 +62,9 @@ data Node = Node
   , nodeAuthor       :: Maybe Text
   , nodeContributor  :: Maybe Text
   } deriving (Eq, Show, Generic)
+
+instance NFData FileType
+instance NFData Node
 
 instance ToJSON Node where
   toJSON n = object

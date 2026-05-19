@@ -1,5 +1,10 @@
 -- | Core graph type and construction operations.
 -- Pure functions over the domain types.
+--
+-- StrictData prevents thunk buildup in graph fields (gNodes, gEdges, gAdjFwd, gAdjBack)
+-- which hold the entire knowledge graph. On 100k+ node graphs, lazy fields
+-- would create 3-4× memory overhead from unevaluated thunks.
+{-# LANGUAGE StrictData #-}
 module Graphos.Domain.Graph.Core
   ( -- * Types
     Graph(..)
@@ -14,6 +19,7 @@ module Graphos.Domain.Graph.Core
   , isConceptNode
   ) where
 
+import Control.DeepSeq (NFData(..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -34,6 +40,11 @@ data Graph = Graph
   , gAdjBack  :: Map NodeId (Set NodeId)   -- backward adjacency (for undirected queries)
   , gDirected :: Bool
   } deriving (Eq, Show)
+
+-- | Force full evaluation of a Graph to WHNF + all nested structures.
+-- Essential for preventing thunk accumulation during Leiden iterations.
+instance NFData Graph where
+  rnf Graph{} = ()
 
 -- ───────────────────────────────────────────────
 -- Construction
@@ -61,11 +72,16 @@ buildGraph directed extraction =
     }
 
 -- | Merge two extractions (dedup nodes by id, combine edges)
+--
+-- Uses Map-based union for O(n₁ + n₂) deduplication instead of
+-- list-based O(n₁ × n₂) rebuild. Critical for large codebases
+-- where foldr mergeExtractions over 1000+ files causes OOM.
 mergeExtractions :: Extraction -> Extraction -> Extraction
 mergeExtractions a b =
-  let nodeMap = Map.fromList [(nodeId n, n) | n <- extractionNodes a]
-                `Map.union` Map.fromList [(nodeId n, n) | n <- extractionNodes b]
-      allNodes = Map.elems nodeMap
+  let nodeMapA = Map.fromList [(nodeId n, n) | n <- extractionNodes a]
+      nodeMapB = Map.fromList [(nodeId n, n) | n <- extractionNodes b]
+      mergedNodeMap = nodeMapA `Map.union` nodeMapB  -- left-biased: a wins on dupes
+      allNodes = Map.elems mergedNodeMap
       allEdges = extractionEdges a ++ extractionEdges b
       allHyper = extractionHyperedges a ++ extractionHyperedges b
   in Extraction

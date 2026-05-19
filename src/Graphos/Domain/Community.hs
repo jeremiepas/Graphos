@@ -1,29 +1,37 @@
+{-# LANGUAGE StrictData #-}
+{-# LANGUAGE BangPatterns #-}
 module Graphos.Domain.Community
-  ( -- * Community detection
-    detectCommunities
+  ( detectCommunities
   , detectCommunitiesWithResolution
   , cohesionScore
   , scoreAllCohesion
 
-    -- * Resolution control
   , Resolution(..)
   , MergeStrategy(..)
   , defaultResolution
   , mergeSmallCommunities
 
-    -- * Reverse index
+  , countMoves
+
   , buildReverseIndex
   , communityOf
 
-    -- * Stats (exposed for incremental writer)
+  , selectRepresentatives
+  , filterEdgesByNodeSet
+
   , CommunityStats(..)
   , computeCommunityStats
   ) where
 
-import Data.List (sortOn, groupBy, nub)
+import Control.DeepSeq (deepseq, NFData(..))
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IntMap
+import Data.List (sortOn, foldl')
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector as V
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, neighbors, gNodes, gEdges)
@@ -32,6 +40,7 @@ data Resolution = Resolution
   { resGamma         :: Double
   , resMinSize       :: Int
   , resMergeInto     :: MergeStrategy
+  , resMaxIterations :: Int
   } deriving (Eq, Show)
 
 data MergeStrategy
@@ -44,6 +53,7 @@ defaultResolution = Resolution
   { resGamma     = 1.0
   , resMinSize   = 3
   , resMergeInto = MergeToNeighbor
+  , resMaxIterations = 50
   }
 
 detectCommunities :: Graph -> CommunityMap
@@ -51,10 +61,8 @@ detectCommunities g = detectCommunitiesWithResolution g defaultResolution
 
 detectCommunitiesWithResolution :: Graph -> Resolution -> CommunityMap
 detectCommunitiesWithResolution g res =
-  let raw = leidenPhase g res (initialAssignment g)
+  let raw = leidenPhase g res
   in mergeSmallCommunities g res raw
-  where
-    initialAssignment gr = Map.fromList $ zip (Map.keys (gNodes gr)) [0..]
 
 buildReverseIndex :: CommunityMap -> Map NodeId CommunityId
 buildReverseIndex commMap = Map.fromList
@@ -86,72 +94,160 @@ computeCommunityStats g assign =
       sigmaIn = Map.fromListWith (+) internalContribs
   in CommunityStats { csSigmaIn = sigmaIn, csSigmaTot = sigmaTot, csDegrees = degrees, csM = m }
 
-leidenPhase :: Graph -> Resolution -> Map NodeId CommunityId -> CommunityMap
-leidenPhase g res assignment = leidenPhase' g res assignment 50
+-- ───────────────────────────────────────────────
+-- Optimized Leiden algorithm using Int-indexed vectors
+-- ───────────────────────────────────────────────
 
-leidenPhase' :: Graph -> Resolution -> Map NodeId CommunityId -> Int -> CommunityMap
-leidenPhase' _ _ assignment 0 = buildCommunityMap assignment
-leidenPhase' g res assignment remaining =
-  let improved = localMoving g res assignment
-      refined = refineCommunities g improved
-  in if refined == improved
-     then buildCommunityMap refined
-     else leidenPhase' g res refined (remaining - 1)
+data LeidenState = LeidenState
+  { lsNodeIds   :: !(V.Vector NodeId)
+  , lsNeighbors  :: !(V.Vector (VU.Vector Int))
+  , lsDegrees    :: !(VU.Vector Double)
+  , lsAssignment :: !(VU.Vector Int)
+  , lsSigmaTot   :: !(IntMap Double)
+  , lsM          :: !Double
+  , lsGamma      :: !Double
+  , lsN          :: !Int
+  }
 
-localMoving :: Graph -> Resolution -> Map NodeId CommunityId -> Map NodeId CommunityId
-localMoving g res assign0 = go assign0 allNodes sigmaTotMap0 degrees0 m0
+instance NFData LeidenState where
+  rnf LeidenState{} = ()
+
+buildLeidenState :: Graph -> Resolution -> LeidenState
+buildLeidenState g res =
+  let nodeIds  = V.fromList (Map.keys (gNodes g))
+      n       = V.length nodeIds
+      nidToIdx = Map.fromList (zip (V.toList nodeIds) [0::Int ..])
+      degrees = VU.generate n $ \i ->
+        fromIntegral (Set.size (neighbors g (nodeIds V.! i)))
+      m = VU.sum degrees / 2.0
+      adj = V.generate n $ \i ->
+        let nbs = neighbors g (nodeIds V.! i)
+        in VU.fromList [nidToIdx Map.! nb | nb <- Set.toList nbs]
+      assign0 = VU.generate n id
+      sigTot0 = IntMap.fromListWith (+)
+        [ (i, degrees VU.! i) | i <- [0..n-1] ]
+  in LeidenState
+       { lsNodeIds   = nodeIds
+       , lsNeighbors  = adj
+       , lsDegrees    = degrees
+       , lsAssignment = assign0
+       , lsSigmaTot   = sigTot0
+       , lsM          = m
+       , lsGamma      = resGamma res
+       , lsN          = n
+       }
+
+localMovingPass :: LeidenState -> (LeidenState, Int)
+localMovingPass st0 = go st0 0 0
   where
-    allNodes = Map.keys (gNodes g)
-    degrees0 = Map.mapWithKey (\nid _n -> fromIntegral (Set.size (neighbors g nid))) (gNodes g)
-    m0 = sum (Map.elems degrees0) / 2.0
-    sigmaTotMap0 = Map.fromListWith (+)
-      [ (Map.findWithDefault 0 nid assign0, Map.findWithDefault 0.0 nid degrees0)
-      | nid <- allNodes
-      ]
+    n = lsN st0
+    go :: LeidenState -> Int -> Int -> (LeidenState, Int)
+    go !st !i !moved
+      | i >= n = (st, moved)
+      | otherwise =
+          let assign = lsAssignment st
+              ki = lsDegrees st VU.! i
+              currentComm = assign VU.! i
+              nbs = lsNeighbors st V.! i
+              neighborComms = nubInt (VU.toList (VU.map (assign VU.!) nbs))
+              bestComm = findBestCommunity st ki currentComm nbs neighborComms
+          in if bestComm /= currentComm
+             then let !st' = moveNode st i currentComm bestComm ki assign nbs
+                  in go st' (i + 1) (moved + 1)
+             else go st (i + 1) moved
 
-    go assign [] _sigmaTotMap _degrees _m = assign
-    go assign (nid:nids) sigmaTotMap degrees m =
-      let currentComm = Map.findWithDefault 0 nid assign
-          nbs = Set.toList (neighbors g nid)
-          neighborComms = nub [Map.findWithDefault currentComm n assign | n <- nbs]
-          ki = Map.findWithDefault 1.0 nid degrees
-          bestComm = bestCommunity assign nid ki neighborComms currentComm sigmaTotMap m
-          newAssign = Map.insert nid bestComm assign
-      in go newAssign nids sigmaTotMap degrees m
+nubInt :: [Int] -> [Int]
+nubInt = go IntMap.empty
+  where
+    go _ []     = []
+    go !seen (x:xs) = if IntMap.member x seen then go seen xs else x : go (IntMap.insert x () seen) xs
 
-    bestCommunity assign nid ki comms current sigmaTotMap m =
-      let scores = [(c, deltaModFast m res assign g nid ki sigmaTotMap c) | c <- comms]
-      in case scores of
-           [] -> current
-           _  -> let (bestC, bestScore) = maximumBySnd scores
-                 in if bestScore > 0 then bestC else current
+findBestCommunity :: LeidenState -> Double -> Int -> VU.Vector Int -> [Int] -> Int
+findBestCommunity st ki currentComm nbs comms =
+  let m           = lsM st
+      gamma       = lsGamma st
+      assign      = lsAssignment st
+      sigmaTotMap = lsSigmaTot st
+      twoM2       = 2.0 * m * m
+      commOfNb    = VU.map (assign VU.!) nbs
+      deltaQ targetComm =
+        let sigmaTot = IntMap.findWithDefault 0.0 targetComm sigmaTotMap
+            sigmaIn   = fromIntegral (VU.length (VU.filter (== targetComm) commOfNb))
+        in sigmaIn / m - gamma * (sigmaTot * ki) / twoM2
+      scores = [(c, deltaQ c) | c <- comms]
+  in case scores of
+       [] -> currentComm
+       _  -> let (bestC, bestScore) = maximumBySnd scores
+             in if bestScore > 0 then bestC else currentComm
 
-deltaModFast :: Double -> Resolution -> Map NodeId CommunityId -> Graph -> NodeId -> Double -> Map CommunityId Double -> CommunityId -> Double
-deltaModFast m res assign g nid ki sigmaTotMap targetComm =
-  let gamma = resGamma res
-      sigmaTot = Map.findWithDefault 0.0 targetComm sigmaTotMap
-      nbs = Set.toList (neighbors g nid)
-      sigmaIn = fromIntegral (length [n | n <- nbs, Map.findWithDefault (-1) n assign == targetComm])
-      dQ = sigmaIn / m - gamma * (sigmaTot * ki) / (2 * m * m)
-  in dQ
+moveNode :: LeidenState -> Int -> Int -> Int -> Double -> VU.Vector Int -> VU.Vector Int -> LeidenState
+moveNode st i oldComm newComm ki assign nbs =
+  let commOfNb = VU.map (assign VU.!) nbs
+      edgesToOld = VU.length (VU.filter (== oldComm) commOfNb)
+      edgesToNew = VU.length (VU.filter (== newComm) commOfNb)
+      assign' = VU.unsafeUpd assign [(i, newComm)]
+      sigTot  = lsSigmaTot st
+      oldST   = IntMap.findWithDefault 0.0 oldComm sigTot
+      newST   = IntMap.findWithDefault 0.0 newComm sigTot
+      sigTot' = IntMap.insert oldComm (oldST - ki + fromIntegral edgesToOld) $
+                IntMap.insert newComm (newST + ki - fromIntegral edgesToNew) sigTot
+  in st { lsAssignment = assign', lsSigmaTot = sigTot' }
 
-refineCommunities :: Graph -> Map NodeId CommunityId -> Map NodeId CommunityId
-refineCommunities g assignment =
-  let commMap = buildCommunityMap assignment
-      maxCid = maximum (0 : Map.elems assignment)
-      (finalAssign, _nextCid) = Map.foldlWithKey' (\(acc, cidCounter) cid members ->
-        let wellConnected = [nid | nid <- members
-                                  , cohesionToCommunity g assignment nid cid > 0.5]
+refineCommunitiesOpt :: LeidenState -> LeidenState
+refineCommunitiesOpt st =
+  let assign  = lsAssignment st
+      n       = lsN st
+      maxCid  = VU.maximum assign
+      commMembers = IntMap.fromListWith (++) [(assign VU.! i, [i]) | i <- [0..n-1]]
+      (assign', _nextCid) = IntMap.foldlWithKey' (\(acc, cid) _ members ->
+        let wellConnected = [i | i <- members
+                               , cohesionToCommunityIdx st acc i (acc VU.! i) > 0.5]
         in if length wellConnected < length members `div` 2
-           then (foldlStrict (\a nid -> Map.insert nid cidCounter a) acc wellConnected, cidCounter + 1)
-           else (acc, cidCounter)
-        ) (assignment, maxCid + 1) commMap
-  in finalAssign
+           then (Data.List.foldl' (\a i -> VU.unsafeUpd a [(i, cid)]) acc wellConnected, cid + 1)
+           else (acc, cid)
+        ) (assign, maxCid + 1) commMembers
+  in st { lsAssignment = assign' }
+
+cohesionToCommunityIdx :: LeidenState -> VU.Vector Int -> Int -> Int -> Double
+cohesionToCommunityIdx st assign i cid =
+  let nbs = lsNeighbors st V.! i
+      commOfNb = VU.map (assign VU.!) nbs
+      sameCommunity = VU.length (VU.filter (== cid) commOfNb)
+      totalNbs = max 1 (VU.length nbs)
+  in fromIntegral sameCommunity / fromIntegral totalNbs
+
+leidenPhase :: Graph -> Resolution -> CommunityMap
+leidenPhase g res =
+  let st0     = buildLeidenState g res
+      maxIter = if resMaxIterations res > 0 then resMaxIterations res else 50
+      finalSt = leidenLoop st0 maxIter
+  in leidenStateToCommunityMap finalSt
+
+leidenLoop :: LeidenState -> Int -> LeidenState
+leidenLoop st0 maxIter = go st0 maxIter (lsAssignment st0)
   where
-    foldlStrict f z xs = go z xs
-      where
-        go acc []     = acc
-        go acc (x:xs') = let acc' = f acc x in acc' `seq` go acc' xs'
+    go :: LeidenState -> Int -> VU.Vector Int -> LeidenState
+    go !st 0 _prev = st
+    go !st remaining !prevAssign =
+      let (st', moved) = localMovingPass st
+      in if moved == 0
+         then st'
+         else let st'' = refineCommunitiesOpt st'
+              in st'' `deepseq`
+                 if lsAssignment st'' == prevAssign
+                 then st''
+                 else go st'' (remaining - 1) (lsAssignment st'')
+
+leidenStateToCommunityMap :: LeidenState -> CommunityMap
+leidenStateToCommunityMap st =
+  let assign  = lsAssignment st
+      n       = lsN st
+      nodeIds = lsNodeIds st
+      grouped = IntMap.fromListWith (++) [(assign VU.! i, [nodeIds V.! i]) | i <- [0..n-1]]
+  in Map.fromList [(cid, members) | (cid, members) <- IntMap.toList grouped]
+
+countMoves :: Map NodeId CommunityId -> Map NodeId CommunityId -> Int
+countMoves old new = Map.size $ Map.filter id $ Map.intersectionWith (/=) old new
 
 mergeSmallCommunities :: Graph -> Resolution -> CommunityMap -> CommunityMap
 mergeSmallCommunities g res commMap =
@@ -161,13 +257,10 @@ mergeSmallCommunities g res commMap =
                                    , length members < minSize]
   in if null smallComms
      then commMap
-     else foldlStrict (\acc small -> mergeOne g strategy acc small acc) commMap smallComms
-  where
-    foldlStrict _f z []     = z
-    foldlStrict f z (x:xs) = let z' = f z x in z' `seq` foldlStrict f z' xs
+     else foldlStrict' (\acc small -> mergeOne g strategy acc small) commMap smallComms
 
-mergeOne :: Graph -> MergeStrategy -> CommunityMap -> (CommunityId, [NodeId]) -> CommunityMap -> CommunityMap
-mergeOne g strategy allComms (smallCid, smallMembers) _ =
+mergeOne :: Graph -> MergeStrategy -> CommunityMap -> (CommunityId, [NodeId]) -> CommunityMap
+mergeOne g strategy allComms (smallCid, smallMembers) =
   let targetCid = case strategy of
         MergeToLargest  -> largestCommunity allComms smallCid
         MergeToNeighbor -> bestNeighborCommunity g allComms smallMembers smallCid
@@ -199,19 +292,6 @@ bestNeighborCommunity g commMap smallMembers excludeCid =
                []           -> largestCommunity commMap excludeCid
   in best
 
-cohesionToCommunity :: Graph -> Map NodeId CommunityId -> NodeId -> CommunityId -> Double
-cohesionToCommunity g assign nid cid =
-  let nbs = Set.toList (neighbors g nid)
-      sameCommunity = length [n | n <- nbs, Map.findWithDefault (-1) n assign == cid]
-      totalNbs = max 1 (length nbs)
-  in fromIntegral sameCommunity / fromIntegral totalNbs
-
-buildCommunityMap :: Map NodeId CommunityId -> CommunityMap
-buildCommunityMap assignment =
-  let pairs = Map.toList assignment
-      grouped = groupBy (\a b -> snd a == snd b) (sortOn snd pairs)
-  in Map.fromList [(cid, map fst group) | group@((_, cid):_) <- grouped]
-
 cohesionScore :: Graph -> [NodeId] -> Double
 cohesionScore g members =
   let memberSet = Set.fromList members
@@ -228,3 +308,41 @@ scoreAllCohesion g commMap = fmap (cohesionScore g) commMap
 maximumBySnd :: Ord a => [(b, a)] -> (b, a)
 maximumBySnd [] = error "maximumBySnd: empty list"
 maximumBySnd xs = foldl1 (\a@(_,sa) b@(_,sb) -> if sb > sa then b else a) xs
+
+foldlStrict' :: (a -> b -> a) -> a -> [b] -> a
+foldlStrict' _f z []     = z
+foldlStrict' f z (x:xs) = let !z' = f z x in foldlStrict' f z' xs
+
+-- ───────────────────────────────────────────────
+-- Representative node selection (for sub-graph Neo4j push)
+-- ───────────────────────────────────────────────
+
+selectRepresentatives
+  :: Graph
+  -> CommunityMap
+  -> Int
+  -> [NodeId]
+  -> Map CommunityId [NodeId]
+selectRepresentatives g commMap topN artPoints =
+  let reverseIdx  = buildReverseIndex commMap
+      artCommMap  = Map.fromListWith (++)
+        [ (case Map.lookup nid reverseIdx of
+             Just cid -> cid
+             Nothing  -> -1, [nid])
+        | nid <- artPoints
+        , Map.member nid reverseIdx
+        ]
+  in Map.mapWithKey (\cid members ->
+        let sortedByDegree = sortOn (\nid -> negate (fromIntegral (Set.size (neighbors g nid)) :: Double)) members
+            topNodes = take topN sortedByDegree
+            artForComm = Map.findWithDefault [] cid artCommMap
+            merged = Set.toList (Set.fromList (topNodes ++ artForComm))
+       in merged
+    ) commMap
+
+filterEdgesByNodeSet
+  :: Set.Set NodeId
+  -> Map (NodeId, NodeId) Edge
+  -> Map (NodeId, NodeId) Edge
+filterEdgesByNodeSet nodeSet edges =
+  Map.filterWithKey (\(src, tgt) _ -> src `Set.member` nodeSet && tgt `Set.member` nodeSet) edges

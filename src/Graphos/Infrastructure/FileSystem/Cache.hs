@@ -1,5 +1,6 @@
 -- | Extraction cache - skip unchanged files on re-run
 -- Stores per-file extraction results keyed by SHA256 hash of file contents.
+{-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.Infrastructure.FileSystem.Cache
   ( loadCached
   , saveCached
@@ -7,8 +8,12 @@ module Graphos.Infrastructure.FileSystem.Cache
   , saveSemanticCache
   , clearCache
   , cacheDir
+  , loadPipelineCheckpoint
+  , savePipelineCheckpoint
+  , clearPipelineCheckpoint
   ) where
 
+import Control.Exception (SomeException, catch)
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
@@ -18,6 +23,7 @@ import System.Directory (doesFileExist, createDirectoryIfMissing, removeFile, re
 import System.FilePath (takeFileName, (</>))
 
 import Graphos.Domain.Types
+import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
 
 -- | Get the cache directory path
 cacheDir :: FilePath -> FilePath
@@ -146,3 +152,41 @@ groupBySourceFile nodes edges hyperedges =
       edgeMap  = foldl' (\m e -> Map.insertWith (\(a,b,c) (a',b',c') -> (a++a', b++b', c++c')) (T.unpack (edgeSourceFile e)) ([], [e], []) m) nodeMap edges
       hyperMap = foldl' (\m h -> Map.insertWith (\(a,b,c) (a',b',c') -> (a++a', b++b', c++c')) (T.unpack (hyperedgeSourceFile h)) ([], [], [h]) m) edgeMap hyperedges
   in hyperMap
+
+-- ───────────────────────────────────────────────
+-- Pipeline checkpoint (resume from failure)
+-- ───────────────────────────────────────────────
+
+-- | Path to the pipeline checkpoint file.
+checkpointPath :: FilePath -> FilePath
+checkpointPath outputDir = outputDir </> "pipeline.checkpoint.json"
+
+-- | Save a pipeline checkpoint to disk.
+-- Uses atomic write (write to tmp, then rename) to avoid corruption.
+savePipelineCheckpoint :: FilePath -> PipelineCheckpoint -> IO ()
+savePipelineCheckpoint outputDir chk = do
+  createDirectoryIfMissing True outputDir
+  let path = checkpointPath outputDir
+      tmp  = path ++ ".tmp"
+  BSL.writeFile tmp (encode chk)
+  renameFile tmp path
+
+-- | Load a pipeline checkpoint from disk.
+-- Returns Nothing if no checkpoint exists (first run or after cleanup).
+loadPipelineCheckpoint :: FilePath -> IO (Maybe PipelineCheckpoint)
+loadPipelineCheckpoint outputDir = do
+  let path = checkpointPath outputDir
+  exists <- doesFileExist path
+  if not exists
+    then pure Nothing
+    else do
+      bs <- BSL.readFile path
+      case eitherDecode bs of
+        Left _   -> pure Nothing  -- corrupt checkpoint, start fresh
+        Right chk -> pure (Just chk)
+
+-- | Clear (delete) the pipeline checkpoint after successful completion.
+clearPipelineCheckpoint :: FilePath -> IO ()
+clearPipelineCheckpoint outputDir = do
+  let path = checkpointPath outputDir
+  removeFile path `catch` \(_ :: SomeException) -> pure ()

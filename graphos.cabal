@@ -56,6 +56,7 @@ library
                     Graphos.Domain.Graph.Analysis
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
+                    Graphos.Domain.Graph.Index
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
@@ -68,12 +69,14 @@ library
                     Graphos.UseCase.Extract.Markdown
                     Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
-                    Graphos.UseCase.Analyze
-                    Graphos.UseCase.Report
-                    Graphos.UseCase.Export
-                    Graphos.UseCase.Infer
-                      Graphos.UseCase.Query
+                     Graphos.UseCase.Analyze
+                     Graphos.UseCase.Report
+                     Graphos.UseCase.Export
+                     Graphos.UseCase.Infer
+                     Graphos.UseCase.Label
+                       Graphos.UseCase.Query
                      Graphos.UseCase.Load
+                     Graphos.UseCase.Merge
                      Graphos.UseCase.Ingest
                      Graphos.UseCase.Benchmark
                      -- UseCase - Query submodules
@@ -123,8 +126,10 @@ library
                      -- Infrastructure - Server
                      Graphos.Infrastructure.Server.MCP
                      Graphos.Infrastructure.Server.Static
-                    -- Infrastructure - Tracking
-                    Graphos.Infrastructure.Tracking.Cost
+                     -- Infrastructure - Tracking
+                     Graphos.Infrastructure.Tracking.Cost
+                     -- Infrastructure - Observability
+                     Graphos.Infrastructure.Observability
                     -- Infrastructure - Git
                     Graphos.Infrastructure.Git.Hook
                     -- Infrastructure - Logging
@@ -146,6 +151,7 @@ library
     , base                 >= 4.17 && < 5
     , bytestring           >= 0.11
     , containers           >= 0.6
+    , deepseq              >= 1.4
     , directory            >= 1.3
     , fgl                  >= 5.8
     , filepath             >= 1.4
@@ -177,6 +183,8 @@ library
     , wai                  >= 3.2
     , warp                 >= 3.3
     , http-types           >= 0.12
+    , http-conduit         >= 2.3
+    , http-client          >= 0.7
 
 -- ───────────────────────────────────────────────
 -- Executable

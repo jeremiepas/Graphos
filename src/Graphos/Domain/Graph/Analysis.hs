@@ -1,14 +1,28 @@
 -- | Advanced graph analysis — structural properties and centrality.
 -- Pure functions over the domain types.
+--
+-- Memory optimization: FGL graph is computed ONCE and shared across all
+-- algorithms (articulation points, biconnected components, dominators,
+-- edge betweenness). Previously each algorithm created its own FGL copy
+-- (~200MB each on 100k-node graphs), totaling ~800MB of duplicate data.
+-- Now we use a CachedFGL record to compute once and reuse.
+{-# LANGUAGE StrictData #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.Domain.Graph.Analysis
-  ( godNodes
+  ( -- * Cached FGL (shared across algorithms to save memory)
+    CachedFGL(..)
+  , toCachedFGL
+  , cachedFindIdx
+
+    -- * Analysis algorithms
+  , godNodes
   , articulationPoints
   , biconnectedComponents
   , dominators
   , edgeBetweenness
   ) where
 
+import Control.DeepSeq (deepseq)
 import Data.List (sortOn, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -26,24 +40,33 @@ import Graphos.Domain.Graph.Core (Graph(..), isFileNode, isConceptNode)
 import Graphos.Domain.Graph.FGL (toFGL, FGLGraph)
 
 -- ───────────────────────────────────────────────
--- Internal: Graph -> FGL conversion
+-- Cached FGL computation (memory optimization)
 -- ───────────────────────────────────────────────
 
--- | Convert a Graphos Graph to an fgl Gr for algorithm use
-toFGL' :: Graph -> FGLGraph
-toFGL' g = toFGL (gNodes g) (gEdges g)
+-- | Cached FGL graph + lookup tables.
+-- Computed once from a Graphos Graph, then shared across all algorithm calls.
+-- Saves ~600MB on 100k-node graphs by avoiding redundant FGL conversions.
+data CachedFGL = CachedFGL
+  { cfgGraph   :: !FGLGraph
+  , cfgNidMap  :: !(Map Int NodeId)
+  , cfgIdxList :: ![(NodeId, Int)]
+  }
 
--- | Build a node ID lookup: fgl Int -> Graphos NodeId
-nidLookup :: FGLGraph -> Map Int NodeId
-nidLookup gr = Map.fromList [(idx, nid) | (idx, (nid, _)) <- labNodes gr]
+-- | Build a cached FGL graph. Forces the result with deepseq to ensure
+-- the FGL structure is fully evaluated before any algorithm runs.
+toCachedFGL :: Graph -> CachedFGL
+toCachedFGL g =
+  let gr = toFGL (gNodes g) (gEdges g)
+      nidMap = Map.fromList [(idx, nid) | (idx, (nid, _)) <- labNodes gr]
+      idxList = [(nid, idx) | (idx, (nid, _)) <- labNodes gr]
+  in CachedFGL { cfgGraph = gr, cfgNidMap = nidMap, cfgIdxList = idxList }
 
 -- | Find the fgl Int index for a Graphos NodeId
-findFglIdx :: FGLGraph -> NodeId -> Maybe Int
-findFglIdx gr nid = lookup nid idxList
-  where idxList = [(nid', idx) | (idx, (nid', _)) <- labNodes gr]
+cachedFindIdx :: CachedFGL -> NodeId -> Maybe Int
+cachedFindIdx cfg nid = lookup nid (cfgIdxList cfg)
 
 -- ───────────────────────────────────────────────
--- Analysis queries
+-- Analysis queries (all use shared CachedFGL)
 -- ───────────────────────────────────────────────
 
 -- | Find god nodes (highest-degree nodes, excluding file hubs and concepts)
@@ -53,7 +76,7 @@ godNodes g topN =
       filtered = filter (\(_, deg, n) -> not (isFileNode g n) && not (isConceptNode n) && deg > 0) degrees
       sorted = sortOn (\(_, deg, _) -> negate deg) filtered
   in take topN [GodNode { gnId = nid, gnLabel = nodeLabel n, gnEdges = deg }
-               | (nid, deg, n) <- sorted]
+                | (nid, deg, n) <- sorted]
   where
     neighbors' g' nid =
       let fwd = Map.findWithDefault Set.empty nid (gAdjFwd g')
@@ -61,50 +84,47 @@ godNodes g topN =
       in if gDirected g' then fwd else fwd `Set.union` bwd
 
 -- | Find articulation points (bridge nodes) whose removal would disconnect the graph.
--- Uses fgl's ap algorithm internally.
 articulationPoints :: Graph -> [NodeId]
 articulationPoints g =
-  let gr = toFGL' g
-      nidMap = nidLookup gr
+  let cfg = toCachedFGL g
+      gr = cfgGraph cfg
+      nidMap = cfgNidMap cfg
       artPointIdxs = ap gr
-  in [Map.findWithDefault (T.pack "???") idx nidMap | idx <- artPointIdxs]
+  in artPointIdxs `deepseq` [Map.findWithDefault (T.pack "???") idx nidMap | idx <- artPointIdxs]
 
 -- | Find biconnected components of the graph.
--- Each component is a list of NodeIds forming a maximal subgraph
--- with no articulation point.
--- Uses fgl's bcc algorithm internally.
 biconnectedComponents :: Graph -> [[NodeId]]
 biconnectedComponents g =
-  let gr = toFGL' g
-      nidMap = nidLookup gr
+  let cfg = toCachedFGL g
+      gr = cfgGraph cfg
+      nidMap = cfgNidMap cfg
       components = bcc gr
-  in [nub [Map.findWithDefault (T.pack "???") idx nidMap | idx <- FGL.nodes comp] | comp <- components]
+  in components `deepseq` [nub [Map.findWithDefault (T.pack "???") idx nidMap | idx <- FGL.nodes comp] | comp <- components]
 
 -- | Compute the dominator tree for a given start node.
--- Returns a map from each node to its immediate dominator.
--- Uses fgl's dom algorithm internally.
 dominators :: Graph -> NodeId -> Map NodeId (Maybe NodeId)
 dominators g start =
-  let gr = toFGL' g
-      nidMap = nidLookup gr
-  in case findFglIdx gr start of
+  let cfg = toCachedFGL g
+      gr = cfgGraph cfg
+      nidMap = cfgNidMap cfg
+  in case cachedFindIdx cfg start of
        Just startIdx ->
          let domList = dom gr startIdx
-         in Map.fromList [(Map.findWithDefault n idx nidMap
-                          , case Map.lookup idom nidMap of
-                              Just d -> Just d
-                              Nothing -> Nothing)
-                          | (idx, idomList) <- domList
-                          , n <- [Map.findWithDefault start idx nidMap]
-                          , idom <- idomList]
+          in domList `deepseq` Map.fromList [(Map.findWithDefault start idx nidMap
+                           , case Map.lookup idom nidMap of
+                               Just d -> Just d
+                               Nothing -> Nothing)
+                           | (idx, idomList) <- domList
+                           , idom <- idomList]
        Nothing -> Map.empty
 
 -- | Compute edge betweenness centrality using fgl shortest paths.
 -- For large graphs (N > 500), samples a subset of source nodes to keep cost manageable.
 edgeBetweenness :: Graph -> Map (NodeId, NodeId) Double
 edgeBetweenness g =
-  let gr = toFGL' g
-      nidMap = nidLookup gr
+  let cfg = toCachedFGL g
+      gr = cfgGraph cfg
+      nidMap = cfgNidMap cfg
       allNodeIndices = [(idx, nid) | (idx, (nid, _)) <- labNodes gr]
       n = length allNodeIndices
       maxSamples = 500
@@ -126,4 +146,4 @@ edgeBetweenness g =
       sampledNormalization = if n <= maxSamples
         then normalization
         else normalization * (fromIntegral n / fromIntegral (length sampledSources))
-  in fmap (* sampledNormalization) edgeCounts
+  in edgeCounts `deepseq` fmap (* sampledNormalization) edgeCounts

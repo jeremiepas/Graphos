@@ -2,7 +2,7 @@
 -- Build, merge, query, and diff knowledge graphs.
 -- 
 -- This module re-exports everything from sub-modules for backward compatibility.
--- Sub-modules: Core, Query, Analysis, Diff, FGL.
+-- Sub-modules: Core, Query, Analysis, Diff, FGL, Index.
 module Graphos.Domain.Graph
   ( -- * Types
     Graph

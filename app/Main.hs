@@ -6,22 +6,38 @@ import System.Exit (exitWith, ExitCode(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Monad (forM_)
+import Control.Concurrent.MVar (newMVar)
+import Data.Maybe (isJust)
 
-import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, CommunityMap)
-import Graphos.UseCase.Pipeline (runPipeline, PipelineResult(..))
+import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, PipelineResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
-import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..))
+import Graphos.UseCase.Query (queryGraphWithIndex, pathQueryWithIndex, explainNodeWithIndex, QueryResult(..))
+import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import Graphos.Domain.Graph (gNodes, gEdges, neighbors, degree)
+import Graphos.Domain.Graph.Analysis (articulationPoints)
+import Graphos.Domain.Graph.Index (communityOfNode)
+import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
-import Graphos.Domain.Config (defaultGraphosConfig)
+import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGraphToNeo4j, pushToNeo4jWithCommunities)
+import Graphos.Infrastructure.Observability
+  ( initObservability, shutdownObservability, ObservabilityEnv(..)
+  , OtelConfig(..), defaultOtelConfig
+  , Tracer, withSpan, withSpan_, SpanKind(..)
+  , MetricsStore, incCounter, setGauge, observeHistogram
+  , debugTraceEvent
+  )
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability)
 import Graphos.Infrastructure.Config (loadConfig)
 import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
+import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Maybe (listToMaybe)
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, createDirectoryIfMissing)
+
+import qualified Graphos.UseCase.Export as Export
 
 
 -- ───────────────────────────────────────────────
@@ -33,6 +49,8 @@ data Command
   | QueryCmd Text Text Int FilePath
   | PathCmd Text Text FilePath
   | ExplainCmd Text FilePath
+  | PushCmd FilePath String String String Neo4jPushMode Int
+  | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
   | LServers
   | Serve FilePath Int
   | Init
@@ -52,6 +70,8 @@ pipelineOpts = PipelineConfig
   <*> optional (strOption (long "obsidian-dir" <> help "Obsidian vault output directory"))
   <*> switch (long "neo4j" <> help "Generate Cypher for Neo4j")
   <*> optional (strOption (long "neo4j-push" <> help "Push to Neo4j at URI"))
+  <*> option auto (long "neo4j-push-mode" <> value SubgraphPush <> help "Neo4j push mode: full|subgraph|community (default: subgraph)")
+  <*> option auto (long "neo4j-subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode (default: 7)")
   <*> optional (strOption (long "mcp" <> metavar "GRAPH_JSON" <> help "Start MCP server with graph file"))
   <*> switch (long "svg" <> help "Export SVG")
   <*> switch (long "graphml" <> help "Export GraphML")
@@ -60,11 +80,18 @@ pipelineOpts = PipelineConfig
   <*> switch (long "verbose" <> short 'v' <> help "Verbose output: show DEBUG level logs")
   <*> switch (long "debug" <> help "Debug output: show TRACE level logs + internal details")
   <*> option auto (long "edge-density" <> value Normal <> help "Edge density: sparse|normal|dense|maximum (default: normal)")
-  <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0)")
-  <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3)")
-  <*> option auto (long "threads" <> short 'j' <> value 1 <> help "Number of parallel extraction threads (default: 1)")
-  <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
-  <*> pure defaultGraphosConfig  -- placeholder; loaded from graphos.yaml at runtime
+  <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0, try 0.3-0.5 for 100k+ nodes)")
+   <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3, try 10-20 for 100k+ nodes)")
+   <*> option auto (long "max-leiden-iterations" <> value 50 <> help "Max Leiden iterations (default: 50, try 10-20 for 100k+ nodes)")
+   <*> option auto (long "threads" <> short 'j' <> value 1 <> help "Number of parallel extraction threads (default: 1)")
+   <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
+    <*> pure defaultGraphosConfig  -- placeholder; loaded from graphos.yaml at runtime
+    <*> pure Nothing  -- cfgNeo4jStreaming: set programmatically when --neo4j is enabled
+    <*> optional (option auto (long "metrics" <> help "Start Prometheus metrics server on given port (e.g. 9090)"))
+    <*> switch (long "otel" <> help "Enable OpenTelemetry trace/metric export via OTLP")
+    <*> fmap (\ep -> case ep of Nothing -> defaultOtelConfig; Just e -> defaultOtelConfig { otelTracesEndpoint = e ++ "/v1/traces", otelMetricsEndpoint = e ++ "/v1/metrics" })
+             (optional (strOption (long "otel-endpoint" <> help "OTLP endpoint base (default: http://localhost:4318)")))
+    <*> optional (strOption (long "debug-trace" <> help "Directory for debug trace JSONL files"))
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -84,11 +111,34 @@ serveOpts = Serve
   <$> strOption (long "dir" <> value "graphos-out" <> help "Directory to serve (default: graphos-out)")
   <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
 
+pushOpts :: Parser Command
+pushOpts = PushCmd
+  <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
+  <*> strOption (long "uri" <> value "http://localhost:7474" <> help "Neo4j URI")
+  <*> strOption (long "user" <> value "neo4j" <> help "Neo4j username")
+  <*> strOption (long "password" <> value "graphos_dev" <> help "Neo4j password")
+  <*> option auto (long "mode" <> value SubgraphPush <> help "Push mode: FullPush|SubgraphPush|CommunityPush")
+  <*> option auto (long "subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode")
+
+mergeOpts :: Parser Command
+mergeOpts = MergeCmd
+  <$> argument str (metavar "GRAPH_A" <> help "Path to first graph.json")
+  <*> argument str (metavar "GRAPH_B" <> help "Path to second graph.json")
+  <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
+  <*> option auto (long "edge-density" <> value Normal <> help "Edge density: sparse|normal|dense|maximum (default: normal)")
+  <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0)")
+  <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3)")
+  <*> option auto (long "max-leiden-iterations" <> value 50 <> help "Max Leiden iterations (default: 50)")
+  <*> switch (long "no-viz" <> help "Skip HTML visualization")
+  <*> switch (long "verbose" <> short 'v' <> help "Verbose output: show DEBUG level logs")
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
  <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
+ <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
+ <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
  <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
  <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
  <> command "init" (info (pure Init) (progDesc "Generate a graphos.yaml config file"))
@@ -102,39 +152,92 @@ main = do
     Run config -> do
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
-      let config' = config { cfgGraphosConfig = graphosCfg }
+      let obsCfg = gcObservability graphosCfg
+          -- Merge config file + CLI flags: CLI flags override config file values
+          otelCfg = defaultOtelConfig
+            { otelEnabled        = obsEnabled obsCfg || cfgOtelEnabled config || isJust (cfgMetricsPort config)
+            , otelTracesEndpoint = obsEndpoint obsCfg ++ "/v1/traces"
+            , otelMetricsEndpoint = obsEndpoint obsCfg ++ "/v1/metrics"
+            , otelServiceName    = obsServiceName obsCfg
+            , otelServiceVersion = obsServiceVersion obsCfg
+            , otelExportInterval = obsExportInterval obsCfg
+            }
+          metricsPort = case cfgMetricsPort config of
+                           Just p  -> Just p
+                           Nothing -> if obsMetricsPort obsCfg > 0 then Just (obsMetricsPort obsCfg) else Nothing
+          debugDir = case cfgDebugTraceDir config of
+                       Just d  -> d
+                       Nothing -> if null (obsDebugTraceDir obsCfg)
+                                    then cfgOutputDir config ++ "/traces"
+                                    else obsDebugTraceDir obsCfg
+          config' = config { cfgGraphosConfig = graphosCfg
+                           , cfgOtelConfig     = otelCfg
+                           , cfgMetricsPort    = metricsPort
+                           , cfgDebugTraceDir  = Just debugDir
+                           }
+      -- Initialize observability (tracing, metrics, debug trace)
+      let logLevel = if cfgDebug config then LevelTrace
+                      else if cfgVerbose config then LevelDebug
+                      else LevelInfo
+      obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
+      let tracer = otelTracer obsEnv
+          metrics = otelMetrics obsEnv
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
         Just graphPath -> do
           putStrLn $ "[graphos] Starting MCP server with " ++ graphPath
           startMCPServerFromFile graphPath
-        Nothing -> do
-          let logLevel = if cfgDebug config then LevelTrace
-                         else if cfgVerbose config then LevelDebug
-                         else LevelInfo
-          env <- defaultLogEnv logLevel
-          logInfo env "Starting pipeline..."
-          logDebug env $ "Config: " <> T.pack (show config')
-          result <- runPipeline config'
-          case result of
-            Left err -> do
-              logError env $ "Pipeline failed: " <> err
-              exitWith (ExitFailure 1)
-            Right res -> do
-              logInfo env "Graph complete!"
-              logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
-              logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
-              logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
-              logInfo env $ T.pack $ "  Report: " ++ prReportPath res
-              logInfo env $ T.pack $ "  Graph: " ++ prGraphPath res
-              case prHtmlPath res of
-                Just html -> do
-                  logInfo env $ T.pack $ "  HTML: " ++ html
-                  logInfo env $ T.pack $ "  View: graphos serve --dir " ++ cfgOutputDir config' ++ " --port 8080"
-                Nothing  -> pure ()
-              case prNeo4jPath res of
-                Just cypher -> logInfo env $ T.pack $ "  Neo4j: " ++ cypher
-                Nothing     -> pure ()
+        Nothing ->
+          -- Watch mode: run initial pipeline, then watch for changes
+          if cfgWatch config'
+            then do
+              env <- defaultLogEnv logLevel
+              logInfo env "Starting initial pipeline (watch mode)..."
+              result <- runPipeline config'
+              case result of
+                Left err -> do
+                  logError env $ "Initial pipeline failed: " <> err
+                  exitWith (ExitFailure 1)
+                Right res -> do
+                  logInfo env "Initial pipeline complete! Watching for changes..."
+                  logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
+                  logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
+                  logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
+                  -- Start watcher
+                  shutdownVar <- newMVar ()
+                  watchDirectory (cfgInputPath config') (\changedFiles -> do
+                    let filesList = T.splitOn ", " (T.pack changedFiles)
+                    logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
+                    incResult <- runIncrementalPipeline config' (map T.unpack filesList)
+                    case incResult of
+                      Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                      Right _ -> logInfo env "[watch] Incremental update complete"
+                    ) defaultGraphosWatchConfig shutdownVar
+            else do
+              -- Normal mode: run once and exit
+              env <- defaultLogEnv logLevel
+              logInfo env "Starting pipeline..."
+              logDebug env $ "Config: " <> T.pack (show config')
+              result <- runPipeline config'
+              case result of
+                Left err -> do
+                  logError env $ "Pipeline failed: " <> err
+                  exitWith (ExitFailure 1)
+                Right res -> do
+                  logInfo env "Graph complete!"
+                  logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
+                  logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
+                  logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
+                  logInfo env $ T.pack $ "  Report: " ++ prReportPath res
+                  logInfo env $ T.pack $ "  Graph: " ++ prGraphPath res
+                  case prHtmlPath res of
+                    Just html -> do
+                      logInfo env $ T.pack $ "  HTML: " ++ html
+                      logInfo env $ T.pack $ "  View: graphos serve --dir " ++ cfgOutputDir config' ++ " --port 8080"
+                    Nothing  -> pure ()
+                  case prNeo4jPath res of
+                    Just cypher -> logInfo env $ T.pack $ "  Neo4j: " ++ cypher
+                    Nothing     -> pure ()
 
     QueryCmd question mode budget graphPath -> do
       env <- defaultLogEnv LevelInfo
@@ -144,7 +247,8 @@ main = do
         Left err -> putStrLn $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
-              result = queryGraph g question mode budget
+              idx = lrIndex loaded
+              result = queryGraphWithIndex g idx question mode budget
           if null (qrNodes result)
             then putStrLn "No matching nodes found. Try different terms."
             else do
@@ -174,7 +278,8 @@ main = do
         Left err -> putStrLn $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
-          case pathQuery g from to of
+              idx = lrIndex loaded
+          case pathQueryWithIndex g idx from to of
             Nothing -> putStrLn $ "No path found between '" ++ T.unpack from ++ "' and '" ++ T.unpack to ++ "'"
             Just path -> do
               let hops = length path - 1
@@ -201,7 +306,8 @@ main = do
         Left err -> putStrLn $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
-          case explainNode g node of
+              idx = lrIndex loaded
+          case explainNodeWithIndex g idx node of
             Nothing -> putStrLn $ "Node not found: " ++ T.unpack node
             Just n -> do
               putStrLn $ "NODE: " ++ T.unpack (nodeLabel n)
@@ -212,10 +318,8 @@ main = do
                 Nothing  -> pure ()
               putStrLn $ "  Type: " ++ show (nodeFileType n)
               putStrLn $ "  Degree: " ++ show (degree g (nodeId n))
-              -- Show community
-              let commMap = lrCommunities loaded
-                  commId = findCommunityForNode (nodeId n) commMap
-              case commId of
+              -- Show community (O(log N) via index instead of O(C×M) scan)
+              case communityOfNode (nodeId n) idx of
                 Just cid -> putStrLn $ "  Community: " ++ show cid
                 Nothing  -> pure ()
               -- Show neighbors
@@ -232,6 +336,102 @@ main = do
                         confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
                     putStrLn $ "  --" ++ relLabel ++ "--> " ++ T.unpack (nodeLabel nb) ++ confLabel
                   Nothing -> pure ()
+
+    PushCmd graphPath uri user password pushMode topN -> do
+      putStrLn $ "[graphos] Push: loading " ++ graphPath
+      loadResult <- loadGraphFromFile graphPath
+      case loadResult of
+        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Right loaded -> do
+          let g = lrGraph loaded
+              totalNodes = Map.size (gNodes g)
+              totalEdges = Map.size (gEdges g)
+          -- If communities are empty, compute them now
+          (commMap, cohesionMap) <- if Map.null (lrCommunities loaded)
+            then do
+              putStrLn $ "[graphos] No communities found in graph.json — computing communities..."
+              let commMap' = detectCommunities g
+                  cohesionMap' = scoreAllCohesion g commMap'
+              putStrLn $ "[graphos] Computed " ++ show (Map.size commMap') ++ " communities"
+              pure (commMap', cohesionMap')
+            else pure (lrCommunities loaded, lrCohesion loaded)
+          let numCommunities = Map.size commMap
+          putStrLn $ "[graphos] Graph loaded: " ++ show totalNodes ++ " nodes, " ++ show totalEdges ++ " edges, " ++ show numCommunities ++ " communities"
+          env <- defaultLogEnv LevelInfo
+          (msg, _stmts, _batches) <- case pushMode of
+            FullPush -> do
+              logInfo env $ T.pack $ "[neo4j] Push mode: full (all nodes + edges + communities)"
+              pushToNeo4jWithCommunities g commMap cohesionMap (T.pack uri) (T.pack user) (T.pack password)
+            SubgraphPush -> do
+              let artPoints = articulationPoints g
+              logInfo env $ T.pack $ "[neo4j] Push mode: subgraph (communities + " ++ show topN ++ " representatives/community, " ++ show (length artPoints) ++ " bridge nodes)"
+              logInfo env $ T.pack $ "[neo4j] Full graph: " ++ show totalNodes ++ " nodes → subgraph: ~" ++ show (topN * numCommunities + length artPoints) ++ " representative nodes"
+              pushSubgraphToNeo4j g commMap cohesionMap topN artPoints (T.pack uri) (T.pack user) (T.pack password)
+            CommunityPush -> do
+              logInfo env $ T.pack $ "[neo4j] Push mode: community-only (communities + inter-community edges)"
+              pushCommunityGraphToNeo4j g commMap cohesionMap (T.pack uri) (T.pack user) (T.pack password)
+          logInfo env $ "[neo4j] " <> msg
+
+    MergeCmd pathA pathB outputDir density resolution minCommSize maxLeidenIterations noViz verbose -> do
+      let logLevel = if verbose then LevelDebug else LevelInfo
+      env <- defaultLogEnv logLevel
+      logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
+      resultA <- loadGraphFromFile pathA
+      case resultA of
+        Left err -> do
+          logError env $ "[merge] Failed to load graph A: " <> err
+          exitWith (ExitFailure 1)
+        Right graphA -> do
+          logInfo env $ "[merge] Loading graph B: " <> T.pack pathB
+          resultB <- loadGraphFromFile pathB
+          case resultB of
+            Left err -> do
+              logError env $ "[merge] Failed to load graph B: " <> err
+              exitWith (ExitFailure 1)
+            Right graphB -> do
+              logInfo env $ T.pack $ "[merge] Graph A: " ++ show (Map.size (gNodes (lrGraph graphA))) ++ " nodes, " ++ show (Map.size (gEdges (lrGraph graphA))) ++ " edges"
+              logInfo env $ T.pack $ "[merge] Graph B: " ++ show (Map.size (gNodes (lrGraph graphB))) ++ " nodes, " ++ show (Map.size (gEdges (lrGraph graphB))) ++ " edges"
+              logInfo env "[merge] Merging graphs..."
+              let res = Resolution { resGamma = resolution
+                                   , resMinSize = minCommSize
+                                   , resMergeInto = MergeToNeighbor
+                                   , resMaxIterations = maxLeidenIterations }
+                  mergeResult = mergeGraphsAndAnalyze (lrGraph graphA) (lrGraph graphB) density res
+                  mergedGraph = mrGraph mergeResult
+                  commMap = mrCommunities mergeResult
+              logInfo env $ T.pack $ "[merge] Merged graph: " ++ show (Map.size (gNodes mergedGraph)) ++ " nodes, " ++ show (Map.size (gEdges mergedGraph)) ++ " edges"
+              logInfo env $ T.pack $ "[merge] Communities: " ++ show (Map.size commMap)
+              -- Export
+              createDirectoryIfMissing True outputDir
+              let analysis = mrAnalysis mergeResult
+                  graphosCfg = defaultGraphosConfig
+                  config = defaultConfig
+                        { cfgOutputDir = outputDir
+                        , cfgNoViz = noViz
+                        , cfgEdgeDensity = density
+                        , cfgResolution = resolution
+                        , cfgMinCommSize = minCommSize
+                        , cfgMaxLeidenIterations = maxLeidenIterations
+                        , cfgGraphosConfig = graphosCfg
+                        }
+                  detection = Detection
+                        { detectionTotalFiles = 0
+                        , detectionTotalWords = 0
+                        , detectionNeedsGraph = True
+                        , detectionWarning = Nothing
+                        , detectionFiles = Map.empty
+                        }
+              logInfo env "[merge] Exporting..."
+              exports <- Export.exportAll mergedGraph analysis config detection
+              logInfo env "[merge] Merge complete!"
+              logInfo env $ T.pack $ "  Nodes: " ++ show (Map.size (gNodes mergedGraph))
+              logInfo env $ T.pack $ "  Edges: " ++ show (Map.size (gEdges mergedGraph))
+              logInfo env $ T.pack $ "  Communities: " ++ show (Map.size commMap)
+              logInfo env $ T.pack $ "  Report: " ++ Export.erReport exports
+              logInfo env $ T.pack $ "  Graph: " ++ Export.erJSON exports
+              case Export.erHTML exports of
+                Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
+                Nothing   -> pure ()
 
     LServers -> do
       putStrLn "[graphos] Discovering available LSP servers..."
@@ -260,11 +460,6 @@ main = do
 -- Helpers
 -- ───────────────────────────────────────────────
 
--- | Find which community a node belongs to
-findCommunityForNode :: Text -> CommunityMap -> Maybe Int
-findCommunityForNode nid commMap =
-  listToMaybe [cid | (cid, members) <- Map.toList commMap, nid `elem` members]
-
 -- ───────────────────────────────────────────────
 -- graphos init — generate config file
 -- ───────────────────────────────────────────────
@@ -286,6 +481,12 @@ defaultConfigYaml :: String
 defaultConfigYaml = unlines
   [ "# Graphos configuration file"
   , "# Generated by: graphos init"
+  , "#"
+  , "# Config resolution (later wins):"
+  , "#   1. Built-in defaults"
+  , "#   2. Global config: ~/.config/graphos/graphos.yaml"
+  , "#   3. This file (project graphos.yaml)"
+  , "#   4. CLI flags (--otel, --metrics, etc.)"
   , "#"
   , "# Extractors: how to extract symbols from each file type."
   , "#   lsp          — use Language Server Protocol (requires server installed)"
@@ -358,11 +559,14 @@ defaultConfigYaml = unlines
   , ""
   , "# Neo4j connection settings for --neo4j push"
   , "# Used by: graphos . --neo4j --neo4j-push"
-  , "# Start a local server: docker compose up -d"
+  , "# push_mode: full (all nodes), subgraph (communities + representatives), community (communities only)"
+  , "# subgraph_size: representatives per community for subgraph mode"
   , "neo4j:"
   , "  uri: \"http://localhost:7474\""
   , "  user: \"neo4j\""
   , "  password: \"graphos_dev\""
+  , "  push_mode: \"subgraph\""
+  , "  subgraph_size: 7"
   , ""
   , "# LLM-based community labeling (use --label to enable)"
   , "# Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.)"
@@ -374,4 +578,15 @@ defaultConfigYaml = unlines
   , "  api_key: \"${OPENAI_API_KEY}\""
   , "  base_url: \"https://api.openai.com/v1\""
   , "  batch_size: 10"
+  , ""
+  , "# Observability: tracing, metrics, and debug instrumentation"
+  , "# CLI flags (--otel, --metrics, --debug-trace) override these values."
+  , "observability:"
+  , "  enabled: false"
+  , "  endpoint: \"http://localhost:4318\""
+  , "  metricsPort: 0"
+  , "  serviceName: graphos"
+  , "  serviceVersion: \"0.1.0\""
+  , "  exportInterval: 15"
+  , "  debugTraceDir: \"\""
   ]

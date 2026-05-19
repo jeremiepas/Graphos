@@ -39,7 +39,7 @@ pkgs'.mkShell {
 
   LD_LIBRARY_PATH = libPaths;
   EXTRA_LIBRARY_PATH = libPaths;
-
+  OPENCODE_EXPERIMENTAL_LSP_TOOL=true;
   shellHook = ''
     export PATH="$HOME/.cache/.bun/bin:$PATH"
     export PATH="$HOME/.npm-global/bin:$PATH"

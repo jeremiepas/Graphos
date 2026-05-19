@@ -1,5 +1,8 @@
 -- | Graph-level types: hyperedges, extractions, labeled graphs, communities, and diffs.
 -- Pure data types with no IO dependencies.
+--
+-- All fields are strict (!) to prevent thunk accumulation on large graphs.
+{-# LANGUAGE StrictData #-}
 module Graphos.Domain.Types.Graph
   ( -- * Hyperedge types
     Hyperedge(..)
@@ -20,6 +23,7 @@ module Graphos.Domain.Types.Graph
   , GraphDiff(..)
   ) where
 
+import Control.DeepSeq (NFData(..))
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
@@ -47,6 +51,8 @@ data Hyperedge = Hyperedge
   , hyperedgeConfidenceScore :: Double
   , hyperedgeSourceFile  :: Text
   } deriving (Eq, Show, Generic)
+
+instance NFData Hyperedge
 
 instance ToJSON Hyperedge where
   toJSON h = object
@@ -77,6 +83,8 @@ data Extraction = Extraction
   , extractionInputTokens  :: Int
   , extractionOutputTokens :: Int
   } deriving (Eq, Show, Generic)
+
+instance NFData Extraction
 
 -- | Empty extraction with no nodes, edges, or tokens
 emptyExtraction :: Extraction

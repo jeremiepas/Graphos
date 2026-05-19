@@ -16,3 +16,6 @@ graphos-out/
 .opencode/
 docs/
 node_modules/
+traces/
+monitoring/prometheus/data/
+monitoring/grafana/data/

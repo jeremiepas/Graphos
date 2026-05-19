@@ -11,6 +11,8 @@ module Graphos.Infrastructure.LLM.OpenAI
 
 import Control.Exception (catch, SomeException)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as AesonKey
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import qualified Data.Vector as V
 import Data.Map.Strict (Map)
@@ -21,8 +23,9 @@ import Data.Text.Encoding (encodeUtf8)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 import System.Environment (getEnv)
+import System.IO.Unsafe (unsafePerformIO)
 
-import Graphos.Domain.Config (LabelingConfig)
+import Graphos.Domain.Config (LabelingConfig(..))
 import Graphos.Domain.Types (CommunityId)
 
 -- | Call an OpenAI-compatible chat completion API via curl.
@@ -32,13 +35,20 @@ callLLM cfg prompt = catch (do
       model = labelingModel cfg
       apiKey = resolveEnvVars (labelingApiKey cfg)
 
-  -- Build JSON payload
-  let payload = Aeson.encode $ Aeson.object
+  -- Build JSON payload  
+  let systemMsg :: Aeson.Object
+      systemMsg = KeyMap.fromList
+        [ (AesonKey.fromText "role", Aeson.String "system")
+        , (AesonKey.fromText "content", Aeson.String "You are a code architecture analyst. Respond only with valid JSON.")
+        ]
+      userMsg :: Aeson.Object
+      userMsg = KeyMap.fromList
+        [ (AesonKey.fromText "role", Aeson.String "user")
+        , (AesonKey.fromText "content", Aeson.String prompt)
+        ]
+      payload = Aeson.encode $ Aeson.object
         [ "model" Aeson..= model
-        , "messages" Aeson..=
-          [ Aeson.object ["role" Aeson..= ("system" :: Text), "content" Aeson..= ("You are a code architecture analyst. Respond only with valid JSON." :: Text)]
-          , Aeson.object ["role" Aeson..= ("user" :: Text), "content" Aeson..= prompt]
-          ]
+        , "messages" Aeson..= [Aeson.Object systemMsg, Aeson.Object userMsg]
         , "temperature" Aeson..= (0.3 :: Double)
         , "max_tokens" Aeson..= (500 :: Int)
         ]
@@ -60,11 +70,11 @@ callLLM cfg prompt = catch (do
 
   (exitCode, stdout, stderr) <- readProcessWithExitCode "curl" curlArgs ""
 
-  -- Cleanup temp file
-  catch (BSL8.readFile payloadPath >> return ()) (\(_ :: SomeException) -> pure ())
+  -- Cleanup temp file (best effort)
+  _ <- catch (BSL8.readFile payloadPath >> return ()) (\(_ :: SomeException) -> pure ())
 
   case exitCode of
-    ExitSuccess -> parseResponse (T.pack stdout)
+    ExitSuccess -> pure $ parseResponse (T.pack stdout)
     ExitFailure code -> pure $ Left $ T.pack $ "LLM API call failed (curl exit " ++ show code ++ "): " ++ take 200 stderr
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "LLM API call error: " ++ show e
 
@@ -73,14 +83,14 @@ parseResponse :: Text -> Either Text Text
 parseResponse response =
   case Aeson.decode (BSL8.fromStrict (encodeUtf8 response)) of
     Just (Aeson.Object obj) ->
-      case Map.lookup "choices" obj of
-        Just (Aeson.Array choices)
-          | not (V.null choices) ->
-            case choices V.! 0 of
-              Just (Aeson.Object choice) ->
-                case Map.lookup "message" choice of
+      case KeyMap.lookup "choices" obj of
+        Just (Aeson.Array arr)
+          | not (V.null arr) ->
+            case V.toList arr of
+              (Aeson.Object choice:_) ->
+                case KeyMap.lookup "message" choice of
                   Just (Aeson.Object msg) ->
-                    case Map.lookup "content" msg of
+                    case KeyMap.lookup "content" msg of
                       Just (Aeson.String content) -> Right content
                       Just other -> Right $ T.pack $ show other
                       Nothing -> Left "No 'content' in message"
@@ -90,11 +100,6 @@ parseResponse response =
         _ -> Left $ "No 'choices' in response: " <> T.take 200 response
     _ -> Left $ "Failed to parse JSON response: " <> T.take 200 response
 
-atIndex :: [a] -> Int -> Maybe a
-atIndex [] _ = Nothing
-atIndex (x:_) 0 = Just x
-atIndex (_:xs) n = atIndex xs (n-1)
-
 -- | Parse community labels from LLM response text.
 -- Expects JSON like: {"483": "Export Module", "484": "Config Parsing"}
 parseLabelsFromResponse :: Text -> Map CommunityId Text
@@ -102,8 +107,8 @@ parseLabelsFromResponse response =
   let clean = stripCodeBlocks response
   in case Aeson.decode (BSL8.fromStrict (encodeUtf8 clean)) of
        Just (Aeson.Object obj) -> Map.fromList
-         [ (read (T.unpack k), v)
-         | (k, Aeson.String v) <- Map.toList obj
+         [ (read (T.unpack (AesonKey.toText k)) :: CommunityId, v)
+         | (k, Aeson.String v) <- KeyMap.toList obj
          ]
        _ -> Map.empty
 
@@ -113,13 +118,15 @@ stripCodeBlocks t =
   T.strip $ T.replace "```" "" $ T.replace "```json" "" t
 
 -- | Resolve environment variable references like ${VAR} in a string.
+-- Uses unsafePerformIO for env var lookup in pure context.
 resolveEnvVars :: String -> String
 resolveEnvVars s = go s
   where
     go [] = []
     go ('$':'{':rest) = let (varName, after) = break (== '}') rest
-                            envVal = unsafeGetEnv varName
-                        in envVal ++ go (drop 1 after)
+                        in unsafeGetEnv varName ++ go (drop 1 after)
     go (c:cs) = c : go cs
 
-    unsafeGetEnv var = catch (getEnv var) (\(_ :: SomeException) -> "")
+    unsafeGetEnv :: String -> String
+    unsafeGetEnv var = unsafePerformIO (catch (getEnv var) (\(_ :: SomeException) -> pure []))
+    {-# NOINLINE unsafeGetEnv #-}

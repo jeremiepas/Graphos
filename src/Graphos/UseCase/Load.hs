@@ -1,5 +1,8 @@
 -- | Load a previously built graph from the JSON export file.
--- This is the shared helper used by CLI query, path, explain, and MCP commands.
+-- This is the shared helper used by CLI query, path, explain, merge, and MCP commands.
+--
+-- Builds a GraphIndex (inverted label index + community reverse index)
+-- at load time for O(k) queries instead of O(N) full-scans.
 module Graphos.UseCase.Load
   ( loadGraphFromFile
   , LoadResult(..)
@@ -15,6 +18,7 @@ import System.Directory (doesFileExist)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph)
+import Graphos.Domain.Graph.Index (GraphIndex, buildIndexWithLabels)
 
 -- | Result of loading a graph from disk
 data LoadResult = LoadResult
@@ -23,6 +27,7 @@ data LoadResult = LoadResult
   , lrCohesion         :: CohesionMap
   , lrGodNodes         :: [GodNode]
   , lrCommunityLabels  :: Map Int Text
+  , lrIndex            :: GraphIndex
   } deriving (Eq, Show)
 
 -- | Load a graph from a JSON file produced by the export pipeline.
@@ -50,12 +55,16 @@ loadGraphFromFile path = do
                 , extractionOutputTokens = 0
                 }
               graph = buildGraph False extraction
+              -- Build index at load time: O(N) one-time cost,
+              -- amortized across all future queries.
+              idx = buildIndexWithLabels graph (gfCommunities gf) (gfCommunityLabels gf)
           pure $ Right LoadResult
             { lrGraph           = graph
             , lrCommunities     = gfCommunities gf
             , lrCohesion        = gfCohesion gf
             , lrGodNodes        = gfGodNodes gf
             , lrCommunityLabels = gfCommunityLabels gf
+            , lrIndex           = idx
             }
 
 -- ───────────────────────────────────────────────
