@@ -27,7 +27,7 @@ The key innovation: **LSP to generate context graphs** and create context graphs
 ## Pipeline
 
 ```
-detect() → lsp_extract() → build_graph() → cluster() → analyze() → report() → export()
+detect() → extract() → build() → cluster() → infer() → analyze() → export()
 ```
 
 Each stage is a pure function. No shared state, no side effects outside `graphos-out/`.
@@ -156,6 +156,9 @@ graphos explain "RequestHandler" --graph path/to/graph.json
 
 # List available LSP servers
 graphos lservers
+
+# Serve HTML visualization over HTTP
+graphos serve --dir graphos-out --port 8080
 
 # MCP server
 graphos --mcp graphos-out/graph.json

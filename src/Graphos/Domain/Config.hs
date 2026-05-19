@@ -24,12 +24,20 @@ module Graphos.Domain.Config
   , LabelingConfig(..)
   , defaultLabelingConfig
 
+     -- * Observability configuration
+  , ObservabilityConfig(..)
+  , defaultObservabilityConfig
+
      -- * Top-level configuration
   , GraphosConfig(..)
   , defaultGraphosConfig
+
+     -- * Config merging
+  , mergeGraphosConfig
+  , mergeObservabilityConfig
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), genericParseJSON, genericToJSON)
+import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), genericParseJSON, genericToJSON, withObject, (.:?), (.!=))
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -247,24 +255,38 @@ defaultFileExtensions = FileExtensionConfig
 
 -- | Neo4j connection configuration for Cypher export and push.
 -- Used by --neo4j and --neo4j-push flags, overridable via graphos.yaml.
+--
+-- All fields except URI are optional in the YAML file (they have defaults).
+-- The FromJSON instance uses .:? so partial neo4j sections are valid.
 data Neo4jConfig = Neo4jConfig
-  { neo4jUri      :: String  -- ^ Neo4j HTTP URI (e.g. "http://localhost:7474")
-  , neo4jUser     :: String  -- ^ Username for authentication (e.g. "neo4j")
-  , neo4jPassword :: String  -- ^ Password for authentication
+  { neo4jUri          :: String  -- ^ Neo4j HTTP URI (e.g. "http://localhost:7474")
+  , neo4jUser         :: String  -- ^ Username for authentication (e.g. "neo4j")
+  , neo4jPassword     :: String  -- ^ Password for authentication
+  , neo4jPushMode     :: String  -- ^ Push mode: "full", "subgraph", or "community" (default: "subgraph")
+  , neo4jSubgraphSize :: Int     -- ^ Representatives per community for subgraph mode (default: 7)
   } deriving (Eq, Show, Generic)
 
 instance ToJSON Neo4jConfig where
   toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 5 }
 
+-- | Custom FromJSON: allows partial neo4j sections in graphos.yaml.
+-- All fields are optional — missing values fall back to defaults.
 instance FromJSON Neo4jConfig where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 5 }
+  parseJSON = withObject "Neo4jConfig" $ \v -> Neo4jConfig
+    <$> v .:? "uri"           .!= "http://localhost:7474"
+    <*> v .:? "user"          .!= "neo4j"
+    <*> v .:? "password"      .!= "graphos_dev"
+    <*> v .:? "pushMode"      .!= "subgraph"
+    <*> v .:? "subgraphSize"  .!= 7
 
 -- | Default Neo4j configuration for local development.
 defaultNeo4jConfig :: Neo4jConfig
 defaultNeo4jConfig = Neo4jConfig
-  { neo4jUri      = "http://localhost:7474"
-  , neo4jUser     = "neo4j"
-  , neo4jPassword = "graphos_dev"
+  { neo4jUri          = "http://localhost:7474"
+  , neo4jUser         = "neo4j"
+  , neo4jPassword     = "graphos_dev"
+  , neo4jPushMode     = "subgraph"
+  , neo4jSubgraphSize = 7
   }
 
 -- ───────────────────────────────────────────────
@@ -273,6 +295,8 @@ defaultNeo4jConfig = Neo4jConfig
 
 -- | Configuration for LLM-based community labeling.
 -- Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.)
+--
+-- All fields are optional in graphos.yaml — missing values fall back to defaults.
 data LabelingConfig = LabelingConfig
   { labelingProvider  :: String  -- ^ Provider: "openai" | "ollama" | "litellm"
   , labelingModel     :: String  -- ^ Model name: "gpt-4o-mini" | "llama3" etc.
@@ -284,8 +308,14 @@ data LabelingConfig = LabelingConfig
 instance ToJSON LabelingConfig where
   toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 8 }
 
+-- | Custom FromJSON: all fields optional with sensible defaults for graphos.yaml.
 instance FromJSON LabelingConfig where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 8 }
+  parseJSON = withObject "LabelingConfig" $ \v -> LabelingConfig
+    <$> v .:? "provider"   .!= "openai"
+    <*> v .:? "model"      .!= "gpt-4o-mini"
+    <*> v .:? "apiKey"     .!= "${OPENAI_API_KEY}"
+    <*> v .:? "baseUrl"    .!= "https://api.openai.com/v1"
+    <*> v .:? "batchSize"  .!= 10
 
 -- | Default labeling configuration (OpenAI gpt-4o-mini).
 defaultLabelingConfig :: LabelingConfig
@@ -295,6 +325,48 @@ defaultLabelingConfig = LabelingConfig
   , labelingApiKey    = "${OPENAI_API_KEY}"
   , labelingBaseUrl   = "https://api.openai.com/v1"
   , labelingBatchSize = 10
+  }
+
+-- ───────────────────────────────────────────────
+-- Observability Configuration
+-- ───────────────────────────────────────────────
+
+-- | Configuration for tracing, metrics, and debug instrumentation.
+-- All fields are optional in graphos.yaml — missing values fall back to defaults.
+--
+-- CLI flags (--otel, --metrics, --debug-trace) override these values.
+data ObservabilityConfig = ObservabilityConfig
+  { obsEnabled        :: Bool     -- ^ Enable OpenTelemetry trace/metric export
+  , obsEndpoint       :: String   -- ^ OTLP endpoint base URL (e.g. "http://localhost:4318")
+  , obsMetricsPort    :: Int      -- ^ Prometheus metrics server port (0 = disabled)
+  , obsServiceName    :: String   -- ^ Service name for spans
+  , obsServiceVersion :: String   -- ^ Service version for spans
+  , obsExportInterval :: Int      -- ^ Metrics export interval in seconds
+  , obsDebugTraceDir  :: String   -- ^ Directory for debug trace JSONL files ("" = disabled)
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON ObservabilityConfig where
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
+
+instance FromJSON ObservabilityConfig where
+  parseJSON = withObject "ObservabilityConfig" $ \v -> ObservabilityConfig
+    <$> v .:? "enabled"         .!= False
+    <*> v .:? "endpoint"        .!= "http://localhost:4318"
+    <*> v .:? "metricsPort"     .!= 0
+    <*> v .:? "serviceName"     .!= "graphos"
+    <*> v .:? "serviceVersion"  .!= "0.1.0"
+    <*> v .:? "exportInterval" .!= 15
+    <*> v .:? "debugTraceDir"  .!= ""
+
+defaultObservabilityConfig :: ObservabilityConfig
+defaultObservabilityConfig = ObservabilityConfig
+  { obsEnabled        = False
+  , obsEndpoint       = "http://localhost:4318"
+  , obsMetricsPort    = 0
+  , obsServiceName    = "graphos"
+  , obsServiceVersion = "0.1.0"
+  , obsExportInterval = 15
+  , obsDebugTraceDir  = ""
   }
 
 -- ───────────────────────────────────────────────
@@ -310,6 +382,7 @@ data GraphosConfig = GraphosConfig
   , gcExtractors     :: Map String ExtractorConfig  -- ^ extension → extractor config
   , gcNeo4j          :: Neo4jConfig                  -- ^ Neo4j connection settings
   , gcLabeling       :: LabelingConfig               -- ^ LLM labeling settings
+  , gcObservability  :: ObservabilityConfig           -- ^ Tracing, metrics, debug settings
   } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -321,4 +394,61 @@ defaultGraphosConfig = GraphosConfig
   , gcExtractors     = defaultExtractors
   , gcNeo4j          = defaultNeo4jConfig
   , gcLabeling       = defaultLabelingConfig
+  , gcObservability  = defaultObservabilityConfig
+  }
+
+-- ───────────────────────────────────────────────
+-- Config merging (global + project + CLI)
+-- ───────────────────────────────────────────────
+
+-- | Merge two GraphosConfig values: project overrides global.
+--
+-- Merge rules:
+--   * Maps (LSP, language IDs, extractors): 'Map.union', project wins on key collision
+--   * Scalar sections (Neo4j, Labeling, Observability): project wins if it differs
+--     from defaults; otherwise global wins
+--   * File extensions: full override (project wins if set)
+mergeGraphosConfig :: GraphosConfig -> GraphosConfig -> GraphosConfig
+mergeGraphosConfig global project = GraphosConfig
+  { gcLsp = Map.union (gcLsp project) (gcLsp global)
+  , gcLanguageIds = Map.union (gcLanguageIds project) (gcLanguageIds global)
+  , gcFileExtensions = if gcFileExtensions project == defaultFileExtensions
+                         then gcFileExtensions global
+                         else gcFileExtensions project
+  , gcExtractors = Map.union (gcExtractors project) (gcExtractors global)
+  , gcNeo4j = if gcNeo4j project == defaultNeo4jConfig
+                 then gcNeo4j global
+                 else gcNeo4j project
+  , gcLabeling = if gcLabeling project == defaultLabelingConfig
+                   then gcLabeling global
+                   else gcLabeling project
+  , gcObservability = mergeObservabilityConfig (gcObservability global)
+                                                (gcObservability project)
+  }
+
+-- | Merge two ObservabilityConfig values: project overrides global.
+-- A field in project is considered "explicit" if it differs from the default.
+mergeObservabilityConfig :: ObservabilityConfig -> ObservabilityConfig -> ObservabilityConfig
+mergeObservabilityConfig global project = ObservabilityConfig
+  { obsEnabled        = if obsEnabled project /= obsEnabled defaultObservabilityConfig
+                           then obsEnabled project
+                           else obsEnabled global
+  , obsEndpoint        = if obsEndpoint project /= obsEndpoint defaultObservabilityConfig
+                           then obsEndpoint project
+                           else obsEndpoint global
+  , obsMetricsPort     = if obsMetricsPort project /= obsMetricsPort defaultObservabilityConfig
+                           then obsMetricsPort project
+                           else obsMetricsPort global
+  , obsServiceName     = if obsServiceName project /= obsServiceName defaultObservabilityConfig
+                           then obsServiceName project
+                           else obsServiceName global
+  , obsServiceVersion  = if obsServiceVersion project /= obsServiceVersion defaultObservabilityConfig
+                           then obsServiceVersion project
+                           else obsServiceVersion global
+  , obsExportInterval  = if obsExportInterval project /= obsExportInterval defaultObservabilityConfig
+                           then obsExportInterval project
+                           else obsExportInterval global
+  , obsDebugTraceDir   = if obsDebugTraceDir project /= obsDebugTraceDir defaultObservabilityConfig
+                           then obsDebugTraceDir project
+                           else obsDebugTraceDir global
   }

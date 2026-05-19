@@ -4,6 +4,12 @@
 # This file configures LSP servers and file extension categories.
 # Any field left out will fall back to built-in defaults.
 # User values override defaults (for LSP/language_ids maps).
+#
+# Config resolution (later wins):
+#   1. Built-in defaults
+#   2. Global config: ~/.config/graphos/graphos.yaml
+#   3. This file (project graphos.yaml)
+#   4. CLI flags (--otel, --metrics, etc.)
 
 # ──── LSP Servers ─────────────────────────────
 # Map file extension → {command, args, language_id}
@@ -140,3 +146,21 @@ file_extensions:
     - .wav
     - .m4a
     - .ogg
+
+# ──── Observability ─────────────────────────────
+# Enable tracing, metrics, and debug instrumentation.
+# CLI flags (--otel, --metrics, --debug-trace) override these values.
+observability:
+  # Enable OpenTelemetry trace/metric export to an OTLP collector
+  enabled: false
+  # OTLP endpoint base URL (v1/traces and v1/metrics are appended automatically)
+  endpoint: "http://localhost:4318"
+  # Prometheus metrics server port (0 = disabled; use --metrics PORT to override)
+  metricsPort: 0
+  # Service name and version attached to all spans and metrics
+  serviceName: graphos
+  serviceVersion: "0.1.0"
+  # Metrics export interval in seconds
+  exportInterval: 15
+  # Directory for debug trace JSONL files (empty = disabled, use --debug-trace to enable)
+  debugTraceDir: ""

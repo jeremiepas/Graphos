@@ -7,6 +7,7 @@ module Graphos.UseCase.Export
 
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import qualified Data.Map.Strict as Map
 
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
@@ -15,7 +16,8 @@ import qualified Graphos.Infrastructure.Export.Report as ExportReport
 import qualified Graphos.Infrastructure.Export.Neo4j as ExportNeo4j
 import qualified Graphos.UseCase.Report as Report
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph)
+import Graphos.Domain.Graph (Graph, gNodes)
+import Graphos.Domain.Graph.Analysis (articulationPoints)
 
 -- | Result of all export operations
 data ExportResult = ExportResult
@@ -56,17 +58,43 @@ exportAll g analysis config detection = do
       let cypherPath = cfgOutputDir config ++ "/graph.cypher"
       ExportNeo4j.exportCypher g cypherPath
 
-      -- Push to Neo4j with community structure
+      -- Push to Neo4j based on push mode
       let pushUri = case cfgNeo4jPush config of
             Just uri -> T.unpack uri
             Nothing  -> neo4jUri neo4jCfg
           commMap = analysisCommunities analysis
           cohesionMap = analysisCohesion analysis
-      (msg, _stmts, _batches) <- ExportNeo4j.pushToNeo4jWithCommunities
-        g commMap cohesionMap
-        (T.pack pushUri)
-        (T.pack (neo4jUser neo4jCfg))
-        (T.pack (neo4jPassword neo4jCfg))
+          pushMode = cfgNeo4jPushMode config
+          topN = cfgNeo4jSubgraphSize config
+
+      (msg, _stmts, _batches) <- case pushMode of
+        FullPush -> do
+          TIO.putStrLn $ "[neo4j] Push mode: full (all nodes + edges + communities)"
+          ExportNeo4j.pushToNeo4jWithCommunities
+            g commMap cohesionMap
+            (T.pack pushUri)
+            (T.pack (neo4jUser neo4jCfg))
+            (T.pack (neo4jPassword neo4jCfg))
+
+        SubgraphPush -> do
+          let artPoints = articulationPoints g
+              totalNodes = length (gNodes g)
+          TIO.putStrLn $ "[neo4j] Push mode: subgraph (communities + " <> T.pack (show topN) <> " representatives/community, " <> T.pack (show (length artPoints)) <> " bridge nodes)"
+          TIO.putStrLn $ "[neo4j] Full graph: " <> T.pack (show totalNodes) <> " nodes → subgraph: ~" <> T.pack (show (topN * Map.size commMap + length artPoints)) <> " representative nodes"
+          ExportNeo4j.pushSubgraphToNeo4j
+            g commMap cohesionMap topN artPoints
+            (T.pack pushUri)
+            (T.pack (neo4jUser neo4jCfg))
+            (T.pack (neo4jPassword neo4jCfg))
+
+        CommunityPush -> do
+          TIO.putStrLn $ "[neo4j] Push mode: community-only (communities + inter-community edges)"
+          ExportNeo4j.pushCommunityGraphToNeo4j
+            g commMap cohesionMap
+            (T.pack pushUri)
+            (T.pack (neo4jUser neo4jCfg))
+            (T.pack (neo4jPassword neo4jCfg))
+
       TIO.putStrLn $ "[neo4j] " <> msg
       pure (Just cypherPath)
     else pure Nothing

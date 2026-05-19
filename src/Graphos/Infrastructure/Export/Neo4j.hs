@@ -16,12 +16,23 @@ module Graphos.Infrastructure.Export.Neo4j
   ( exportCypher
   , pushToNeo4j
   , pushToNeo4jWithCommunities
+  , pushSubgraphToNeo4j
+  , pushCommunityGraphToNeo4j
+  , pushFileExtraction
+  , pushEdgeRepair
+  , generateSubgraphStatements
+  , generateCommunityOnlyStatements
+  , generateCommunityStatements
+  , generateFileStatements
+  , generateEdgeRepairStatements
   ) where
 
 import Control.Exception (catch, SomeException)
+import Data.List (sortOn)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (removeFile)
@@ -29,8 +40,10 @@ import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 import Graphos.Domain.Community.Label (suggestCommunityLabels)
+import Graphos.Domain.Community (selectRepresentatives, filterEdgesByNodeSet)
+
 
 -- ───────────────────────────────────────────────
 -- Cypher file export (pure IO)
@@ -279,4 +292,214 @@ escapeCypherId t =
 -- | Escape a value for Cypher string literals (for .cypher file only).
 escapeCypherString :: Text -> Text
 escapeCypherString = T.replace "\\" "\\\\"
-                  . T.replace "'" "''"
+                   . T.replace "'" "''"
+
+-- ───────────────────────────────────────────────
+-- Community-only push (fastest — no individual nodes)
+-- ───────────────────────────────────────────────
+
+-- | Push community-level graph to Neo4j (no individual nodes or edges).
+-- Creates Community nodes and CONNECTED_TO inter-community edges.
+-- Fastest mode: ~3k-8k statements for large codebases.
+pushCommunityGraphToNeo4j :: Graph -> CommunityMap -> CohesionMap -> Text -> Text -> Text -> IO (Text, Int, Int)
+pushCommunityGraphToNeo4j g commMap cohesionMap uri user password =
+  let labels = suggestCommunityLabels g commMap
+      stmts = generateCommunityOnlyStatements g commMap cohesionMap labels
+  in pushStatements uri user password stmts
+
+-- | Generate parameterized Cypher statements for community-only push.
+-- Pure function — testable without Neo4j.
+generateCommunityOnlyStatements :: Graph -> CommunityMap -> CohesionMap -> Map.Map CommunityId Text -> [Aeson.Value]
+generateCommunityOnlyStatements g commMap cohesionMap labels =
+  -- Community nodes
+  [ Aeson.object
+      [ "statement" Aeson..= ("MERGE (c:Community {id: $id}) ON CREATE SET c.label = $label, c.size = $size, c.cohesion = $cohesion, c.top_members = $top_members" :: Text)
+      , "parameters" Aeson..= Aeson.object
+          [ "id"          Aeson..= T.pack ("community_" ++ show cid)
+          , "label"       Aeson..= Map.findWithDefault ("Community " <> T.pack (show cid)) cid labels
+          , "size"         Aeson..= length members
+          , "cohesion"    Aeson..= Map.findWithDefault 0.0 cid cohesionMap
+          , "top_members" Aeson..= topMemberLabels g members 5
+          ]
+      ]
+  | (cid, members) <- Map.toList commMap
+  ]
+  ++
+  -- Inter-community CONNECTED_TO edges
+  generateCommunityEdgeStatements g commMap
+
+-- ───────────────────────────────────────────────
+-- Sub-graph push (communities + representative nodes)
+-- ───────────────────────────────────────────────
+
+-- | Push communities + representative sub-graphs to Neo4j.
+-- Creates Community nodes, representative Node nodes, BELONGS_TO edges,
+-- intra-community edges between representatives, and CONNECTED_TO inter-community edges.
+pushSubgraphToNeo4j :: Graph -> CommunityMap -> CohesionMap -> Int -> [NodeId] -> Text -> Text -> Text -> IO (Text, Int, Int)
+pushSubgraphToNeo4j g commMap cohesionMap topN artPoints uri user password =
+  let labels = suggestCommunityLabels g commMap
+      reps = selectRepresentatives g commMap topN artPoints
+      allRepNodeIds = Set.fromList (concat (Map.elems reps))
+      stmts = generateSubgraphStatements g commMap cohesionMap labels reps allRepNodeIds
+  in pushStatements uri user password stmts
+
+-- | Generate parameterized Cypher statements for sub-graph push.
+-- Pure function — testable without Neo4j.
+generateSubgraphStatements
+  :: Graph
+  -> CommunityMap
+  -> CohesionMap
+  -> Map.Map CommunityId Text
+  -> Map.Map CommunityId [NodeId]   -- ^ representatives per community
+  -> Set.Set NodeId                 -- ^ all representative/bridge node IDs
+  -> [Aeson.Value]
+generateSubgraphStatements g commMap cohesionMap labels reps allRepNodeIds =
+  -- 1. Community nodes
+  [ Aeson.object
+      [ "statement" Aeson..= ("MERGE (c:Community {id: $id}) ON CREATE SET c.label = $label, c.size = $size, c.cohesion = $cohesion" :: Text)
+      , "parameters" Aeson..= Aeson.object
+          [ "id"       Aeson..= T.pack ("community_" ++ show cid)
+          , "label"    Aeson..= Map.findWithDefault ("Community " <> T.pack (show cid)) cid labels
+          , "size"     Aeson..= length members
+          , "cohesion" Aeson..= Map.findWithDefault 0.0 cid cohesionMap
+          ]
+      ]
+  | (cid, members) <- Map.toList commMap
+  ]
+  ++
+  -- 2. Representative Node nodes
+  [ generateRepresentativeNodeStatement n
+  | nid <- Set.toList allRepNodeIds
+  , Just n <- [Map.lookup nid (gNodes g)]
+  ]
+  ++
+  -- 3. BELONGS_TO edges (representative nodes → their community)
+  [ Aeson.object
+      [ "statement" Aeson..= ("MATCH (n:Node {id: $node_id}) MATCH (c:Community {id: $community_id}) MERGE (n)-[:BELONGS_TO]->(c)" :: Text)
+      , "parameters" Aeson..= Aeson.object
+          [ "node_id"      Aeson..= nid
+          , "community_id" Aeson..= T.pack ("community_" ++ show cid)
+          ]
+      ]
+  | (cid, members) <- Map.toList reps
+  , nid <- members
+  ]
+  ++
+  -- 4. Intra-community edges between representative nodes
+  [ generateParameterizedEdgeStatement e
+  | (_, e) <- Map.toList (filterEdgesByNodeSet allRepNodeIds (gEdges g))
+  ]
+  ++
+  -- 5. Inter-community CONNECTED_TO edges
+  generateCommunityEdgeStatements g commMap
+
+-- ───────────────────────────────────────────────
+-- Shared helpers for community push modes
+-- ───────────────────────────────────────────────
+
+-- | Generate a parameterized MERGE statement for a representative node.
+-- Marks the node as representative=true so it can be distinguished from full-push nodes.
+generateRepresentativeNodeStatement :: Node -> Aeson.Value
+generateRepresentativeNodeStatement n =
+  let stmt = T.concat
+        [ "MERGE (n:Node {id: $id})"
+        , " ON CREATE SET n.label = $label, n.file_type = $file_type, n.representative = true"
+        , maybe "" (const ", n.source_location = $source_location") (nodeSourceLocation n)
+        , maybe "" (const ", n.source_url = $source_url") (nodeSourceUrl n)
+        ]
+      params = Aeson.object $
+        [ "id"              Aeson..= nodeId n
+        , "label"           Aeson..= nodeLabel n
+        , "file_type"       Aeson..= T.pack (show (nodeFileType n))
+        , "representative"  Aeson..= Aeson.Bool True
+        ]
+        ++ maybe [] (\loc -> ["source_location" Aeson..= loc]) (nodeSourceLocation n)
+        ++ maybe [] (\url -> ["source_url" Aeson..= url]) (nodeSourceUrl n)
+  in Aeson.object
+       [ "statement" Aeson..= stmt
+       , "parameters" Aeson..= params
+       ]
+
+-- | Generate CONNECTED_TO inter-community edge statements.
+-- Shared between community-only and sub-graph push modes.
+generateCommunityEdgeStatements :: Graph -> CommunityMap -> [Aeson.Value]
+generateCommunityEdgeStatements g commMap =
+  let reverseIdx = Map.fromList
+        [(nid, cid) | (cid, members) <- Map.toList commMap, nid <- members]
+      edgeCounts :: Map.Map (CommunityId, CommunityId) (Int, [NodeId])
+      edgeCounts = Map.fromListWith (\(c1, b1) (c2, b2) -> (c1 + c2, take 5 (b1 ++ b2)))
+        [ let srcComm = Map.findWithDefault (-1) (edgeSource e) reverseIdx
+              tgtComm = Map.findWithDefault (-1) (edgeTarget e) reverseIdx
+              (c1, c2) = if srcComm <= tgtComm then (srcComm, tgtComm) else (tgtComm, srcComm)
+          in ((c1, c2), (1 :: Int, [edgeSource e]))
+        | (_, e) <- Map.toList (gEdges g)
+        , let srcC = Map.findWithDefault (-1) (edgeSource e) reverseIdx
+              tgtC = Map.findWithDefault (-1) (edgeTarget e) reverseIdx
+        , srcC /= tgtC
+        , srcC >= 0 && tgtC >= 0
+        ]
+  in [ Aeson.object
+         [ "statement" Aeson..= ("MATCH (c1:Community {id: $source_id}) MATCH (c2:Community {id: $target_id}) MERGE (c1)-[:CONNECTED_TO {edge_count: $edge_count, bridge_nodes: $bridge_nodes}]->(c2)" :: Text)
+         , "parameters" Aeson..= Aeson.object
+             [ "source_id"    Aeson..= T.pack ("community_" ++ show c1)
+             , "target_id"    Aeson..= T.pack ("community_" ++ show c2)
+             , "edge_count"   Aeson..= count
+             , "bridge_nodes" Aeson..= map (\nid -> maybe nid nodeLabel (Map.lookup nid (gNodes g))) bridges
+             ]
+         ]
+     | ((c1, c2), (count, bridges)) <- Map.toList edgeCounts
+     ]
+
+-- | Get the top N member node labels for a community (used in community-only push).
+topMemberLabels :: Graph -> [NodeId] -> Int -> [Text]
+topMemberLabels g members n =
+  let sortedByDegree = sortOn (\nid -> negate (fromIntegral (Set.size (neighbors g nid)) :: Double)) members
+  in take n [ nodeLabel nd | nid <- sortedByDegree, Just nd <- [Map.lookup nid (gNodes g)] ]
+
+-- ───────────────────────────────────────────────
+-- Streaming node-by-node push (during extraction)
+-- ───────────────────────────────────────────────
+
+-- | Push a single file's extraction to Neo4j immediately.
+--
+-- Each file's nodes and edges are pushed as a small batch using MERGE,
+-- making this idempotent and safe for incremental/streaming use.
+--
+-- Returns: (message, statementCount, batchCount)
+pushFileExtraction :: Extraction -> Text -> Text -> Text -> IO (Text, Int, Int)
+pushFileExtraction extraction uri user password =
+  let stmts = generateFileStatements extraction
+  in if null stmts
+     then pure ("Skipped empty extraction", 0, 0)
+     else pushStatements uri user password stmts
+
+-- | Generate parameterized Cypher statements for a single file's extraction.
+--
+-- Pure function — testable without Neo4j.
+-- Produces MERGE statements for each node and edge in the extraction,
+-- so re-pushing is safe (idempotent).
+generateFileStatements :: Extraction -> [Aeson.Value]
+generateFileStatements extraction =
+  [ generateParameterizedNodeStatement n | n <- extractionNodes extraction ]
+  ++ [ generateParameterizedEdgeStatement e | e <- extractionEdges extraction ]
+
+-- | Push edge-repair statements to Neo4j.
+--
+-- After all extractions are complete, edges may reference nodes from
+-- other files. MERGE already handles this (creates nodes on match),
+-- but edges with MATCH require the target nodes to exist. This function
+-- re-pushes all edges to ensure MATCH clauses resolve correctly.
+--
+-- Returns: (message, statementCount, batchCount)
+pushEdgeRepair :: Graph -> Text -> Text -> Text -> IO (Text, Int, Int)
+pushEdgeRepair g uri user password =
+  pushStatements uri user password (generateEdgeRepairStatements g)
+
+-- | Generate edge-repair statements: re-push all edges with MATCH.
+--
+-- This ensures that edges between nodes extracted from different files
+-- are properly connected, since nodes may have been pushed before their
+-- cross-file neighbors existed in Neo4j.
+generateEdgeRepairStatements :: Graph -> [Aeson.Value]
+generateEdgeRepairStatements g =
+  [ generateParameterizedEdgeStatement e | e <- Map.elems (gEdges g) ]

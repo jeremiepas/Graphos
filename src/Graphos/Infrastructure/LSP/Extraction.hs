@@ -12,7 +12,7 @@ module Graphos.Infrastructure.LSP.Extraction
   ) where
 
 import Control.Concurrent.MVar (takeMVar, putMVar)
-import Control.Exception (catch, SomeException(..))
+import Control.Exception (catch, SomeException(..), evaluate)
 import Control.Monad (unless)
 import Data.Aeson (Value(..))
 import qualified Data.Aeson as Aeson
@@ -24,6 +24,7 @@ import Data.Maybe (mapMaybe)
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import System.Timeout (timeout)
 
 import Graphos.Domain.Types
@@ -49,7 +50,10 @@ extractViaLSP client filePath =
     let ext = takeExtension filePath
         langId = languageIdFromExt ext
 
-    fileContent <- catch (T.pack <$> readFile filePath) $ \(_ :: SomeException) -> pure ""
+    -- Read file content strictly to avoid holding the entire file as a lazy
+    -- thunk chain. For 10k+ files this accumulates megabytes of lazy String
+    -- chunks that can't be GC'd until fully consumed.
+    fileContent <- catch (TIO.readFile filePath >>= evaluate) $ \(_ :: SomeException) -> pure ""
 
     let openMsg = lspDidOpen filePath langId fileContent
     sent <- sendLSPMessageSafe client openMsg

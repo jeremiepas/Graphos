@@ -6,6 +6,7 @@ module Graphos.Domain.Labeling
   , batchCommunities
   ) where
 
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -16,10 +17,10 @@ import Graphos.Domain.Graph (Graph, gNodes, degree)
 
 -- | Result of LLM community labeling.
 data LabelingResult = LabelingResult
-  { lrLabels   :: Map CommunityId Text    -- ^ Community ID → LLM-generated label
-  , lrTokensIn :: Int                     -- ^ Total input tokens used
-  , lrTokensOut :: Int                    -- ^ Total output tokens used
-  , llmRawResponses :: [Text]            -- ^ Raw LLM responses for debugging
+  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → LLM-generated label
+  , lrTokensIn     :: Int                     -- ^ Total input tokens used
+  , lrTokensOut    :: Int                     -- ^ Total output tokens used
+  , llmRawResponses :: [Text]                 -- ^ Raw LLM responses for debugging
   } deriving (Eq, Show)
 
 -- | Build a labeling prompt for a batch of communities.
@@ -31,7 +32,7 @@ labelPrompt g commMap cohesion cids =
      [ "You are a code architecture analyst. Given these communities of related code nodes,"
      , "assign a concise 2-4 word label that describes each community's purpose."
      , ""
-     , T.unlines communitySections
+     , T.intercalate "\n" communitySections
      , "Respond ONLY with a JSON object mapping community IDs to labels."
      , "Example: {\"483\": \"Export Module\", \"484\": \"Config Parsing\"}"
      ]
@@ -42,7 +43,7 @@ formatCommunity g commMap cohesion cid =
   case Map.lookup cid commMap of
     Nothing -> ""
     Just members ->
-      let topNodes = take 10 $ map snd $ take 10 $ reverse $ sortOn snd
+      let topNodes = take 10 $ map snd $ reverse $ sortOn fst
             [(degree g nid, nid) | nid <- members, Map.member nid (gNodes g)]
           labels = map (\nid -> case Map.lookup nid (gNodes g) of
                               Just n -> nodeLabel n
@@ -62,7 +63,3 @@ batchCommunities :: [CommunityId] -> Int -> [[CommunityId]]
 batchCommunities _ 0 = []
 batchCommunities [] _ = []
 batchCommunities cids size = take size cids : batchCommunities (drop size cids) size
-
--- | Sort a list by descending second element.
-sortOn :: Ord b => (a -> b) -> [a] -> [a]
-sortOn f = map snd . Map.toDescList . Map.fromList . map (\x -> (f x, x))
