@@ -1,23 +1,32 @@
-# Graphos — Neo4j + Observability Development Stack
+# Graphos — Neo4j / Memgraph + Observability Development Stack
 #
 # Quick start:
-#   docker compose up -d          # Start all services
-#   docker compose up -d neo4j    # Start only Neo4j
-#   docker compose down            # Stop (data preserved in volumes)
-#   docker compose down -v         # Stop and delete data
+#   docker compose up -d                # Start all services
+#   docker compose up -d neo4j          # Start only Neo4j
+#   docker compose up -d memgraph        # Start only Memgraph
+#   docker compose down                  # Stop (data preserved in volumes)
+#   docker compose down -v               # Stop and delete data
 #
 # Access:
-#   Neo4j Browser:  http://localhost:7474
-#   Neo4j Bolt:     bolt://localhost:7687
-#   Grafana:        http://localhost:13000 (anonymous access, no login)
-#   Prometheus:     http://localhost:9091
-#   OTel Collector: http://localhost:14318 (OTLP HTTP)
+#   Neo4j Browser:   http://localhost:7474
+#   Neo4j Bolt:      bolt://localhost:7687
+#   Memgraph Lab:    http://localhost:7400
+#   Memgraph Bolt:   bolt://localhost:7688
+#   Grafana:         http://localhost:13000 (anonymous access, no login)
+#   Prometheus:      http://localhost:9091
+#   Loki:            http://localhost:3100
+#   Tempo:           http://localhost:14320 (OTLP HTTP traces)
+#   OTel Collector:  http://localhost:14318 (OTLP HTTP — via Tempo)
+#                     http://localhost:14319 (OTLP HTTP — direct to Collector)
 #
 # Graphos integration:
-#   graphos . --neo4j                          # Export Cypher to graphos-out/
-#   graphos . --neo4j --neo4j-push http://localhost:7474  # Push directly
-#   graphos . --otel --otel-endpoint http://localhost:14318  # Enable tracing
-#   graphos . --metrics 9090                   # Expose Prometheus metrics
+#   graphos . --neo4j                                              # Export Cypher to graphos-out/
+#   graphos . --neo4j --neo4j-push http://localhost:7474            # Push to Neo4j
+#   graphos . --memgraph                                           # Export Cypher to graphos-out/
+#   graphos . --memgraph --memgraph-push bolt://localhost:7688     # Push to Memgraph
+#   graphos . --otel --metrics 9090 --debug                        # Full observability
+#   graphos . --otel --otel-endpoint http://localhost:14319         # OTLP via OTel Collector (Docker Compose)
+#   graphos . --otel --otel-endpoint http://localhost:4318          # OTLP direct (local Tempo)
 
 services:
   neo4j:
@@ -69,9 +78,54 @@ services:
       retries: 5
       start_period: 30s
 
+  # ── Memgraph ─────────────────────────────────────────────────────
+  # In-memory graph database, Bolt-protocol compatible with Neo4j drivers.
+  # Use for fast, in-process graph analytics without JVM overhead.
+  # Data is ephemeral unless --data-dir is set (see comment below).
+  memgraph:
+    image: memgraph/memgraph-platform:latest
+    container_name: graphos-memgraph
+    restart: unless-stopped
+    ports:
+      - "7688:7687"   # Bolt — Cypher query protocol (remapped to avoid Neo4j conflict)
+      - "7400:3000"   # Memgraph Lab — web UI (remapped, 3000 in use by Grafana)
+    environment:
+      - MEMGRAPH_ARGS=--also-execute-session-init-script=CREATE INDEX node_id_index IF NOT EXISTS FOR (n:Node) ON (n.id); CREATE INDEX community_id_index IF NOT EXISTS FOR (c:Community) ON (c.id);
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+      - memgraph-log:/var/log/memgraph
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ── Grafana Tempo ─────────────────────────────────────────────────
+  # Distributed tracing backend. Receives OTLP traces from the OTel Collector.
+  # Grafana queries Tempo via the Tempo data source for trace exploration.
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: graphos-tempo
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./monitoring/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "14320:4320"   # Tempo HTTP API (query, metrics) — used by Grafana
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4320/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
   # ── OpenTelemetry Collector ────────────────────────────────────
-  # Receives traces and metrics from Graphos via OTLP HTTP.
-  # Forwards to Prometheus (metrics) and Loki (logs/traces).
+  # Receives traces, metrics, and logs from Graphos via OTLP HTTP.
+  # Forwards to Prometheus (metrics), Tempo (traces), and Loki (logs).
+  # Notes: Tempo owns ports 4317/4318 (OTLP receivers). The collector
+  # uses different host ports to avoid conflict.
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.96.0
     container_name: graphos-otel-collector
@@ -80,12 +134,15 @@ services:
     volumes:
       - ./monitoring/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "14318:4318"  # OTLP HTTP receiver (remapped, 4318 in use)
-      - "14317:4317"  # OTLP gRPC receiver (remapped, 4317 in use)
-      - "8889:8889"   # Prometheus exporter (scraped by Prometheus)
+      - "14319:4318"   # OTLP HTTP receiver (remapped, 4318 used by Tempo)
+      - "14316:4317"   # OTLP gRPC receiver (remapped, 4317 used by Tempo)
+      - "8889:8889"    # Prometheus exporter (scraped by Prometheus)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - prometheus
       - loki
+      - tempo
 
   # ── Prometheus ─────────────────────────────────────────────────
   # Scrapes metrics from Graphos (--metrics 9090) and the OTel Collector.
@@ -102,6 +159,8 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-remote-write-receiver"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── Loki ────────────────────────────────────────────────────────
   # Receives log and trace data from OTel Collector.
@@ -116,7 +175,7 @@ services:
     command: ["-config.file=/etc/loki/local-config.yaml"]
 
   # ── Grafana ─────────────────────────────────────────────────────
-  # Visualization dashboard for Prometheus metrics and Loki traces.
+  # Visualization dashboard for Prometheus metrics, Loki logs, Tempo traces.
   grafana:
     image: grafana/grafana:10.4.1
     container_name: graphos-grafana
@@ -135,6 +194,7 @@ services:
     depends_on:
       - prometheus
       - loki
+      - tempo
 
 volumes:
   neo4j-data:
@@ -145,6 +205,12 @@ volumes:
     name: graphos-neo4j-plugins
   neo4j-config:
     name: graphos-neo4j-config
+  memgraph-data:
+    name: graphos-memgraph-data
+  memgraph-log:
+    name: graphos-memgraph-log
+  tempo-data:
+    name: graphos-tempo-data
   prometheus-data:
     name: graphos-prometheus-data
   loki-data:

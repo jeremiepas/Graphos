@@ -43,6 +43,7 @@ data ConfigFile = ConfigFile
   , cfFileExtensions  :: Maybe FileExtensionConfig
   , cfExtractors      :: Maybe (Map String ExtractorConfig)
   , cfNeo4j           :: Maybe Neo4jConfig
+  , cfMemgraph        :: Maybe MemgraphConfig
   , cfLabeling        :: Maybe LabelingConfig
   , cfObservability   :: Maybe ObservabilityConfig
   } deriving (Eq, Show)
@@ -54,6 +55,7 @@ instance FromJSON ConfigFile where
     <*> v .:? "file_extensions"
     <*> v .:? "extractors"
     <*> v .:? "neo4j"
+    <*> v .:? "memgraph"
     <*> v .:? "labeling"
     <*> v .:? "observability"
 
@@ -137,6 +139,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcNeo4j = case cfNeo4j cfgFile of
       Just neo4j  -> neo4j
       Nothing     -> gcNeo4j defaults
+  , gcMemgraph = case cfMemgraph cfgFile of
+      Just memgraph -> memgraph
+      Nothing       -> gcMemgraph defaults
   , gcLabeling = case cfLabeling cfgFile of
       Just labeling -> labeling
       Nothing      -> gcLabeling defaults
