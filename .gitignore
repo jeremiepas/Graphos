@@ -13,7 +13,10 @@ cabal.project.local
 cabal.project.local~
 .ghc.environment.*
 graphos-out/
-.opencode/
+# .opencode local dev config (agent files tracked separately)
+.opencode/*
+!.opencode/agent/
+!.opencode/agent/**
 docs/
 node_modules/
 traces/
