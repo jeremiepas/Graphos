@@ -17,3 +17,23 @@ datasources:
     editable: true
     jsonData:
       maxLines: 1000
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:4320
+    editable: true
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags: ['service.name']
+        queries:
+          - name: Pipeline Duration
+            query: 'histogram_quantile(0.95, sum(rate(graphos_pipeline_step_duration_seconds_bucket[5m])) by (le))'
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ['service.name']
+        mapTagNames:
+          service.name: service
+      nodeGraph:
+        enabled: true

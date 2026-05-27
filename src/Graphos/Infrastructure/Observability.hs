@@ -78,7 +78,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import Data.Time.Clock (UTCTime(..), getCurrentTime, diffUTCTime)
-import Data.Time (formatTime, defaultTimeLocale)
+import Data.Time (formatTime, defaultTimeLocale, fromGregorian)
 import Data.Word (Word64, Word8)
 import Network.HTTP.Client
   ( newManager
@@ -95,8 +95,9 @@ import Network.HTTP.Types (status200, hContentType, methodPost)
 import Network.Wai (pathInfo, responseLBS)
 import Network.Wai.Handler.Warp (runSettings, setPort, setHost, defaultSettings, setBeforeMainLoop)
 import System.Directory (createDirectoryIfMissing)
+import System.IO (hPutStrLn, stderr)
 
-import Graphos.Infrastructure.Logging (LogLevel(..), LogEnv, defaultLogEnv, logInfo, logDebug)
+import Graphos.Infrastructure.Logging (LogLevel(..), LogEnv, defaultLogEnv, logInfo, logDebug, enableOtlpLogShipping, flushOtlpLogs)
 
 -- ───────────────────────────────────────────────
 -- Configuration
@@ -106,6 +107,7 @@ import Graphos.Infrastructure.Logging (LogLevel(..), LogEnv, defaultLogEnv, logI
 data OtelConfig = OtelConfig
   { otelTracesEndpoint  :: String
   , otelMetricsEndpoint :: String
+  , otelLogsEndpoint    :: String
   , otelServiceName     :: String
   , otelServiceVersion  :: String
   , otelExportInterval  :: Int
@@ -116,6 +118,7 @@ defaultOtelConfig :: OtelConfig
 defaultOtelConfig = OtelConfig
   { otelTracesEndpoint  = "http://localhost:4318/v1/traces"
   , otelMetricsEndpoint = "http://localhost:4318/v1/metrics"
+  , otelLogsEndpoint     = "http://localhost:4318/v1/logs"
   , otelServiceName     = "graphos"
   , otelServiceVersion  = "0.1.0"
   , otelExportInterval  = 15
@@ -371,13 +374,16 @@ exportTracesOTLP config spans = unless (null spans) $ do
   pure ()
 
 -- | Export metrics as OTLP JSON to the metrics endpoint.
+-- Uses current nanosecond timestamps so Prometheus/Collector accepts them.
 exportMetricsOTLP :: OtelConfig -> MetricsStore -> IO ()
 exportMetricsOTLP config ms = do
   counters <- readIORef (msCounters ms)
   gauges <- readIORef (msGauges ms)
   histograms <- readIORef (msHistograms ms)
   unless (Map.null counters && Map.null gauges && Map.null histograms) $ do
-    let body = encodeOTLPMetrics config counters gauges histograms
+    now <- getCurrentTime
+    let ts = T.pack $ show (utcToNano now)
+        body = encodeOTLPMetrics config counters gauges histograms ts
     _ <- httpPost (otelMetricsEndpoint config) body
     pure ()
 
@@ -397,20 +403,20 @@ encodeOTLPTraces config spans = BSL.fromStrict $ TE.encodeUtf8 $ T.concat
 
 encodeSpan :: Span -> Text
 encodeSpan s = T.concat
-  [ "{\"traceId\":\"" <> formatHex (spanTraceId s) <> "\","
-  , "\"spanId\":\"" <> formatHex (spanSpanId s) <> "\","
+  [ "{\"traceId\":\"" <> formatTraceId (spanTraceId s) <> "\","
+  , "\"spanId\":\"" <> formatSpanId (spanSpanId s) <> "\","
   , "\"name\":\"" <> escapeJson (spanName s) <> "\","
   , "\"kind\":" <> kindNum (spanKind s) <> ","
   , "\"startTimeUnixNano\":\"" <> formatTimeNano (spanStart s) <> "\","
   , case spanEnd s of
       Just end -> "\"endTimeUnixNano\":\"" <> formatTimeNano end <> "\","
       Nothing -> ""
-  , "\"status\":{\"code\":" <> statusCode (spanStatus s)
+  , "\"status\":{\"code\":" <> statusNum (spanStatus s)
   , case spanStatus s of
       SpanError msg -> ",\"message\":\"" <> escapeJson msg <> "\"}"
       SpanOK -> "}"
   , case spanParentId s of
-      Just pid -> ",\"parentSpanId\":\"" <> formatHex pid <> "\""
+      Just pid -> ",\"parentSpanId\":\"" <> formatSpanId pid <> "\""
       Nothing -> ""
   , ",\"attributes\":[" <> T.intercalate "," (map attrEntry (Map.toList (spanAttributes s))) <> "]}"
   ]
@@ -420,10 +426,15 @@ encodeSpan s = T.concat
     kindNum SpanInternal = "3"
     kindNum SpanProducer = "4"
     kindNum SpanConsumer = "5"
-    statusCode SpanOK = "0"
-    statusCode (SpanError _) = "1"
+    statusNum SpanOK = "0"
+    statusNum (SpanError _) = "1"
     attrEntry (k,v) = "{\"key\":\"" <> escapeJson k <> "\",\"value\":{\"stringValue\":\"" <> escapeJson v <> "\"}}"
-    formatHex n = T.pack $ concatMap (padHex . showHexInt) (wordToBytes n)
+    -- OTLP requires 128-bit (32 hex char) trace IDs and 64-bit (16 hex char) span IDs.
+    -- Word64 is 64-bit (16 hex chars). We use:
+    --   traceId: zero-prefix + 16 hex = 32 hex chars (128-bit)
+    --   spanId:  16 hex chars (64-bit)
+    formatTraceId n = T.replicate 16 "0" <> T.pack (concatMap (padHex . showHexInt) (wordToBytes n))
+    formatSpanId n = T.pack (concatMap (padHex . showHexInt) (wordToBytes n))
     padHex h = replicate (2 - length h) '0' ++ h
     showHexInt :: Word8 -> String
     showHexInt b0 = case quotRem b0 16 of
@@ -449,12 +460,14 @@ encodeSpan s = T.concat
     formatTimeNano t = T.pack $ show (utcToNano t)
 
 utcToNano :: UTCTime -> Integer
-utcToNano t = floor (diffUTCTime t epochUTCTime * 1e9)
-  where
-    epochUTCTime = UTCTime (toEnum 0) 0
+utcToNano t = floor (diffUTCTime t unixEpoch * 1e9)
 
-encodeOTLPMetrics :: OtelConfig -> Map CounterName Int64 -> Map GaugeName Double -> Map HistogramName [Double] -> BSL.ByteString
-encodeOTLPMetrics config counters gauges histograms = BSL.fromStrict $ TE.encodeUtf8 $ T.concat
+-- | Unix epoch (1970-01-01 00:00:00 UTC) as a UTCTime value.
+unixEpoch :: UTCTime
+unixEpoch = UTCTime (fromGregorian 1970 1 1) 0
+
+encodeOTLPMetrics :: OtelConfig -> Map CounterName Int64 -> Map GaugeName Double -> Map HistogramName [Double] -> Text -> BSL.ByteString
+encodeOTLPMetrics config counters gauges histograms ts = BSL.fromStrict $ TE.encodeUtf8 $ T.concat
   [ "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
   , "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"" <> T.pack (otelServiceName config) <> "\"}},"
   , "{\"key\":\"service.version\",\"value\":{\"stringValue\":\"" <> T.pack (otelServiceVersion config) <> "\"}}]},"
@@ -470,13 +483,13 @@ encodeOTLPMetrics config counters gauges histograms = BSL.fromStrict $ TE.encode
     encodeCounterMetric (name, val) = T.concat
       [ "{\"name\":\"" <> name <> "\",\"description\":\"Total " <> name <> "\",\"unit\":\"1\","
       , "\"sum\":{\"dataPoints\":[{\"asInt\":\"" <> T.pack (show val) <> "\""
-      , ",\"startTimeUnixNano\":\"0\",\"timeUnixNano\":\"0\"}]"
+      , ",\"startTimeUnixNano\":\"" <> ts <> "\",\"timeUnixNano\":\"" <> ts <> "\"}]"
       , ",\"aggregationTemporality\":2,\"isMonotonic\":true}}"
       ]
     encodeGaugeMetric (name, val) = T.concat
       [ "{\"name\":\"" <> name <> "\",\"description\":\"Current " <> name <> "\",\"unit\":\"1\","
       , "\"gauge\":{\"dataPoints\":[{\"asDouble\":\"" <> T.pack (show val) <> "\""
-      , ",\"startTimeUnixNano\":\"0\",\"timeUnixNano\":\"0\"}]}}"
+      , ",\"startTimeUnixNano\":\"" <> ts <> "\",\"timeUnixNano\":\"" <> ts <> "\"}]}}"
       ]
     encodeHistogramMetric (name, vals) = T.concat
       [ "{\"name\":\"" <> name <> "\",\"description\":\"Histogram " <> name <> "\",\"unit\":\"s\","
@@ -485,7 +498,7 @@ encodeOTLPMetrics config counters gauges histograms = BSL.fromStrict $ TE.encode
       , "],\"explicitBounds\":[" <> T.intercalate "," (map (T.pack . show) standardBuckets) <> "]"
       , ",\"count\":\"" <> T.pack (show (length vals)) <> "\""
       , ",\"sum\":\"" <> T.pack (show (sum vals)) <> "\""
-      , ",\"startTimeUnixNano\":\"0\",\"timeUnixNano\":\"0\"}]}}"
+      , ",\"startTimeUnixNano\":\"" <> ts <> "\",\"timeUnixNano\":\"" <> ts <> "\"}]}}"
       ]
     countInBucket vals bound = length $ filter (<= bound) vals
     standardBuckets = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
@@ -502,8 +515,10 @@ httpPost url body = do
                  , requestHeaders = [("Content-Type", "application/json")]
                  , requestBody = RequestBodyLBS body
                  }
-  _ <- httpLbs req' mgr `catch` (\(_ :: SomeException) -> pure (error "ignored"))
-  pure ()
+  result <- (Right <$> httpLbs req' mgr) `catch` (\(e :: SomeException) -> pure $ Left $ show e)
+  case result of
+    Right _   -> pure ()
+    Left err  -> hPutStrLn stderr $ "[graphos] WARNING: OTLP POST to " ++ url ++ " failed: " ++ err
 
 -- ───────────────────────────────────────────────
 -- Prometheus metrics HTTP endpoint
@@ -534,6 +549,7 @@ startMetricsServer ms listenPort = do
 -- | Initialize full observability stack.
 -- Creates tracer, metrics store, debug trace, and optionally starts:
 --   * OTLP background exporter (if otelEnabled)
+--   * Structured JSON log shipping to OTLP Collector → Loki (if otelEnabled && logLevel >= LevelTrace)
 --   * Prometheus metrics server (if metricsPort is Just)
 initObservability :: LogLevel -> OtelConfig -> Maybe Int -> FilePath -> IO ObservabilityEnv
 initObservability logLevel otelCfg metricsPort debugDir = do
@@ -544,6 +560,11 @@ initObservability logLevel otelCfg metricsPort debugDir = do
 
   when (otelEnabled otelCfg) $ do
     logInfo logEnv "Starting OTLP metrics exporter..."
+    -- Enable structured JSON log shipping to OTLP Collector → Loki
+    -- When --otel is active, all logs at or above the current log level are shipped.
+    -- Previously this was gated behind --debug (LevelTrace), which meant --otel alone
+    -- produced no logs in Grafana — a common source of confusion.
+    enableOtlpLogShipping logEnv (otelLogsEndpoint otelCfg) (otelServiceName otelCfg)
     _ <- forkIO $ forever $ do
       threadDelay (otelExportInterval otelCfg * 1000000)
       spans <- readIORef (tracerSpans tracer)
@@ -566,10 +587,11 @@ initObservability logLevel otelCfg metricsPort debugDir = do
     , otelLogEnv = logEnv
     }
 
--- | Shut down observability: flush debug traces and export remaining spans.
+-- | Shut down observability: flush debug traces, OTLP logs, and export remaining spans.
 shutdownObservability :: ObservabilityEnv -> IO ()
 shutdownObservability env = do
   flushDebugTrace (otelDebugTrace env)
+  flushOtlpLogs (otelLogEnv env)
   when (otelEnabled (otelConfig env)) $ do
     spans <- readIORef (tracerSpans (otelTracer env))
     unless (null spans) $ exportTracesOTLP (otelConfig env) spans

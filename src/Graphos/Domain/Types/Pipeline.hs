@@ -6,6 +6,7 @@ module Graphos.Domain.Types.Pipeline
   , EdgeDensity(..)
   , Neo4jPushMode(..)
   , Neo4jStreamingConfig(..)
+  , MemgraphPushMode(..)
   , defaultConfig
 
     -- * Checkpoint & resume
@@ -24,7 +25,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
-import Graphos.Infrastructure.Observability (OtelConfig(..), defaultOtelConfig)
+import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
 
 -- | Pipeline configuration
 data PipelineConfig = PipelineConfig
@@ -58,6 +59,10 @@ data PipelineConfig = PipelineConfig
   , cfgCommunityGraph :: Bool      -- ^ export community-level graph JSON for LLM navigation
   , cfgGraphosConfig :: GraphosConfig  -- ^ LSP servers, language IDs, file extensions (config-driven)
   , cfgNeo4jStreaming :: Maybe Neo4jStreamingConfig  -- ^ Push nodes to Neo4j during extraction (streaming)
+  , cfgMemgraph      :: Bool          -- ^ Export Cypher for Memgraph (--memgraph)
+  , cfgMemgraphPush  :: Maybe Text   -- ^ Push to Memgraph at Bolt URI (--memgraph-push)
+  , cfgMemgraphPushMode :: MemgraphPushMode
+  , cfgMemgraphSubgraphSize :: Int
   , cfgMetricsPort   :: Maybe Int                   -- ^ Prometheus metrics server port (e.g. Just 9090)
   , cfgOtelEnabled   :: Bool                         -- ^ Enable OTLP export (--otel flag)
   , cfgOtelConfig     :: OtelConfig                   -- ^ OpenTelemetry configuration
@@ -81,6 +86,13 @@ data Neo4jPushMode
   = FullPush         -- ^ All nodes + edges + communities (current behavior)
   | SubgraphPush     -- ^ Communities + representative sub-graphs per community
   | CommunityPush    -- ^ Communities + inter-community edges only
+  deriving (Eq, Show, Read)
+
+-- | Memgraph push mode — mirrors Neo4jPushMode for Memgraph.
+data MemgraphPushMode
+  = MemgraphFull
+  | MemgraphSubgraph
+  | MemgraphCommunity
   deriving (Eq, Show, Read)
 
 -- | Default pipeline configuration
@@ -116,6 +128,10 @@ defaultConfig = PipelineConfig
   , cfgCommunityGraph = False
   , cfgGraphosConfig = defaultGraphosConfig
   , cfgNeo4jStreaming = Nothing
+  , cfgMemgraph      = False
+  , cfgMemgraphPush  = Nothing
+  , cfgMemgraphPushMode = MemgraphSubgraph
+  , cfgMemgraphSubgraphSize = 7
   , cfgMetricsPort   = Nothing
   , cfgOtelEnabled   = False
   , cfgOtelConfig     = defaultOtelConfig

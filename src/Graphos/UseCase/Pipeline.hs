@@ -29,12 +29,19 @@ import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Graph (gNodes, gEdges)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
-import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logTrace)
-import Graphos.Infrastructure.Observability
+import Graphos.Infrastructure.Logging (LogLevel(..), logInfo, logDebug, logTrace)
+import Graphos.Infrastructure.Observability.SDK
   ( ObservabilityEnv(..)
   , incCounter, setGauge, observeHistogram
-  , debugTraceSpan, flushDebugTrace
+  , debugTraceSpan
   , initObservability
+  , shutdownObservability
+  )
+import OpenTelemetry.Trace
+  ( inSpan
+  , defaultSpanArguments
+  , SpanKind(..)
+  , SpanArguments(..)
   )
 import Graphos.UseCase.Detect (detectFiles)
 import Graphos.UseCase.Extract (extractAll, extractChangedFiles)
@@ -68,17 +75,16 @@ runPipeline config = catch (do
   let logLevel = if cfgDebug config then LevelTrace
                  else if cfgVerbose config then LevelDebug
                  else LevelInfo
-  env <- defaultLogEnv logLevel
-
-  -- Initialize observability (tracing + metrics)
+  -- Initialize observability (tracing + metrics + log shipping)
   let otelCfg = cfgOtelConfig config
       metricsPort = cfgMetricsPort config
       debugDir = case cfgDebugTraceDir config of
                    Just d -> d
                    Nothing -> cfgOutputDir config ++ "/traces"
   obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
-  let _tracer = otelTracer obsEnv
+  let tracer = otelTracer obsEnv
       metrics = otelMetrics obsEnv
+      env = otelLogEnv obsEnv  -- Use the LogEnv from ObservabilityEnv (has OTLP shipping enabled)
 
   -- Set up Neo4j streaming: when --neo4j is enabled, push nodes during extraction
   let configWithStreaming = case (cfgNeo4j config, cfgNeo4jPush config) of
@@ -106,7 +112,7 @@ runPipeline config = catch (do
   -- Step 1: Detect
   logInfo env "Step 1: Detecting files..."
   detectStart <- getCurrentTime
-  detection <- detectFiles (cfgInputPath configWithStreaming)
+  detection <- withSpan_ tracer "pipeline_detect" SpanInternal $ detectFiles (cfgInputPath configWithStreaming)
   detectEnd <- getCurrentTime
   observeHistogram metrics "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   incCounter metrics "graphos_pipeline_steps_total" 1
@@ -134,7 +140,8 @@ runPipeline config = catch (do
       -- Step 2: Extract (nodes are pushed to Neo4j during extraction if streaming is enabled)
       logInfo env "Step 2: Extracting entities and relationships..."
       extractStart <- getCurrentTime
-      extraction <- extractAll configWithStreaming detection env
+      extraction <- withSpan_ tracer "pipeline_extract" SpanInternal $
+        extractAll configWithStreaming detection env
       extractEnd <- getCurrentTime
       observeHistogram metrics "graphos_extract_duration_seconds" (realToFrac (diffUTCTime extractEnd extractStart) :: Double)
       incCounter metrics "graphos_pipeline_steps_total" 1
@@ -277,8 +284,8 @@ runPipeline config = catch (do
       -- Cleanup checkpoint
       clearPipelineCheckpoint (cfgOutputDir configWithStreaming)
 
-      -- Flush observability data
-      flushDebugTrace (otelDebugTrace obsEnv)
+      -- Flush observability data (traces to OTLP, logs to Loki, debug traces)
+      shutdownObservability obsEnv
 
       let result = PipelineResult
             { prNodes       = Map.size (gNodes enrichedGraph)
@@ -303,14 +310,14 @@ runIncrementalPipeline config changedFiles = catch (do
   let logLevel = if cfgDebug config then LevelTrace
                  else if cfgVerbose config then LevelDebug
                  else LevelInfo
-  env <- defaultLogEnv logLevel
   let otelCfg = cfgOtelConfig config
       metricsPort = cfgMetricsPort config
       debugDir = case cfgDebugTraceDir config of
-                   Just d -> d
-                   Nothing -> cfgOutputDir config ++ "/traces"
+                    Just d -> d
+                    Nothing -> cfgOutputDir config ++ "/traces"
   obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
   let _metrics = otelMetrics obsEnv
+      env = otelLogEnv obsEnv  -- Use the LogEnv from ObservabilityEnv (has OTLP shipping enabled)
 
   -- Set up Neo4j streaming if enabled
   let configWithStreaming = case (cfgNeo4j config, cfgNeo4jPush config) of

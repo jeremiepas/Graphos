@@ -9,7 +9,7 @@ import Control.Monad (forM_)
 import Control.Concurrent.MVar (newMVar)
 import Data.Maybe (isJust)
 
-import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), MemgraphPushMode(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, PipelineResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndex, pathQueryWithIndex, explainNodeWithIndex, QueryResult(..))
@@ -21,12 +21,11 @@ import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
 import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGraphToNeo4j, pushToNeo4jWithCommunities)
+import Graphos.Infrastructure.Export.Memgraph (pushToMemgraphWithCommunities, pushSubgraphToMemgraph, pushCommunityGraphToMemgraph)
 import Graphos.Infrastructure.Observability
-  ( initObservability, shutdownObservability, ObservabilityEnv(..)
+  ( initObservability
   , OtelConfig(..), defaultOtelConfig
-  , Tracer, withSpan, withSpan_, SpanKind(..)
-  , MetricsStore, incCounter, setGauge, observeHistogram
-  , debugTraceEvent
+  , ObservabilityEnv(..)
   )
 import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability)
 import Graphos.Infrastructure.Config (loadConfig)
@@ -50,6 +49,7 @@ data Command
   | PathCmd Text Text FilePath
   | ExplainCmd Text FilePath
   | PushCmd FilePath String String String Neo4jPushMode Int
+  | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
   | LServers
   | Serve FilePath Int
@@ -87,9 +87,13 @@ pipelineOpts = PipelineConfig
    <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
     <*> pure defaultGraphosConfig  -- placeholder; loaded from graphos.yaml at runtime
     <*> pure Nothing  -- cfgNeo4jStreaming: set programmatically when --neo4j is enabled
+    <*> switch (long "memgraph" <> help "Generate Cypher for Memgraph")
+    <*> optional (strOption (long "memgraph-push" <> help "Push to Memgraph at Bolt URI"))
+    <*> option auto (long "memgraph-push-mode" <> value MemgraphSubgraph <> help "Memgraph push mode: MemgraphFull|MemgraphSubgraph|MemgraphCommunity (default: MemgraphSubgraph)")
+    <*> option auto (long "memgraph-subgraph-size" <> value 7 <> help "Representatives per community for Memgraph subgraph mode (default: 7)")
     <*> optional (option auto (long "metrics" <> help "Start Prometheus metrics server on given port (e.g. 9090)"))
     <*> switch (long "otel" <> help "Enable OpenTelemetry trace/metric export via OTLP")
-    <*> fmap (\ep -> case ep of Nothing -> defaultOtelConfig; Just e -> defaultOtelConfig { otelTracesEndpoint = e ++ "/v1/traces", otelMetricsEndpoint = e ++ "/v1/metrics" })
+    <*> fmap (\ep -> case ep of Nothing -> defaultOtelConfig; Just e -> defaultOtelConfig { otelTracesEndpoint = e ++ "/v1/traces", otelMetricsEndpoint = e ++ "/v1/metrics", otelLogsEndpoint = e ++ "/v1/logs" })
              (optional (strOption (long "otel-endpoint" <> help "OTLP endpoint base (default: http://localhost:4318)")))
     <*> optional (strOption (long "debug-trace" <> help "Directory for debug trace JSONL files"))
 
@@ -120,6 +124,15 @@ pushOpts = PushCmd
   <*> option auto (long "mode" <> value SubgraphPush <> help "Push mode: FullPush|SubgraphPush|CommunityPush")
   <*> option auto (long "subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode")
 
+pushMemgraphOpts :: Parser Command
+pushMemgraphOpts = PushMemgraphCmd
+  <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
+  <*> strOption (long "uri" <> value "bolt://localhost:7688" <> help "Memgraph Bolt URI")
+  <*> strOption (long "user" <> value "" <> help "Memgraph username (empty = no auth)")
+  <*> strOption (long "password" <> value "" <> help "Memgraph password (empty = no auth)")
+  <*> option auto (long "mode" <> value MemgraphSubgraph <> help "Push mode: MemgraphFull|MemgraphSubgraph|MemgraphCommunity")
+  <*> option auto (long "subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode")
+
 mergeOpts :: Parser Command
 mergeOpts = MergeCmd
   <$> argument str (metavar "GRAPH_A" <> help "Path to first graph.json")
@@ -138,6 +151,7 @@ commandOpts = subparser
  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
  <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
  <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
+ <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
  <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
  <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
  <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
@@ -154,13 +168,12 @@ main = do
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg
           -- Merge config file + CLI flags: CLI flags override config file values
+          -- SDK reads OTEL_* env vars; we set them from CLI flags via otelEndpoint/otelServiceName
           otelCfg = defaultOtelConfig
             { otelEnabled        = obsEnabled obsCfg || cfgOtelEnabled config || isJust (cfgMetricsPort config)
-            , otelTracesEndpoint = obsEndpoint obsCfg ++ "/v1/traces"
-            , otelMetricsEndpoint = obsEndpoint obsCfg ++ "/v1/metrics"
+            , otelEndpoint       = obsEndpoint obsCfg
             , otelServiceName    = obsServiceName obsCfg
-            , otelServiceVersion = obsServiceVersion obsCfg
-            , otelExportInterval = obsExportInterval obsCfg
+            , otelLogsEndpoint   = obsEndpoint obsCfg ++ "/v1/logs"
             }
           metricsPort = case cfgMetricsPort config of
                            Just p  -> Just p
@@ -176,68 +189,68 @@ main = do
                            , cfgDebugTraceDir  = Just debugDir
                            }
       -- Initialize observability (tracing, metrics, debug trace)
-      let logLevel = if cfgDebug config then LevelTrace
+      let logLevel = if cfgDebug config || obsDebug obsCfg then LevelTrace
                       else if cfgVerbose config then LevelDebug
                       else LevelInfo
       obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
-      let tracer = otelTracer obsEnv
-          metrics = otelMetrics obsEnv
+      let _tracer = otelTracer obsEnv
+          _metrics = otelMetrics obsEnv
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
-        Just graphPath -> do
-          putStrLn $ "[graphos] Starting MCP server with " ++ graphPath
-          startMCPServerFromFile graphPath
-        Nothing ->
-          -- Watch mode: run initial pipeline, then watch for changes
-          if cfgWatch config'
-            then do
-              env <- defaultLogEnv logLevel
-              logInfo env "Starting initial pipeline (watch mode)..."
-              result <- runPipeline config'
-              case result of
-                Left err -> do
-                  logError env $ "Initial pipeline failed: " <> err
-                  exitWith (ExitFailure 1)
-                Right res -> do
-                  logInfo env "Initial pipeline complete! Watching for changes..."
-                  logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
-                  logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
-                  logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
-                  -- Start watcher
-                  shutdownVar <- newMVar ()
-                  watchDirectory (cfgInputPath config') (\changedFiles -> do
-                    let filesList = T.splitOn ", " (T.pack changedFiles)
-                    logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
-                    incResult <- runIncrementalPipeline config' (map T.unpack filesList)
-                    case incResult of
-                      Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
-                      Right _ -> logInfo env "[watch] Incremental update complete"
-                    ) defaultGraphosWatchConfig shutdownVar
-            else do
-              -- Normal mode: run once and exit
-              env <- defaultLogEnv logLevel
-              logInfo env "Starting pipeline..."
-              logDebug env $ "Config: " <> T.pack (show config')
-              result <- runPipeline config'
-              case result of
-                Left err -> do
-                  logError env $ "Pipeline failed: " <> err
-                  exitWith (ExitFailure 1)
-                Right res -> do
-                  logInfo env "Graph complete!"
-                  logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
-                  logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
-                  logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
-                  logInfo env $ T.pack $ "  Report: " ++ prReportPath res
-                  logInfo env $ T.pack $ "  Graph: " ++ prGraphPath res
-                  case prHtmlPath res of
-                    Just html -> do
-                      logInfo env $ T.pack $ "  HTML: " ++ html
-                      logInfo env $ T.pack $ "  View: graphos serve --dir " ++ cfgOutputDir config' ++ " --port 8080"
-                    Nothing  -> pure ()
-                  case prNeo4jPath res of
-                    Just cypher -> logInfo env $ T.pack $ "  Neo4j: " ++ cypher
-                    Nothing     -> pure ()
+         Just graphPath -> do
+           putStrLn $ "[graphos] Starting MCP server with " ++ graphPath
+           startMCPServerFromFile graphPath
+         Nothing ->
+           -- Watch mode: run initial pipeline, then watch for changes
+           if cfgWatch config'
+             then do
+               let env = otelLogEnv obsEnv
+               logInfo env "Starting initial pipeline (watch mode)..."
+               result <- runPipeline config'
+               case result of
+                 Left err -> do
+                   logError env $ "Initial pipeline failed: " <> err
+                   exitWith (ExitFailure 1)
+                 Right res -> do
+                   logInfo env "Initial pipeline complete! Watching for changes..."
+                   logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
+                   logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
+                   logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
+                   -- Start watcher
+                   shutdownVar <- newMVar ()
+                   watchDirectory (cfgInputPath config') (\changedFiles -> do
+                     let filesList = T.splitOn ", " (T.pack changedFiles)
+                     logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
+                     incResult <- runIncrementalPipeline config' (map T.unpack filesList)
+                     case incResult of
+                       Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                       Right _ -> logInfo env "[watch] Incremental update complete"
+                     ) defaultGraphosWatchConfig shutdownVar
+             else do
+               -- Normal mode: run once and exit
+               let env = otelLogEnv obsEnv
+               logInfo env "Starting pipeline..."
+               logDebug env $ "Config: " <> T.pack (show config')
+               result <- runPipeline config'
+               case result of
+                 Left err -> do
+                   logError env $ "Pipeline failed: " <> err
+                   exitWith (ExitFailure 1)
+                 Right res -> do
+                   logInfo env "Graph complete!"
+                   logInfo env $ T.pack $ "  Nodes: " ++ show (prNodes res)
+                   logInfo env $ T.pack $ "  Edges: " ++ show (prEdges res)
+                   logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
+                   logInfo env $ T.pack $ "  Report: " ++ prReportPath res
+                   logInfo env $ T.pack $ "  Graph: " ++ prGraphPath res
+                   case prHtmlPath res of
+                     Just html -> do
+                       logInfo env $ T.pack $ "  HTML: " ++ html
+                       logInfo env $ T.pack $ "  View: graphos serve --dir " ++ cfgOutputDir config' ++ " --port 8080"
+                     Nothing  -> pure ()
+                   case prNeo4jPath res of
+                     Just cypher -> logInfo env $ T.pack $ "  Neo4j: " ++ cypher
+                     Nothing     -> pure ()
 
     QueryCmd question mode budget graphPath -> do
       env <- defaultLogEnv LevelInfo
@@ -371,6 +384,39 @@ main = do
               logInfo env $ T.pack $ "[neo4j] Push mode: community-only (communities + inter-community edges)"
               pushCommunityGraphToNeo4j g commMap cohesionMap (T.pack uri) (T.pack user) (T.pack password)
           logInfo env $ "[neo4j] " <> msg
+
+    PushMemgraphCmd graphPath uri user password pushMode topN -> do
+      putStrLn $ "[graphos] Push to Memgraph: loading " ++ graphPath
+      loadResult <- loadGraphFromFile graphPath
+      case loadResult of
+        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Right loaded -> do
+          let g = lrGraph loaded
+              totalNodes = Map.size (gNodes g)
+              totalEdges = Map.size (gEdges g)
+          (commMap, cohesionMap) <- if Map.null (lrCommunities loaded)
+            then do
+              putStrLn $ "[graphos] No communities found in graph.json — computing communities..."
+              let commMap' = detectCommunities g
+                  cohesionMap' = scoreAllCohesion g commMap'
+              putStrLn $ "[graphos] Computed " ++ show (Map.size commMap') ++ " communities"
+              pure (commMap', cohesionMap')
+            else pure (lrCommunities loaded, lrCohesion loaded)
+          let numCommunities = Map.size commMap
+          putStrLn $ "[graphos] Graph loaded: " ++ show totalNodes ++ " nodes, " ++ show totalEdges ++ " edges, " ++ show numCommunities ++ " communities"
+          env <- defaultLogEnv LevelInfo
+          (msg, _stmts, _batches) <- case pushMode of
+            MemgraphFull -> do
+              logInfo env $ "[memgraph] Push mode: full (all nodes + edges + communities)"
+              pushToMemgraphWithCommunities g commMap cohesionMap (T.pack uri) (T.pack user) (T.pack password)
+            MemgraphSubgraph -> do
+              let artPoints = articulationPoints g
+              logInfo env $ T.pack $ "[memgraph] Push mode: subgraph (communities + " ++ show topN ++ " representatives/community, " ++ show (length artPoints) ++ " bridge nodes)"
+              pushSubgraphToMemgraph g commMap cohesionMap topN artPoints (T.pack uri) (T.pack user) (T.pack password)
+            MemgraphCommunity -> do
+              logInfo env $ "[memgraph] Push mode: community-only (communities + inter-community edges)"
+              pushCommunityGraphToMemgraph g commMap cohesionMap (T.pack uri) (T.pack user) (T.pack password)
+          logInfo env $ "[memgraph] " <> msg
 
     MergeCmd pathA pathB outputDir density resolution minCommSize maxLeidenIterations noViz verbose -> do
       let logLevel = if verbose then LevelDebug else LevelInfo
@@ -565,6 +611,17 @@ defaultConfigYaml = unlines
   , "  uri: \"http://localhost:7474\""
   , "  user: \"neo4j\""
   , "  password: \"graphos_dev\""
+  , "  push_mode: \"subgraph\""
+  , "  subgraph_size: 7"
+  , ""
+  , "# Memgraph connection settings for --memgraph push"
+  , "# Memgraph uses Bolt protocol (bolt://) instead of HTTP"
+  , "# No auth by default (leave user/password empty)"
+  , "# push_mode: full (all nodes), subgraph (communities + representatives), community (communities only)"
+  , "memgraph:"
+  , "  uri: \"bolt://localhost:7688\""
+  , "  user: \"\""
+  , "  password: \"\""
   , "  push_mode: \"subgraph\""
   , "  subgraph_size: 7"
   , ""

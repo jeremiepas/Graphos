@@ -117,8 +117,9 @@ library
                      Graphos.Infrastructure.Export.JSON
                      Graphos.Infrastructure.Export.HTML
                      Graphos.Infrastructure.Export.Obsidian
-                     Graphos.Infrastructure.Export.Neo4j
-                      Graphos.Infrastructure.Export.GraphML
+                      Graphos.Infrastructure.Export.Neo4j
+                       Graphos.Infrastructure.Export.Memgraph
+                       Graphos.Infrastructure.Export.GraphML
                       Graphos.Infrastructure.Export.CommunityGraph
                       Graphos.Infrastructure.Export.SVG
                      Graphos.Infrastructure.Export.Report
@@ -129,7 +130,8 @@ library
                      -- Infrastructure - Tracking
                      Graphos.Infrastructure.Tracking.Cost
                      -- Infrastructure - Observability
-                     Graphos.Infrastructure.Observability
+                      Graphos.Infrastructure.Observability
+                     Graphos.Infrastructure.Observability.SDK
                     -- Infrastructure - Git
                     Graphos.Infrastructure.Git.Hook
                     -- Infrastructure - Logging
@@ -182,9 +184,12 @@ library
     , fsnotify             >= 0.4
     , wai                  >= 3.2
     , warp                 >= 3.3
-    , http-types           >= 0.12
-    , http-conduit         >= 2.3
-    , http-client          >= 0.7
+     , http-types           >= 0.12
+      , http-conduit         >= 2.3
+      , http-client          >= 0.7
+     , hs-opentelemetry-api   >= 0.3
+     , hs-opentelemetry-sdk   >= 0.1
+     , hs-opentelemetry-exporter-otlp >= 0.1
 
 -- ───────────────────────────────────────────────
 -- Executable

@@ -1,5 +1,8 @@
 # OpenTelemetry Collector configuration for Graphos
-# Receives OTLP HTTP traces/metrics from Graphos, exports to Prometheus + Loki
+# Receives OTLP HTTP traces/metrics/logs from Graphos, exports to:
+#   - Prometheus (metrics)
+#   - Tempo (traces)
+#   - Loki (logs)
 
 receivers:
   otlp:
@@ -14,43 +17,53 @@ processors:
     timeout: 5s
     send_batch_size: 1024
 
-  # Convert traces to log lines so Loki can store them
-  transform/traces_to_logs:
+  # Add service.name resource attribute to all signals
+  transform/add_resource:
     error_mode: ignore
-    log_statements:
-      - context: log
+    trace_statements:
+      - context: resource
         statements:
-          - set(attributes["trace_id"], resource.attributes["trace_id"]) where resource.attributes["trace_id"] != nil
+          - set(attributes["service.name"], "graphos") where attributes["service.name"] == nil
+    log_statements:
+      - context: resource
+        statements:
+          - set(attributes["service.name"], "graphos") where attributes["service.name"] == nil
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["service.name"], "graphos") where attributes["service.name"] == nil
 
 exporters:
   prometheus:
     endpoint: "0.0.0.0:8889"
-    namespace: graphos
     send_timestamps: true
-    metric_expiration: 180s
+    metric_expiration: 3600s
 
+  # Tempo — trace backend for Grafana trace exploration
+  otlphttp/tempo:
+    endpoint: "http://tempo:4318"
+    tls:
+      insecure: true
+
+  # Loki — log backend for Grafana log panels
   loki:
     endpoint: "http://loki:3100/loki/api/v1/push"
     default_labels_enabled:
-      exporter: false
-
-  # Send traces to Loki via OTLP HTTP (Loki 2.9+ supports OTLP natively)
-  otlphttp/loki:
-    endpoint: "http://loki:3100/otlp"
+      exporter: true
 
 service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [batch, transform/add_resource]
       exporters: [prometheus]
 
     traces:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/loki]
+      processors: [batch, transform/add_resource]
+      exporters: [otlphttp/tempo]
 
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [batch, transform/add_resource]
       exporters: [loki]

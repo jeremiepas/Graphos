@@ -1,5 +1,5 @@
 # Prometheus configuration for Graphos observability stack
-# Scrapes Graphos metrics endpoint + OTel Collector metrics
+# Scrapes Graphos metrics endpoint + OTel Collector metrics + Tempo metrics
 
 global:
   scrape_interval: 15s
@@ -7,10 +7,10 @@ global:
   scrape_timeout: 10s
 
 scrape_configs:
-  # Graphos application metrics (--metrics 9090)
+  # Graphos application metrics (--metrics 9190 to avoid port conflicts)
   - job_name: 'graphos'
     static_configs:
-      - targets: ['host.docker.internal:9090']
+      - targets: ['172.27.0.1:9190']
         labels:
           service: 'graphos'
     metrics_path: '/metrics'
@@ -23,3 +23,12 @@ scrape_configs:
         labels:
           service: 'otel-collector'
     scrape_interval: 15s
+
+  # Tempo self-reported metrics
+  - job_name: 'tempo'
+    static_configs:
+      - targets: ['tempo:4320']
+        labels:
+          service: 'tempo'
+    scrape_interval: 15s
+    metrics_path: /metrics

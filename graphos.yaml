@@ -154,7 +154,7 @@ observability:
   # Enable OpenTelemetry trace/metric export to an OTLP collector
   enabled: false
   # OTLP endpoint base URL (v1/traces and v1/metrics are appended automatically)
-  endpoint: "http://localhost:4318"
+  endpoint: "http://localhost:14319"
   # Prometheus metrics server port (0 = disabled; use --metrics PORT to override)
   metricsPort: 0
   # Service name and version attached to all spans and metrics
@@ -164,3 +164,23 @@ observability:
   exportInterval: 15
   # Directory for debug trace JSONL files (empty = disabled, use --debug-trace to enable)
   debugTraceDir: ""
+
+# ──── Neo4j ──────────────────────────────────────
+# Used by: graphos . --neo4j --neo4j-push
+neo4j:
+  uri: "http://localhost:7474"
+  user: "neo4j"
+  password: "graphos_dev"
+  push_mode: "subgraph"
+  subgraph_size: 7
+
+# ──── Memgraph ────────────────────────────────────
+# In-memory graph database, Bolt-protocol compatible.
+# Used by: graphos . --memgraph --memgraph-push bolt://localhost:7688
+# No auth by default — leave user/password empty for local dev.
+memgraph:
+  uri: "bolt://localhost:7688"
+  user: ""
+  password: ""
+  push_mode: "subgraph"
+  subgraph_size: 7
