@@ -20,6 +20,10 @@ module Graphos.Domain.Config
   , Neo4jConfig(..)
   , defaultNeo4jConfig
 
+     -- * Memgraph configuration
+  , MemgraphConfig(..)
+  , defaultMemgraphConfig
+
      -- * LLM labeling configuration
   , LabelingConfig(..)
   , defaultLabelingConfig
@@ -290,6 +294,41 @@ defaultNeo4jConfig = Neo4jConfig
   }
 
 -- ───────────────────────────────────────────────
+-- Memgraph Configuration
+-- ───────────────────────────────────────────────
+
+-- | Memgraph connection configuration for Bolt-protocol export and push.
+-- Memgraph uses Bolt protocol (not HTTP) — the URI format is bolt://host:port.
+-- All fields are optional in graphos.yaml — missing values fall back to defaults.
+data MemgraphConfig = MemgraphConfig
+  { mgUri          :: String  -- ^ Memgraph Bolt URI (e.g. "bolt://localhost:7688")
+  , mgUser         :: String  -- ^ Username (often "" for Memgraph — no auth by default)
+  , mgPassword     :: String  -- ^ Password (often "" for Memgraph — no auth by default)
+  , mgPushMode     :: String  -- ^ Push mode: "full", "subgraph", or "community" (default: "subgraph")
+  , mgSubgraphSize :: Int     -- ^ Representatives per community for subgraph mode (default: 7)
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON MemgraphConfig where
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 2 }
+
+instance FromJSON MemgraphConfig where
+  parseJSON = withObject "MemgraphConfig" $ \v -> MemgraphConfig
+    <$> v .:? "uri"           .!= "bolt://localhost:7688"
+    <*> v .:? "user"          .!= ""
+    <*> v .:? "password"      .!= ""
+    <*> v .:? "pushMode"      .!= "subgraph"
+    <*> v .:? "subgraphSize"  .!= 7
+
+defaultMemgraphConfig :: MemgraphConfig
+defaultMemgraphConfig = MemgraphConfig
+  { mgUri          = "bolt://localhost:7688"
+  , mgUser         = ""
+  , mgPassword     = ""
+  , mgPushMode     = "subgraph"
+  , mgSubgraphSize = 7
+  }
+
+-- ───────────────────────────────────────────────
 -- LLM Labeling Configuration
 -- ───────────────────────────────────────────────
 
@@ -336,14 +375,15 @@ defaultLabelingConfig = LabelingConfig
 --
 -- CLI flags (--otel, --metrics, --debug-trace) override these values.
 data ObservabilityConfig = ObservabilityConfig
-  { obsEnabled        :: Bool     -- ^ Enable OpenTelemetry trace/metric export
-  , obsEndpoint       :: String   -- ^ OTLP endpoint base URL (e.g. "http://localhost:4318")
-  , obsMetricsPort    :: Int      -- ^ Prometheus metrics server port (0 = disabled)
-  , obsServiceName    :: String   -- ^ Service name for spans
-  , obsServiceVersion :: String   -- ^ Service version for spans
-  , obsExportInterval :: Int      -- ^ Metrics export interval in seconds
-  , obsDebugTraceDir  :: String   -- ^ Directory for debug trace JSONL files ("" = disabled)
-  } deriving (Eq, Show, Generic)
+   { obsEnabled        :: Bool     -- ^ Enable OpenTelemetry trace/metric export
+   , obsEndpoint       :: String   -- ^ OTLP endpoint base URL (e.g. "http://localhost:14319")
+   , obsMetricsPort    :: Int      -- ^ Prometheus metrics server port (0 = disabled)
+   , obsServiceName    :: String   -- ^ Service name for spans
+   , obsServiceVersion :: String   -- ^ Service version for spans
+   , obsExportInterval :: Int      -- ^ Metrics export interval in seconds
+   , obsDebugTraceDir  :: String   -- ^ Directory for debug trace JSONL files ("" = disabled)
+   , obsDebug          :: Bool     -- ^ Enable debug mode: TRACE logs + structured log shipping to Loki
+   } deriving (Eq, Show, Generic)
 
 instance ToJSON ObservabilityConfig where
   toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
@@ -357,6 +397,7 @@ instance FromJSON ObservabilityConfig where
     <*> v .:? "serviceVersion"  .!= "0.1.0"
     <*> v .:? "exportInterval" .!= 15
     <*> v .:? "debugTraceDir"  .!= ""
+    <*> v .:? "debug"           .!= False
 
 defaultObservabilityConfig :: ObservabilityConfig
 defaultObservabilityConfig = ObservabilityConfig
@@ -367,6 +408,7 @@ defaultObservabilityConfig = ObservabilityConfig
   , obsServiceVersion = "0.1.0"
   , obsExportInterval = 15
   , obsDebugTraceDir  = ""
+  , obsDebug          = False
   }
 
 -- ───────────────────────────────────────────────
@@ -381,6 +423,7 @@ data GraphosConfig = GraphosConfig
   , gcFileExtensions :: FileExtensionConfig          -- ^ file extension categories
   , gcExtractors     :: Map String ExtractorConfig  -- ^ extension → extractor config
   , gcNeo4j          :: Neo4jConfig                  -- ^ Neo4j connection settings
+  , gcMemgraph       :: MemgraphConfig               -- ^ Memgraph connection settings
   , gcLabeling       :: LabelingConfig               -- ^ LLM labeling settings
   , gcObservability  :: ObservabilityConfig           -- ^ Tracing, metrics, debug settings
   } deriving (Eq, Show, Generic)
@@ -393,6 +436,7 @@ defaultGraphosConfig = GraphosConfig
   , gcFileExtensions = defaultFileExtensions
   , gcExtractors     = defaultExtractors
   , gcNeo4j          = defaultNeo4jConfig
+  , gcMemgraph       = defaultMemgraphConfig
   , gcLabeling       = defaultLabelingConfig
   , gcObservability  = defaultObservabilityConfig
   }
@@ -419,6 +463,9 @@ mergeGraphosConfig global project = GraphosConfig
   , gcNeo4j = if gcNeo4j project == defaultNeo4jConfig
                  then gcNeo4j global
                  else gcNeo4j project
+  , gcMemgraph = if gcMemgraph project == defaultMemgraphConfig
+                   then gcMemgraph global
+                   else gcMemgraph project
   , gcLabeling = if gcLabeling project == defaultLabelingConfig
                    then gcLabeling global
                    else gcLabeling project
@@ -451,4 +498,7 @@ mergeObservabilityConfig global project = ObservabilityConfig
   , obsDebugTraceDir   = if obsDebugTraceDir project /= obsDebugTraceDir defaultObservabilityConfig
                            then obsDebugTraceDir project
                            else obsDebugTraceDir global
+  , obsDebug            = if obsDebug project /= obsDebug defaultObservabilityConfig
+                           then obsDebug project
+                           else obsDebug global
   }

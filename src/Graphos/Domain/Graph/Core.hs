@@ -51,18 +51,22 @@ instance NFData Graph where
 -- ───────────────────────────────────────────────
 
 -- | Build a graph from an Extraction result
+-- Dangling edges (referencing nodes not in extractionNodes) are silently dropped.
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction =
   let nodes = Map.fromList [(nodeId n, n) | n <- extractionNodes extraction]
-      edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- extractionEdges extraction]
+      validEdges = [e | e <- extractionEdges extraction
+                       , Map.member (edgeSource e) nodes
+                       , Map.member (edgeTarget e) nodes]
+      edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
       fwdAdj = Map.fromListWith Set.union
-          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- extractionEdges extraction]
+          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
       bwdAdj = if directed
           then Map.fromListWith Set.union
-            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- extractionEdges extraction]
+            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
           else Map.fromListWith Set.union
-            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- extractionEdges extraction]
-              <> fwdAdj  -- undirected: edges go both ways
+            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+              <> fwdAdj
   in Graph
     { gNodes    = nodes
     , gEdges    = edgeMap
@@ -93,10 +97,12 @@ mergeExtractions a b =
     }
 
 -- | Merge two graphs (new graph takes precedence for overlapping nodes)
+-- Dangling edges are removed to keep adjacency lists consistent.
 mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =
   let mergedNodes = gNodes old <> gNodes new
-      mergedEdges = gEdges old <> gEdges new
+      mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
+                     (gEdges old <> gEdges new)
       mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
       mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
   in Graph
