@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   build-and-test:
+    if: github.actor == 'jeremiepas'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +60,7 @@ jobs:
 
   haddock:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.actor == 'jeremiepas'
     needs: build-and-test
     steps:
       - uses: actions/checkout@v4
