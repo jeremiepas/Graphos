@@ -32,6 +32,10 @@ module Graphos.Domain.Config
   , ObservabilityConfig(..)
   , defaultObservabilityConfig
 
+     -- * Embedding configuration
+  , EmbeddingConfig(..)
+  , defaultEmbeddingConfig
+
      -- * Top-level configuration
   , GraphosConfig(..)
   , defaultGraphosConfig
@@ -412,6 +416,45 @@ defaultObservabilityConfig = ObservabilityConfig
   }
 
 -- ───────────────────────────────────────────────
+-- Embedding Configuration
+-- ───────────────────────────────────────────────
+
+-- | Configuration for local embedding generation via Ollama.
+-- Disabled by default — only runs when --embed flag is passed or
+-- embedding.enabled is set in graphos.yaml.
+--
+-- Targets small local models (nomic-embed-text, all-minilm) via
+-- Ollama's OpenAI-compatible /embeddings endpoint.
+data EmbeddingConfig = EmbeddingConfig
+  { embEnabled   :: Bool     -- ^ Enable embedding generation (default: False)
+  , embProvider  :: String   -- ^ Provider: "ollama" (only local for now)
+  , embModel     :: String   -- ^ Model name (e.g. "nomic-embed-text")
+  , embBaseUrl   :: String   -- ^ Ollama API base URL (e.g. "http://localhost:11434/v1")
+  , embDimension :: Int      -- ^ Embedding vector dimension (0 = auto-detect from model)
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON EmbeddingConfig where
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
+
+instance FromJSON EmbeddingConfig where
+  parseJSON = withObject "EmbeddingConfig" $ \v -> EmbeddingConfig
+    <$> v .:? "enabled"   .!= False
+    <*> v .:? "provider"  .!= "ollama"
+    <*> v .:? "model"     .!= "nomic-embed-text"
+    <*> v .:? "baseUrl"   .!= "http://localhost:11434/v1"
+    <*> v .:? "dimension" .!= 0
+
+-- | Default embedding configuration (disabled, local Ollama).
+defaultEmbeddingConfig :: EmbeddingConfig
+defaultEmbeddingConfig = EmbeddingConfig
+  { embEnabled   = False
+  , embProvider  = "ollama"
+  , embModel     = "nomic-embed-text"
+  , embBaseUrl   = "http://localhost:11434/v1"
+  , embDimension = 0
+  }
+
+-- ───────────────────────────────────────────────
 -- Top-level Configuration
 -- ───────────────────────────────────────────────
 
@@ -426,6 +469,7 @@ data GraphosConfig = GraphosConfig
   , gcMemgraph       :: MemgraphConfig               -- ^ Memgraph connection settings
   , gcLabeling       :: LabelingConfig               -- ^ LLM labeling settings
   , gcObservability  :: ObservabilityConfig           -- ^ Tracing, metrics, debug settings
+  , gcEmbedding      :: EmbeddingConfig               -- ^ Local embedding settings (Ollama)
   } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -439,6 +483,7 @@ defaultGraphosConfig = GraphosConfig
   , gcMemgraph       = defaultMemgraphConfig
   , gcLabeling       = defaultLabelingConfig
   , gcObservability  = defaultObservabilityConfig
+  , gcEmbedding      = defaultEmbeddingConfig
   }
 
 -- ───────────────────────────────────────────────
@@ -457,8 +502,8 @@ mergeGraphosConfig global project = GraphosConfig
   { gcLsp = Map.union (gcLsp project) (gcLsp global)
   , gcLanguageIds = Map.union (gcLanguageIds project) (gcLanguageIds global)
   , gcFileExtensions = if gcFileExtensions project == defaultFileExtensions
-                         then gcFileExtensions global
-                         else gcFileExtensions project
+                          then gcFileExtensions global
+                          else gcFileExtensions project
   , gcExtractors = Map.union (gcExtractors project) (gcExtractors global)
   , gcNeo4j = if gcNeo4j project == defaultNeo4jConfig
                  then gcNeo4j global
@@ -471,6 +516,9 @@ mergeGraphosConfig global project = GraphosConfig
                    else gcLabeling project
   , gcObservability = mergeObservabilityConfig (gcObservability global)
                                                 (gcObservability project)
+  , gcEmbedding = if gcEmbedding project == defaultEmbeddingConfig
+                     then gcEmbedding global
+                     else gcEmbedding project
   }
 
 -- | Merge two ObservabilityConfig values: project overrides global.

@@ -122,7 +122,12 @@ buildLeidenState g res =
       m = VU.sum degrees / 2.0
       adj = V.generate n $ \i ->
         let nbs = neighbors g (nodeIds V.! i)
-        in VU.fromList [nidToIdx Map.! nb | nb <- Set.toList nbs]
+            -- Skip neighbors not in the index (dangling edges from
+            -- cross-file references). Prevents Map.! crash.
+        in VU.fromList [case Map.lookup nb nidToIdx of
+                          Just idx -> idx
+                          Nothing  -> i  -- self-loop fallback for dangling edge
+                       | nb <- Set.toList nbs]
       assign0 = VU.generate n id
       sigTot0 = IntMap.fromListWith (+)
         [ (i, degrees VU.! i) | i <- [0..n-1] ]
@@ -168,17 +173,21 @@ findBestCommunity st ki currentComm nbs comms =
       gamma       = lsGamma st
       assign      = lsAssignment st
       sigmaTotMap = lsSigmaTot st
-      twoM2       = 2.0 * m * m
-      commOfNb    = VU.map (assign VU.!) nbs
-      deltaQ targetComm =
-        let sigmaTot = IntMap.findWithDefault 0.0 targetComm sigmaTotMap
-            sigmaIn   = fromIntegral (VU.length (VU.filter (== targetComm) commOfNb))
-        in sigmaIn / m - gamma * (sigmaTot * ki) / twoM2
-      scores = [(c, deltaQ c) | c <- comms]
-  in case scores of
-       [] -> currentComm
-       _  -> let (bestC, bestScore) = maximumBySnd scores
-             in if bestScore > 0 then bestC else currentComm
+  -- Edge case: graph with no edges (m = 0) → stay in current community
+  in if m <= 0
+     then currentComm
+     else
+       let twoM2       = 2.0 * m * m
+           commOfNb    = VU.map (assign VU.!) nbs
+           deltaQ targetComm =
+             let sigmaTot = IntMap.findWithDefault 0.0 targetComm sigmaTotMap
+                 sigmaIn   = fromIntegral (VU.length (VU.filter (== targetComm) commOfNb))
+             in sigmaIn / m - gamma * (sigmaTot * ki) / twoM2
+           scores = [(c, deltaQ c) | c <- comms]
+       in case scores of
+            [] -> currentComm
+            _  -> let (bestC, bestScore) = maximumBySnd scores
+                  in if bestScore > 0 then bestC else currentComm
 
 moveNode :: LeidenState -> Int -> Int -> Int -> Double -> VU.Vector Int -> VU.Vector Int -> LeidenState
 moveNode st i oldComm newComm ki assign nbs =
@@ -197,16 +206,20 @@ refineCommunitiesOpt :: LeidenState -> LeidenState
 refineCommunitiesOpt st =
   let assign  = lsAssignment st
       n       = lsN st
-      maxCid  = VU.maximum assign
-      commMembers = IntMap.fromListWith (++) [(assign VU.! i, [i]) | i <- [0..n-1]]
-      (assign', _nextCid) = IntMap.foldlWithKey' (\(acc, cid) _ members ->
-        let wellConnected = [i | i <- members
-                               , cohesionToCommunityIdx st acc i (acc VU.! i) > 0.5]
-        in if length wellConnected < length members `div` 2
-           then (Data.List.foldl' (\a i -> VU.unsafeUpd a [(i, cid)]) acc wellConnected, cid + 1)
-           else (acc, cid)
-        ) (assign, maxCid + 1) commMembers
-  in st { lsAssignment = assign' }
+  -- Edge case: empty or single-node graph → no refinement needed
+  in if n == 0
+     then st
+     else
+       let maxCid  = VU.maximum assign
+           commMembers = IntMap.fromListWith (++) [(assign VU.! i, [i]) | i <- [0..n-1]]
+           (assign', _nextCid) = IntMap.foldlWithKey' (\(acc, cid) _ members ->
+             let wellConnected = [i | i <- members
+                                    , cohesionToCommunityIdx st acc i (acc VU.! i) > 0.5]
+             in if length wellConnected < length members `div` 2
+                then (Data.List.foldl' (\a i -> VU.unsafeUpd a [(i, cid)]) acc wellConnected, cid + 1)
+                else (acc, cid)
+             ) (assign, maxCid + 1) commMembers
+       in st { lsAssignment = assign' }
 
 cohesionToCommunityIdx :: LeidenState -> VU.Vector Int -> Int -> Int -> Double
 cohesionToCommunityIdx st assign i cid =
@@ -218,10 +231,14 @@ cohesionToCommunityIdx st assign i cid =
 
 leidenPhase :: Graph -> Resolution -> CommunityMap
 leidenPhase g res =
-  let st0     = buildLeidenState g res
-      maxIter = if resMaxIterations res > 0 then resMaxIterations res else 50
-      finalSt = leidenLoop st0 maxIter
-  in leidenStateToCommunityMap finalSt
+  -- Edge case: empty graph (no nodes) → no communities
+  if Map.null (gNodes g)
+  then Map.empty
+  else
+    let st0     = buildLeidenState g res
+        maxIter = if resMaxIterations res > 0 then resMaxIterations res else 50
+        finalSt = leidenLoop st0 maxIter
+    in leidenStateToCommunityMap finalSt
 
 leidenLoop :: LeidenState -> Int -> LeidenState
 leidenLoop st0 maxIter = go st0 maxIter (lsAssignment st0)
@@ -293,20 +310,24 @@ bestNeighborCommunity g commMap smallMembers excludeCid =
   in best
 
 cohesionScore :: Graph -> [NodeId] -> Double
-cohesionScore g members =
-  let memberSet = Set.fromList members
-      internalEdges = length [1 :: Int | nid <- members
-                              , n <- Set.toList (neighbors g nid)
-                              , n `Set.member` memberSet
-                              , nid < n]
-      totalPossible = max 1 (length members * (length members - 1) `div` 2)
-  in fromIntegral internalEdges / fromIntegral totalPossible
+cohesionScore g members
+  | length members <= 1 = 1.0  -- singleton is trivially cohesive
+  | otherwise =
+      let memberSet = Set.fromList members
+          internalEdges = length [1 :: Int | nid <- members
+                                  , n <- Set.toList (neighbors g nid)
+                                  , n `Set.member` memberSet
+                                  , nid < n]
+          totalPossible = max 1 (length members * (length members - 1) `div` 2)
+      in fromIntegral internalEdges / fromIntegral totalPossible
 
 scoreAllCohesion :: Graph -> CommunityMap -> CohesionMap
-scoreAllCohesion g commMap = fmap (cohesionScore g) commMap
+scoreAllCohesion g commMap
+  | Map.null commMap = Map.empty
+  | otherwise = fmap (cohesionScore g) commMap
 
 maximumBySnd :: Ord a => [(b, a)] -> (b, a)
-maximumBySnd [] = error "maximumBySnd: empty list"
+maximumBySnd [] = error "maximumBySnd: empty list — this should never happen (all communities have at least one neighbor)"
 maximumBySnd xs = foldl1 (\a@(_,sa) b@(_,sb) -> if sb > sa then b else a) xs
 
 foldlStrict' :: (a -> b -> a) -> a -> [b] -> a
