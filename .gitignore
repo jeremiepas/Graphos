@@ -17,7 +17,6 @@ graphos-out/
 .opencode/*
 !.opencode/agent/
 !.opencode/agent/**
-docs/
 node_modules/
 traces/
 monitoring/prometheus/data/
