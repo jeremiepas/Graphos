@@ -42,6 +42,15 @@ module Graphos.Domain.Types
   , Detection(..)
   , FileCategory(..)
 
+    -- * Ingest types
+  , IngestEmbedding(..)
+  , emptyIngestEmbedding
+  , IngestIndex(..)
+  , emptyIngestIndex
+  , addToIndex
+  , lookupIndex
+  , indexSize
+
     -- * Configuration
   , PipelineConfig(..)
   , EdgeDensity(..)
@@ -63,6 +72,8 @@ module Graphos.Domain.Types
   , ExtractorMode(..)
   , ExtractorConfig(..)
   , defaultExtractors
+  , EmbeddingConfig(..)
+  , defaultEmbeddingConfig
   ) where
 
 import Graphos.Domain.Types.Node (NodeId, Node(..), FileType(..))
@@ -70,4 +81,5 @@ import Graphos.Domain.Types.Edge (EdgeId, Edge(..), Relation(..), relationToText
 import Graphos.Domain.Types.Graph (Hyperedge(..), Extraction(..), emptyExtraction, LabeledGraph(..), CommunityId, CommunityMap, CohesionMap, GraphDiff(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), MemgraphPushMode(..), defaultConfig, Detection(..), FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..))
-import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, MemgraphConfig(..), defaultMemgraphConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors)
+import Graphos.Domain.Types.Ingest (IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex, lookupIndex, indexSize)
+import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, MemgraphConfig(..), defaultMemgraphConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors, EmbeddingConfig(..), defaultEmbeddingConfig)

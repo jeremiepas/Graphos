@@ -13,7 +13,9 @@
 module Graphos.UseCase.Pipeline
   ( runPipeline
   , runIncrementalPipeline
+  , runSingleFilePipeline
   , PipelineResult(..)
+  , SingleFileResult(..)
   ) where
 
 import Control.DeepSeq (deepseq)
@@ -37,21 +39,17 @@ import Graphos.Infrastructure.Observability.SDK
   , initObservability
   , shutdownObservability
   )
-import OpenTelemetry.Trace
-  ( inSpan
-  , defaultSpanArguments
-  , SpanKind(..)
-  , SpanArguments(..)
-  )
 import Graphos.UseCase.Detect (detectFiles)
 import Graphos.UseCase.Extract (extractAll, extractChangedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
-import Graphos.UseCase.Cluster (clusterGraphWithResolution)
+import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferEdges)
 import Graphos.UseCase.Report (generateReport)
 import Graphos.UseCase.Export (exportAll, ExportResult(..))
+import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
+import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.Export.CommunityGraph (exportCommunityGraph)
 import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
@@ -82,7 +80,7 @@ runPipeline config = catch (do
                    Just d -> d
                    Nothing -> cfgOutputDir config ++ "/traces"
   obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
-  let tracer = otelTracer obsEnv
+  let _tracer = otelTracer obsEnv
       metrics = otelMetrics obsEnv
       env = otelLogEnv obsEnv  -- Use the LogEnv from ObservabilityEnv (has OTLP shipping enabled)
 
@@ -112,7 +110,7 @@ runPipeline config = catch (do
   -- Step 1: Detect
   logInfo env "Step 1: Detecting files..."
   detectStart <- getCurrentTime
-  detection <- withSpan_ tracer "pipeline_detect" SpanInternal $ detectFiles (cfgInputPath configWithStreaming)
+  detection <- detectFiles (cfgInputPath configWithStreaming)
   detectEnd <- getCurrentTime
   observeHistogram metrics "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   incCounter metrics "graphos_pipeline_steps_total" 1
@@ -140,8 +138,7 @@ runPipeline config = catch (do
       -- Step 2: Extract (nodes are pushed to Neo4j during extraction if streaming is enabled)
       logInfo env "Step 2: Extracting entities and relationships..."
       extractStart <- getCurrentTime
-      extraction <- withSpan_ tracer "pipeline_extract" SpanInternal $
-        extractAll configWithStreaming detection env
+      extraction <- extractAll configWithStreaming detection env
       extractEnd <- getCurrentTime
       observeHistogram metrics "graphos_extract_duration_seconds" (realToFrac (diffUTCTime extractEnd extractStart) :: Double)
       incCounter metrics "graphos_pipeline_steps_total" 1
@@ -411,3 +408,116 @@ runIncrementalPipeline config changedFiles = catch (do
   logInfo env "[watch] Incremental pipeline complete!"
   pure $ Right result
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Incremental pipeline error: " ++ show e
+
+-- ───────────────────────────────────────────────
+-- Single-File Ingestion Pipeline
+-- ───────────────────────────────────────────────
+
+-- | Result of single-file ingestion pipeline
+data SingleFileResult = SingleFileResult
+  { sfrNodes       :: Int
+  , sfrEdges       :: Int
+  , sfrCommunities :: Int
+  , sfrGraphPath   :: FilePath
+  , sfrIndexPath   :: FilePath
+  , sfrEmbeddingCount :: Int
+  } deriving (Eq, Show)
+
+-- | Run the single-file ingestion pipeline.
+--
+-- Flow: ingestFile → build subgraph → clusterSingle → update index → incremental export
+--
+-- This is the fast path for 'graphos ingest <file> [--embed]'.
+-- It processes exactly one file without a directory scan, clusters only the
+-- subgraph around the extracted nodes, and optionally generates embeddings.
+--
+-- The index is loaded from/merged with the existing index.json if present,
+-- giving cumulative coverage across multiple ingest calls.
+runSingleFilePipeline :: PipelineConfig -> FilePath -> IO (Either Text SingleFileResult)
+runSingleFilePipeline config filePath = catch (do
+  let logLevel = if cfgDebug config then LevelTrace
+                 else if cfgVerbose config then LevelDebug
+                 else LevelInfo
+  let otelCfg = cfgOtelConfig config
+      metricsPort = cfgMetricsPort config
+      debugDir = case cfgDebugTraceDir config of
+                   Just d -> d
+                   Nothing -> cfgOutputDir config ++ "/traces"
+  obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
+  let _metrics = otelMetrics obsEnv
+      env = otelLogEnv obsEnv
+
+  logInfo env $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
+
+  -- Step 1: Ingest file (detect + extract + optional embeddings)
+  ingestResult <- ingestFile config filePath env
+  case ingestResult of
+    Left err -> pure $ Left err
+    Right fir -> do
+      -- Step 2: Build graph from the extraction
+      let graph = buildGraphFromExtractions (cfgDirected config) [firExtraction fir]
+
+      logInfo env $ T.pack $ "  Graph: " ++ show (Map.size (gNodes graph)) ++ " nodes, "
+                                ++ show (Map.size (gEdges graph)) ++ " edges"
+
+      -- Step 3: Cluster (fast subgraph clustering if not --no-cluster)
+      (enrichedGraph, finalCommMap) <-
+        if cfgNoCluster config
+          then pure (graph, Map.empty)
+          else do
+            -- Use clusterSingle on the first extracted node as seed
+            -- If no nodes, skip clustering
+            let nodes = extractionNodes (firExtraction fir)
+            case nodes of
+              (seedNode: _) -> do
+                let res = Resolution { resGamma = cfgResolution config
+                                     , resMinSize = cfgMinCommSize config
+                                     , resMergeInto = MergeToNeighbor
+                                     , resMaxIterations = cfgMaxLeidenIterations config
+                                     }
+                    (commMap, _cohesion) = clusterSingle graph (nodeId seedNode) 3 res
+                    allInferred = inferEdges (cfgEdgeDensity config) graph commMap
+                    enriched = if null allInferred
+                      then graph
+                      else buildGraphFromExtractions (cfgDirected config)
+                           [emptyExtraction { extractionNodes = Map.elems (gNodes graph)
+                                            , extractionEdges = Map.elems (gEdges graph) ++ allInferred }]
+                logInfo env $ T.pack $ "  Clusters: " ++ show (Map.size commMap)
+                pure (enriched, commMap)
+              [] -> pure (graph, Map.empty)
+
+      -- Step 4: Update index (merge with existing)
+      createDirectoryIfMissing True (cfgOutputDir config)
+      let indexPath = cfgOutputDir config ++ "/index.json"
+      existingIndex <- loadIndex indexPath
+      let mergedIndex = mergeIndices existingIndex (firIndex fir)
+      saveIndex indexPath mergedIndex
+      logInfo env $ T.pack $ "  Index: " ++ show (Map.size (iiEntries mergedIndex)) ++ " entries → " ++ indexPath
+
+      -- Step 5: Export
+      let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
+          detection = Detection
+            { detectionTotalFiles = 1
+            , detectionTotalWords = 0
+            , detectionNeedsGraph = True
+            , detectionWarning = Nothing
+            , detectionFiles = Map.empty
+            }
+      exports <- exportAll enrichedGraph analysis config detection
+
+      -- Clean up
+      clearPipelineCheckpoint (cfgOutputDir config)
+      shutdownObservability obsEnv
+
+      let embWithVectors = length $ filter (not . null . ieVector) (firEmbeddings fir)
+      logInfo env "[ingest] Single-file pipeline complete!"
+
+      pure $ Right SingleFileResult
+        { sfrNodes       = Map.size (gNodes enrichedGraph)
+        , sfrEdges       = Map.size (gEdges enrichedGraph)
+        , sfrCommunities = Map.size finalCommMap
+        , sfrGraphPath   = erJSON exports
+        , sfrIndexPath   = indexPath
+        , sfrEmbeddingCount = embWithVectors
+        }
+  ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Single-file pipeline error: " ++ show e

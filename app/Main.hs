@@ -5,12 +5,12 @@ import Options.Applicative
 import System.Exit (exitWith, ExitCode(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Control.Concurrent.MVar (newMVar)
 import Data.Maybe (isJust)
 
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), MemgraphPushMode(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
-import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, PipelineResult(..))
+import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndex, pathQueryWithIndex, explainNodeWithIndex, QueryResult(..))
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
@@ -22,10 +22,11 @@ import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discover
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
 import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGraphToNeo4j, pushToNeo4jWithCommunities)
 import Graphos.Infrastructure.Export.Memgraph (pushToMemgraphWithCommunities, pushSubgraphToMemgraph, pushCommunityGraphToMemgraph)
-import Graphos.Infrastructure.Observability
+import Graphos.Infrastructure.Observability.SDK
   ( initObservability
-  , OtelConfig(..), defaultOtelConfig
   , ObservabilityEnv(..)
+  , OtelConfig(..)
+  , defaultOtelConfig
   )
 import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability)
 import Graphos.Infrastructure.Config (loadConfig)
@@ -51,6 +52,7 @@ data Command
   | PushCmd FilePath String String String Neo4jPushMode Int
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
+  | IngestCmd FilePath Bool FilePath  -- ^ (file path, embed flag, output dir)
   | LServers
   | Serve FilePath Int
   | Init
@@ -93,9 +95,10 @@ pipelineOpts = PipelineConfig
     <*> option auto (long "memgraph-subgraph-size" <> value 7 <> help "Representatives per community for Memgraph subgraph mode (default: 7)")
     <*> optional (option auto (long "metrics" <> help "Start Prometheus metrics server on given port (e.g. 9090)"))
     <*> switch (long "otel" <> help "Enable OpenTelemetry trace/metric export via OTLP")
-    <*> fmap (\ep -> case ep of Nothing -> defaultOtelConfig; Just e -> defaultOtelConfig { otelTracesEndpoint = e ++ "/v1/traces", otelMetricsEndpoint = e ++ "/v1/metrics", otelLogsEndpoint = e ++ "/v1/logs" })
+    <*> fmap (\ep -> case ep of Nothing -> defaultOtelConfig; Just e -> defaultOtelConfig { otelEndpoint = e, otelLogsEndpoint = e ++ "/v1/logs" })
              (optional (strOption (long "otel-endpoint" <> help "OTLP endpoint base (default: http://localhost:4318)")))
     <*> optional (strOption (long "debug-trace" <> help "Directory for debug trace JSONL files"))
+    <*> switch (long "embed" <> help "Generate embeddings for ingested files via local Ollama")
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -145,17 +148,24 @@ mergeOpts = MergeCmd
   <*> switch (long "no-viz" <> help "Skip HTML visualization")
   <*> switch (long "verbose" <> short 'v' <> help "Verbose output: show DEBUG level logs")
 
+ingestOpts :: Parser Command
+ingestOpts = IngestCmd
+  <$> argument str (metavar "FILE" <> help "Single file to ingest")
+  <*> switch (long "embed" <> help "Generate embeddings via local Ollama (nomic-embed-text)")
+  <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
- <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
- <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
- <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
- <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
- <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
- <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
- <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
- <> command "init" (info (pure Init) (progDesc "Generate a graphos.yaml config file"))
+  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
+  <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
+  <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
+  <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
+  <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
+  <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
+  <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
+  <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
+  <> command "init" (info (pure Init) (progDesc "Generate a graphos.yaml config file"))
   )
   <|> Run <$> pipelineOpts
 
@@ -168,7 +178,7 @@ main = do
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg
           -- Merge config file + CLI flags: CLI flags override config file values
-          -- SDK reads OTEL_* env vars; we set them from CLI flags via otelEndpoint/otelServiceName
+          -- SDK reads OTEL_* env vars; we set them from CLI flags
           otelCfg = defaultOtelConfig
             { otelEnabled        = obsEnabled obsCfg || cfgOtelEnabled config || isJust (cfgMetricsPort config)
             , otelEndpoint       = obsEndpoint obsCfg
@@ -478,6 +488,32 @@ main = do
               case Export.erHTML exports of
                 Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
                 Nothing   -> pure ()
+
+    IngestCmd filePath embed outputDir -> do
+      -- Load graphos.yaml config
+      graphosCfg <- loadConfig
+      let logLevel = LevelInfo
+          config = defaultConfig
+                { cfgOutputDir = outputDir
+                , cfgEmbed = embed
+                , cfgGraphosConfig = graphosCfg
+                }
+      env <- defaultLogEnv logLevel
+      logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if embed then " (embeddings enabled)" else "")
+      result <- Graphos.UseCase.Pipeline.runSingleFilePipeline config filePath
+      case result of
+        Left err -> do
+          logError env $ "[ingest] Failed: " <> err
+          exitWith (ExitFailure 1)
+        Right res -> do
+          logInfo env "[ingest] Ingest complete!"
+          logInfo env $ T.pack $ "  Nodes: " ++ show (sfrNodes res)
+          logInfo env $ T.pack $ "  Edges: " ++ show (sfrEdges res)
+          logInfo env $ T.pack $ "  Communities: " ++ show (sfrCommunities res)
+          logInfo env $ T.pack $ "  Graph: " ++ sfrGraphPath res
+          logInfo env $ T.pack $ "  Index: " ++ sfrIndexPath res
+          when (sfrEmbeddingCount res > 0) $
+            logInfo env $ T.pack $ "  Embeddings: " ++ show (sfrEmbeddingCount res) ++ " vectors"
 
     LServers -> do
       putStrLn "[graphos] Discovering available LSP servers..."

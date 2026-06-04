@@ -1,17 +1,42 @@
--- | URL Ingest - fetch URLs and save as annotated markdown for extraction
+-- | File and URL ingestion — single-file and URL ingestion for the Graphos pipeline.
+--
+-- Two ingestion modes:
+--   1. URL ingest: fetch URLs and save as annotated markdown for extraction
+--   2. File ingest: accept a single file path, auto-detect category, extract
+--      entities, and optionally generate embeddings via local Ollama.
 module Graphos.UseCase.Ingest
-  ( ingest
+  ( -- * URL ingestion
+    ingest
   , IngestResult(..)
   , detectUrlType
+
+    -- * Single-file ingestion
+  , ingestFile
+  , FileIngestResult(..)
   ) where
 
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
+import Data.Time (getCurrentTime, UTCTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
-import System.FilePath ((</>))
+import System.FilePath (takeExtension, (</>))
 
+import Graphos.Domain.Types
+  ( Node(..), Extraction(..)
+  , FileCategory(..), Detection(..)
+  , IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex
+  , PipelineConfig(..), EmbeddingConfig(..)
+  )
+import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtensionConfig(..))
 import Graphos.Infrastructure.Security (validateUrl)
+import qualified Graphos.Infrastructure.LLM.Embedding as Emb
+import qualified Graphos.UseCase.Extract as Extract
+import Graphos.Infrastructure.Logging (LogEnv, logInfo)
+
+-- ───────────────────────────────────────────────
+-- URL Ingestion (existing)
+-- ───────────────────────────────────────────────
 
 -- | Result of ingesting a URL
 data IngestResult = IngestResult
@@ -41,10 +66,6 @@ detectUrlType url
   | otherwise = GenericWeb
 
 -- | Ingest a URL - fetch content and save as annotated markdown
--- Note: Full HTTP fetching requires http-conduit. This implementation
--- provides the scaffolding and YAML frontmatter generation.
--- For now, it creates a stub file that can be manually filled or
--- fetched by an external tool.
 ingest :: Text -> FilePath -> Maybe Text -> Maybe Text -> IO (Either Text IngestResult)
 ingest url rawDir author contributor =
   case validateUrl url of
@@ -67,7 +88,6 @@ ingest url rawDir author contributor =
             YoutubeUrl -> frontmatter <> "\n[Video transcript - to be fetched]\n"
             GenericWeb -> frontmatter <> "\n[Webpage content - to be fetched]\n"
 
-      -- Check if file already exists
       exists <- doesFileExist filepath
       if exists
         then pure (Right IngestResult
@@ -84,7 +104,135 @@ ingest url rawDir author contributor =
             })
 
 -- ───────────────────────────────────────────────
+-- Single-File Ingestion
+-- ───────────────────────────────────────────────
+
+-- | Result of single-file ingestion
+data FileIngestResult = FileIngestResult
+  { firPath       :: FilePath          -- ^ Path of the ingested file
+  , firCategory   :: FileCategory      -- ^ Detected file category
+  , firExtraction :: Extraction         -- ^ Extracted nodes and edges
+  , firEmbeddings :: [IngestEmbedding]  -- ^ Generated embeddings (empty if disabled)
+  , firIndex      :: IngestIndex        -- ^ Updated ingest index
+  } deriving (Show)
+
+-- | Ingest a single file: detect category, extract entities, optionally generate embeddings.
+--
+-- This bypasses the full pipeline's directory scan — it processes exactly one file.
+-- The extraction reuses the same extractors (LSP, tree-sitter, stub) configured
+-- in graphos.yaml.
+--
+-- When --embed is enabled, generates an embedding vector for each extracted node
+-- using the configured Ollama model.
+ingestFile :: PipelineConfig -> FilePath -> LogEnv -> IO (Either Text FileIngestResult)
+ingestFile config filePath env = do
+  -- Verify file exists
+  exists <- doesFileExist filePath
+  if not exists
+    then pure $ Left $ T.pack $ "File not found: " ++ filePath
+    else do
+      -- Auto-detect file category from extension
+      let ext = takeExtension filePath
+          cfg = cfgGraphosConfig config
+          fec = gcFileExtensions cfg
+          category = detectFileCategory ext fec
+
+      logInfo env $ T.pack $ "  Ingesting file: " ++ filePath ++ " (category: " ++ show category ++ ")"
+
+      -- Build a mini-detection for the single file
+      let detection = Detection
+            { detectionTotalFiles = 1
+            , detectionTotalWords  = 0
+            , detectionNeedsGraph = True
+            , detectionWarning     = Nothing
+            , detectionFiles       = Map.singleton category [filePath]
+            }
+
+      -- Extract entities from the single file
+      extraction <- Extract.extractAll config detection env
+
+      let nodes = extractionNodes extraction
+          nodeCount = length nodes
+          edgeCount = length (extractionEdges extraction)
+
+      logInfo env $ T.pack $ "  Extracted " ++ show nodeCount ++ " nodes, " ++ show edgeCount ++ " edges"
+
+      -- Generate embeddings if enabled
+      let embCfg = gcEmbedding cfg
+          embedEnabled = cfgEmbed config || embEnabled embCfg
+
+      (embeddings, idx) <- if embedEnabled
+        then do
+          logInfo env $ T.pack $ "  Generating embeddings via " ++ embModel embCfg ++ "..."
+          embs <- generateEmbeddingsForNodes embCfg nodes env
+          let idx' = foldr addToIndex emptyIngestIndex embs
+          logInfo env $ T.pack $ "  Generated " ++ show (length embs) ++ " embeddings"
+          pure (embs, idx')
+        else do
+          -- Store metadata-only entries (no vector) for index lookups
+          now <- getCurrentTime
+          let metaEmbs = [emptyIngestEmbedding (nodeId n) (nodeSourceFile n) now | n <- nodes]
+              idx' = foldr addToIndex emptyIngestIndex metaEmbs
+          pure (metaEmbs, idx')
+
+      pure $ Right FileIngestResult
+        { firPath = filePath
+        , firCategory = category
+        , firExtraction = extraction
+        , firEmbeddings = embeddings
+        , firIndex = idx
+        }
+
+-- ───────────────────────────────────────────────
 -- Helpers
+-- ───────────────────────────────────────────────
+
+-- | Detect file category from extension using config-driven FileExtensionConfig.
+-- Falls back to DocFiles for unknown extensions.
+detectFileCategory :: String -> FileExtensionConfig -> FileCategory
+detectFileCategory ext fec
+  | ext `elem` fecCode fec  = CodeFiles
+  | ext `elem` fecDoc fec   = DocFiles
+  | ext `elem` fecPaper fec = PaperFiles
+  | ext `elem` fecImage fec = ImageFiles
+  | ext `elem` fecVideo fec  = VideoFiles
+  | otherwise               = DocFiles
+
+-- | Generate embeddings for a list of extracted nodes.
+-- Creates a text representation of each node and calls the embedding API.
+generateEmbeddingsForNodes :: EmbeddingConfig -> [Node] -> LogEnv -> IO [IngestEmbedding]
+generateEmbeddingsForNodes cfg nodes env = do
+  now <- getCurrentTime
+  let model = T.pack (embModel cfg)
+  -- Process nodes sequentially to avoid overwhelming local Ollama
+  mapM (embedNode cfg model now env) nodes
+
+-- | Generate embedding for a single node.
+embedNode :: EmbeddingConfig -> Text -> UTCTime -> LogEnv -> Node -> IO IngestEmbedding
+embedNode cfg model ts _env node = do
+  let inputText = nodeLabel node <> " " <> nodeSourceFile node
+  result <- Emb.generateEmbedding cfg inputText
+  case result of
+    Left _err ->
+      -- On failure, store a metadata-only entry (no vector)
+      pure IngestEmbedding
+        { ieNodeId     = nodeId node
+        , ieVector     = []
+        , ieSourceHash = nodeSourceFile node
+        , ieTimestamp  = ts
+        , ieModel      = model
+        }
+    Right vec ->
+      pure IngestEmbedding
+        { ieNodeId     = nodeId node
+        , ieVector     = vec
+        , ieSourceHash = nodeSourceFile node
+        , ieTimestamp  = ts
+        , ieModel      = model
+        }
+
+-- ───────────────────────────────────────────────
+-- URL helpers (existing)
 -- ───────────────────────────────────────────────
 
 buildFrontmatter :: Text -> Text -> Maybe Text -> Maybe Text -> Text

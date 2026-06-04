@@ -46,6 +46,7 @@ data ConfigFile = ConfigFile
   , cfMemgraph        :: Maybe MemgraphConfig
   , cfLabeling        :: Maybe LabelingConfig
   , cfObservability   :: Maybe ObservabilityConfig
+  , cfEmbedding       :: Maybe EmbeddingConfig
   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -58,6 +59,7 @@ instance FromJSON ConfigFile where
     <*> v .:? "memgraph"
     <*> v .:? "labeling"
     <*> v .:? "observability"
+    <*> v .:? "embedding"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -148,6 +150,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcObservability = case cfObservability cfgFile of
       Just obs  -> obs
       Nothing   -> gcObservability defaults
+  , gcEmbedding = case cfEmbedding cfgFile of
+      Just emb   -> emb
+      Nothing    -> gcEmbedding defaults
   }
 
 -- ───────────────────────────────────────────────
