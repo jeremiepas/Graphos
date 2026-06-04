@@ -67,6 +67,7 @@ data PipelineConfig = PipelineConfig
   , cfgOtelEnabled   :: Bool                         -- ^ Enable OTLP export (--otel flag)
   , cfgOtelConfig     :: OtelConfig                   -- ^ OpenTelemetry configuration
   , cfgDebugTraceDir  :: Maybe FilePath               -- ^ Directory for debug trace JSONL files
+  , cfgEmbed          :: Bool                          -- ^ Enable embedding generation for ingested files (--embed)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -136,6 +137,7 @@ defaultConfig = PipelineConfig
   , cfgOtelEnabled   = False
   , cfgOtelConfig     = defaultOtelConfig
   , cfgDebugTraceDir  = Nothing
+  , cfgEmbed          = False
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

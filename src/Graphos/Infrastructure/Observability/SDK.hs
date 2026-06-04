@@ -58,7 +58,7 @@ module Graphos.Infrastructure.Observability.SDK
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, swapMVar, modifyMVar_)
 import Control.Exception (SomeException, catch)
-import Control.Monad (when, forever)
+-- import Control.Monad (when, forever)  -- removed: unused, was causing -Werror=unused-imports
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Int (Int64)
 import Data.List (sort)
@@ -394,7 +394,7 @@ shutdownObservability env = do
   -- Shutdown the global TracerProvider (flushes all buffered spans)
   case otelProvider env of
     Just provider -> do
-      shutdownTracerProvider provider
+      _ <- shutdownTracerProvider provider (Just 5000)
       logInfo (otelLogEnv env) "OpenTelemetry SDK shut down (spans flushed)"
     Nothing -> pure ()
 

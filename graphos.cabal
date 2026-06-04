@@ -49,6 +49,7 @@ library
                     Graphos.Domain.Types.Graph
                     Graphos.Domain.Types.Pipeline
                     Graphos.Domain.Types.Analysis
+                    Graphos.Domain.Types.Ingest
                     -- Domain - Graph
                     Graphos.Domain.Graph
                     Graphos.Domain.Graph.Core
@@ -77,8 +78,9 @@ library
                        Graphos.UseCase.Query
                      Graphos.UseCase.Load
                      Graphos.UseCase.Merge
-                     Graphos.UseCase.Ingest
-                     Graphos.UseCase.Benchmark
+                      Graphos.UseCase.Ingest
+                      Graphos.UseCase.IngestIndex
+                      Graphos.UseCase.Benchmark
                      -- UseCase - Query submodules
                      Graphos.UseCase.Query.Normalize
                       -- UseCase - Detect submodules
@@ -111,8 +113,9 @@ library
                       Graphos.Infrastructure.FileSystem.Conversation
                       -- Infrastructure - Security
                      Graphos.Infrastructure.Security
-                     -- Infrastructure - LLM
-                     Graphos.Infrastructure.LLM.OpenAI
+                      -- Infrastructure - LLM
+                      Graphos.Infrastructure.LLM.OpenAI
+                      Graphos.Infrastructure.LLM.Embedding
                     -- Infrastructure - Export
                      Graphos.Infrastructure.Export.JSON
                      Graphos.Infrastructure.Export.HTML
