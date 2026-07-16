@@ -69,6 +69,7 @@ library
                      Graphos.UseCase.Extract.Haskell
                      Graphos.UseCase.Extract.Markdown
                      Graphos.UseCase.Extract.Office
+                     Graphos.UseCase.Extract.Image
                     Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
                      Graphos.UseCase.Analyze
@@ -114,9 +115,10 @@ library
                       Graphos.Infrastructure.FileSystem.Conversation
                       -- Infrastructure - Security
                      Graphos.Infrastructure.Security
-                      -- Infrastructure - LLM
-                      Graphos.Infrastructure.LLM.OpenAI
-                      Graphos.Infrastructure.LLM.Embedding
+                       -- Infrastructure - LLM
+                       Graphos.Infrastructure.LLM.OpenAI
+                       Graphos.Infrastructure.LLM.Vision
+                       Graphos.Infrastructure.LLM.Embedding
                     -- Infrastructure - Export
                      Graphos.Infrastructure.Export.JSON
                      Graphos.Infrastructure.Export.HTML
@@ -234,15 +236,17 @@ test-suite graphos-test
                     Graphos.Domain.CommunitySpec
                     Graphos.Domain.Community.LabelSpec
                     Graphos.Domain.AnalysisSpec
+                    Graphos.Domain.ContextSpec
                     Graphos.UseCase.PipelineSpec
                     Graphos.UseCase.ExtractSpec
+                    Graphos.UseCase.Extract.ImageSpec
                     Graphos.UseCase.QuerySpec
-                      Graphos.Infrastructure.LSP.ClientSpec
-                      Graphos.Infrastructure.LSP.TransportSpec
-                     Graphos.Domain.ContextSpec
-                     Graphos.UseCase.SelectContextSpec
-                     Graphos.UseCase.FormatContextSpec
-                     Graphos.UseCase.ConversationSpec
+                    Graphos.UseCase.SelectContextSpec
+                    Graphos.UseCase.FormatContextSpec
+                    Graphos.UseCase.ConversationSpec
+                    Graphos.Infrastructure.LSP.ClientSpec
+                    Graphos.Infrastructure.LSP.TransportSpec
+                    Graphos.Infrastructure.FileSystem.OfficeConvertSpec
 
   build-depends:
       base
