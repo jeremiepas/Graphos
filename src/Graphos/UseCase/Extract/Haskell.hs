@@ -32,6 +32,11 @@ makeStubNode filePath =
     , nodeLabel        = name
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
     , nodeSourceLocation = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
@@ -48,12 +53,8 @@ extractHaskellStub filePath = catch (do
   content <- readFile filePath
   let allNodes = haskellStubNodes filePath content
       edges = haskellStubEdges filePath allNodes
-  pure emptyExtraction
-    { extractionNodes = allNodes
-    , extractionEdges = edges
-    }
-  ) $ \(_ :: SomeException) -> pure emptyExtraction
-    { extractionNodes = [makeStubNode filePath] }
+  pure (extractionFromLists allNodes edges)
+  ) $ \(_ :: SomeException) -> pure (extractionFromLists [makeStubNode filePath] [])
 
 -- | Parse Haskell source for module name, imports, and top-level decl names
 haskellStubNodes :: FilePath -> String -> [Node]
@@ -71,6 +72,11 @@ haskellStubNodes filePath content =
             , nodeLabel        = T.pack mn
             , nodeFileType     = CodeFile
             , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
             , nodeSourceLocation = Just "L1"
             , nodeLineEnd      = Nothing
             , nodeKind         = Just "Module"
@@ -87,6 +93,11 @@ haskellStubNodes filePath content =
         , nodeLabel        = T.pack imp
         , nodeFileType     = CodeFile
         , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
         , nodeSourceLocation = Nothing
         , nodeLineEnd      = Nothing
         , nodeKind         = Just "Module"
@@ -103,6 +114,11 @@ haskellStubNodes filePath content =
         , nodeLabel        = T.pack decl
         , nodeFileType     = CodeFile
         , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
         , nodeSourceLocation = Nothing
         , nodeLineEnd      = Nothing
         , nodeKind         = Nothing
@@ -118,23 +134,21 @@ haskellStubNodes filePath content =
 
 -- | Build edges from Haskell stub nodes: module→import, module→decl
 haskellStubEdges :: FilePath -> [Node] -> [Edge]
-haskellStubEdges filePath nodes =
+haskellStubEdges _filePath nodes =
   let modNodeM = find (\n -> not ("_import_" `T.isInfixOf` nodeId n)) nodes
   in case modNodeM of
     Just mn ->
       let otherNodes = filter (\n -> nodeId n /= nodeId mn) nodes
       in [ Edge
-        { edgeSource        = nodeId mn
-        , edgeTarget        = nodeId other
-        , edgeRelation      = Imports
-        , edgeConfidence    = Ambiguous
-        , edgeConfidenceScore = 0.7
-        , edgeSourceFile    = T.pack filePath
-        , edgeSourceLocation = nodeSourceLocation mn
-        , edgeWeight        = 0.7
-        }
-        | other <- otherNodes
-        ]
+         { edgeId        = EdgeId (nodeId mn <> "->" <> nodeId other <> ":imports")
+         , edgeSource    = nodeId mn
+         , edgeTarget    = nodeId other
+         , edgeRelation  = Imports
+         , edgeConfidence = Confidence 0.7
+         , edgeWeight    = 0.7
+         }
+         | other <- otherNodes
+         ]
     Nothing -> []
 
 {- | Parse the module name from a Haskell source file -}

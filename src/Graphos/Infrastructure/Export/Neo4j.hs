@@ -37,6 +37,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (removeFile)
 import System.Exit (ExitCode(..))
+import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStrLn)
 import System.Process (readProcessWithExitCode)
 
 import Graphos.Domain.Types
@@ -50,10 +51,16 @@ import Graphos.Domain.Community (selectRepresentatives, filterEdgesByNodeSet)
 -- ───────────────────────────────────────────────
 
 -- | Generate Cypher statements and write to file (without communities).
+-- Streams statements to handle to reduce peak memory for large graphs.
 exportCypher :: Graph -> FilePath -> IO ()
 exportCypher g path = do
-  let cypher = generateCypher g
-  writeFile path (T.unpack cypher)
+  h <- openFile path WriteMode
+  -- Stream node statements one by one
+  mapM_ (\n -> hPutStrLn h (T.unpack (generateCypherNodeStatement n))) (Map.elems (gNodes g))
+  -- Stream edge statements one by one
+  mapM_ (\e -> hPutStrLn h (T.unpack (generateCypherEdgeStatement e))) (Map.elems (gEdges g))
+  hFlush h
+  hClose h
 
 -- ───────────────────────────────────────────────
 -- Neo4j push (basic — nodes + edges only)
@@ -240,13 +247,6 @@ chunkList n xs = take n xs : chunkList n (drop n xs)
 -- ───────────────────────────────────────────────
 -- Cypher file generation (for .cypher export)
 -- ───────────────────────────────────────────────
-
--- | Generate Cypher MERGE statements for the .cypher file (no communities).
-generateCypher :: Graph -> Text
-generateCypher g =
-  let nodeStatements = [ generateCypherNodeStatement n | n <- Map.elems (gNodes g) ]
-      edgeStatements = [ generateCypherEdgeStatement e | e <- Map.elems (gEdges g) ]
-  in T.unlines (nodeStatements ++ edgeStatements)
 
 -- | Generate a MERGE statement for a single node (for .cypher file).
 generateCypherNodeStatement :: Node -> Text
@@ -480,8 +480,8 @@ pushFileExtraction extraction uri user password =
 -- so re-pushing is safe (idempotent).
 generateFileStatements :: Extraction -> [Aeson.Value]
 generateFileStatements extraction =
-  [ generateParameterizedNodeStatement n | n <- extractionNodes extraction ]
-  ++ [ generateParameterizedEdgeStatement e | e <- extractionEdges extraction ]
+  [ generateParameterizedNodeStatement n | n <- Map.elems (extNodes extraction) ]
+  ++ [ generateParameterizedEdgeStatement e | e <- Map.elems (extEdges extraction) ]
 
 -- | Push edge-repair statements to Neo4j.
 --

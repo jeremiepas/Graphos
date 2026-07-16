@@ -17,6 +17,11 @@ testNode nid = Node
   , nodeLabel        = nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Just "L1"
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
@@ -34,6 +39,11 @@ testNodeWithLabel nid label = Node
   , nodeLabel        = label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Just "L1"
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
@@ -44,30 +54,29 @@ testNodeWithLabel nid label = Node
   , nodeContributor  = Nothing
   }
 
+-- helper: generate a unique EdgeId from source and target
+edgeIdFrom :: Text -> Text -> EdgeId
+edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
+
 -- Helper: create a test edge
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge
-  { edgeSource        = src
-  , edgeTarget        = tgt
-  , edgeRelation      = Calls
-  , edgeConfidence    = Extracted
-  , edgeConfidenceScore = 1.0
-  , edgeSourceFile    = "test.hs"
-  , edgeSourceLocation = Just "L1"
-  , edgeWeight        = 1.0
+  { edgeId        = edgeIdFrom src tgt
+  , edgeSource    = src
+  , edgeTarget    = tgt
+  , edgeRelation  = Calls
+  , edgeConfidence = Confidence 1.0
+  , edgeWeight    = 1.0
   }
 
--- Helper: create a test edge with custom confidence
 testEdgeWithConfidence :: Text -> Text -> Confidence -> Edge
 testEdgeWithConfidence src tgt conf = Edge
-  { edgeSource        = src
-  , edgeTarget        = tgt
-  , edgeRelation      = References
-  , edgeConfidence    = conf
-  , edgeConfidenceScore = confidenceScore conf
-  , edgeSourceFile    = "test.hs"
-  , edgeSourceLocation = Just "L1"
-  , edgeWeight        = 1.0
+  { edgeId        = edgeIdFrom src tgt
+  , edgeSource    = src
+  , edgeTarget    = tgt
+  , edgeRelation  = References
+  , edgeConfidence = conf
+  , edgeWeight    = 1.0
   }
 
 -- Helper: create a test node with file type
@@ -77,6 +86,11 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLabel        = nid
   , nodeFileType     = ft
   , nodeSourceFile   = srcFile
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Just "L1"
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
@@ -95,52 +109,42 @@ spec = do
       Map.size (gNodes g) `shouldBe` 0
 
     it "creates nodes from extraction" $ do
-      let ext = emptyExtraction { extractionNodes = [testNode "a", testNode "b"] }
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
           g = buildGraph False ext
       Map.size (gNodes g) `shouldBe` 2
 
   describe "mergeExtractions" $ do
     it "deduplicates nodes by id" $ do
-      let a = emptyExtraction { extractionNodes = [testNode "x"] }
-          b = emptyExtraction { extractionNodes = [testNode "x", testNode "y"] }
+      let a = extractionFromLists [testNode "x"] []
+          b = extractionFromLists [testNode "x", testNode "y"] []
           merged = mergeExtractions a b
       length (extractionNodes merged) `shouldBe` 2
 
   describe "degree" $ do
     it "returns 0 for isolated nodes" $ do
-      let g = buildGraph False emptyExtraction { extractionNodes = [testNode "a"] }
+      let g = buildGraph False (extractionFromLists [testNode "a"] [])
       degree g "a" `shouldBe` 0
 
   describe "shortestPath" $ do
     it "returns Just for connected nodes" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
-            , extractionEdges = [testEdge "a" "b", testEdge "b" "c"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b", testEdge "b" "c"]
           g = buildGraph False ext
       shortestPath g "a" "c" `shouldBe` Just ["a", "b", "c"]
 
     it "returns Nothing for disconnected nodes" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
           g = buildGraph False ext
       shortestPath g "a" "b" `shouldBe` Nothing
 
   describe "godNodes" $ do
     it "returns list sorted by degree descending" $ do
-      let ext = emptyExtraction
-            { extractionNodes = 
-                [ testNodeWithLabel "a" "Alpha"
+      let ext = extractionFromLists [ testNodeWithLabel "a" "Alpha"
                 , testNodeWithLabel "b" "Beta" 
                 , testNodeWithLabel "c" "Gamma"
-                ]
-            , extractionEdges = 
-                [ testEdge "a" "b"
+                ] [ testEdge "a" "b"
                 , testEdge "a" "c"
                 , testEdge "b" "c"
                 ]
-            }
           g = buildGraph False ext
           result = godNodes g 10
       -- In a fully connected 3-node undirected graph, all have degree 2
@@ -154,6 +158,11 @@ spec = do
             , nodeLabel = "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = "test.hs"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
             , nodeSourceLocation = Just "L1"
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
@@ -163,20 +172,14 @@ spec = do
             , nodeAuthor = Nothing
             , nodeContributor = Nothing
             }
-          ext = emptyExtraction
-            { extractionNodes = [fileNode, testNode "func"]
-            , extractionEdges = [testEdge "test.hs" "func"]
-            }
+          ext = extractionFromLists [fileNode, testNode "func"] [testEdge "test.hs" "func"]
           g = buildGraph False ext
           result = godNodes g 10
       -- File node should be excluded
       map gnId result `shouldNotContain` ["test.hs"]
 
     it "respects topN parameter" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c", testNode "d"]
-            , extractionEdges = [testEdge "a" "b", testEdge "a" "c", testEdge "a" "d", testEdge "b" "c"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c", testNode "d"] [testEdge "a" "b", testEdge "a" "c", testEdge "a" "d", testEdge "b" "c"]
           g = buildGraph False ext
           result = godNodes g 2
       length result `shouldBe` 2
@@ -184,10 +187,7 @@ spec = do
 
   describe "neighbors" $ do
     it "returns connected nodes" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
-            , extractionEdges = [testEdge "a" "b", testEdge "a" "c"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b", testEdge "a" "c"]
           g = buildGraph False ext
           nbs = neighbors g "a"
       Set.size nbs `shouldBe` 2
@@ -195,59 +195,52 @@ spec = do
       Set.member "c" nbs `shouldBe` True
 
     it "returns empty set for isolated nodes" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
           g = buildGraph False ext
           nbs = neighbors g "a"
       Set.size nbs `shouldBe` 0
 
   describe "graphDiff" $ do
     it "detects new nodes" $ do
-      let old = emptyExtraction { extractionNodes = [testNode "a", testNode "b"] }
-          new = emptyExtraction { extractionNodes = [testNode "a", testNode "b", testNode "c"] }
+      let old = extractionFromLists [testNode "a", testNode "b"] []
+          new = extractionFromLists [testNode "a", testNode "b", testNode "c"] []
           gOld = buildGraph False old
           gNew = buildGraph False new
           diff = graphDiff gOld gNew
-      length (gdNewNodes diff) `shouldBe` 1
-      nodeId (fromJust (listToMaybe (gdNewNodes diff))) `shouldBe` "c"
+      length (diffAddedNodes diff) `shouldBe` 1
+      nodeId (head $ Map.elems $ diffAddedNodes diff) `shouldBe` "c"
 
     it "detects removed nodes" $ do
-      let old = emptyExtraction { extractionNodes = [testNode "a", testNode "b"] }
-          new = emptyExtraction { extractionNodes = [testNode "a"] }
+      let old = extractionFromLists [testNode "a", testNode "b"] []
+          new = extractionFromLists [testNode "a"] []
           gOld = buildGraph False old
           gNew = buildGraph False new
           diff = graphDiff gOld gNew
-      length (gdRemovedNodes diff) `shouldBe` 1
-      fst (fromJust (listToMaybe (gdRemovedNodes diff))) `shouldBe` "b"
+      length (diffRemovedNodes diff) `shouldBe` 1
+      fst (head $ Map.toList $ diffRemovedNodes diff) `shouldBe` "b"
 
     it "detects new edges" $ do
-      let old = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b"]
-            , extractionEdges = [testEdge "a" "b"]
-            }
-          new = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
-            , extractionEdges = [testEdge "a" "b", testEdge "b" "c"]
-            }
+      let old = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
+          new = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b", testEdge "b" "c"]
           gOld = buildGraph False old
           gNew = buildGraph False new
           diff = graphDiff gOld gNew
-      length (gdNewEdges diff) `shouldBe` 1
+      length (diffAddedEdges diff) `shouldBe` 1
 
     it "returns no changes when graphs are equal" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b"]
-            , extractionEdges = [testEdge "a" "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
           g = buildGraph False ext
           diff = graphDiff g g
-      gdSummary diff `shouldBe` "no changes"
+      -- No changes means all added/removed maps are empty
+      Map.null (diffAddedNodes diff) `shouldBe` True
+      Map.null (diffRemovedNodes diff) `shouldBe` True
+      Map.null (diffAddedEdges diff) `shouldBe` True
+      Map.null (diffRemovedEdges diff) `shouldBe` True
 
   describe "mergeGraphs" $ do
     it "combines nodes from both graphs" $ do
-      let ext1 = emptyExtraction { extractionNodes = [testNode "a"] }
-          ext2 = emptyExtraction { extractionNodes = [testNode "b"] }
+      let ext1 = extractionFromLists [testNode "a"] []
+          ext2 = extractionFromLists [testNode "b"] []
           g1 = buildGraph False ext1
           g2 = buildGraph False ext2
           merged = mergeGraphs g1 g2
@@ -256,8 +249,8 @@ spec = do
     it "old graph takes precedence for duplicates" $ do
       let n1 = testNodeWithLabel "a" "Original"
           n2 = testNodeWithLabel "a" "Updated"
-          ext1 = emptyExtraction { extractionNodes = [n1] }
-          ext2 = emptyExtraction { extractionNodes = [n2] }
+          ext1 = extractionFromLists [n1] []
+          ext2 = extractionFromLists [n2] []
           g1 = buildGraph False ext1
           g2 = buildGraph False ext2
           merged = mergeGraphs g1 g2
@@ -271,6 +264,11 @@ spec = do
             , nodeLabel = "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = "test.hs"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
             , nodeSourceLocation = Nothing
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
@@ -280,7 +278,7 @@ spec = do
             , nodeAuthor = Nothing
             , nodeContributor = Nothing
             }
-          ext = emptyExtraction { extractionNodes = [n] }
+          ext = extractionFromLists [n] []
           g = buildGraph False ext
       isFileNode g n `shouldBe` True
 
@@ -290,6 +288,11 @@ spec = do
             , nodeLabel = ".foo()"
             , nodeFileType = CodeFile
             , nodeSourceFile = "test.hs"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
             , nodeSourceLocation = Nothing
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
@@ -299,7 +302,7 @@ spec = do
             , nodeAuthor = Nothing
             , nodeContributor = Nothing
             }
-          ext = emptyExtraction { extractionNodes = [n] }
+          ext = extractionFromLists [n] []
           g = buildGraph False ext
       isFileNode g n `shouldBe` True
 

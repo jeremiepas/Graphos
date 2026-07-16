@@ -1,0 +1,103 @@
+schema: pdca
+
+# Project context — shown to AI when creating every artifact.
+# This is the SINGLE SOURCE OF TRUTH for project identity, constraints, and conventions.
+context: |
+  ## Identity
+  Project: Graphos
+  Tagline: Context graph builder — any input → knowledge graph → clustered communities → HTML + JSON + report
+  License: MIT
+  Version: 0.1.0.0
+
+  ## Problem & Solution
+  Problem: LLMs waste tokens re-reading entire codebases. Developers lack navigable maps of how code connects.
+  Solution: Use LSP to extract code structure as a graph, cluster with Leiden community detection, produce persistent queryable context that saves tokens per LLM call.
+
+  ## Tech Stack
+  Language: Haskell (GHC 9.10)
+  Build: Cabal 3.0
+  Dev Shell: Nix (nixpkgs-unstable, shell.nix)
+  Graph Library: FGL 5.8+ (functional graph library, pure graph operations)
+  Protocol: LSP (lsp-types 2.0+, Language Server Protocol for extraction)
+  Serialization: Aeson 2.0+ (JSON for graph.json, config, LSP protocol)
+  CLI: optparse-applicative 0.17+
+  Testing: Hspec 2.10+ / QuickCheck 2.14+
+  Concurrency: STM + async (watcher, multi-thread extraction, MCP)
+  Observability: hs-opentelemetry-sdk + custom IORef MetricsStore + Prometheus endpoint
+  LLM Integration: OpenAI-compatible client for labeling/ingest/extraction
+  MCP Protocol: 2024-11-05 stdio JSON-RPC 2.0
+
+  ## Architecture
+  Pattern: Clean Architecture (Domain ← UseCase ← Infrastructure)
+  - Domain (pure, no IO): Types (Node, Edge, Graph, Community, Analysis, Pipeline, Extraction, Ingest, Context), Graph (Core, FGL adapter, Query, Diff, Analysis, Index), Community (Leiden, Label, Resolution, Merge, Cohesion, Representatives), Analysis (God nodes, bridges, surprising, suggested questions), Config, Context formatting, Extraction validation
+  - UseCase (pure orchestration, no IO implementation): Pipeline, Detect, Extract, Build, Cluster, Infer, Analyze, Report, Export, Query, Load, Ingest, SelectContext
+  - Infrastructure (all IO): LSP (Client, Protocol, Transport, Extraction, ServerMap 30+ langs, Capabilities), Extract (tree-sitter CLI), FileSystem (Cache, Manifest, Watcher, Ignore, Sensitive, OfficeConvert, Conversation), Export (JSON, HTML, Report, Obsidian, Neo4j, SVG, GraphML, CommunityGraph), Server (MCP stdio 11 tools, static HTTP), Logging + OTLP bridge, Observability wrapper, Config loader, LLM client + Embeddings
+  HARD RULE: Domain has ZERO IO. UseCase has ZERO IO implementation. ALL side effects in Infrastructure only.
+
+  ## Build & Test
+  Setup: nix-shell shell.nix
+  Build: cabal build (uses -Wall -Wcompat -Wincomplete-uni-patterns -Werror with --flag dev)
+  Test: cabal test (Hspec + QuickCheck)
+  REPL: cabal repl
+  Run: cabal run graphos -- <path>
+  GHC: 9.10 (via Nix shell.nix hp = pkgs.haskell.packages.ghc910)
+
+  ## Pipeline Stages
+  detect → extract → build → cluster → infer → analyze → export
+  Each stage is a pure function. Checkpoint after Build. SHA256 cache for incremental.
+
+  ## Key Decisions
+  - LSP over tree-sitter: any language with server, semantic info, cross-file refs, zero grammar maintenance
+  - FGL adapter: Domain maps (NodeId→Node, EId→Edge) ↔ FGL Gr a b (Patricia Tree). FGL module does NOT import Domain.Graph (avoids cycles). Operates on raw Maps/Sets.
+  - Leiden community detection: 3 phases (local moving, refinement, aggregation). Parameters: resGamma (default 1.0), resMinSize (3), resMaxIterations (50).
+  - Context selection: 5 strategies by complexity (Focused/Module/CrossModule/Architectural/Exploratory). Token budget allocation. Compact markdown output.
+  - MCP server: stdio JSON-RPC, 11 tools, community 0 = synthetic chat community (one-way edges, non-polluting).
+  - Neo4j: 3 push modes (FullPush/SubgraphPush/CommunityPush). Auto-select by graph size (<10k=Full, >=10k=Subgraph).
+  - Observability: OTLP traces + IORef metrics store + OTLP log bridge + debug-trace JSONL. Collector at :4318.
+
+  ## Haskell Conventions
+  - Types: PascalCase. Functions: camelCase. Constants: UPPER_SNAKE_CASE.
+  - Explicit exports on every module. Type signatures on ALL top-level definitions.
+  - Newtypes for type safety (not type aliases). Smart constructors for validation.
+  - Pure functions preferred. IO pushed to edge (Infrastructure only).
+  - StrictData + BangPatterns for performance-critical paths.
+  - No orphan instances. No partial functions in production code.
+
+  ## Output Directory
+  graphos-out/ is the single source of truth:
+  - graph.json (always), graph.html (unless --no-viz), GRAPH_REPORT.md (always)
+  - cache/ (SHA256 + checkpoint), memory/ (conv_*.md), debug/ (*.jsonl)
+  - community_graph.json, obsidian/, index.json
+
+  ## Context Stores Available
+  - fgl: FGL graph library (Data.Graph.Inductive.*), Patricia Tree, nidToInt hashing, BFS/DFS, articulation points
+  - lsp: Language Server Protocol (lsp-types), JSON-RPC 2.0, initialize handshake, documentSymbol/references/callHierarchy
+  - leiden: Leiden community detection algorithm, modularity, resolution parameter, cohesion scoring, merge strategies
+  - aeson: Aeson JSON serialization, FromJSON/ToJSON, Options, generic derivation
+  - otel-observability: hs-opentelemetry-sdk, OTLP, IORef MetricsStore, Prometheus format, trace context propagation
+  - compilation-optimisation: GHC 9.10 strictness, StrictData, BangPatterns, NFData, unboxed vectors, RTS options
+
+# Per-artifact rules
+rules:
+  proposal:
+    - Reference PRD.md section numbers for every capability
+    - Capabilities MUST map 1:1 to workflow docs (01-full-pipeline through 16-lsp-discovery)
+    - Keep the proposal under 2 pages — focus on why not how
+    - PDCA cycle MUST reference measurable success criteria from PRD section 16
+  specs:
+    - Every requirement MUST use SHALL/MUST (not should/may)
+    - Every requirement MUST have at least one Scenario with WHEN/THEN format using exactly 4 hashtags (####)
+    - Reference PRD section numbers in requirement descriptions
+    - Map scenarios to testable outcomes verifiable by cabal test
+  design:
+    - Architecture decisions MUST reference the clean architecture layers (Domain/UseCase/Infrastructure)
+    - Every decision MUST list alternatives considered
+    - No code examples — use schema diagrams and structured tables per PRD style
+    - Verification strategy MUST reference cabal build/test commands
+  tasks:
+    - Each task is ONE PDCA micro-cycle (N.P → N.D → N.C → N.A)
+    - Tasks should be completable in 1-4 hours each
+    - Plan (N.P) MUST define Check criteria BEFORE code — this is the anti-bias guard
+    - Check (N.C) MUST execute Plan's criteria verbatim — never invent new criteria
+    - Order tasks by dependency (foundation tasks first, integration tasks last)
+    - Group parallel-safe tasks when possible (no dependencies between them)

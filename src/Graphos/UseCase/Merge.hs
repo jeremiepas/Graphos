@@ -46,8 +46,10 @@ mergeGraphsAndAnalyze graphA graphB density res =
       enriched = if null allInferred
         then merged
         else buildGraphFromExtractions False
-             [emptyExtraction { extractionNodes = Map.elems (gNodes merged)
-                               , extractionEdges = Map.elems (gEdges merged) ++ allInferred }]
+             [Extraction
+               { extractionNodes = gNodes merged
+               , extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges merged) ++ allInferred]
+               }]
 
       -- Step 4: Re-cluster on enriched graph and analyze
       (finalComm, finalCohes) = clusterGraphWithResolution' enriched res

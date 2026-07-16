@@ -114,7 +114,7 @@ spec = describe "Context domain types" $ do
       map edgeSource edges `shouldBe` ["conv_001", "conv_001"]
       map edgeTarget edges `shouldBe` ["Parser", "AST"]
 
-    it "conversationNodeToNode creates a DocumentFile node" $ do
+    it "conversationNodeToNode creates a DocFile node" $ do
       let conv = ConversationNode
             { convId            = "conv_001"
             , convQuestion      = "How does parsing work?"

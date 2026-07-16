@@ -54,10 +54,11 @@ instance NFData Graph where
 -- Dangling edges (referencing nodes not in extractionNodes) are silently dropped.
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction =
-  let nodes = Map.fromList [(nodeId n, n) | n <- extractionNodes extraction]
-      validEdges = [e | e <- extractionEdges extraction
-                       , Map.member (edgeSource e) nodes
-                       , Map.member (edgeTarget e) nodes]
+  let nodes = extNodes extraction
+      edgeList = Map.elems (extEdges extraction)
+      validEdges = [e | e <- edgeList
+                      , Map.member (edgeSource e) nodes
+                      , Map.member (edgeTarget e) nodes]
       edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
       fwdAdj = Map.fromListWith Set.union
           [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
@@ -82,18 +83,11 @@ buildGraph directed extraction =
 -- where foldr mergeExtractions over 1000+ files causes OOM.
 mergeExtractions :: Extraction -> Extraction -> Extraction
 mergeExtractions a b =
-  let nodeMapA = Map.fromList [(nodeId n, n) | n <- extractionNodes a]
-      nodeMapB = Map.fromList [(nodeId n, n) | n <- extractionNodes b]
-      mergedNodeMap = nodeMapA `Map.union` nodeMapB  -- left-biased: a wins on dupes
-      allNodes = Map.elems mergedNodeMap
-      allEdges = extractionEdges a ++ extractionEdges b
-      allHyper = extractionHyperedges a ++ extractionHyperedges b
+  let mergedNodes = extNodes a `Map.union` extNodes b
+      mergedEdges = extEdges a `Map.union` extEdges b
   in Extraction
-    { extractionNodes      = allNodes
-    , extractionEdges      = allEdges
-    , extractionHyperedges = allHyper
-    , extractionInputTokens  = extractionInputTokens a + extractionInputTokens b
-    , extractionOutputTokens = extractionOutputTokens a + extractionOutputTokens b
+    { extractionNodes = mergedNodes
+    , extractionEdges = mergedEdges
     }
 
 -- | Merge two graphs (new graph takes precedence for overlapping nodes)

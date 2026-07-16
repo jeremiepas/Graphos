@@ -55,10 +55,12 @@ module Graphos.Infrastructure.Observability.SDK
   , startMetricsServer
   ) where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent.Async (Async, async, cancel)
 import Control.Concurrent.MVar (MVar, newMVar, swapMVar, modifyMVar_)
 import Control.Exception (SomeException, catch)
--- import Control.Monad (when, forever)  -- removed: unused, was causing -Werror=unused-imports
+import Control.Monad (void)
+import System.Timeout (timeout)
+import System.IO (hPutStrLn, stderr)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Int (Int64)
 import Data.List (sort)
@@ -146,6 +148,7 @@ data ObservabilityEnv = ObservabilityEnv
   , otelDebugTrace :: DebugTraceEnv       -- ^ Graphos-specific JSONL trace
   , otelLogEnv     :: LogEnv              -- ^ Console logging + OTLP log bridge
   , otelProvider   :: Maybe TracerProvider -- ^ SDK provider (for shutdown), Nothing if disabled
+  , otelServerThread :: Maybe (Async ())   -- ^ Metrics server thread (for clean shutdown)
   }
 
 -- ───────────────────────────────────────────────
@@ -370,12 +373,11 @@ initObservability logLevel otelCfg metricsPort debugDir = do
       pure $ makeTracer provider instrLib tracerOptions
 
   -- Start Prometheus metrics server if requested
-  case metricsPort of
+  serverThread <- case metricsPort of
     Just p -> do
       logInfo logEnv $ T.pack $ "Starting Prometheus metrics server on :" ++ show p ++ "/metrics"
-      _ <- forkIO $ startMetricsServer metrics p
-      pure ()
-    Nothing -> pure ()
+      Just <$> async (startMetricsServer metrics p)
+    Nothing -> pure Nothing
 
   pure ObservabilityEnv
     { otelTracer = tracer
@@ -384,17 +386,35 @@ initObservability logLevel otelCfg metricsPort debugDir = do
     , otelDebugTrace = debugTrace
     , otelLogEnv = logEnv
     , otelProvider = mProvider
+    , otelServerThread = serverThread
     }
 
--- | Shut down observability: flush debug traces, OTLP logs, and SDK provider.
+-- | Shut down observability: cancel metrics server, flush debug traces, OTLP logs, and SDK provider.
+-- Each sub-cleanup is wrapped in an independent 5-second timeout with exception
+-- catching so that one component hanging (e.g. OTLP collector unavailable) does
+-- not prevent the others from running.
 shutdownObservability :: ObservabilityEnv -> IO ()
 shutdownObservability env = do
-  flushDebugTrace (otelDebugTrace env)
-  flushOtlpLogs (otelLogEnv env)
-  -- Shutdown the global TracerProvider (flushes all buffered spans)
+  let logEnv = otelLogEnv env
+      componentTimeout :: IO () -> String -> IO ()
+      componentTimeout action label = do
+        result <- timeout 5000000 (action `catch` \(e :: SomeException) -> do
+          hPutStrLn stderr $ "[graphos] WARNING: " ++ label ++ " threw exception: " ++ show e)
+        case result of
+          Nothing -> hPutStrLn stderr $ "[graphos] WARNING: " ++ label ++ " timed out after 5s"
+          Just () -> pure ()
+  case otelServerThread env of
+    Just thread -> do
+      logInfo logEnv "Shutting down metrics server..."
+      componentTimeout (cancel thread) "metrics server shutdown"
+      logInfo logEnv "Metrics server shut down."
+    Nothing -> pure ()
+  componentTimeout (flushDebugTrace (otelDebugTrace env)) "debug trace flush"
+  componentTimeout (flushOtlpLogs logEnv) "OTLP logs flush"
   case otelProvider env of
     Just provider -> do
-      _ <- shutdownTracerProvider provider (Just 5000)
-      logInfo (otelLogEnv env) "OpenTelemetry SDK shut down (spans flushed)"
+      logInfo logEnv "Shutting down OpenTelemetry SDK..."
+      componentTimeout (void $ shutdownTracerProvider provider (Just 5000)) "OTLP SDK shutdown"
+      logInfo logEnv "OpenTelemetry SDK shut down (spans flushed)"
     Nothing -> pure ()
 

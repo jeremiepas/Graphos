@@ -5,6 +5,7 @@ module Graphos.Infrastructure.LSP.Extraction
   ( extractViaLSP
   , extractDocumentSymbols
   , extractCallHierarchy
+  , extractReferences
   , extractWorkspaceSymbols
   , workspaceSymbolsToDocumentSymbols
   , symbolToNodes
@@ -63,22 +64,28 @@ extractViaLSP client filePath =
     symbols <- extractDocumentSymbols client filePath
     putStrLn $ "[lsp] Got " ++ show (length symbols) ++ " symbols from " ++ filePath
 
+    -- Extract reference edges (textDocument/references) for top symbols
+    let hasRefs = scpReferencesProvider (lspServerCaps client)
+    refEdges <- if hasRefs
+      then extractReferences client filePath symbols
+      else pure []
+
+    -- Extract call hierarchy edges if supported
+    let hasCallHierarchy = scpCallHierarchyProvider (lspServerCaps client)
+    callEdges <- if hasCallHierarchy
+      then extractCallHierarchy client filePath symbols
+      else pure []
+
     let closeMsg = lspDidClose filePath
     sentClose <- sendLSPMessageSafe client closeMsg
     unless sentClose $ putStrLn "[lsp] Warning: could not send didClose (server disconnected?)"
 
     let nodes = symbolToNodes filePath symbols
-        edges = symbolTreeToEdges filePath symbols
-    pure emptyExtraction
-      { extractionNodes = nodes
-      , extractionEdges = edges
-      }
+        edges = symbolTreeToEdges filePath symbols ++ refEdges ++ callEdges
+    pure (extractionFromLists nodes edges)
   ) $ \(e :: SomeException) -> do
     putStrLn $ "[lsp] Warning: extraction failed for " ++ filePath ++ ": " ++ show e
-    pure emptyExtraction
-      { extractionNodes = [makeStubNode filePath]
-      , extractionEdges = []
-      }
+    pure (extractionFromLists [makeStubNode filePath] [])
 
 -- | Extract document symbols from a file.
 -- Catches Broken pipe and other IO errors — returns [] instead of crashing.
@@ -178,12 +185,228 @@ parseSymbolsFromResponse (Object o) =
 
 parseSymbolsFromResponse _ = []
 
--- | Extract call hierarchy (incoming calls) for a symbol
-extractCallHierarchy :: LSPClient -> Text -> IO [CallHierarchyItem]
-extractCallHierarchy client _name = do
-  _ <- takeMVar (lspMessageId client)
-  putMVar (lspMessageId client) 1
-  pure []  -- placeholder
+-- ───────────────────────────────────────────────
+-- Reference extraction
+-- ───────────────────────────────────────────────
+
+-- | Symbol kind priority for reference extraction:
+--   Class(5) > Method(6) > Function(12) > Constructor(9) > Interface(11) > others
+symbolKindPriority :: Int -> Int
+symbolKindPriority k = case k of
+  5  -> 0   -- Class
+  6  -> 1   -- Method
+  12 -> 2   -- Function
+  9  -> 3   -- Constructor
+  11 -> 4   -- Interface
+  23 -> 5   -- Struct
+  8  -> 6   -- Field
+  13 -> 7   -- Variable
+  _  -> 8   -- Everything else
+
+-- | Extract reference edges by sending textDocument/references for top symbols.
+-- Limits to 10 symbols per file (sorted by kind priority) to keep extraction fast.
+extractReferences :: LSPClient -> FilePath -> [DocumentSymbolResult] -> IO [Edge]
+extractReferences client filePath symbols = catch (do
+  let sorted = sortOn (symbolKindPriority . dsrKind) symbols
+      topSymbols = take 10 sorted
+  refEdgesList <- mapM (extractRefsForSymbol client filePath) topSymbols
+  pure (concat refEdgesList)
+  ) $ \(_ :: SomeException) -> pure []
+
+-- | Extract references for a single symbol position
+extractRefsForSymbol :: LSPClient -> FilePath -> DocumentSymbolResult -> IO [Edge]
+extractRefsForSymbol client filePath sym = catch (do
+  nextId <- takeMVar (lspMessageId client)
+  putMVar (lspMessageId client) (nextId + 1)
+  let Position line char = rangeStart (dsrRange sym)
+      req = lspReferencesWithId filePath line char nextId
+  sent <- sendLSPMessageSafe client req
+  if not sent
+    then pure []
+    else do
+      mResp <- timeout 5000000 (readLSPResponseForId (lspStdout client) nextId)
+      case mResp of
+        Nothing -> pure []
+        Just (Left _) -> pure []
+        Just (Right val) -> pure $ parseReferencesToEdges filePath sym val
+  ) $ \(_ :: SomeException) -> pure []
+
+-- | Parse references response into edges
+parseReferencesToEdges :: FilePath -> DocumentSymbolResult -> Value -> [Edge]
+parseReferencesToEdges filePath sym (Object o) =
+  case KM.lookup "result" o of
+    Just (Array arr) -> mapMaybe (parseRefLocation filePath sym) (V.toList arr)
+    _ -> []
+parseReferencesToEdges _ _ _ = []
+
+parseRefLocation :: FilePath -> DocumentSymbolResult -> Value -> Maybe Edge
+parseRefLocation filePath sym (Object loc) =
+  let refUri = case KM.lookup "uri" loc of
+        Just (Aeson.String u) -> T.drop 7 u
+        _ -> ""
+      refRange = case KM.lookup "range" loc of
+        Just (Object r) -> parseRangeFromFile r
+        _ -> Position 0 0
+      srcId = makeNodeId filePath (safeLabel (dsrName sym))
+      tgtId = makeNodeId (T.unpack refUri) ("ref_" <> T.pack (show (posLine refRange)))
+  in if T.null refUri
+     then Nothing
+     else Just Edge
+       { edgeId        = EdgeId (srcId <> "->ref:" <> tgtId)
+       , edgeSource    = srcId
+       , edgeTarget    = tgtId
+       , edgeRelation  = References
+       , edgeConfidence = Confidence 0.8
+       , edgeWeight    = 0.8
+       }
+  where
+    parseRangeFromFile r =
+      case KM.lookup "start" r of
+        Just (Object p) ->
+          let line = case KM.lookup "line" p of
+                Just (Aeson.Number n) -> round n
+                _ -> 0
+              char = case KM.lookup "character" p of
+                Just (Aeson.Number n) -> round n
+                _ -> 0
+          in Position line char
+        _ -> Position 0 0
+
+parseRefLocation _ _ (Array _) = Nothing
+parseRefLocation _ _ _ = Nothing
+
+-- ───────────────────────────────────────────────
+-- Call hierarchy extraction
+-- ───────────────────────────────────────────────
+
+-- | Extract call hierarchy edges for top-5 symbols per file.
+extractCallHierarchy :: LSPClient -> FilePath -> [DocumentSymbolResult] -> IO [Edge]
+extractCallHierarchy client filePath symbols = catch (do
+  let sorted = sortOn (symbolKindPriority . dsrKind) symbols
+      topSymbols = take 5 sorted
+  callEdgesList <- mapM (extractCallsForSymbol client filePath) topSymbols
+  pure (concat callEdgesList)
+  ) $ \(_ :: SomeException) -> pure []
+
+-- | Extract incoming calls for a single symbol
+extractCallsForSymbol :: LSPClient -> FilePath -> DocumentSymbolResult -> IO [Edge]
+extractCallsForSymbol client filePath sym = catch (do
+  nextId <- takeMVar (lspMessageId client)
+  putMVar (lspMessageId client) (nextId + 1)
+  let Position line char = rangeStart (dsrRange sym)
+      req = lspCallHierarchyPrepareWithId filePath line char nextId
+  sent <- sendLSPMessageSafe client req
+  if not sent
+    then pure []
+    else do
+      mResp <- timeout 5000000 (readLSPResponseForId (lspStdout client) nextId)
+      case mResp of
+        Nothing -> pure []
+        Just (Left _) -> pure []
+        Just (Right val) -> do
+          let items = parseCallHierarchyPrepareResponse val
+          if null items
+            then pure []
+            else do
+              -- For each item, request incoming calls
+              allEdges <- mapM (getIncomingCalls client filePath sym) items
+              pure (concat allEdges)
+  ) $ \(_ :: SomeException) -> pure []
+
+-- | Parse call hierarchy prepare response
+parseCallHierarchyPrepareResponse :: Value -> [CallHierarchyItem]
+parseCallHierarchyPrepareResponse (Object o) =
+  case KM.lookup "result" o of
+    Just (Array arr) -> mapMaybe parseCallHierarchyItem (V.toList arr)
+    _ -> []
+parseCallHierarchyPrepareResponse _ = []
+
+parseCallHierarchyItem :: Value -> Maybe CallHierarchyItem
+parseCallHierarchyItem (Object o) =
+  let name = case KM.lookup "name" o of
+        Just (Aeson.String t) -> t
+        _ -> ""
+      kind = case KM.lookup "kind" o of
+        Just (Aeson.Number n) -> round n
+        _ -> 0
+      uri = case KM.lookup "uri" o of
+        Just (Aeson.String u) -> T.drop 7 u
+        _ -> ""
+      range = case KM.lookup "range" o of
+        Just (Object r) -> parseRangeObj r
+        _ -> Range (Position 0 0) (Position 0 0)
+      selRange = case KM.lookup "selectionRange" o of
+        Just (Object r) -> parseRangeObj r
+        _ -> Range (Position 0 0) (Position 0 0)
+  in if T.null name then Nothing
+     else Just CallHierarchyItem { chiName = name, chiKind = kind, chiUri = uri, chiRange = range, chiSelectionRange = selRange }
+parseCallHierarchyItem _ = Nothing
+
+parseRangeObj :: Aeson.Object -> Range
+parseRangeObj r =
+  let start = case KM.lookup "start" r of
+        Just (Object p) -> parsePosObj p
+        _ -> Position 0 0
+      end = case KM.lookup "end" r of
+        Just (Object p) -> parsePosObj p
+        _ -> Position 0 0
+  in Range start end
+
+parsePosObj :: Aeson.Object -> Position
+parsePosObj p =
+  let line = case KM.lookup "line" p of
+        Just (Aeson.Number n) -> round n
+        _ -> 0
+      char = case KM.lookup "character" p of
+        Just (Aeson.Number n) -> round n
+        _ -> 0
+  in Position line char
+
+-- | Get incoming calls for a call hierarchy item
+getIncomingCalls :: LSPClient -> FilePath -> DocumentSymbolResult -> CallHierarchyItem -> IO [Edge]
+getIncomingCalls client filePath sym item = catch (do
+  nextId <- takeMVar (lspMessageId client)
+  putMVar (lspMessageId client) (nextId + 1)
+  let req = lspCallHierarchyIncomingWithId item nextId
+  sent <- sendLSPMessageSafe client req
+  if not sent
+    then pure []
+    else do
+      mResp <- timeout 5000000 (readLSPResponseForId (lspStdout client) nextId)
+      case mResp of
+        Nothing -> pure []
+        Just (Left _) -> pure []
+        Just (Right val) -> pure $ parseIncomingCallsEdges filePath sym val
+  ) $ \(_ :: SomeException) -> pure []
+
+-- | Parse incoming calls response into edges
+parseIncomingCallsEdges :: FilePath -> DocumentSymbolResult -> Value -> [Edge]
+parseIncomingCallsEdges filePath sym (Object o) =
+  case KM.lookup "result" o of
+    Just (Array arr) -> mapMaybe (parseIncomingCall filePath sym) (V.toList arr)
+    _ -> []
+parseIncomingCallsEdges _ _ _ = []
+
+parseIncomingCall :: FilePath -> DocumentSymbolResult -> Value -> Maybe Edge
+parseIncomingCall filePath sym (Object obj) =
+  let fromName = case KM.lookup "from" obj of
+        Just (Object from) -> case KM.lookup "name" from of
+          Just (Aeson.String t) -> t
+          _ -> ""
+        _ -> ""
+      srcId = makeNodeId filePath (safeLabel fromName)
+      tgtId = makeNodeId filePath (safeLabel (dsrName sym))
+  in if T.null fromName
+     then Nothing
+     else Just Edge
+       { edgeId        = EdgeId (srcId <> "->call:" <> tgtId)
+       , edgeSource    = srcId
+       , edgeTarget    = tgtId
+       , edgeRelation  = Calls
+       , edgeConfidence = Confidence 0.9
+       , edgeWeight    = 0.9
+       }
+parseIncomingCall _ _ _ = Nothing
 
 -- ───────────────────────────────────────────────
 -- Symbol → Node/Edge conversion
@@ -196,6 +419,11 @@ symbolToNodes filePath symbols =
     , nodeLabel        = safeLabel (dsrName sym)
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
     , nodeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange sym))))
     , nodeLineEnd      = Just $ posLine (rangeEnd (dsrRange sym))
     , nodeKind         = Just $ symbolKindToText (dsrKind sym)
@@ -217,14 +445,12 @@ symbolTreeToEdges :: FilePath -> [DocumentSymbolResult] -> [Edge]
 symbolTreeToEdges filePath flatSymbols =
   let fileEdges =
         [ Edge
-          { edgeSource        = T.pack (takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath)
-          , edgeTarget        = makeNodeId filePath (safeLabel (dsrName sym))
-          , edgeRelation      = Contains
-          , edgeConfidence    = Extracted
-          , edgeConfidenceScore = 1.0
-          , edgeSourceFile    = T.pack filePath
-          , edgeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange sym))))
-          , edgeWeight        = 1.0
+          { edgeId        = EdgeId (T.pack (takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath) <> "->" <> makeNodeId filePath (safeLabel (dsrName sym)) <> ":contains")
+          , edgeSource    = T.pack (takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath)
+          , edgeTarget    = makeNodeId filePath (safeLabel (dsrName sym))
+          , edgeRelation  = Contains
+          , edgeConfidence = Confidence 1.0
+          , edgeWeight    = 1.0
           }
         | sym <- flatSymbols
         ]
@@ -258,14 +484,12 @@ buildHierarchyEdges filePath symbols =
       popStack st startPos = dropWhile (\p -> posLine (rangeEnd (dsrRange p)) * 10000 + posCharacter (rangeEnd (dsrRange p)) <= startPos) st
 
       makeEdge parent child = Edge
-        { edgeSource        = makeNodeId filePath (safeLabel (dsrName parent))
-        , edgeTarget        = makeNodeId filePath (safeLabel (dsrName child))
-        , edgeRelation      = Contains
-        , edgeConfidence    = Extracted
-        , edgeConfidenceScore = 1.0
-        , edgeSourceFile    = T.pack filePath
-        , edgeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange parent))))
-        , edgeWeight        = 1.0
+        { edgeId        = EdgeId (makeNodeId filePath (safeLabel (dsrName parent)) <> "->" <> makeNodeId filePath (safeLabel (dsrName child)) <> ":contains")
+        , edgeSource    = makeNodeId filePath (safeLabel (dsrName parent))
+        , edgeTarget    = makeNodeId filePath (safeLabel (dsrName child))
+        , edgeRelation  = Contains
+        , edgeConfidence = Confidence 1.0
+        , edgeWeight    = 1.0
         }
   in go [] sorted
 
@@ -295,6 +519,11 @@ makeStubNode filePath =
     , nodeLabel        = name
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
     , nodeSourceLocation = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing

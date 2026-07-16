@@ -16,6 +16,11 @@ testNode nid = Node
   , nodeLabel        = nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Just "L1"
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
@@ -27,40 +32,35 @@ testNode nid = Node
   }
 
 -- Helper: create a test edge
+edgeIdFrom :: Text -> Text -> EdgeId
+edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
+
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge
-  { edgeSource        = src
-  , edgeTarget        = tgt
-  , edgeRelation      = Imports
-  , edgeConfidence    = Extracted
-  , edgeConfidenceScore = 1.0
-  , edgeSourceFile    = "test.hs"
-  , edgeSourceLocation = Just "L1"
-  , edgeWeight        = 1.0
+  { edgeId        = edgeIdFrom src tgt
+  , edgeSource    = src
+  , edgeTarget    = tgt
+  , edgeRelation  = Imports
+  , edgeConfidence = Confidence 1.0
+  , edgeWeight    = 1.0
   }
 
 spec :: Spec
 spec = do
   describe "labelFromNodes" $ do
     it "returns label for nodes with labels" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "Auth", testNode "Database"]
-            , extractionEdges = [testEdge "Auth" "Database"]
-            }
+      let ext = extractionFromLists [testNode "Auth", testNode "Database"] [testEdge "Auth" "Database"]
           g = buildGraph False ext
       let label = labelFromNodes g ["Auth", "Database"]
       label `shouldSatisfy` (not . T.null)
 
     it "returns Unnamed Community for empty node list" $ do
-      let ext = emptyExtraction { extractionNodes = [], extractionEdges = [] }
+      let ext = extractionFromLists [] []
           g = buildGraph False ext
       labelFromNodes g [] `shouldBe` "Unnamed Community"
 
     it "handles nodes with zero degree without division by zero" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "Module.Authentication"]
-            , extractionEdges = []
-            }
+      let ext = extractionFromLists [testNode "Module.Authentication"] []
           g = buildGraph False ext
       -- This should NOT crash with division by zero
       let label = labelFromNodes g ["Module.Authentication"]
@@ -68,17 +68,14 @@ spec = do
 
   describe "suggestCommunityLabels" $ do
     it "generates labels for communities" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "Auth", testNode "Database", testNode "Router"]
-            , extractionEdges = [testEdge "Auth" "Database", testEdge "Auth" "Router"]
-            }
+      let ext = extractionFromLists [testNode "Auth", testNode "Database", testNode "Router"] [testEdge "Auth" "Database", testEdge "Auth" "Router"]
           g = buildGraph False ext
           commMap = Map.fromList [(0, ["Auth", "Database", "Router"])]
           labels = suggestCommunityLabels g commMap
       Map.size labels `shouldSatisfy` (>= 1)
 
     it "handles empty community gracefully" $ do
-      let ext = emptyExtraction { extractionNodes = [], extractionEdges = [] }
+      let ext = extractionFromLists [] []
           g = buildGraph False ext
           commMap = Map.fromList [(0, [])]
           labels = suggestCommunityLabels g commMap

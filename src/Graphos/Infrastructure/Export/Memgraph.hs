@@ -34,7 +34,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.Exit (ExitCode(..))
 import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (hClose, openTempFile)
+import System.IO (hClose, hFlush, hPutStrLn, IOMode(..), openFile, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Data.List (sortOn)
 
@@ -49,11 +49,19 @@ import Graphos.Domain.Community.Label (suggestCommunityLabels)
 
 -- | Generate Memgraph-compatible Cypher and write to file.
 -- Includes index creation statements before data.
+-- Streams statements to handle to reduce peak memory for large graphs.
 exportMemgraphCypher :: Graph -> FilePath -> IO ()
 exportMemgraphCypher g path = do
-  let idxCypher = generateIndexCypher
-      dataCypher = generateDataCypher g
-  writeFile path (T.unpack $ T.unlines [idxCypher, "", dataCypher])
+  h <- openFile path WriteMode
+  -- Write index creation statements
+  mapM_ (hPutStrLn h . T.unpack) (T.lines generateIndexCypher)
+  hPutStrLn h ""
+  -- Stream node statements one by one
+  mapM_ (\n -> hPutStrLn h (T.unpack (generateInlineNodeStatement n))) (Map.elems (gNodes g))
+  -- Stream edge statements one by one
+  mapM_ (\e -> hPutStrLn h (T.unpack (generateInlineEdgeStatement e))) (Map.elems (gEdges g))
+  hFlush h
+  hClose h
 
 -- ───────────────────────────────────────────────
 -- Index creation
@@ -342,14 +350,7 @@ generateCommunityEdgeInlineStatements g commMap =
          , "}]->(c2);"
          ]
      | ((c1, c2), (count, bridges)) <- Map.toList edgeCounts
-     ]
-
--- | Generate inline data Cypher for file export.
-generateDataCypher :: Graph -> Text
-generateDataCypher g =
-  let nodeStmts = [ generateInlineNodeStatement n | n <- Map.elems (gNodes g) ]
-      edgeStmts = [ generateInlineEdgeStatement e | e <- Map.elems (gEdges g) ]
-  in T.unlines nodeStmts <> T.unlines edgeStmts
+ ]
 
 -- ───────────────────────────────────────────────
 -- Helpers

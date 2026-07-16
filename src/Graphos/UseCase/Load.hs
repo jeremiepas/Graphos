@@ -47,13 +47,7 @@ loadGraphFromFile path = do
         Left err ->
           pure $ Left $ "Failed to parse graph JSON: " <> T.pack err
         Right gf -> do
-          let extraction = Extraction
-                { extractionNodes      = gfNodes gf
-                , extractionEdges      = gfEdges gf
-                , extractionHyperedges = []
-                , extractionInputTokens  = 0
-                , extractionOutputTokens = 0
-                }
+          let extraction = extractionFromLists (gfNodes gf) (gfEdges gf)
               graph = buildGraph False extraction
               -- Build index at load time: O(N) one-time cost,
               -- amortized across all future queries.

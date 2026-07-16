@@ -16,6 +16,7 @@ module Graphos.Infrastructure.LSP.Client
   , extractViaLSP
   , extractDocumentSymbols
   , extractCallHierarchy
+  , extractReferences
   , extractWorkspaceSymbols
   , parseServerCapabilities
   , workspaceSymbolsToDocumentSymbols
@@ -48,6 +49,7 @@ import Graphos.Infrastructure.LSP.Extraction
   ( extractViaLSP
   , extractDocumentSymbols
   , extractCallHierarchy
+  , extractReferences
   , extractWorkspaceSymbols
   , workspaceSymbolsToDocumentSymbols
   , symbolToNodes

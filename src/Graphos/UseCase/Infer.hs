@@ -1,22 +1,9 @@
--- | Edge inference - create additional edges by analyzing graph structure.
--- 
--- After initial extraction, the graph often has sparse connections between
--- communities. This module infers new edges based on:
---   * Community centroids (highest-degree nodes) → ConceptuallyRelatedTo
---   * Shared neighbors → SharesDataWith
---   * Transitive dependencies → DependsOn
---   * Bridge nodes (articulation points) → RationaleFor
---   * Code ↔ Documentation linking → References
 module Graphos.UseCase.Infer
-  ( -- * Community-bridging inference
-    inferCommunityBridges
+  ( inferCommunityBridges
   , inferTransitiveDeps
   , inferSharedContextEdges
-    -- * Code↔Doc linking
   , inferCodeDocEdges
-    -- * Density-controlled inference
   , inferEdges
-    -- * Bridge node classification
   , classifyBridgeNodes
   , BridgeClassification(..)
   ) where
@@ -35,30 +22,20 @@ import Graphos.Domain.Graph
   , edgeBetweenness
   )
 
--- ───────────────────────────────────────────────
--- Bridge classification
--- ───────────────────────────────────────────────
-
--- | Classification of a bridge node in the graph
 data BridgeClassification = BridgeClassification
   { bcNodeId        :: NodeId
   , bcIsArticulation :: Bool
-  , bcBccCount      :: Int        -- How many biconnected components it bridges
-  , bcBetweenness   :: Double     -- Edge betweenness score
-  , bcCommunities   :: [CommunityId]  -- Which communities it connects
+  , bcBccCount      :: Int
+  , bcBetweenness   :: Double
+  , bcCommunities   :: [CommunityId]
   } deriving (Eq, Show)
 
--- | Classify bridge nodes using fgl-powered graph algorithms.
--- Articulation points are nodes whose removal would disconnect the graph.
--- Biconnected components show tightly connected clusters.
 classifyBridgeNodes :: Graph -> CommunityMap -> [BridgeClassification]
 classifyBridgeNodes g commMap =
   let artPoints = articulationPoints g
       bccs = biconnectedComponents g
       between = edgeBetweenness g
-      -- Map each node to its communities
       nodeComm = nodeCommunityMap commMap
-      -- Count BCC membership for each art point
       bccMembership = Map.fromListWith (+)
         [ (nid, 1)
         | comp <- bccs
@@ -66,67 +43,47 @@ classifyBridgeNodes g commMap =
         , nid `elem` artPoints
         ]
   in [ BridgeClassification
-       { bcNodeId        = nid
-       , bcIsArticulation = True
-       , bcBccCount      = Map.findWithDefault 1 nid bccMembership
-       , bcBetweenness   = sum [score | ((s,t), score) <- Map.toList between
-                                       , s == nid || t == nid]
-       , bcCommunities   = case Map.lookup nid nodeComm of
-                              Just cid -> [cid]  -- bridge nodes often sit between communities
-                              Nothing  -> []
-       }
-     | nid <- artPoints
-     ]
+        { bcNodeId        = nid
+        , bcIsArticulation = True
+        , bcBccCount      = Map.findWithDefault 1 nid bccMembership
+        , bcBetweenness   = sum [score | ((s,t), score) <- Map.toList between
+                                        , s == nid || t == nid]
+        , bcCommunities   = case Map.lookup nid nodeComm of
+                               Just cid -> [cid]
+                               Nothing  -> []
+        }
+      | nid <- artPoints
+      ]
 
--- ───────────────────────────────────────────────
--- Community-bridging inference
--- ───────────────────────────────────────────────
-
--- | Infer edges between community centroids.
--- For each pair of communities, connect their highest-degree nodes
--- with ConceptuallyRelatedTo edges. This creates inter-cluster bridges
--- that make the graph more connected and help discovery.
---
--- Returns inferred edges (to be merged into the graph).
 inferCommunityBridges :: Graph -> CommunityMap -> [Edge]
 inferCommunityBridges g commMap =
   let centroids = communityCentroids g commMap
       communityIds = Map.keys centroids
-      -- Generate edges between centroids of different communities
       pairs = [(cid1, cid2) | cid1 <- communityIds
                              , cid2 <- communityIds
                              , cid1 < cid2]
-  in [makeBridgeEdge srcNid tgtNid | (cid1, cid2) <- pairs
-                                    , Just srcNid <- [Map.lookup cid1 centroids]
-                                    , Just tgtNid <- [Map.lookup cid2 centroids]
-                                    , notEdgeAlready g srcNid tgtNid
-                                    ]
+  in [makeInferredEdge srcNid tgtNid Inferred 0.5 | (cid1, cid2) <- pairs
+                                                   , Just srcNid <- [Map.lookup cid1 centroids]
+                                                   , Just tgtNid <- [Map.lookup cid2 centroids]
+                                                   , notEdgeAlready g srcNid tgtNid
+                                                   ]
 
--- | Infer transitive dependency edges:
--- If A → B and B → C (both Imports/DependsOn), infer A → C (DependsOn).
 inferTransitiveDeps :: Graph -> [Edge]
 inferTransitiveDeps g =
   let edges = Map.toList (gEdges g)
-      -- Collect import/dependency edges
       depEdges = [((s, t), e) | ((s, t), e) <- edges
-                               , edgeRelation e `elem` [Imports, ImportsFrom, DependsOn]]
-      -- Build predecessor map: target → list of sources
+                               , edgeRelation e `elem` [Imports, DependsOn]]
       predMap = Map.fromListWith (++) [(t, [s]) | ((s, t), _) <- depEdges]
-      -- For each node, find transitive deps
       transitiveDeps = nubBy (\a b -> edgeSource a == edgeSource b && edgeTarget a == edgeTarget b)
-        [makeTransitiveDepEdge src tgt
+        [makeInferredEdge src tgt DependsOn 0.4
         | ((src, mid), _) <- depEdges
         , Just targets <- [Map.lookup mid predMap]
         , tgt <- targets
-        , tgt /= src  -- no self-loops
-        , notEdgeAlready g src tgt  -- don't duplicate
+        , tgt /= src
+        , notEdgeAlready g src tgt
         ]
   in transitiveDeps
 
--- | Infer "shares data with" edges: if two nodes share 2+ common neighbors,
--- they likely share data.
--- O(E * avg_degree) instead of O(N²) — iterates over edges and collects
--- co-occurrences of neighbors rather than enumerating all node pairs.
 inferSharedContextEdges :: Graph -> Int -> [Edge]
 inferSharedContextEdges g minShared =
   let allNodes = Map.keys (gNodes g)
@@ -145,105 +102,22 @@ inferSharedContextEdges g minShared =
                    , count >= minShared
                    , notEdgeAlready g n1 n2
                    ]
-  in [makeSharedDataEdge n1 n2 count | (n1, n2, count) <- validPairs]
+  in [makeInferredEdge n1 n2 Inferred (min 0.9 (0.2 * fromIntegral sharedCount)) | (n1, n2, sharedCount) <- validPairs]
   where
     orderPair a b = if a < b then (a, b) else (b, a)
 
--- ───────────────────────────────────────────────
--- Helpers
--- ───────────────────────────────────────────────
-
--- | Get the centroid (highest-degree node) of each community
-communityCentroids :: Graph -> CommunityMap -> Map CommunityId NodeId
-communityCentroids g commMap = Map.fromList
-  [ (cid, centroidOf g members)
-  | (cid, members) <- Map.toList commMap
-  , not (null members)
-  ]
-  where
-    centroidOf g' members =
-      let scored = sortOn (\n -> negate (fromIntegral (degree g' n) :: Double)) members
-      in case scored of (x:_) -> x; [] -> error "centroidOf: empty community"
-
--- | Check if an edge already exists between two nodes (in either direction)
-notEdgeAlready :: Graph -> NodeId -> NodeId -> Bool
-notEdgeAlready g src tgt =
-  Map.notMember (src, tgt) (gEdges g) && Map.notMember (tgt, src) (gEdges g)
-
--- | Map each node to its community
-nodeCommunityMap :: CommunityMap -> Map NodeId CommunityId
-nodeCommunityMap commMap = Map.fromList
-  [(nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids]
-
--- | Make a bridge edge between community centroids
-makeBridgeEdge :: NodeId -> NodeId -> Edge
-makeBridgeEdge src tgt = Edge
-  { edgeSource         = src
-  , edgeTarget         = tgt
-  , edgeRelation       = ConceptuallyRelatedTo
-  , edgeConfidence     = Inferred
-  , edgeConfidenceScore = 0.5
-  , edgeSourceFile     = T.pack "inferred:community-bridge"
-  , edgeSourceLocation = Nothing
-  , edgeWeight         = 0.5
-  }
-
--- | Make a transitive dependency edge
-makeTransitiveDepEdge :: NodeId -> NodeId -> Edge
-makeTransitiveDepEdge src tgt = Edge
-  { edgeSource         = src
-  , edgeTarget         = tgt
-  , edgeRelation       = DependsOn
-  , edgeConfidence     = Inferred
-  , edgeConfidenceScore = 0.4
-  , edgeSourceFile     = T.pack "inferred:transitive-dep"
-  , edgeSourceLocation = Nothing
-  , edgeWeight         = 0.4
-  }
-
--- | Make a shared-data edge
-makeSharedDataEdge :: NodeId -> NodeId -> Int -> Edge
-makeSharedDataEdge src tgt sharedCount = Edge
-  { edgeSource         = src
-  , edgeTarget         = tgt
-  , edgeRelation       = SharesDataWith
-  , edgeConfidence     = Inferred
-  , edgeConfidenceScore = min 0.9 (0.2 * fromIntegral sharedCount)
-  , edgeSourceFile     = T.pack "inferred:shared-context"
-  , edgeSourceLocation = Nothing
-  , edgeWeight         = min 0.9 (0.2 * fromIntegral sharedCount)
-  }
-
--- ───────────────────────────────────────────────
--- Code ↔ Documentation linking
--- ───────────────────────────────────────────────
-
--- | Infer edges between code nodes and documentation nodes.
---
--- Two linking strategies:
---
---   1. **Name alignment**: A doc file references a module/class name
---      that exists as a code node. E.g. docs mention "Boond.Types"
---      and there's a code node with label "Boond.Types".
---
---   2. **Path alignment**: A doc file lives next to a code file.
---      E.g. @src/Foo.hs@ ↔ @docs/Foo.md@ share the base name "Foo".
---
--- All inferred edges use 'References' relation with 'Inferred' confidence.
 inferCodeDocEdges :: Graph -> [Edge]
 inferCodeDocEdges g =
   let allNodes = Map.toList (gNodes g)
-      docNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == DocumentFile]
+      docNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == DocFile]
       codeNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == CodeFile]
 
-      -- Build a label → NodeId index for code nodes (fast lookup)
       codeLabelIdx :: Map Text [NodeId]
       codeLabelIdx = Map.fromListWith (++)
         [ (nodeLabel cn, [nid])
         | (nid, cn) <- codeNodes
         ]
 
-      -- Also index by source file base name (without extension)
       codeBaseIdx :: Map Text [NodeId]
       codeBaseIdx = Map.fromListWith (++)
         [ (fileBaseName (nodeSourceFile cn), [nid])
@@ -251,19 +125,15 @@ inferCodeDocEdges g =
         , not (T.null (nodeSourceFile cn))
         ]
 
-      -- Strategy 1: Name alignment
-      -- Doc nodes whose label matches a code node label → References edge
       nameAlignEdges =
-        [ makeCodeDocEdge codeNid docNid "name-alignment"
+        [ makeInferredEdge codeNid docNid References 0.7
         | (docNid, dn) <- docNodes
         , codeNid <- Map.findWithDefault [] (nodeLabel dn) codeLabelIdx
         , notEdgeAlready g docNid codeNid
         ]
 
-      -- Strategy 2: Path alignment
-      -- Doc file "Foo.md" ↔ Code file "Foo.hs" share base name
       pathAlignEdges =
-        [ makeCodeDocEdge codeNid docNid "path-alignment"
+        [ makeInferredEdge codeNid docNid References 0.7
         | (docNid, dn) <- docNodes
         , not (T.null (nodeSourceFile dn))
         , let docBase = fileBaseName (nodeSourceFile dn)
@@ -275,15 +145,11 @@ inferCodeDocEdges g =
   in nubBy (\a b -> edgeSource a == edgeSource b && edgeTarget a == edgeTarget b)
        (nameAlignEdges ++ pathAlignEdges)
 
--- | Extract the base name of a file path (without directory or extension).
--- "src/Foo/Bar.hs" → "Bar"
 fileBaseName :: Text -> Text
 fileBaseName path =
-  let -- Take after last '/'
-      filename = case T.breakOnEnd "/" path of
+  let filename = case T.breakOnEnd "/" path of
         (_, f) | not (T.null f) -> T.dropWhile (== '/') f
         _                        -> path
-      -- Drop extension (last .xxx segment)
       base = case T.breakOnEnd "." filename of
         (_, ext) | not (T.null ext) && T.length ext <= 5 ->
           case T.breakOnEnd "." (T.dropEnd (T.length ext + 1) filename) of
@@ -292,27 +158,37 @@ fileBaseName path =
         _ -> filename
   in base
 
--- | Make a code↔doc edge
-makeCodeDocEdge :: NodeId -> NodeId -> Text -> Edge
-makeCodeDocEdge src tgt strategy = Edge
-  { edgeSource         = src
-  , edgeTarget         = tgt
-  , edgeRelation       = References
-  , edgeConfidence     = Inferred
-  , edgeConfidenceScore = 0.7
-  , edgeSourceFile     = "inferred:code-doc-" <> strategy
-  , edgeSourceLocation = Nothing
-  , edgeWeight         = 0.7
-  }
-
--- | Infer edges based on density level.
---
---   * Sparse:   No inferred edges at all (only what was extracted)
---   * Normal:   Community bridges + transitive deps (recommended default)
---   * Dense:    Normal + shared-context edges (min 3 shared neighbors)
---   * Maximum:  Dense + shared-context edges (min 2 shared neighbors)
 inferEdges :: EdgeDensity -> Graph -> CommunityMap -> [Edge]
 inferEdges Sparse   g _  = inferCodeDocEdges g
 inferEdges Normal g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g
 inferEdges Dense   g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g
 inferEdges Maximum g cm = inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g
+
+communityCentroids :: Graph -> CommunityMap -> Map CommunityId NodeId
+communityCentroids g commMap = Map.fromList
+  [ (cid, centroidOf g members)
+  | (cid, members) <- Map.toList commMap
+  , not (null members)
+  ]
+  where
+    centroidOf g' members =
+      let scored = sortOn (\n -> negate (fromIntegral (degree g' n) :: Double)) members
+      in case scored of (x:_) -> x; [] -> error "centroidOf: empty community"
+
+notEdgeAlready :: Graph -> NodeId -> NodeId -> Bool
+notEdgeAlready g src tgt =
+  Map.notMember (src, tgt) (gEdges g) && Map.notMember (tgt, src) (gEdges g)
+
+nodeCommunityMap :: CommunityMap -> Map NodeId CommunityId
+nodeCommunityMap commMap = Map.fromList
+  [(nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids]
+
+makeInferredEdge :: NodeId -> NodeId -> Relation -> Double -> Edge
+makeInferredEdge src tgt rel w = Edge
+  { edgeId        = EdgeId (src <> "->" <> tgt <> ":" <> relationToText rel)
+  , edgeSource    = src
+  , edgeTarget    = tgt
+  , edgeRelation  = rel
+  , edgeWeight    = w
+  , edgeConfidence = Confidence w
+  }
