@@ -1,25 +1,94 @@
 -- | Ingest types: embedding records and index for fast single-file ingestion.
 -- Pure data types with no IO dependencies.
+{-# LANGUAGE StrictData #-}
 module Graphos.Domain.Types.Ingest
-  ( -- * Embedding record
-    IngestEmbedding(..)
-  , emptyIngestEmbedding
+  ( -- * Ingest result (spec-compliant)
+    IngestResult(..)
 
-    -- * Ingest index
+    -- * Ingest index (spec-compliant)
   , IngestIndex(..)
   , emptyIngestIndex
+  , lookupEmbedding
+  , mergeIndex
+
+    -- * Legacy embedding types (backward compat)
+  , IngestEmbedding(..)
+  , emptyIngestEmbedding
   , addToIndex
   , lookupIndex
   , indexSize
   ) where
 
+import Control.DeepSeq (NFData(..))
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Time.Clock (UTCTime)
+import GHC.Generics (Generic)
 
+import Graphos.Domain.Types.Graph (Extraction)
 import Graphos.Domain.Types.Node (NodeId)
+
+-- ───────────────────────────────────────────────
+-- Spec-Compliant Types (Task 6)
+-- ───────────────────────────────────────────────
+
+-- | Result of ingesting a single file
+-- Extraction contains nodes/edges; embeddings optionally stores vectors per node
+data IngestResult = IngestResult
+  { irExtraction :: !Extraction
+  , irEmbeddings :: !(Maybe (Map NodeId [Double]))
+  } deriving (Eq, Show, Generic)
+
+instance NFData IngestResult
+
+instance ToJSON IngestResult where
+  toJSON r = object
+    [ "extraction" .= irExtraction r
+    , "embeddings" .= irEmbeddings r
+    ]
+
+instance FromJSON IngestResult where
+  parseJSON = withObject "IngestResult" $ \v -> IngestResult
+    <$> v .: "extraction"
+    <*> v .: "embeddings"
+
+-- | In-memory index mapping nodeId → embedding vector.
+-- Persisted as index.json for fast lookups during query.
+-- Supports O(1) lookup via Map.
+data IngestIndex = IngestIndex
+  { iiNodes :: !(Map NodeId [Double])
+  } deriving (Eq, Show, Generic)
+
+instance NFData IngestIndex
+
+-- | Empty index
+emptyIngestIndex :: IngestIndex
+emptyIngestIndex = IngestIndex { iiNodes = Map.empty }
+
+-- | Look up an embedding by nodeId (O(1) via Map lookup)
+lookupEmbedding :: NodeId -> IngestIndex -> Maybe [Double]
+lookupEmbedding nid idx = Map.lookup nid (iiNodes idx)
+
+-- | Merge two indices (right-biased: right side wins on key collision)
+mergeIndex :: IngestIndex -> IngestIndex -> IngestIndex
+mergeIndex left right = IngestIndex
+  { iiNodes = Map.union (iiNodes left) (iiNodes right)
+  }
+
+instance ToJSON IngestIndex where
+  toJSON idx = object
+    [ "nodes" .= iiNodes idx
+    ]
+
+instance FromJSON IngestIndex where
+  parseJSON = withObject "IngestIndex" $ \v -> IngestIndex
+    <$> v .: "nodes"
+
+-- ───────────────────────────────────────────────
+-- Legacy Types (for backward compatibility)
+-- ───────────────────────────────────────────────
 
 -- | Embedding record for a single ingested node.
 -- When embedding is disabled, the vector is empty and only metadata is stored.
@@ -59,36 +128,23 @@ instance FromJSON IngestEmbedding where
     <*> v .: "timestamp"
     <*> v .: "model"
 
--- | In-memory index mapping nodeId → IngestEmbedding.
--- Persisted as index.json for fast lookups during query.
--- When embeddings exist, supports cosine-similarity search.
-data IngestIndex = IngestIndex
-  { iiEntries :: Map NodeId IngestEmbedding
-  } deriving (Eq, Show)
-
--- | Empty index
-emptyIngestIndex :: IngestIndex
-emptyIngestIndex = IngestIndex { iiEntries = Map.empty }
-
 -- | Add an embedding to the index (overwrites if nodeId exists)
 addToIndex :: IngestEmbedding -> IngestIndex -> IngestIndex
-addToIndex emb idx = idx { iiEntries = Map.insert (ieNodeId emb) emb (iiEntries idx) }
+addToIndex emb idx = idx { iiNodes = Map.insert (ieNodeId emb) (ieVector emb) (iiNodes idx) }
 
 -- | Look up an embedding by nodeId
 lookupIndex :: NodeId -> IngestIndex -> Maybe IngestEmbedding
-lookupIndex nid idx = Map.lookup nid (iiEntries idx)
+lookupIndex nid idx = do
+  vec <- Map.lookup nid (iiNodes idx)
+  -- Note: This loses timestamp/model info. Consider using IngestResult instead.
+  Just IngestEmbedding
+    { ieNodeId = nid
+    , ieVector = vec
+    , ieSourceHash = ""
+    , ieTimestamp = undefined
+    , ieModel = ""
+    }
 
 -- | Number of entries in the index
 indexSize :: IngestIndex -> Int
-indexSize = Map.size . iiEntries
-
-instance ToJSON IngestIndex where
-  toJSON idx = object
-    [ "entries" .= Map.elems (iiEntries idx)
-    ]
-
-instance FromJSON IngestIndex where
-  parseJSON = withObject "IngestIndex" $ \v -> do
-    entries <- v .: "entries"
-    let entryMap = Map.fromList [(ieNodeId e, e) | e <- entries]
-    pure IngestIndex { iiEntries = entryMap }
+indexSize = Map.size . iiNodes

@@ -1,0 +1,1979 @@
+{
+  "nodes": [
+    {
+      "id": "direnv_bin_nix_direnv_reload",
+      "label": "nix-direnv-reload",
+      "file_type": "code",
+      "source_file": ".direnv/bin/nix-direnv-reload",
+      "source_location": "L1",
+      "metadata": {
+        "language": "bash",
+        "kind": "file"
+      },
+      "_origin": "ast"
+    },
+    {
+      "id": "direnv_bin_nix_direnv_reload__entry",
+      "label": "nix-direnv-reload script",
+      "file_type": "code",
+      "source_file": ".direnv/bin/nix-direnv-reload",
+      "source_location": "L1",
+      "metadata": {
+        "language": "bash",
+        "kind": "bash_entrypoint"
+      },
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package",
+      "label": "package.json",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_name",
+      "label": "name",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L2",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_version",
+      "label": "version",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L3",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_description",
+      "label": "description",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L4",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_main",
+      "label": "main",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L5",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_scripts",
+      "label": "scripts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L6",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_scripts_build",
+      "label": "build",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L7",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_scripts_start",
+      "label": "start",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L8",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_devdependencies",
+      "label": "devDependencies",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L10",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_package_devdependencies_typescript",
+      "label": "typescript",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L11",
+      "_origin": "ast"
+    },
+    {
+      "id": "typescript",
+      "label": "typescript",
+      "file_type": "concept",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L11",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db",
+      "label": "db.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_generateid",
+      "label": "generateId()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L7",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_users",
+      "label": "users",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L12",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_dbgetall",
+      "label": "dbGetAll()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_dbgetbyid",
+      "label": "dbGetById()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L18",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_dbcreate",
+      "label": "dbCreate()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L22",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_dbupdate",
+      "label": "dbUpdate()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L27",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_db_dbdelete",
+      "label": "dbDelete()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L35",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_index",
+      "label": "index.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_index_applogger",
+      "label": "appLogger",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L8",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_index_printuser",
+      "label": "printUser()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L10",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_index_main",
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service",
+      "label": "service.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice",
+      "label": "UserService",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L8",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice_getallusers",
+      "label": ".getAllUsers()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L9",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice_getuserbyid",
+      "label": ".getUserById()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice_createuser",
+      "label": ".createUser()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L23",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "label": ".updateUser()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L42",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice_deleteuser",
+      "label": ".deleteUser()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L59",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_service_userservice_getadmins",
+      "label": ".getAdmins()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L67",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_types",
+      "label": "types.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_types_user",
+      "label": "User",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L3",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_types_userrole",
+      "label": "UserRole",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L11",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_types_userid",
+      "label": "UserId",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L17",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_types_createuserrequest",
+      "label": "CreateUserRequest",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L19",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_types_updateuserrequest",
+      "label": "UpdateUserRequest",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L25",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_format",
+      "label": "format.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_format_formatusername",
+      "label": "formatUserName()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L5",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_format_formatuserlist",
+      "label": "formatUserList()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L9",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger",
+      "label": "logger.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_loglevel",
+      "label": "LogLevel",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L3",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_logger",
+      "label": "Logger",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L10",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_logger_constructor",
+      "label": ".constructor()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_logger_debug",
+      "label": ".debug()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L19",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_logger_info",
+      "label": ".info()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L25",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_logger_warn",
+      "label": ".warn()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L31",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_utils_logger_logger_error",
+      "label": ".error()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L37",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_validate",
+      "label": "validate.ts",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_validate_validationresult",
+      "label": "ValidationResult",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L5",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_validate_validatecreaterequest",
+      "label": "validateCreateRequest()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L10",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_src_validate_validateupdaterequest",
+      "label": "validateUpdateRequest()",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L28",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig",
+      "label": "tsconfig.json",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions",
+      "label": "compilerOptions",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L2",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_target",
+      "label": "target",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L3",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_module",
+      "label": "module",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L4",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_moduleresolution",
+      "label": "moduleResolution",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L5",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_strict",
+      "label": "strict",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L6",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_esmoduleinterop",
+      "label": "esModuleInterop",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L7",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_skiplibcheck",
+      "label": "skipLibCheck",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L8",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_outdir",
+      "label": "outDir",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L9",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_rootdir",
+      "label": "rootDir",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L10",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_declaration",
+      "label": "declaration",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L11",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_compileroptions_sourcemap",
+      "label": "sourceMap",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L12",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_include",
+      "label": "include",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "ref_src",
+      "label": "src/**/*",
+      "file_type": "concept",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "example_ts_lsp_test_tsconfig_exclude",
+      "label": "exclude",
+      "file_type": "code",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L15",
+      "_origin": "ast"
+    },
+    {
+      "id": "ref_node_modules",
+      "label": "node_modules",
+      "file_type": "concept",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L15",
+      "_origin": "ast"
+    },
+    {
+      "id": "ref_dist",
+      "label": "dist",
+      "file_type": "concept",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L15",
+      "_origin": "ast"
+    },
+    {
+      "id": "opencode",
+      "label": "opencode.json",
+      "file_type": "code",
+      "source_file": "opencode.json",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "opencode_schema",
+      "label": "$schema",
+      "file_type": "code",
+      "source_file": "opencode.json",
+      "source_location": "L2",
+      "_origin": "ast"
+    },
+    {
+      "id": "opencode_default_agent",
+      "label": "default_agent",
+      "file_type": "code",
+      "source_file": "opencode.json",
+      "source_location": "L3",
+      "_origin": "ast"
+    }
+  ],
+  "edges": [
+    {
+      "source": "direnv_bin_nix_direnv_reload",
+      "target": "direnv_bin_nix_direnv_reload__entry",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": ".direnv/bin/nix-direnv-reload",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package",
+      "target": "example_ts_lsp_test_package_name",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L2",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package",
+      "target": "example_ts_lsp_test_package_version",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package",
+      "target": "example_ts_lsp_test_package_description",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package",
+      "target": "example_ts_lsp_test_package_main",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package",
+      "target": "example_ts_lsp_test_package_scripts",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package_scripts",
+      "target": "example_ts_lsp_test_package_scripts_build",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package_scripts",
+      "target": "example_ts_lsp_test_package_scripts_start",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package",
+      "target": "example_ts_lsp_test_package_devdependencies",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package_devdependencies",
+      "target": "example_ts_lsp_test_package_devdependencies_typescript",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_package_devdependencies_typescript",
+      "target": "typescript",
+      "relation": "imports",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/package.json",
+      "source_location": "L11",
+      "weight": 1.0,
+      "context": "import",
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types_user",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types_userid",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_generateid",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_users",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_dbgetall",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_dbgetbyid",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L18",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_dbcreate",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L22",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_dbupdate",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L27",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_db",
+      "target": "example_ts_lsp_test_src_db_dbdelete",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/db.ts",
+      "source_location": "L35",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_service",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_service_userservice",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_service_userservice",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_types",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_types_userrole",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_utils_format",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_utils_format_formatusername",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_utils_logger",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_utils_logger_logger",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_utils_logger_loglevel",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_index_applogger",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_index_printuser",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index",
+      "target": "example_ts_lsp_test_src_index_main",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index_main",
+      "target": "example_ts_lsp_test_src_index_printuser",
+      "relation": "indirect_call",
+      "context": "argument",
+      "confidence": "INFERRED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L36",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_types",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_types_userid",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_types_userrole",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_types_createuserrequest",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_types_updateuserrequest",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db_generateid",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db_dbgetall",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db_dbgetbyid",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db_dbcreate",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db_dbupdate",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_db_dbdelete",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_validate",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_validate_validatecreaterequest",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_validate_validateupdaterequest",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_utils_logger",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_utils_logger_logger",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_service_userservice",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice",
+      "target": "example_ts_lsp_test_src_service_userservice_getallusers",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice",
+      "target": "example_ts_lsp_test_src_service_userservice_getuserbyid",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice",
+      "target": "example_ts_lsp_test_src_service_userservice_createuser",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L23",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice",
+      "target": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L42",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice",
+      "target": "example_ts_lsp_test_src_service_userservice_deleteuser",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L59",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice",
+      "target": "example_ts_lsp_test_src_service_userservice_getadmins",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L67",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service",
+      "target": "example_ts_lsp_test_src_service_userservice",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L73",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_types",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_types",
+      "target": "example_ts_lsp_test_src_types_userrole",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_types",
+      "target": "example_ts_lsp_test_src_types_userid",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L17",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_types",
+      "target": "example_ts_lsp_test_src_types_createuserrequest",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L19",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_types",
+      "target": "example_ts_lsp_test_src_types_updateuserrequest",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/types.ts",
+      "source_location": "L25",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_format",
+      "target": "example_ts_lsp_test_src_types",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_format",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_format",
+      "target": "example_ts_lsp_test_src_utils_format_formatusername",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_format",
+      "target": "example_ts_lsp_test_src_utils_format_formatuserlist",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_format_formatuserlist",
+      "target": "example_ts_lsp_test_src_utils_format_formatusername",
+      "relation": "indirect_call",
+      "context": "argument",
+      "confidence": "INFERRED",
+      "source_file": "example/ts-lsp-test/src/utils/format.ts",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_loglevel",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_constructor",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_debug",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L19",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_info",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L25",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_warn",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L31",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_error",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L37",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_utils_logger",
+      "target": "example_ts_lsp_test_src_utils_logger_logger",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/utils/logger.ts",
+      "source_location": "L44",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types_userrole",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types_createuserrequest",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "home_jeremie_documents_perso_graphos_example_ts_lsp_test_types_updateuserrequest",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "example_ts_lsp_test_src_validate_validationresult",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "example_ts_lsp_test_src_validate_validatecreaterequest",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate",
+      "target": "example_ts_lsp_test_src_validate_validateupdaterequest",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L28",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L2",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_target",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_module",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_moduleresolution",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_strict",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_esmoduleinterop",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_skiplibcheck",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_outdir",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_rootdir",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_declaration",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_compileroptions",
+      "target": "example_ts_lsp_test_tsconfig_compileroptions_sourcemap",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig",
+      "target": "example_ts_lsp_test_tsconfig_include",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_include",
+      "target": "ref_src",
+      "relation": "extends",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L14",
+      "weight": 1.0,
+      "context": "import",
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig",
+      "target": "example_ts_lsp_test_tsconfig_exclude",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L15",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_exclude",
+      "target": "ref_node_modules",
+      "relation": "extends",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L15",
+      "weight": 1.0,
+      "context": "import",
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_tsconfig_exclude",
+      "target": "ref_dist",
+      "relation": "extends",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/tsconfig.json",
+      "source_location": "L15",
+      "weight": 1.0,
+      "context": "import",
+      "_origin": "ast"
+    },
+    {
+      "source": "opencode",
+      "target": "opencode_schema",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "opencode.json",
+      "source_location": "L2",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "opencode",
+      "target": "opencode_default_agent",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "opencode.json",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index_printuser",
+      "target": "example_ts_lsp_test_src_utils_format_formatusername",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getallusers",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getuserbyid",
+      "target": "example_ts_lsp_test_src_types_userid",
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getuserbyid",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_createuser",
+      "target": "example_ts_lsp_test_src_types_createuserrequest",
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L23",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_createuser",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L23",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "target": "example_ts_lsp_test_src_types_userid",
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L42",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "target": "example_ts_lsp_test_src_types_updateuserrequest",
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L42",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L42",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_deleteuser",
+      "target": "example_ts_lsp_test_src_types_userid",
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L59",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getadmins",
+      "target": "example_ts_lsp_test_src_types_user",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L67",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getallusers",
+      "target": "example_ts_lsp_test_src_db_dbgetall",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getuserbyid",
+      "target": "example_ts_lsp_test_src_db_dbgetbyid",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L15",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_createuser",
+      "target": "example_ts_lsp_test_src_validate_validatecreaterequest",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L24",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_createuser",
+      "target": "example_ts_lsp_test_src_db_generateid",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L31",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_createuser",
+      "target": "example_ts_lsp_test_src_db_dbcreate",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L39",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "target": "example_ts_lsp_test_src_validate_validateupdaterequest",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L43",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_updateuser",
+      "target": "example_ts_lsp_test_src_db_dbupdate",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L49",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_deleteuser",
+      "target": "example_ts_lsp_test_src_db_dbdelete",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L60",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_service_userservice_getadmins",
+      "target": "example_ts_lsp_test_src_db_dbgetall",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/service.ts",
+      "source_location": "L68",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate_validatecreaterequest",
+      "target": "example_ts_lsp_test_src_types_userrole",
+      "relation": "indirect_call",
+      "context": "argument",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L21",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_validate_validateupdaterequest",
+      "target": "example_ts_lsp_test_src_types_userrole",
+      "relation": "indirect_call",
+      "context": "argument",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "example/ts-lsp-test/src/validate.ts",
+      "source_location": "L39",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index_printuser",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_info",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "example_ts_lsp_test_src_index_main",
+      "target": "example_ts_lsp_test_src_utils_logger_logger_info",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "example/ts-lsp-test/src/index.ts",
+      "source_location": "L40",
+      "weight": 1.0,
+      "_origin": "ast"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

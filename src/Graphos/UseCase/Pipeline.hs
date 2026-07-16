@@ -19,16 +19,17 @@ module Graphos.UseCase.Pipeline
   ) where
 
 import Control.DeepSeq (deepseq)
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when, void)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Directory (createDirectoryIfMissing)
+import System.Mem (performGC)
 
-import Graphos.Domain.Types
-import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
+import Graphos.Domain.Types hiding (PushMode(..))
+import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..), Neo4jPushMode(..))
 import Graphos.Domain.Graph (gNodes, gEdges)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.Infrastructure.Logging (LogLevel(..), logInfo, logDebug, logTrace)
@@ -142,12 +143,12 @@ runPipeline config = catch (do
       extractEnd <- getCurrentTime
       observeHistogram metrics "graphos_extract_duration_seconds" (realToFrac (diffUTCTime extractEnd extractStart) :: Double)
       incCounter metrics "graphos_pipeline_steps_total" 1
-      setGauge metrics "graphos_nodes_extracted" (fromIntegral $ length (extractionNodes extraction))
-      setGauge metrics "graphos_edges_extracted" (fromIntegral $ length (extractionEdges extraction))
-      debugTraceSpan (otelDebugTrace obsEnv) "extract" extractStart extractEnd (Map.fromList [("nodes", T.pack $ show $ length (extractionNodes extraction)), ("edges", T.pack $ show $ length (extractionEdges extraction))])
-      logInfo env $ T.pack $ "  " ++ show (length (extractionNodes extraction)) ++ " nodes, " ++
-                  show (length (extractionEdges extraction)) ++ " edges"
-      logDebug env $ T.pack $ "  Nodes: " ++ show (map nodeId (extractionNodes extraction))
+      setGauge metrics "graphos_nodes_extracted" (fromIntegral $ Map.size (extractionNodes extraction))
+      setGauge metrics "graphos_edges_extracted" (fromIntegral $ Map.size (extractionEdges extraction))
+      debugTraceSpan (otelDebugTrace obsEnv) "extract" extractStart extractEnd (Map.fromList [("nodes", T.pack $ show $ Map.size (extractionNodes extraction)), ("edges", T.pack $ show $ Map.size (extractionEdges extraction))])
+      logInfo env $ T.pack $ "  " ++ show (Map.size (extractionNodes extraction)) ++ " nodes, " ++
+                  show (Map.size (extractionEdges extraction)) ++ " edges"
+      logDebug env $ T.pack $ "  Nodes: " ++ show (Map.elems (extractionNodes extraction))
 
       -- Edge repair pass: re-push all edges to Neo4j to ensure cross-file connections
       when (cfgNeo4jStreaming configWithStreaming /= Nothing) $ do
@@ -190,11 +191,12 @@ runPipeline config = catch (do
       logInfo env $ T.pack $ "  Checkpoint saved: " ++ checkpointPath
 
       -- Force full evaluation of the graph now that incremental write + checkpoint
-      -- are done. This allows the GC to reclaim graph nodes before clustering starts.
-      -- On 100k+ node graphs, the checkpoint keeps the whole graph in memory;
-      -- forcing here means subsequent clustering operates on fully-evaluated data
-      -- without retaining lazy thunks from the extraction phase.
-      graph `deepseq` pure ()
+      -- are done, then perform GC to reclaim extraction Maps before clustering starts.
+      -- On 100k+ node graphs, the extraction Maps can be 30-40% of peak memory;
+      -- this boundary lets the runtime reclaim that memory before Leiden begins.
+      _ <- evaluate (Map.size (gNodes graph))
+      _ <- evaluate (Map.size (gEdges graph))
+      performGC
 
       -- Steps 4-5: Cluster + Analyze (skipped when --no-cluster)
       (enrichedGraph, finalCommMap, _finalCohesion, analysis) <-
@@ -235,8 +237,8 @@ runPipeline config = catch (do
                 enrichedGraph' = if null allInferred
                   then graph
                   else buildGraphFromExtractions (cfgDirected configWithStreaming)
-                       [emptyExtraction { extractionNodes = Map.elems (gNodes graph)
-                                         , extractionEdges = Map.elems (gEdges graph) ++ allInferred }]
+                       [extractionFromLists (Map.elems (gNodes graph))
+                                            (Map.elems (gEdges graph) ++ allInferred)]
             -- deepseq forces full evaluation of the enriched graph, which:
             -- 1. Eliminates lazy thunk chains in nested Maps/Sets
             -- 2. Allows the original 'graph' to be GC'd — without this,
@@ -254,6 +256,12 @@ runPipeline config = catch (do
             pure (enrichedGraph', finalComm, finalCohes, anal)
 
       logInfo env "  graph.json written incrementally"
+
+      -- Release intermediate data structures before export.
+      -- Clustering (LeidenState) and analysis (CachedFGL) are done;
+      -- only the graph, community map, and analysis results are needed for export.
+      -- performGC lets the runtime reclaim LeidenState vectors and FGL Patricia trees.
+      performGC
 
       -- Step 6: Report
       logInfo env "Step 6: Generating report..."
@@ -368,8 +376,8 @@ runIncrementalPipeline config changedFiles = catch (do
             enriched = if null allInferred
               then graph
               else buildGraphFromExtractions (cfgDirected configWithStreaming)
-                   [emptyExtraction { extractionNodes = Map.elems (gNodes graph)
-                                     , extractionEdges = Map.elems (gEdges graph) ++ allInferred }]
+                   [extractionFromLists (Map.elems (gNodes graph))
+                                        (Map.elems (gEdges graph) ++ allInferred)]
         pure (enriched, commMap, cohesion)
 
   -- Export
@@ -467,8 +475,8 @@ runSingleFilePipeline config filePath = catch (do
           else do
             -- Use clusterSingle on the first extracted node as seed
             -- If no nodes, skip clustering
-            let nodes = extractionNodes (firExtraction fir)
-            case nodes of
+            let nodesMap = extractionNodes (firExtraction fir)
+            case Map.elems nodesMap of
               (seedNode: _) -> do
                 let res = Resolution { resGamma = cfgResolution config
                                      , resMinSize = cfgMinCommSize config
@@ -480,8 +488,8 @@ runSingleFilePipeline config filePath = catch (do
                     enriched = if null allInferred
                       then graph
                       else buildGraphFromExtractions (cfgDirected config)
-                           [emptyExtraction { extractionNodes = Map.elems (gNodes graph)
-                                            , extractionEdges = Map.elems (gEdges graph) ++ allInferred }]
+                           [extractionFromLists (Map.elems (gNodes graph))
+                                                (Map.elems (gEdges graph) ++ allInferred)]
                 logInfo env $ T.pack $ "  Clusters: " ++ show (Map.size commMap)
                 pure (enriched, commMap)
               [] -> pure (graph, Map.empty)
@@ -492,7 +500,7 @@ runSingleFilePipeline config filePath = catch (do
       existingIndex <- loadIndex indexPath
       let mergedIndex = mergeIndices existingIndex (firIndex fir)
       saveIndex indexPath mergedIndex
-      logInfo env $ T.pack $ "  Index: " ++ show (Map.size (iiEntries mergedIndex)) ++ " entries → " ++ indexPath
+      logInfo env $ T.pack $ "  Index: " ++ show (Map.size (iiNodes mergedIndex)) ++ " entries → " ++ indexPath
 
       -- Step 5: Export
       let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty

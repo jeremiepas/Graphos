@@ -69,9 +69,9 @@ checkSemanticCache files root = do
 
 -- | Save semantic extraction results grouped by source_file
 saveSemanticCache :: [Node] -> [Edge] -> [Hyperedge] -> FilePath -> IO Int
-saveSemanticCache nodes edges hyperedges root = do
-  let byFile = groupBySourceFile nodes edges hyperedges
-  mapM_ (\(fpath, (ns, es, hs)) -> saveCached fpath (Extraction ns es hs 0 0) root) (Map.toList byFile)
+saveSemanticCache nodes edges _hyperedges root = do
+  let byFile = groupBySourceFile nodes edges
+  mapM_ (\(fpath, (ns, es)) -> saveCached fpath (extractionFromLists ns es) root) (Map.toList byFile)
   pure (Map.size byFile)
 
 -- | Clear all cache entries
@@ -91,37 +91,27 @@ clearCache root = do
 data CachedExtraction = CachedExtraction
   { ceNodes      :: [Node]
   , ceEdges      :: [Edge]
-  , ceHyperedges :: [Hyperedge]
   } deriving (Eq, Show)
 
 instance ToJSON CachedExtraction where
   toJSON ce = object
     [ "nodes"      .= ceNodes ce
     , "edges"      .= ceEdges ce
-    , "hyperedges" .= ceHyperedges ce
     ]
 
 instance FromJSON CachedExtraction where
   parseJSON = withObject "CachedExtraction" $ \v -> CachedExtraction
     <$> v .: "nodes"
     <*> v .: "edges"
-    <*> v .: "hyperedges"
 
 extractionToCached :: Extraction -> CachedExtraction
 extractionToCached e = CachedExtraction
-  { ceNodes      = extractionNodes e
-  , ceEdges      = extractionEdges e
-  , ceHyperedges = extractionHyperedges e
+  { ceNodes      = Map.elems (extNodes e)
+  , ceEdges      = Map.elems (extEdges e)
   }
 
 cachedToExtraction :: CachedExtraction -> Extraction
-cachedToExtraction c = Extraction
-  { extractionNodes      = ceNodes c
-  , extractionEdges      = ceEdges c
-  , extractionHyperedges = ceHyperedges c
-  , extractionInputTokens  = 0
-  , extractionOutputTokens = 0
-  }
+cachedToExtraction c = extractionFromLists (ceNodes c) (ceEdges c)
 
 -- ───────────────────────────────────────────────
 -- Helpers
@@ -146,12 +136,13 @@ fileHash path root = do
     isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
 
 -- | Group nodes/edges/hyperedges by source_file
-groupBySourceFile :: [Node] -> [Edge] -> [Hyperedge] -> Map FilePath ([Node], [Edge], [Hyperedge])
-groupBySourceFile nodes edges hyperedges =
-  let nodeMap  = foldl' (\m n -> Map.insertWith (\(a,b,c) (a',b',c') -> (a++a', b++b', c++c')) (T.unpack (nodeSourceFile n)) ([n], [], []) m) Map.empty nodes
-      edgeMap  = foldl' (\m e -> Map.insertWith (\(a,b,c) (a',b',c') -> (a++a', b++b', c++c')) (T.unpack (edgeSourceFile e)) ([], [e], []) m) nodeMap edges
-      hyperMap = foldl' (\m h -> Map.insertWith (\(a,b,c) (a',b',c') -> (a++a', b++b', c++c')) (T.unpack (hyperedgeSourceFile h)) ([], [], [h]) m) edgeMap hyperedges
-  in hyperMap
+groupBySourceFile :: [Node] -> [Edge] -> Map FilePath ([Node], [Edge])
+groupBySourceFile nodes edges =
+  let nodeSourceMap = Map.fromList [(nodeId n, nodeSourceFile n) | n <- nodes]
+      nodeMap  = foldl' (\m n -> Map.insertWith (\(a,b) (a',b') -> (a++a', b++b')) (T.unpack (nodeSourceFile n)) ([n], []) m) Map.empty nodes
+      edgeMap  = foldl' (\m e -> let srcFile = Map.findWithDefault "" (edgeSource e) nodeSourceMap
+                                 in Map.insertWith (\(a,b) (a',b') -> (a++a', b++b')) (T.unpack srcFile) ([], [e]) m) nodeMap edges
+  in edgeMap
 
 -- ───────────────────────────────────────────────
 -- Pipeline checkpoint (resume from failure)

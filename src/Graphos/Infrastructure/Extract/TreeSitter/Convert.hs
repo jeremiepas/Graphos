@@ -12,8 +12,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-  ( Node(..), Edge(..), Extraction(..), emptyExtraction
-  , NodeId, FileType(..), Relation(..), Confidence(..)
+  ( Node(..), Edge(..), Extraction(..), extractionFromLists
+  , NodeId, FileType(..), Relation(..), Confidence(..), EdgeId(..)
   )
 import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
 
@@ -65,10 +65,7 @@ tsNodesToExtraction :: FilePath -> [TSNodeInfo] -> Extraction
 tsNodesToExtraction filePath nodes =
   let graphNodes = concatMap (tsNodeToGraphNodes filePath) nodes
       graphEdges = concatMap (tsNodeToGraphEdges filePath Nothing) nodes
-  in emptyExtraction
-    { extractionNodes = graphNodes
-    , extractionEdges = graphEdges
-    }
+  in extractionFromLists graphNodes graphEdges
 
 -- | Convert a TSNodeInfo and its children into Graphos Nodes.
 tsNodeToGraphNodes :: FilePath -> TSNodeInfo -> [Node]
@@ -86,14 +83,12 @@ tsNodeToGraphEdges filePath parentLabel node =
       myEdges = case (parentLabel, isDef) of
         (Just p, True) ->
           [ Edge
-            { edgeSource        = makeNodeId filePath p
-            , edgeTarget        = makeNodeId filePath myLabel
-            , edgeRelation      = Contains
-            , edgeConfidence    = Extracted
-            , edgeConfidenceScore = 1.0
-            , edgeSourceFile    = T.pack filePath
-            , edgeSourceLocation = Just $ T.pack $ "L" ++ show (tsnStartRow node + 1)
-            , edgeWeight        = 1.0
+            { edgeId        = EdgeId (makeNodeId filePath p <> "->" <> makeNodeId filePath myLabel <> ":contains")
+            , edgeSource    = makeNodeId filePath p
+            , edgeTarget    = makeNodeId filePath myLabel
+            , edgeRelation  = Contains
+            , edgeConfidence = Confidence 1.0
+            , edgeWeight    = 1.0
             }
           ]
         _ -> []
@@ -114,6 +109,11 @@ makeNode filePath node = Node
   , nodeLabel        = tsNodeLabel node
   , nodeFileType     = CodeFile
   , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Just $ T.pack $ "L" ++ show (tsnStartRow node + 1)
   , nodeLineEnd      = Just (tsnEndRow node + 1)
   , nodeKind         = Just $ T.pack $ tsTypeToKind (tsnType node)

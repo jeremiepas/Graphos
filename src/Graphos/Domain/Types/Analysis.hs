@@ -18,11 +18,11 @@ import Graphos.Domain.Types.Node (NodeId)
 
 -- | Analysis results
 data Analysis = Analysis
-  { analysisCommunities :: CommunityMap
-  , analysisCohesion     :: CohesionMap
-  , analysisGodNodes     :: [GodNode]
-  , analysisSurprises    :: [SurprisingConnection]
-  , analysisQuestions    :: [SuggestedQuestion]
+  { analysisCommunities :: !CommunityMap
+  , analysisCohesion     :: !CohesionMap
+  , analysisGodNodes     :: ![GodNode]
+  , analysisSurprises    :: ![SurprisingConnection]
+  , analysisQuestions    :: ![SuggestedQuestion]
   } deriving (Eq, Show)
 
 -- | A god node (high-degree hub)

@@ -1,50 +1,46 @@
--- | Edge types for the knowledge graph.
--- Pure data types with no IO dependencies.
---
--- All fields are strict (!) to prevent thunk accumulation.
--- Edge is the most numerous type in the graph (often 3-10× node count),
--- so thunk overhead here multiplies fastest.
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Graphos.Domain.Types.Edge
   ( -- * Edge types
-    EdgeId
+    EdgeId(..)
   , Edge(..)
   , Relation(..)
   , relationToText
   , textToRelation
   , Confidence(..)
-  , confidenceScore
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject, withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), ToJSONKey, FromJSONKey, object, (.=), (.:), withObject, withText, withScientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Types.Node (NodeId)
 
--- | Unique identifier for an edge
-type EdgeId = Text
+newtype EdgeId = EdgeId Text
+  deriving (Eq, Show, Generic, Ord, ToJSONKey, FromJSONKey)
 
--- | Relation types for edges
+instance NFData EdgeId
+
+instance ToJSON EdgeId where
+  toJSON (EdgeId t) = toJSON t
+
+instance FromJSON EdgeId where
+  parseJSON = withText "EdgeId" (pure . EdgeId)
+
 data Relation
   = Calls
+  | Imports
+  | Extends
   | Implements
   | References
-  | Cites
-  | ConceptuallyRelatedTo
-  | SharesDataWith
-  | SemanticallySimilarTo
-  | RationaleFor
-  | Imports
-  | ImportsFrom
   | Contains
-  | Method
-  | Extends
-  | Overrides
   | DependsOn
-  deriving (Eq, Show, Generic, Ord)
+  | Inferred
+  deriving (Eq, Show, Generic, Ord, Bounded, Enum)
+
+instance NFData Relation
 
 instance ToJSON Relation where
   toJSON = toJSON . relationToText
@@ -55,103 +51,66 @@ instance FromJSON Relation where
       Just r  -> pure r
       Nothing -> fail $ "Unknown relation: " ++ T.unpack t
 
--- | Convert a relation to its text representation
 relationToText :: Relation -> Text
 relationToText = \case
-  Calls                    -> "calls"
-  Implements                -> "implements"
-  References                -> "references"
-  Cites                    -> "cites"
-  ConceptuallyRelatedTo    -> "conceptually_related_to"
-  SharesDataWith           -> "shares_data_with"
-  SemanticallySimilarTo    -> "semantically_similar_to"
-  RationaleFor             -> "rationale_for"
-  Imports                  -> "imports"
-  ImportsFrom              -> "imports_from"
-  Contains                  -> "contains"
-  Method                   -> "method"
-  Extends                  -> "extends"
-  Overrides                -> "overrides"
-  DependsOn                -> "depends_on"
+  Calls      -> "calls"
+  Imports    -> "imports"
+  Extends    -> "extends"
+  Implements -> "implements"
+  References -> "references"
+  Contains   -> "contains"
+  DependsOn  -> "depends_on"
+  Inferred   -> "inferred"
 
--- | Parse a relation from its text representation
 textToRelation :: Text -> Maybe Relation
 textToRelation = \case
-  "calls"                    -> Just Calls
-  "implements"               -> Just Implements
-  "references"               -> Just References
-  "cites"                    -> Just Cites
-  "conceptually_related_to"  -> Just ConceptuallyRelatedTo
-  "shares_data_with"         -> Just SharesDataWith
-  "semantically_similar_to"  -> Just SemanticallySimilarTo
-  "rationale_for"            -> Just RationaleFor
-  "imports"                  -> Just Imports
-  "imports_from"             -> Just ImportsFrom
-  "contains"                 -> Just Contains
-  "method"                   -> Just Method
-  "extends"                  -> Just Extends
-  "overrides"                -> Just Overrides
-  "depends_on"               -> Just DependsOn
-  _                          -> Nothing
+  "calls"       -> Just Calls
+  "imports"     -> Just Imports
+  "extends"     -> Just Extends
+  "implements"  -> Just Implements
+  "references"  -> Just References
+  "contains"    -> Just Contains
+  "depends_on"  -> Just DependsOn
+  "inferred"   -> Just Inferred
+  _            -> Nothing
 
--- | Confidence level for an edge
-data Confidence = Extracted | Inferred | Ambiguous
+newtype Confidence = Confidence Double
   deriving (Eq, Show, Generic, Ord)
 
 instance NFData Confidence
-instance NFData Relation
 
 instance ToJSON Confidence where
-  toJSON Extracted = "EXTRACTED"
-  toJSON Inferred  = "INFERRED"
-  toJSON Ambiguous = "AMBIGUOUS"
+  toJSON (Confidence d) = toJSON d
 
 instance FromJSON Confidence where
-  parseJSON = withText "Confidence" $ \case
-    "EXTRACTED" -> pure Extracted
-    "INFERRED"  -> pure Inferred
-    "AMBIGUOUS" -> pure Ambiguous
-    t           -> fail $ "Unknown confidence: " ++ T.unpack t
+  parseJSON = withScientific "Confidence" $ \n -> pure (Confidence (realToFrac n))
 
--- | Convert confidence to a numeric score
-confidenceScore :: Confidence -> Double
-confidenceScore Extracted = 1.0
-confidenceScore Inferred  = 0.7
-confidenceScore Ambiguous  = 0.2
-
--- | An edge in the knowledge graph
 data Edge = Edge
-  { edgeSource        :: NodeId
-  , edgeTarget        :: NodeId
-  , edgeRelation      :: Relation
-  , edgeConfidence    :: Confidence
-  , edgeConfidenceScore :: Double
-  , edgeSourceFile    :: Text
-  , edgeSourceLocation :: Maybe Text
-  , edgeWeight        :: Double
+  { edgeId        :: !EdgeId
+  , edgeSource    :: !NodeId
+  , edgeTarget    :: !NodeId
+  , edgeRelation  :: !Relation
+  , edgeWeight    :: !Double
+  , edgeConfidence :: !Confidence
   } deriving (Eq, Show, Generic)
 
 instance NFData Edge
 
 instance ToJSON Edge where
   toJSON e = object
-    [ "source"           .= edgeSource e
-    , "target"           .= edgeTarget e
-    , "relation"         .= edgeRelation e
-    , "confidence"       .= edgeConfidence e
-    , "confidence_score" .= edgeConfidenceScore e
-    , "source_file"      .= edgeSourceFile e
-    , "source_location"  .= edgeSourceLocation e
-    , "weight"           .= edgeWeight e
+    [ "id"         .= edgeId e
+    , "source"     .= edgeSource e
+    , "target"     .= edgeTarget e
+    , "relation"   .= edgeRelation e
+    , "weight"     .= edgeWeight e
+    , "confidence" .= edgeConfidence e
     ]
 
 instance FromJSON Edge where
   parseJSON = withObject "Edge" $ \v -> Edge
-    <$> v .: "source"
-    <*> v .: "target"
-    <*> v .: "relation"
-    <*> v .: "confidence"
-    <*> v .: "confidence_score"
-    <*> v .: "source_file"
-    <*> v .:? "source_location"
-    <*> v .: "weight"
+    <$> v .:  "id"
+    <*> v .:  "source"
+    <*> v .:  "target"
+    <*> v .:  "relation"
+    <*> v .:  "weight"
+    <*> v .:  "confidence"

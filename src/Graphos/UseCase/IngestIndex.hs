@@ -20,7 +20,7 @@ import Data.Ord (Down(..))
 import System.Directory (doesFileExist)
 
 import Graphos.Domain.Types
-  ( NodeId, IngestEmbedding(..), IngestIndex(..), emptyIngestIndex
+  ( NodeId, IngestIndex(..), emptyIngestIndex
   )
 import qualified Graphos.Infrastructure.LLM.Embedding as Emb
 
@@ -45,7 +45,7 @@ saveIndex path idx = BSL.writeFile path (Aeson.encode idx)
 -- | Merge two indices (right-biased: overwrites on nodeId collision).
 mergeIndices :: IngestIndex -> IngestIndex -> IngestIndex
 mergeIndices a b = IngestIndex
-  { iiEntries = iiEntries a <> iiEntries b
+  { iiNodes = iiNodes a <> iiNodes b
   }
 
 -- | Search for nodes similar to a query vector by cosine similarity.
@@ -53,10 +53,9 @@ mergeIndices a b = IngestIndex
 -- Only considers entries that have non-empty embedding vectors.
 searchSimilar :: [Double] -> IngestIndex -> Int -> [(NodeId, Double)]
 searchSimilar queryVec idx topN =
-  let entries = Map.elems (iiEntries idx)
-      scored = [ (ieNodeId e, Emb.cosineSimilarity queryVec (ieVector e))
-               | e <- entries
-               , not (null (ieVector e))
+  let scored = [ (nid, Emb.cosineSimilarity queryVec vec)
+               | (nid, vec) <- Map.toList (iiNodes idx)
+               , not (null vec)
                ]
       sorted = sortBy (\(_, a) (_, b) -> compare (Down a) (Down b)) scored
   in take topN sorted
