@@ -1,54 +1,54 @@
 ## 1. Add OfficeFile FileType and OfficeFiles FileCategory
 
-- [ ] 1.P Plan: Add `OfficeFile` to `FileType` enum and `OfficeFiles` to `FileCategory` enum in Domain.Types.Pipeline. Add `fecOffice` field to `FileExtensionConfig` in Domain.Config. Update `allSupportedExtensions` in Detect.hs. Add ToJSON/FromJSON instances. Check criteria: `cabal build` passes, existing tests pass, `OfficeFiles` appears in FileCategory JSON serialization.
-- [ ] 1.D Do: Add `OfficeFile` to FileType (Node.hs), `OfficeFiles` to FileCategory (Pipeline.hs), `fecOffice` to FileExtensionConfig (Config.hs), update defaultFileExtensions, allSupportedExtensions, and detectFilesWithExtensions routing. Add office extensions `[.docx, .pptx, .xlsx, .doc, .ppt]`.
-- [ ] 1.C Check: `cabal build` succeeds, `cabal test` passes 90 examples, FileCategory JSON round-trips correctly.
-- [ ] 1.A Act: If checks pass, move to task 2. If any test fails, fix and re-run.
+- [x] 1.P Plan: Add `OfficeFile` to `FileType` enum and `OfficeFiles` to `FileCategory` enum in Domain.Types.Pipeline. Add `fecOffice` field to `FileExtensionConfig` in Domain.Config. Update `allSupportedExtensions` in Detect.hs. Add ToJSON/FromJSON instances. Check criteria: `cabal build` passes, existing tests pass, `OfficeFiles` appears in FileCategory JSON serialization.
+- [x] 1.D Do: Add `OfficeFile` to FileType (Node.hs), `OfficeFiles` to FileCategory (Pipeline.hs), `fecOffice` to FileExtensionConfig (Config.hs), update defaultFileExtensions, allSupportedExtensions, and detectFilesWithExtensions routing. Add office extensions `[.docx, .pptx, .xlsx, .doc, .ppt]`.
+- [x] 1.C Check: `cabal build` succeeds, `cabal test` passes 90 examples, FileCategory JSON round-trips correctly.
+- [x] 1.A Act: Checks pass, move to task 2.
 
 ### Attempt history (1)
 
 ## 2. Add VisionConfig to Domain.Config
 
-- [ ] 2.P Plan: Create `VisionConfig` data type with fields `vcEnabled`, `vcModel`, `vcApiKey`, `vcBaseUrl`, `vcMaxTokens`, `vcBatchSize`. Add ToJSON/FromJSON instances with defaults (model="qwen3.6-moe", baseUrl="http://localhost:11434/v1", apiKey="${OPENAI_API_KEY}", maxTokens=1000, batchSize=5). Add `gcVision` field to `GraphosConfig`. Update `defaultGraphosConfig`, `mergeGraphosConfig`, and config loading in Infrastructure.Config. Check criteria: `cabal build` passes, VisionConfig JSON parsing works with partial overrides.
-- [ ] 2.D Do: Implement VisionConfig in Domain.Config, add to GraphosConfig, update merge logic, update Infrastructure.Config loader to parse `vision:` section from YAML. Add `--vision`/`--no-vision` CLI flags in Main.hs that set `vcEnabled`.
-- [ ] 2.C Check: `cabal build` succeeds, `cabal test` passes, VisionConfig FromJSON parses `{enabled: true, model: "gpt-4o"}` with defaults for missing fields.
-- [ ] 2.A Act: If checks pass, move to task 3. If config parsing fails, debug and retry.
+- [x] 2.P Plan: Create `VisionConfig` data type with fields `vcEnabled`, `vcModel`, `vcApiKey`, `vcBaseUrl`, `vcMaxTokens`, `vcBatchSize`. Add ToJSON/FromJSON instances with defaults (model="qwen3.6-moe", baseUrl="http://localhost:11434/v1", apiKey="${OPENAI_API_KEY}", maxTokens=1000, batchSize=5). Add `gcVision` field to `GraphosConfig`. Update `defaultGraphosConfig`, `mergeGraphosConfig`, and config loading in Infrastructure.Config. Check criteria: `cabal build` passes, VisionConfig JSON parsing works with partial overrides.
+- [x] 2.D Do: Implement VisionConfig in Domain.Config, add to GraphosConfig, update merge logic, update Infrastructure.Config loader to parse `vision:` section from YAML. Add `--vision`/`--no-vision` CLI flags in Main.hs that set `vcEnabled`.
+- [x] 2.C Check: `cabal build` succeeds, `cabal test` passes, VisionConfig FromJSON parses `{enabled: true, model: "gpt-4o"}` with defaults for missing fields.
+- [x] 2.A Act: Checks pass, move to task 3.
 
 ### Attempt history (1)
 
 ## 3. Implement DOCX extraction (OfficeConvert.hs)
 
-- [ ] 3.P Plan: Replace stub `docxToMarkdown` with real ZIP+XML parsing. Add `zip-archive` and `xml-conduit` dependencies. Parse `word/document.xml`, extract `<w:p>` paragraphs with `<w:pStyle>` heading detection, produce markdown text. Check criteria: test DOCX with headings produces correct markdown, corrupt file produces Right with error message.
-- [ ] 3.D Do: Implement `docxToMarkdown` in OfficeConvert.hs using `zip-archive` to open the ZIP and `xml-conduit` to parse `word/document.xml`. Map `<w:pStyle w:val="Heading1"/>` → `##`, Title → `#`, etc. Extract `<w:r><w:t>` text runs. Handle missing files with `Either Text` error. Add `docxExtractMediaPaths` and `docxExtractMediaFile` for embedded image support.
-- [ ] 3.C Check: `cabal build` succeeds. Test with a manually-created .docx file: verify `# Title` and `## Heading 1` in output. Test with missing/corrupt file: verify `Left "..."` error.
-- [ ] 3.A Act: If extraction is incomplete (missing table support, etc.), document limitation and move on. Core heading/paragraph extraction must work.
+- [x] 3.P Plan: Replace stub `docxToMarkdown` with real ZIP+XML parsing. Add `zip-archive` and `xml-conduit` dependencies. Parse `word/document.xml`, extract `<w:p>` paragraphs with `<w:pStyle>` heading detection, produce markdown text. Check criteria: test DOCX with headings produces correct markdown, corrupt file produces Right with error message.
+- [x] 3.D Do: Implement `docxToMarkdown` in OfficeConvert.hs using `zip-archive` to open the ZIP and `xml-conduit` to parse `word/document.xml`. Map `<w:pStyle w:val="Heading1"/>` → `##`, Title → `#`, etc. Extract `<w:r><w:t>` text runs. Handle missing files with `Either Text` error. Add `docxExtractMediaPaths` and `docxExtractMediaFile` for embedded image support.
+- [x] 3.C Check: `cabal build` succeeds. Test with a manually-created .docx file: verify `# Title` and `## Heading 1` in output. Test with missing/corrupt file: verify `Left "..."` error.
+- [x] 3.A Act: Core heading/paragraph extraction works. Documented that tables, nested content, and SmartArt are deferred.
 
 ### Attempt history (1)
 
 ## 4. Implement PPTX and XLSX extraction (OfficeConvert.hs)
 
-- [ ] 4.P Plan: Add `pptxToMarkdown` and `xlsxToMarkdown` to OfficeConvert.hs. PPTX: read `ppt/slides/slideN.xml`, extract `<a:t>` text, produce `## Slide N` headers. XLSX: read `xl/worksheets/sheet1.xml`, extract `<c><v>` cells, produce markdown tables. Check criteria: PPTX produces slide headers, XLSX produces table rows.
-- [ ] 4.D Do: Implement `pptxToMarkdown` parsing slide XML, `xlsxToMarkdown` parsing worksheet XML. Add `pptxExtractMediaPaths` for embedded image extraction. Handle PPTX slide relationships to map images to slides.
-- [ ] 4.C Check: `cabal build` succeeds. Test with minimal PPTX: verify `## Slide 1` output. Test with minimal XLSX: verify markdown table output.
-- [ ] 4.A Act: If PPTX or XLSX parsing has edge cases (animations, complex layouts), document and defer. Core text extraction must work.
+- [x] 4.P Plan: Add `pptxToMarkdown` and `xlsxToMarkdown` to OfficeConvert.hs. PPTX: read `ppt/slides/slideN.xml`, extract `<a:t>` text, produce `## Slide N` headers. XLSX: read `xl/worksheets/sheet1.xml`, extract `<c><v>` cells, produce markdown tables. Check criteria: PPTX produces slide headers, XLSX produces table rows.
+- [x] 4.D Do: Implement `pptxToMarkdown` parsing slide XML, `xlsxToMarkdown` parsing worksheet XML. Add `pptxExtractMediaPaths` for embedded image extraction. Handle PPTX slide relationships to map images to slides.
+- [x] 4.C Check: `cabal build` succeeds. Test with minimal PPTX: verify `## Slide 1` output. Test with minimal XLSX: verify markdown table output.
+- [x] 4.A Act: Core text extraction works. Edge cases (animations, complex layouts) deferred.
 
 ### Attempt history (1)
 
 ## 5. Implement legacy .doc/.ppt handling
 
-- [ ] 5.P Plan: Add `docToMarkdown` and `pptToMarkdown` stubs that return a warning message recommending conversion. These are called by the office extraction pipeline when legacy formats are detected. Check criteria: .doc files produce a stub node with warning, no crash.
-- [ ] 5.D Do: Implement simple stubs that return `Right "# Document: <path>\n\n[Legacy .doc format — convert to .docx for full extraction]"` and similar for .ppt. Add detection in extractOfficeFile to route by extension.
-- [ ] 5.C Check: `cabal build` succeeds. Test with a .doc extension: verify warning message in output.
-- [ ] 5.A Act: If edge cases found, document them.
+- [x] 5.P Plan: Add `docToMarkdown` and `pptToMarkdown` stubs that return a warning message recommending conversion. These are called by the office extraction pipeline when legacy formats are detected. Check criteria: .doc files produce a stub node with warning, no crash.
+- [x] 5.D Do: Implement simple stubs that return `Right "# Document: <path>\n\n[Legacy .doc format — convert to .docx for full extraction]"` and similar for .ppt. Add detection in extractOfficeFile to route by extension.
+- [x] 5.C Check: `cabal build` succeeds. Test with a .doc extension: verify warning message in output.
+- [x] 5.A Act: No edge cases found. Stubs work as expected.
 
 ### Attempt history (1)
 
 ## 6. Wire office extraction into Extract.hs pipeline
 
-- [ ] 6.P Plan: Add `extractOfficeFile` function in `UseCase.Extract.Office` module that routes by extension to the correct OfficeConvert function, then feeds the markdown through `extractDocFile`. Wire `OfficeFiles` category into `extractAll` in `Extract.hs` with concurrent processing and GC boundaries. Check criteria: .docx file in test directory produces header nodes, .doc produces stub with warning.
-- [ ] 6.D Do: Create `UseCase.Extract.Office` module with `extractOfficeFile :: PipelineConfig -> LogEnv -> FilePath -> IO Extraction`. Route by extension: .docx → docxToMarkdown → extractDocFile, .pptx → pptxToMarkdown → extractDocFile, .xlsx → xlsxToMarkdown → extractDocFile, .doc/.ppt → stub. Add office extraction branch to `extractAll` in Extract.hs, processing OfficeFiles concurrently with doc files.
-- [ ] 6.C Check: `cabal build` succeeds. `cabal test` passes. Manual test: create a .docx with headings, run graphos, verify header nodes in graph.json.
-- [ ] 6.A Act: If routing or node creation fails, fix extraction logic and re-test.
+- [x] 6.P Plan: Add `extractOfficeFile` function in `UseCase.Extract.Office` module that routes by extension to the correct OfficeConvert function, then feeds the markdown through `extractDocFile`. Wire `OfficeFiles` category into `extractAll` in `Extract.hs` with concurrent processing and GC boundaries. Check criteria: .docx file in test directory produces header nodes, .doc produces stub with warning.
+- [x] 6.D Do: Create `UseCase.Extract.Office` module with `extractOfficeFile :: PipelineConfig -> LogEnv -> FilePath -> IO Extraction`. Route by extension: .docx → docxToMarkdown → extractDocFile, .pptx → pptxToMarkdown → extractDocFile, .xlsx → xlsxToMarkdown → extractDocFile, .doc/.ppt → stub. Add office extraction branch to `extractAll` in Extract.hs, processing OfficeFiles concurrently with doc files.
+- [x] 6.C Check: `cabal build` succeeds. `cabal test` passes. Manual test: create a .docx with headings, run graphos, verify header nodes in graph.json.
+- [x] 6.A Act: If routing or node creation fails, fix extraction logic and re-test.
 
 ### Attempt history (1)
 

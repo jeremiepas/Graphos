@@ -146,6 +146,12 @@ file_extensions:
     - .wav
     - .m4a
     - .ogg
+  office:
+    - .docx
+    - .pptx
+    - .xlsx
+    - .doc
+    - .ppt
 
 # ──── Observability ─────────────────────────────
 # Enable tracing, metrics, and debug instrumentation.

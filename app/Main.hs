@@ -31,7 +31,7 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability)
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision)
 import Graphos.Infrastructure.Config (loadConfig)
 import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
@@ -104,6 +104,7 @@ pipelineOpts = PipelineConfig
     <*> optional (strOption (long "debug-trace" <> help "Directory for debug trace JSONL files"))
     <*> switch (long "embed" <> help "Generate embeddings for ingested files via local Ollama")
     <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
+    <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -198,11 +199,11 @@ main = do
                        Nothing -> if null (obsDebugTraceDir obsCfg)
                                     then cfgOutputDir config ++ "/traces"
                                     else obsDebugTraceDir obsCfg
-          config' = config { cfgGraphosConfig = graphosCfg
-                           , cfgOtelConfig     = otelCfg
-                           , cfgMetricsPort    = metricsPort
-                           , cfgDebugTraceDir  = Just debugDir
-                           }
+          config' = config { cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
+                            , cfgOtelConfig     = otelCfg
+                            , cfgMetricsPort    = metricsPort
+                            , cfgDebugTraceDir  = Just debugDir
+                            }
       -- Initialize observability (tracing, metrics, debug trace)
       let logLevel = if cfgDebug config || obsDebug obsCfg then LevelTrace
                       else if cfgVerbose config then LevelDebug

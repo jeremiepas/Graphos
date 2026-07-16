@@ -191,12 +191,13 @@ ingestFile config filePath env = do
 -- Falls back to DocFiles for unknown extensions.
 detectFileCategory :: String -> FileExtensionConfig -> FileCategory
 detectFileCategory ext fec
-  | ext `elem` fecCode fec  = CodeFiles
-  | ext `elem` fecDoc fec   = DocFiles
-  | ext `elem` fecPaper fec = PaperFiles
-  | ext `elem` fecImage fec = ImageFiles
+  | ext `elem` fecCode fec   = CodeFiles
+  | ext `elem` fecDoc fec    = DocFiles
+  | ext `elem` fecPaper fec  = PaperFiles
+  | ext `elem` fecImage fec  = ImageFiles
   | ext `elem` fecVideo fec  = VideoFiles
-  | otherwise               = DocFiles
+  | ext `elem` fecOffice fec = OfficeFiles
+  | otherwise                = DocFiles
 
 -- | Generate embeddings for a list of extracted nodes.
 -- Creates a text representation of each node and calls the embedding API.

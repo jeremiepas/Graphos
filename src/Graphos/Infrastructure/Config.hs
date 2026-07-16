@@ -47,6 +47,7 @@ data ConfigFile = ConfigFile
   , cfLabeling        :: Maybe LabelingConfig
   , cfObservability   :: Maybe ObservabilityConfig
   , cfEmbedding       :: Maybe EmbeddingConfig
+  , cfVision          :: Maybe VisionConfig
   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -60,6 +61,7 @@ instance FromJSON ConfigFile where
     <*> v .:? "labeling"
     <*> v .:? "observability"
     <*> v .:? "embedding"
+    <*> v .:? "vision"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -153,6 +155,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcEmbedding = case cfEmbedding cfgFile of
       Just emb   -> emb
       Nothing    -> gcEmbedding defaults
+  , gcVision = case cfVision cfgFile of
+      Just vision -> vision
+      Nothing     -> gcVision defaults
   }
 
 -- ───────────────────────────────────────────────

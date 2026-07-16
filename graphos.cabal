@@ -65,9 +65,10 @@ library
                    -- Use Cases
                    Graphos.UseCase.Pipeline
                    Graphos.UseCase.Detect
-                    Graphos.UseCase.Extract
-                    Graphos.UseCase.Extract.Haskell
-                    Graphos.UseCase.Extract.Markdown
+                     Graphos.UseCase.Extract
+                     Graphos.UseCase.Extract.Haskell
+                     Graphos.UseCase.Extract.Markdown
+                     Graphos.UseCase.Extract.Office
                     Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
                      Graphos.UseCase.Analyze
@@ -190,9 +191,13 @@ library
      , http-types           >= 0.12
       , http-conduit         >= 2.3
       , http-client          >= 0.7
-     , hs-opentelemetry-api   >= 0.3
+      , hs-opentelemetry-api   >= 0.3
      , hs-opentelemetry-sdk   >= 0.1
      , hs-opentelemetry-exporter-otlp >= 0.1
+     , zip-archive           >= 0.4
+     , xml-conduit           >= 1.9
+     , xml-types             >= 0.3
+     , base64-bytestring     >= 1.0
 
 -- ───────────────────────────────────────────────
 -- Executable
