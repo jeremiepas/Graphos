@@ -29,7 +29,7 @@ import qualified Data.Text as T
 import Data.Ord (Down(..))
 
 import Graphos.Domain.Types
-  ( NodeId, Node(..), Edge(..), confidenceScore
+  ( NodeId, Node(..), Edge(..), Confidence(..)
   , CommunityId, CommunityMap, FileType(..), Analysis(..), GodNode(..)
   )
 import Graphos.Domain.Graph
@@ -151,7 +151,7 @@ selectCommunityAware g commMap analysis query budget =
              -- Collect all nodes in budget
              allCandidateNodes = Set.fromList commMembers
                                 `Set.union` Set.fromList relevantBridges
-                                `Set.union` Set.fromList (map gnId (take 5 (analysisGodNodes analysis)))
+                                 `Set.union` Set.fromList (map gnId (take 5 (analysisGodNodes analysis)))
              -- Apply node budget
              nodesInBudget = take (cbMaxNodes budget)
                            $ sortOn (\nid -> Down $ relevanceScore nid g terms) 
@@ -169,7 +169,7 @@ selectCommunityAware g commMap analysis query budget =
             , scCommunityLabels = Map.fromList [ (cid, T.pack ("Community " ++ show cid))
                                               | cid <- commIds]
             , scBridgeNodes     = relevantBridges
-            , scGodNodes         = take 5 (analysisGodNodes analysis)
+            , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 5 (analysisGodNodes analysis)]
             , scStrategy        = CommunityAware
             , scBudget          = budget
             , scMatchScore      = fromIntegral $ sum [s | (_, s) <- take 3 scored]
@@ -216,7 +216,7 @@ selectRelevanceWeighted g commMap analysis query budget =
      , scCommunities     = Map.filterWithKey (\cid _ -> cid `elem` relCommIds) commMap
      , scCommunityLabels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- relCommIds]
      , scBridgeNodes     = filter (`elem` articulationPoints g) nodesInBudget
-     , scGodNodes         = take 5 (analysisGodNodes analysis)
+     , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 5 (analysisGodNodes analysis)]
      , scStrategy        = RelevanceWeightedBFS
      , scBudget          = budget
      , scMatchScore      = sum [s | (_, s) <- take 3 scoredNodes]
@@ -266,7 +266,7 @@ selectPathBased g commMap analysis query budget =
                 , scCommunities     = Map.filterWithKey (\cid _ -> cid `elem` relCommIds) commMap
                 , scCommunityLabels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- relCommIds]
                 , scBridgeNodes     = filter (`elem` articulationPoints g) path
-                , scGodNodes         = take 5 (analysisGodNodes analysis)
+            , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 5 (analysisGodNodes analysis)]
                 , scStrategy        = PathBased
                 , scBudget          = budget
                 , scMatchScore      = fromIntegral $ sum [s | (_, s) <- take 3 scored]
@@ -303,7 +303,7 @@ selectArchitectural g commMap analysis budget =
      , scCommunities     = commMap
      , scCommunityLabels = commLabels
      , scBridgeNodes     = bridges
-     , scGodNodes         = take 10 (analysisGodNodes analysis)
+     , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 10 (analysisGodNodes analysis)]
      , scStrategy        = CommunityAware
      , scBudget          = budget
      , scMatchScore      = fromIntegral (length godIds + length bridges)
@@ -321,7 +321,7 @@ relevanceScore nid g terms =
       -- Boost for high-degree nodes
       degBoost = if degree g nid > 10 then 1.0 else 0.0
       -- Boost for edges with high confidence
-      edgeBoost = sum [confidenceScore (edgeConfidence e) * 0.5
+      edgeBoost = sum [let Confidence d = edgeConfidence e in d * 0.5
                       | ((s,_), e) <- Map.toList (gEdges g), s == nid]
   in nodeLabelScore + degBoost + edgeBoost
 
@@ -340,6 +340,11 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
       , nodeLabel        = "unknown"
       , nodeFileType     = CodeFile
       , nodeSourceFile   = ""
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
       , nodeSourceLocation = Nothing
       , nodeLineEnd      = Nothing
       , nodeKind         = Nothing

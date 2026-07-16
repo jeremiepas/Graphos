@@ -1,5 +1,6 @@
 -- | HTML export - interactive graph visualization with community coloring
 -- Embeds JSON data inline for self-contained HTML that works from file://
+-- Streams to handle to reduce peak memory (avoids building full HTML Text in memory).
 module Graphos.Infrastructure.Export.HTML
   ( exportHTML
   ) where
@@ -9,7 +10,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
+import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints)
@@ -29,17 +30,31 @@ colorForCommunity :: Int -> Text
 colorForCommunity cid = communityColors !! (cid `mod` length communityColors)
 
 -- | Export graph as interactive HTML with vis.js
--- Embeds JSON data inline so the HTML is self-contained (works from file://)
+-- Streams to file handle to reduce peak memory: avoids building the entire
+-- HTML Text in memory. JSON data is written directly to the handle, so only
+-- one node's/edge's JSON is in memory at a time.
 exportHTML :: Graph -> Analysis -> FilePath -> IO ()
 exportHTML g analysis htmlPath = do
-  let nodesJSON = TE.decodeUtf8 $ BSL.toStrict $ encode (nodesToJSON g (analysisCommunities analysis) (articulationPoints g))
-      edgesJSON = TE.decodeUtf8 $ BSL.toStrict $ encode (edgesToJSON g)
-      html = buildHTML g analysis nodesJSON edgesJSON
-  writeFile htmlPath (T.unpack html)
+  h <- openFile htmlPath WriteMode
+  -- Write HTML header + CSS + sidebar (static content)
+  hPutStr h $ T.unpack (htmlHeader g analysis)
+  -- Stream nodes JSON directly to handle (no intermediate Text)
+  hPutStr h "  const _nodesData = "
+  BSL.hPut h (encode (nodesToJSON g (analysisCommunities analysis) (articulationPoints g)))
+  hPutStr h ";\n"
+  -- Stream edges JSON directly to handle
+  hPutStr h "  const _edgesData = "
+  BSL.hPut h (encode (edgesToJSON g))
+  hPutStr h ";\n"
+  -- Write the rest of the HTML (JS + closing tags)
+  hPutStr h $ T.unpack htmlBody
+  hFlush h
+  hClose h
 
--- | Build the HTML page - embedded JSON data for self-contained file
-buildHTML :: Graph -> Analysis -> Text -> Text -> Text
-buildHTML g analysis nodesJSON edgesJSON =
+-- | HTML header: everything before the embedded JSON data.
+-- Parameterized by Graph and Analysis for stats and community sidebar.
+htmlHeader :: Graph -> Analysis -> Text
+htmlHeader g analysis =
   T.unlines
     [ "<!DOCTYPE html>"
     , "<html lang='en'><head>"
@@ -144,9 +159,20 @@ buildHTML g analysis nodesJSON edgesJSON =
     , "</div>"
     , "<script>"
     , "  // Embedded graph data (self-contained HTML, no fetch needed)"
-    , "  const _nodesData = " <> nodesJSON <> ";"
-    , "  const _edgesData = " <> edgesJSON <> ";"
-    , ""
+    ]
+  where
+    statsText = T.pack $ show (Map.size $ gNodes g) ++ " nodes, "
+             ++ show (Map.size $ gEdges g) ++ " edges, "
+             ++ show (length $ analysisCommunities analysis) ++ " communities, "
+             ++ show (length $ articulationPoints g) ++ " bridge nodes"
+    commInfo = communitiesToHTML (analysisCommunities analysis) g
+
+-- | HTML body: JavaScript code and closing tags.
+-- Written after the JSON data is streamed to the file handle.
+htmlBody :: Text
+htmlBody =
+  T.unlines
+    [ ""
     , "  let allNodes = _nodesData;"
     , "  let allEdges = _edgesData;"
     , "  let network = null;"
@@ -431,12 +457,6 @@ buildHTML g analysis nodesJSON edgesJSON =
     , "</script>"
     , "</body></html>"
     ]
-  where
-    statsText = T.pack $ show (Map.size $ gNodes g) ++ " nodes, "
-             ++ show (Map.size $ gEdges g) ++ " edges, "
-             ++ show (length $ analysisCommunities analysis) ++ " communities, "
-             ++ show (length $ articulationPoints g) ++ " bridge nodes"
-    commInfo = communitiesToHTML (analysisCommunities analysis) g
 
 -- | Convert communities to sidebar HTML with cohesion scores
 -- Community items are clickable to focus the graph view on that community
@@ -541,10 +561,10 @@ edgesToJSON g =
      , veColor  = if isInferred then "#6a6a8a" else "#8b8baa"
      }
    | ((_, _), e) <- Map.toList (gEdges g)
-   , let src = sanitize (edgeSource e)
-         tgt = sanitize (edgeTarget e)
-         isInferred = edgeConfidence e == Inferred
-         relLabel = relationToText (edgeRelation e)
+    , let src = sanitize (edgeSource e)
+          tgt = sanitize (edgeTarget e)
+          isInferred = case edgeConfidence e of Confidence c -> c < 1.0
+          relLabel = relationToText (edgeRelation e)
    , src `Set.member` nodeSet
    , tgt `Set.member` nodeSet
    ]

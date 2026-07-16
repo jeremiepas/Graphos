@@ -14,27 +14,26 @@ module Graphos.Domain.Extraction
   , LSPCallHierarchyItem(..)
   ) where
 
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphos.Domain.Types
 
--- | An extractor produces extraction results from a source
 class Extractor a where
   extract :: a -> FilePath -> IO Extraction
 
--- | Result from an extraction pass
 data ExtractionResult a = ExtractionResult
   { resultData    :: a
-  , resultTokens  :: (Int, Int)  -- (input, output)
+  , resultTokens  :: (Int, Int)
   } deriving (Eq, Show)
 
--- | Validate that an extraction has the required fields
 validateExtraction :: Extraction -> Either [Text] Extraction
 validateExtraction ext =
-  let errors = []
-        <> validateNodeIds (extractionNodes ext)
-        <> validateEdges (extractionEdges ext)
-        <> validateHyperedges (extractionHyperedges ext)
+  let nodes = Map.elems (extractionNodes ext)
+      edges = Map.elems (extractionEdges ext)
+      errors = []
+        <> validateNodeIds nodes
+        <> validateEdges edges
   in if null errors
      then Right ext
      else Left errors
@@ -47,9 +46,7 @@ validateExtraction ext =
     validateEdges edges =
       ["Empty source in edge" | any (T.null . edgeSource) edges]
       ++ ["Empty target in edge" | any (T.null . edgeTarget) edges]
-      ++ ["Invalid confidence score" | any (\e -> edgeConfidenceScore e < 0 || edgeConfidenceScore e > 1) edges]
-    validateHyperedges hes =
-      ["Hyperedge with < 3 nodes: " <> hyperedgeId h | h <- hes, length (hyperedgeNodes h) < 3]
+      ++ ["Invalid confidence score" | any (\e -> let Confidence c = edgeConfidence e in c < 0 || c > 1) edges]
 
 -- ───────────────────────────────────────────────
 -- LSP extraction types

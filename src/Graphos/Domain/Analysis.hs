@@ -1,5 +1,3 @@
--- | Analysis functions - god nodes, surprising connections, suggested questions.
--- Pure functions over domain types.
 module Graphos.Domain.Analysis
   ( analyze
   , surprisingConnections
@@ -20,7 +18,6 @@ import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidenc
 import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, gNodes, gEdges, degree)
 import Graphos.Domain.Community (cohesionScore)
 
--- | Run full analysis on a graph with communities
 analyze :: Graph -> CommunityMap -> CohesionMap -> Analysis
 analyze g commMap cohesionMap =
   let gods = godNodes g 10
@@ -35,7 +32,6 @@ analyze g commMap cohesionMap =
     , analysisQuestions    = questions
     }
 
--- | Find surprising connections (cross-community, cross-file edges)
 surprisingConnections :: Graph -> CommunityMap -> Int -> [SurprisingConnection]
 surprisingConnections g commMap topN =
   let nodeComm = nodeCommunityMap commMap
@@ -45,24 +41,20 @@ surprisingConnections g commMap topN =
      then crossFileSurprises g nodeComm topN
      else crossCommunitySurprises g nodeComm topN
 
--- | Suggest questions the graph can answer
 suggestQuestions :: Graph -> CommunityMap -> Map CommunityId Text -> [SuggestedQuestion]
 suggestQuestions g commMap labels =
   let nodeComm = nodeCommunityMap commMap
       ambiguousEdges = [(u, v, d) | (u, v, d) <- allEdges g
-                                   , edgeConfidence d == Ambiguous]
+                                   , let Confidence c = edgeConfidence d
+                                   , c < 0.3]
       ambiguousQs = [SuggestedQuestion
         { sqType = "ambiguous_edge"
         , sqQuestion = Just $ "What is the exact relationship between `" <> nodeLabel' g u <> "` and `" <> nodeLabel' g v <> "`?"
-        , sqWhy = "Edge tagged AMBIGUOUS (relation: " <> relationToText (edgeRelation d) <> ") - confidence is low."
+        , sqWhy = "Low confidence edge (relation: " <> relationToText (edgeRelation d) <> ") - confidence is low."
         } | (u, v, d) <- take 3 ambiguousEdges]
       bridgeQs = bridgeNodeQuestions g nodeComm labels
       lowCohesionQs = lowCohesionQuestions g commMap labels
   in take 7 (ambiguousQs ++ bridgeQs ++ lowCohesionQs)
-
--- ───────────────────────────────────────────────
--- Internal helpers
--- ───────────────────────────────────────────────
 
 nodeCommunityMap :: CommunityMap -> Map NodeId CommunityId
 nodeCommunityMap commMap = Map.fromList [(nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids]
@@ -76,7 +68,7 @@ crossFileSurprises g nodeComm topN =
                    , not (T.null uSrc)
                    , not (T.null vSrc)
                    , uSrc /= vSrc
-                   , edgeRelation d `notElem` [Imports, ImportsFrom, Contains, Method]
+                   , edgeRelation d `notElem` [Imports, Contains]
                    , not (isConceptNode (nodeData g u))
                    , not (isConceptNode (nodeData g v))
                    , let (score, reasons) = surpriseScore g d nodeComm uSrc vSrc u v
@@ -100,7 +92,7 @@ crossCommunitySurprises g nodeComm topN =
                    , cid_u /= cid_v
                    , not (isFileNode g (nodeData g u))
                    , not (isFileNode g (nodeData g v))
-                   , edgeRelation d `notElem` [Imports, ImportsFrom, Contains, Method]
+                   , edgeRelation d `notElem` [Imports, Contains]
                    ]
       sorted = sortOn (\(_, _, d, _, _) -> Down (edgeConfidence d)) candidates
       deduped = nubBy (\a b -> ((\(_,_,_,cu,cv) -> (cu,cv)) a == (\(_,_,_,cu,cv) -> (cu,cv)) b)) sorted
@@ -115,21 +107,19 @@ crossCommunitySurprises g nodeComm topN =
 
 surpriseScore :: Graph -> Edge -> Map NodeId CommunityId -> Text -> Text -> NodeId -> NodeId -> (Int, [Text])
 surpriseScore _g edge nodeComm uSrc vSrc u v =
-  let confBonus = case edgeConfidence edge of
-        Ambiguous  -> 3
-        Inferred  -> 2
-        Extracted -> 1
+  let Confidence c = edgeConfidence edge
+      confBonus = if c < 0.3 then 3 else if c < 0.8 then 2 else 1
       crossFiletype = if fileCategory uSrc /= fileCategory vSrc
                       then (2, ["crosses file types"])
                       else (0, [])
       crossComm = case (Map.lookup u nodeComm, Map.lookup v nodeComm) of
         (Just cu, Just cv) | cu /= cv -> (1, ["bridges separate communities"])
         _ -> (0, [])
-      semBonus = if edgeRelation edge == SemanticallySimilarTo
-                 then (round @Double (fromIntegral confBonus * 1.5), ["semantically similar concepts"])
+      semBonus = if edgeRelation edge == Inferred
+                 then (round @Double (fromIntegral confBonus * 1.5), ["inferred connection"])
                  else (0, [])
   in (confBonus + fst crossFiletype + fst crossComm + fst semBonus
-     , ["inferred connection" | confBonus == 2] ++ snd crossFiletype ++ snd crossComm ++ snd semBonus)
+     , snd crossFiletype ++ snd crossComm ++ snd semBonus)
 
 bridgeNodeQuestions :: Graph -> Map NodeId CommunityId -> Map CommunityId Text -> [SuggestedQuestion]
 bridgeNodeQuestions g _nodeComm _labels =
@@ -163,7 +153,7 @@ fileCategory :: Text -> FileType
 fileCategory path
   | any (`T.isSuffixOf` T.toLower path) codeExts = CodeFile
   | any (`T.isSuffixOf` T.toLower path) paperExts = PaperFile
-  | otherwise = DocumentFile
+  | otherwise = DocFile
   where
     codeExts = [".py", ".ts", ".js", ".go", ".rs", ".java", ".c", ".cpp", ".rb", ".cs", ".kt"
                ,".scala", ".php", ".swift", ".lua", ".zig", ".hs", ".ex", ".m", ".jl"]
@@ -175,6 +165,11 @@ nodeData g nid = Map.findWithDefault (Node
   , nodeLabel        = T.pack "unknown"
   , nodeFileType     = CodeFile
   , nodeSourceFile   = T.pack ""
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Nothing
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing

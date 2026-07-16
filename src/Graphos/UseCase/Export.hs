@@ -9,14 +9,14 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Map.Strict as Map
 
-import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
 import qualified Graphos.Infrastructure.Export.Obsidian as ExportObsidian
 import qualified Graphos.Infrastructure.Export.Report as ExportReport
 import qualified Graphos.Infrastructure.Export.Neo4j as ExportNeo4j
 import qualified Graphos.Infrastructure.Export.Memgraph as ExportMemgraph
 import qualified Graphos.UseCase.Report as Report
-import Graphos.Domain.Types
+import Graphos.Domain.Types hiding (PushMode(..))
+import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.Domain.Graph (Graph, gNodes)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 
@@ -32,10 +32,14 @@ data ExportResult = ExportResult
 
 -- | Export all output formats.
 -- Community data is passed to Neo4j push for Community nodes + BELONGS_TO edges.
+-- Note: graph.json is written incrementally by the Pipeline's IncrementalJSON writer,
+--       so we don't rewrite it here. This avoids holding the full graph in memory
+--       as a JSON AST during export, reducing peak memory by ~1× graph size.
 exportAll :: Graph -> Analysis -> PipelineConfig -> Detection -> IO ExportResult
 exportAll g analysis config detection = do
+  -- graph.json is already written incrementally by the Pipeline's IncrementalJSON writer.
+  -- No need to rewrite it here — that would double memory usage during export.
   let jsonPath = cfgOutputDir config ++ "/graph.json"
-  ExportJSON.exportGraph g analysis jsonPath
 
   let reportPath = cfgOutputDir config ++ "/GRAPH_REPORT.md"
   let reportContent = Report.generateReport g analysis config detection
@@ -80,7 +84,7 @@ exportAll g analysis config detection = do
 
         SubgraphPush -> do
           let artPoints = articulationPoints g
-              totalNodes = length (gNodes g)
+              totalNodes = Map.size (gNodes g)
           TIO.putStrLn $ "[neo4j] Push mode: subgraph (communities + " <> T.pack (show topN) <> " representatives/community, " <> T.pack (show (length artPoints)) <> " bridge nodes)"
           TIO.putStrLn $ "[neo4j] Full graph: " <> T.pack (show totalNodes) <> " nodes → subgraph: ~" <> T.pack (show (topN * Map.size commMap + length artPoints)) <> " representative nodes"
           ExportNeo4j.pushSubgraphToNeo4j
@@ -127,7 +131,7 @@ exportAll g analysis config detection = do
 
         MemgraphSubgraph -> do
           let artPoints = articulationPoints g
-              totalNodes = length (gNodes g)
+              totalNodes = Map.size (gNodes g)
           TIO.putStrLn $ "[memgraph] Push mode: subgraph (communities + " <> T.pack (show topN) <> " representatives/community, " <> T.pack (show (length artPoints)) <> " bridge nodes)"
           TIO.putStrLn $ "[memgraph] Full graph: " <> T.pack (show totalNodes) <> " nodes → subgraph: ~" <> T.pack (show (topN * Map.size commMap + length artPoints)) <> " representative nodes"
           ExportMemgraph.pushSubgraphToMemgraph

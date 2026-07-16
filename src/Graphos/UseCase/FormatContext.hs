@@ -16,7 +16,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Graphos.Domain.Types (Node(..), Edge(..), Confidence(..), GodNode(..)
+import Graphos.Domain.Types (Node(..), Edge(..), Confidence(..)
                             , FileType(..), relationToText)
 import Graphos.Domain.Context (SelectedContext(..), SelectionStrategy(..))
 
@@ -82,7 +82,7 @@ formatBridgeNodes sc =
 -- | God nodes section
 formatGodNodesSection :: SelectedContext -> Text
 formatGodNodesSection sc =
-  let lines' = map (\g -> "- " <> gnLabel g <> " [degree=" <> T.pack (show (gnEdges g)) <> "]")
+  let lines' = map (\(nid, degree) -> "- " <> nid <> " [degree=" <> T.pack (show degree) <> "]")
                    (scGodNodes sc)
   in T.unlines ("### Hub Nodes" : lines')
 
@@ -152,15 +152,17 @@ countContextTokens txt =
 
 showFileType :: FileType -> Text
 showFileType CodeFile     = "code"
-showFileType DocumentFile = "doc"
+showFileType DocFile      = "doc"
 showFileType PaperFile    = "paper"
 showFileType ImageFile    = "image"
 showFileType VideoFile    = "video"
+showFileType AudioFile    = "audio"
 
 confidenceLabel :: Confidence -> Text
-confidenceLabel Extracted = "EXTRACTED"
-confidenceLabel Inferred  = "INFERRED"
-confidenceLabel Ambiguous = "AMBIGUOUS"
+confidenceLabel (Confidence c)
+  | c >= 1.0  = "EXTRACTED"
+  | c >= 0.7  = "INFERRED"
+  | otherwise = "AMBIGUOUS"
 
 strategyLabel :: SelectionStrategy -> Text
 strategyLabel CommunityAware        = "community-aware"

@@ -5,11 +5,13 @@ import Options.Applicative
 import System.Exit (exitWith, ExitCode(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad (forM_, when)
 import Control.Concurrent.MVar (newMVar)
+import Control.Monad (forM_, when)
 import Data.Maybe (isJust)
+import System.IO (hPutStrLn, stderr)
 
-import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Neo4jPushMode(..), MemgraphPushMode(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndex, pathQueryWithIndex, explainNodeWithIndex, QueryResult(..))
@@ -24,6 +26,7 @@ import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGr
 import Graphos.Infrastructure.Export.Memgraph (pushToMemgraphWithCommunities, pushSubgraphToMemgraph, pushCommunityGraphToMemgraph)
 import Graphos.Infrastructure.Observability.SDK
   ( initObservability
+  , shutdownObservability
   , ObservabilityEnv(..)
   , OtelConfig(..)
   , defaultOtelConfig
@@ -36,6 +39,7 @@ import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphos
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Directory (doesFileExist, createDirectoryIfMissing)
+import System.Timeout (timeout)
 
 import qualified Graphos.UseCase.Export as Export
 
@@ -99,6 +103,7 @@ pipelineOpts = PipelineConfig
              (optional (strOption (long "otel-endpoint" <> help "OTLP endpoint base (default: http://localhost:4318)")))
     <*> optional (strOption (long "debug-trace" <> help "Directory for debug trace JSONL files"))
     <*> switch (long "embed" <> help "Generate embeddings for ingested files via local Ollama")
+    <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -236,13 +241,18 @@ main = do
                        Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
                        Right _ -> logInfo env "[watch] Incremental update complete"
                      ) defaultGraphosWatchConfig shutdownVar
-             else do
-               -- Normal mode: run once and exit
-               let env = otelLogEnv obsEnv
-               logInfo env "Starting pipeline..."
-               logDebug env $ "Config: " <> T.pack (show config')
-               result <- runPipeline config'
-               case result of
+              else do
+                -- Normal mode: run once and exit
+                let env = otelLogEnv obsEnv
+                logInfo env "Starting pipeline..."
+                logDebug env $ "Config: " <> T.pack (show config')
+                result <- runPipeline config'
+                let shutdownMicros = cfgOtelShutdownTimeout config' * 1000000
+                shutdownResult <- timeout shutdownMicros (shutdownObservability obsEnv)
+                case shutdownResult of
+                  Nothing -> hPutStrLn stderr $ "[graphos] WARNING: Observability shutdown timed out after " ++ show (cfgOtelShutdownTimeout config') ++ "s"
+                  Just () -> pure ()
+                case result of
                  Left err -> do
                    logError env $ "Pipeline failed: " <> err
                    exitWith (ExitFailure 1)

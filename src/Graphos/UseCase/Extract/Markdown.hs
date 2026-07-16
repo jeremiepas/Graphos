@@ -35,13 +35,10 @@ extractDocFile env filePath = catch (do
   let allNodes = docNodes filePath content
       allEdges = docEdges filePath content allNodes
   logDebug env $ T.pack $ "  [doc] " ++ filePath ++ " → " ++ show (length allNodes) ++ " nodes, " ++ show (length allEdges) ++ " edges"
-  pure emptyExtraction
-    { extractionNodes = allNodes
-    , extractionEdges = allEdges
-    }
+  pure (extractionFromLists allNodes allEdges)
   ) $ \(_ :: SomeException) -> do
-    logDebug env $ T.pack $ "  [doc] " ++ filePath ++ " → stub (read error)"
-    pure emptyExtraction { extractionNodes = [makeStubNode filePath] }
+  logDebug env $ T.pack $ "  [doc] " ++ filePath ++ " → stub (read error)"
+  pure (extractionFromLists [makeStubNode filePath] [])
 
 -- ───────────────────────────────────────────────
 -- Node extraction
@@ -65,8 +62,13 @@ docFileNode filePath =
   in Node
     { nodeId           = nid
     , nodeLabel        = name
-    , nodeFileType     = DocumentFile
+    , nodeFileType     = DocFile
     , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
     , nodeSourceLocation = Just "L1"
     , nodeLineEnd      = Nothing
     , nodeKind         = Just "File"
@@ -111,8 +113,13 @@ mkHeaderNode filePath level title lineNum =
   in Node
     { nodeId           = nid
     , nodeLabel        = cleanTitle
-    , nodeFileType     = DocumentFile
+    , nodeFileType     = DocFile
     , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
     , nodeSourceLocation = Just (T.pack $ "L" ++ show lineNum)
     , nodeLineEnd      = Nothing
     , nodeKind         = Just "Header"
@@ -163,8 +170,13 @@ mkTagNode filePath tag =
   in Node
     { nodeId           = nid
     , nodeLabel        = "#" <> tag
-    , nodeFileType     = DocumentFile
+    , nodeFileType     = DocFile
     , nodeSourceFile   = T.pack filePath
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
     , nodeSourceLocation = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Just "Tag"
@@ -186,40 +198,34 @@ docEdges filePath content nodes =
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       fileNid = T.pack (show dirHash) <> "_doc_" <> T.pack (takeWhile (/= '.') (reverse $ takeWhile (/= '/') $ reverse filePath))
       headerEdges = [ Edge
-        { edgeSource        = fileNid
-        , edgeTarget        = nodeId n
-        , edgeRelation      = Contains
-        , edgeConfidence    = Extracted
-        , edgeConfidenceScore = 1.0
-        , edgeSourceFile    = T.pack filePath
-        , edgeSourceLocation = Nothing
-        , edgeWeight        = 1.0
+        { edgeId        = EdgeId (fileNid <> "->" <> nodeId n <> ":contains")
+        , edgeSource    = fileNid
+        , edgeTarget    = nodeId n
+        , edgeRelation  = Contains
+        , edgeConfidence = Confidence 1.0
+        , edgeWeight    = 1.0
         }
         | n <- nodes
         , "_h" `T.isInfixOf` nodeId n
         ]
       tagEdges = [ Edge
-        { edgeSource        = fileNid
-        , edgeTarget        = nodeId n
-        , edgeRelation      = References
-        , edgeConfidence    = Extracted
-        , edgeConfidenceScore = 1.0
-        , edgeSourceFile    = T.pack filePath
-        , edgeSourceLocation = Nothing
-        , edgeWeight        = 1.0
+        { edgeId        = EdgeId (fileNid <> "->" <> nodeId n <> ":references")
+        , edgeSource    = fileNid
+        , edgeTarget    = nodeId n
+        , edgeRelation  = References
+        , edgeConfidence = Confidence 1.0
+        , edgeWeight    = 1.0
         }
         | n <- nodes
         , "_tag_" `T.isInfixOf` nodeId n
         ]
       wikilinkEdges = [ Edge
-        { edgeSource        = fileNid
-        , edgeTarget        = T.pack target
-        , edgeRelation      = References
-        , edgeConfidence    = Extracted
-        , edgeConfidenceScore = 0.8
-        , edgeSourceFile    = T.pack filePath
-        , edgeSourceLocation = Nothing
-        , edgeWeight        = 0.8
+        { edgeId        = EdgeId (fileNid <> "->" <> T.pack target <> ":references")
+        , edgeSource    = fileNid
+        , edgeTarget    = T.pack target
+        , edgeRelation  = References
+        , edgeConfidence = Confidence 0.8
+        , edgeWeight    = 0.8
         }
         | target <- parseWikiLinks content
         ]

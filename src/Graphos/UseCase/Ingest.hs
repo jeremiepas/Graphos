@@ -151,9 +151,9 @@ ingestFile config filePath env = do
       -- Extract entities from the single file
       extraction <- Extract.extractAll config detection env
 
-      let nodes = extractionNodes extraction
+      let nodes = Map.elems (extractionNodes extraction)
           nodeCount = length nodes
-          edgeCount = length (extractionEdges extraction)
+          edgeCount = Map.size (extractionEdges extraction)
 
       logInfo env $ T.pack $ "  Extracted " ++ show nodeCount ++ " nodes, " ++ show edgeCount ++ " edges"
 

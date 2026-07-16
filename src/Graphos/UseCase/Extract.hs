@@ -13,7 +13,7 @@ module Graphos.UseCase.Extract
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
 import Control.Concurrent.Async (concurrently, mapConcurrently)
-import Control.Exception (bracket_, catch, SomeException(..))
+import Control.Exception (bracket_, catch, evaluate, SomeException(..))
 import Control.Monad (unless, void, when)
 import qualified Data.ByteString as BS
 import qualified Data.List as List (foldl')
@@ -23,8 +23,9 @@ import qualified Data.Text as T
 import Foreign.Ptr (Ptr)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension)
+import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, NodeId, Node(..), Edge)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, NodeId, Node(..), Edge(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..))
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.Infrastructure.LSP.Client (LSPClient(..), extractViaLSP, findLSPServer, LSPClientConfig(..), connectToLSP, disconnectLSP, languageServerCommands, extractWorkspaceSymbols, workspaceSymbolsToDocumentSymbols, symbolToNodes, symbolTreeToEdges, isServerConnected)
@@ -94,28 +95,37 @@ extractAll config detection env = do
 
       accumulate :: IORef (Map.Map NodeId Node) -> IORef ([Edge] -> [Edge]) -> Extraction -> IO ()
       accumulate nodeRef edgeRef ext = do
-        accumulateNodes nodeRef (extractionNodes ext)
-        accumulateEdges edgeRef (extractionEdges ext)
+        accumulateNodes nodeRef (Map.elems (extractionNodes ext))
+        accumulateEdges edgeRef (Map.elems (extractionEdges ext))
 
   void $ concurrently
     -- Code extraction: merge each result into accumulator immediately
     (do
-      -- Tree-sitter extraction (parallel when -j > 1)
-      if numThreads <= 1
-        then mapM_ (\fp -> do
-          ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
-          pushExtractionStreaming config env ext
-          accumulate codeNodeMapRef codeEdgeAccRef ext
-          ) treeSitterFiles
-        else do
-          sem <- newQSemN numThreads
-          mapM_ (\fp -> bracket_
-            (waitQSemN sem 1)
-            (signalQSemN sem 1)
-            (do ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
-                pushExtractionStreaming config env ext
-                accumulate codeNodeMapRef codeEdgeAccRef ext
-            )) treeSitterFiles
+      -- Tree-sitter extraction: process in chunks with GC between batches
+      -- to release intermediate Extraction values and reduce peak memory.
+      let tsChunks = chunkList 500 treeSitterFiles
+      mapM_ (\chunk -> do
+        if numThreads <= 1
+          then mapM_ (\fp -> do
+            ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+            pushExtractionStreaming config env ext
+            accumulate codeNodeMapRef codeEdgeAccRef ext
+            ) chunk
+          else do
+            sem <- newQSemN numThreads
+            mapM_ (\fp -> bracket_
+              (waitQSemN sem 1)
+              (signalQSemN sem 1)
+              (do ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+                  pushExtractionStreaming config env ext
+                  accumulate codeNodeMapRef codeEdgeAccRef ext
+              )) chunk
+        -- Force evaluation of accumulator and GC after each chunk
+        -- so intermediate Extraction values can be reclaimed.
+        n <- readIORef codeNodeMapRef >>= evaluate . Map.size
+        _ <- evaluate n
+        performGC
+        ) tsChunks
 
       -- LSP extraction
       let fileGroups = groupByLSPServer lspFiles
@@ -137,11 +147,13 @@ extractAll config detection env = do
               (signalQSemN sem 1)
               (extractGroup env absRoot config grp)) fileGroups
             mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
+      -- GC after LSP extraction to release connection buffers
+      performGC
 
       -- Stub extraction
       mapM_ (\fp -> do
         logDebug env $ T.pack $ "  [stub] " ++ fp
-        let ext = emptyExtraction { extractionNodes = [makeStubNode fp] }
+        let ext = extractionFromLists [makeStubNode fp] []
         pushExtractionStreaming config env ext
         accumulate codeNodeMapRef codeEdgeAccRef ext
         ) stubFiles
@@ -164,6 +176,11 @@ extractAll config detection env = do
               (signalQSemN sem 1)
               (extractDocFile env fp)) chunk
             mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
+            -- Force evaluation and GC after each chunk to release
+            -- intermediate Extraction values.
+            n <- readIORef docNodeMapRef >>= evaluate . Map.size
+            _ <- evaluate n
+            performGC
             ) chunks
       logDebug env "  [doc] Extraction complete"
     )
@@ -178,12 +195,12 @@ extractAll config detection env = do
   docEdgeAcc <- readIORef docEdgeAccRef
   let mergedNodeMap = codeNodeMap `Map.union` docNodeMap  -- code wins on dupes
       mergedEdgeList = codeEdgeAcc (docEdgeAcc [])  -- flatten DList: O(n)
-      merged = emptyExtraction
-        { extractionNodes = Map.elems mergedNodeMap
-        , extractionEdges = mergedEdgeList
+      merged = Extraction
+        { extractionNodes = mergedNodeMap
+        , extractionEdges = Map.fromList [(edgeId e, e) | e <- mergedEdgeList]
         }
 
-  logInfo env $ T.pack $ "  Extracted " ++ show (length (extractionNodes merged)) ++ " nodes, " ++ show (length (extractionEdges merged)) ++ " edges"
+  logInfo env $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges"
   pure merged
 
 -- | Push a single extraction to Neo4j if streaming is configured.
@@ -193,8 +210,8 @@ pushExtractionStreaming config env extraction =
   case cfgNeo4jStreaming config of
     Nothing -> pure ()
     Just n4cfg -> do
-      let nNodes = length (extractionNodes extraction)
-          nEdges = length (extractionEdges extraction)
+      let nNodes = Map.size (extractionNodes extraction)
+          nEdges = Map.size (extractionEdges extraction)
       when (nNodes > 0 || nEdges > 0) $ do
         logDebug env $ T.pack $ "  [neo4j-stream] Pushing " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
         (msg, stmts, _batches) <- Neo4j.pushFileExtraction extraction
@@ -239,7 +256,7 @@ extractGroup env absRoot _config (serverCmd, files) =
   if serverCmd == "stub"
     then mapM (\fp -> do
       logDebug env $ T.pack $ "  [stub] " ++ fp
-      pure emptyExtraction { extractionNodes = [makeStubNode fp] }
+      pure (extractionFromLists [makeStubNode fp] [])
     ) files
     else doExtractWithSharedLSP env absRoot serverCmd files
 
@@ -250,7 +267,7 @@ doExtractWithSharedLSP env absRoot serverCmd files = do
   case mbLSPOpts of
     Nothing -> mapM (\fp -> do
       logWarn env $ T.pack $ "  LSP " ++ serverCmd ++ " disappeared for " ++ fp
-      pure emptyExtraction { extractionNodes = [makeStubNode fp] }
+      pure (extractionFromLists [makeStubNode fp] [])
       ) files
     Just (cmd, args) -> do
       logDebug env $ T.pack $ "  [lsp] Connecting to " ++ cmd ++ " for " ++ show (length files) ++ " files"
@@ -264,7 +281,7 @@ doExtractWithSharedLSP env absRoot serverCmd files = do
       case result of
         Left err -> do
           logWarn env $ T.pack $ "  [lsp] Connection failed: " ++ T.unpack err
-          mapM (\fp -> pure emptyExtraction { extractionNodes = [makeStubNode fp] }) files
+          mapM (\fp -> pure (extractionFromLists [makeStubNode fp] [])) files
         Right client -> do
           let hasWsSym = scpWorkspaceSymbolProvider (lspServerCaps client)
           extractions <- if hasWsSym
@@ -287,12 +304,12 @@ doExtractWithSharedLSP env absRoot serverCmd files = do
               logDebug env $ T.pack $ "  [lsp] Server does not support workspace/symbol — using per-file extraction"
               extractFilesWithLSP client files
           mapM_ (\(fp, ext) -> do
-            let nNodes = length (extractionNodes ext)
-                nEdges = length (extractionEdges ext)
+            let nNodes = Map.size (extractionNodes ext)
+                nEdges = Map.size (extractionEdges ext)
             logDebug env $ T.pack $ "  [lsp] " ++ fp ++ " → " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
             ) (zip files extractions)
           enriched <- mapM (\(fp, ext) ->
-            if null (extractionNodes ext) && takeExtension fp `elem` [".hs", ".lhs"]
+            if Map.null (extractionNodes ext) && takeExtension fp `elem` [".hs", ".lhs"]
               then do
                 logDebug env $ T.pack $ "  [haskell-stub] LSP gave 0 symbols for " ++ fp ++ ", using parser fallback"
                 extractHaskellStub fp
@@ -311,7 +328,7 @@ extractFilesWithLSP client (fp:fps) = do
   if not alive
     then do
       -- Server is dead — return stubs for this and all remaining files
-      let stubs = [emptyExtraction { extractionNodes = [makeStubNode f], extractionEdges = [] } | f <- fp:fps]
+      let stubs = [extractionFromLists [makeStubNode f] [] | f <- fp:fps]
       pure stubs
     else do
       ext <- extractViaLSP client fp
@@ -328,10 +345,7 @@ extractFromFile env filePath = do
   case mbLSPOpts of
     Nothing -> do
       logDebug env $ T.pack $ "  [stub] " ++ filePath ++ " - no LSP for " ++ ext
-      pure emptyExtraction
-           { extractionNodes = [makeStubNode filePath]
-           , extractionEdges = []
-           }
+      pure (extractionFromLists [makeStubNode filePath] [])
     Just (cmd, args) -> do
       logDebug env $ T.pack $ "  [lsp] " ++ filePath ++ " → " ++ cmd ++ " " ++ unwords args
       let config = LSPClientConfig
@@ -344,14 +358,12 @@ extractFromFile env filePath = do
       case result of
         Left err -> do
           logWarn env $ T.pack $ "  [lsp] Connection failed for " ++ filePath ++ ": " ++ T.unpack err
-          pure emptyExtraction
-              { extractionNodes = [makeStubNode filePath]
-              }
+          pure (extractionFromLists [makeStubNode filePath] [])
         Right client -> do
           extraction <- extractViaLSP client filePath
           disconnectLSP client
-          let nNodes = length (extractionNodes extraction)
-              nEdges = length (extractionEdges extraction)
+          let nNodes = Map.size (extractionNodes extraction)
+              nEdges = Map.size (extractionEdges extraction)
           logDebug env $ T.pack $ "  [lsp] " ++ filePath ++ " → " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
           pure extraction
 
@@ -377,23 +389,23 @@ extractViaTreeSitterFFI env grammar filePath =
   case getGrammarPtr grammar of
     Nothing -> do
       logWarn env $ T.pack $ "  [tree-sitter] No grammar for " ++ grammar ++ " — using stub"
-      pure emptyExtraction { extractionNodes = [makeStubNode filePath] }
+      pure (extractionFromLists [makeStubNode filePath] [])
     Just lang -> catch (do
       content <- BS.readFile filePath
       result <- parseWithGrammar lang content
       case result of
         Nothing -> do
           logWarn env $ T.pack $ "  [tree-sitter] Parse failed for " ++ filePath
-          pure emptyExtraction { extractionNodes = [makeStubNode filePath] }
+          pure (extractionFromLists [makeStubNode filePath] [])
         Just nodes -> do
           let extraction = tsNodesToExtraction filePath nodes
-              nNodes = length (extractionNodes extraction)
-              nEdges = length (extractionEdges extraction)
+              nNodes = Map.size (extractionNodes extraction)
+              nEdges = Map.size (extractionEdges extraction)
           logDebug env $ T.pack $ "  [tree-sitter] " ++ filePath ++ " → " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
           pure extraction
       ) $ \(e :: SomeException) -> do
         logWarn env $ T.pack $ "  [tree-sitter] Error for " ++ filePath ++ ": " ++ show e
-        pure emptyExtraction { extractionNodes = [makeStubNode filePath] }
+        pure (extractionFromLists [makeStubNode filePath] [])
 
 -- | Get the tree-sitter language pointer for a grammar name.
 getGrammarPtr :: String -> Maybe (Ptr TS_LANG.Language)
@@ -423,10 +435,7 @@ extractionFromSymbols :: FilePath -> [DocumentSymbolResult] -> Extraction
 extractionFromSymbols filePath symbols =
   let nodes = symbolToNodes filePath symbols
       edges = symbolTreeToEdges filePath symbols
-  in emptyExtraction
-    { extractionNodes = nodes
-    , extractionEdges = edges
-    }
+  in extractionFromLists nodes edges
 
 -- ───────────────────────────────────────────────
 -- Incremental extraction for watch mode
@@ -453,11 +462,11 @@ extractChangedFiles config changedFiles env = do
   -- Stub files
   stubExtractions <- mapM (\fp -> do
     logDebug env $ T.pack $ "  [stub] " ++ fp
-    pure emptyExtraction { extractionNodes = [makeStubNode fp] }
+    pure (extractionFromLists [makeStubNode fp] [])
     ) stubFiles
   mapM_ (\ext -> pushExtractionStreaming config env ext) stubExtractions
 
   let merged = List.foldl' mergeExtractions emptyExtraction
                  (tsExtractions ++ lspExtractions ++ stubExtractions)
-  logInfo env $ T.pack $ "  [watch] Extracted " ++ show (length (extractionNodes merged)) ++ " nodes, " ++ show (length (extractionEdges merged)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
+  logInfo env $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
   pure merged

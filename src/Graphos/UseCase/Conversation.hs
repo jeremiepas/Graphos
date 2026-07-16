@@ -15,7 +15,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap)
+import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Context (ConversationNode(..), chatCommunityId)
 
@@ -28,14 +28,12 @@ import Graphos.Domain.Context (ConversationNode(..), chatCommunityId)
 conversationEdges :: ConversationNode -> [Edge]
 conversationEdges conv =
   [ Edge
-    { edgeSource         = convId conv
-    , edgeTarget         = codeNodeId
-    , edgeRelation       = References
-    , edgeConfidence     = Inferred
-    , edgeConfidenceScore = 0.8
-    , edgeSourceFile     = "memory/" <> convId conv <> ".md"
-    , edgeSourceLocation = Nothing
-    , edgeWeight         = 1.0
+    { edgeId        = EdgeId (convId conv <> "->" <> codeNodeId <> ":references")
+    , edgeSource    = convId conv
+    , edgeTarget    = codeNodeId
+    , edgeRelation  = References
+    , edgeConfidence = Confidence 0.8
+    , edgeWeight    = 1.0
     }
   | codeNodeId <- convRelevantNodes conv
   ]
@@ -49,9 +47,9 @@ conversationEdges conv =
 queryConversations :: Graph -> Text -> [ConversationNode]
 queryConversations g query =
   let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
-      -- Find all document nodes (conversations are stored as DocumentFile)
+      -- Find all document nodes (conversations are stored as DocFile)
       convNodes = [(nid, n) | (nid, n) <- Map.toList (gNodes g)
-                            , nodeFileType n == DocumentFile
+                            , nodeFileType n == DocFile
                             , "memory/" `T.isPrefixOf` nodeSourceFile n]
       -- Score each conversation by how well it matches the query
       scored = [(conv, matchScore) | (_nid, n) <- convNodes

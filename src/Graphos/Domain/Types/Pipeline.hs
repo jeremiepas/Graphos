@@ -13,6 +13,13 @@ module Graphos.Domain.Types.Pipeline
   , PipelineStep(..)
   , PipelineCheckpoint(..)
 
+    -- * Pipeline state (spec-compliant names)
+  , PipelineState(..)
+  , PipelineStage
+  , initialPipelineState
+  , advanceStage
+  , checkpointPath
+
     -- * Detection types
   , Detection(..)
   , FileCategory(..)
@@ -20,6 +27,7 @@ module Graphos.Domain.Types.Pipeline
 
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject, withText)
 import Data.Map.Strict (Map)
+import Control.DeepSeq (NFData(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -68,6 +76,7 @@ data PipelineConfig = PipelineConfig
   , cfgOtelConfig     :: OtelConfig                   -- ^ OpenTelemetry configuration
   , cfgDebugTraceDir  :: Maybe FilePath               -- ^ Directory for debug trace JSONL files
   , cfgEmbed          :: Bool                          -- ^ Enable embedding generation for ingested files (--embed)
+  , cfgOtelShutdownTimeout :: Int                      -- ^ OTel shutdown timeout in seconds (--otel-shutdown-timeout, default: 10)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -138,6 +147,7 @@ defaultConfig = PipelineConfig
   , cfgOtelConfig     = defaultOtelConfig
   , cfgDebugTraceDir  = Nothing
   , cfgEmbed          = False
+  , cfgOtelShutdownTimeout = 10
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
@@ -168,6 +178,8 @@ data PipelineStep
   | StepReport
   | StepExport
   deriving (Eq, Show, Read, Generic)
+
+instance NFData PipelineStep
 
 instance ToJSON PipelineStep where
   toJSON StepDetect  = "detect"
@@ -235,3 +247,32 @@ instance ToJSON FileCategory where
   toJSON PaperFiles = "paper"
   toJSON ImageFiles = "image"
   toJSON VideoFiles = "video"
+
+-- | Seven-stage pipeline state
+-- Tracks completion of: Detect → Extract → Build → Cluster → Infer → Analyze → Export
+type PipelineStage = PipelineStep
+
+data PipelineState = PipelineState
+  { psCompletedStages :: [PipelineStage]
+  , psCurrentStage    :: Maybe PipelineStage
+  } deriving (Eq, Show, Generic)
+
+instance NFData PipelineState
+
+-- | Initial empty pipeline state
+initialPipelineState :: PipelineState
+initialPipelineState = PipelineState
+  { psCompletedStages = []
+  , psCurrentStage = Nothing
+  }
+
+-- | Advance pipeline to next stage
+advanceStage :: PipelineStage -> PipelineState -> PipelineState
+advanceStage stage state = PipelineState
+  { psCompletedStages = psCompletedStages state ++ [stage]
+  , psCurrentStage = Just stage
+  }
+
+-- | Default checkpoint path
+checkpointPath :: Text
+checkpointPath = "graphos-out/checkpoint.json"

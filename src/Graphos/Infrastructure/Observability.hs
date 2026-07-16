@@ -65,7 +65,9 @@ module Graphos.Infrastructure.Observability
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, modifyMVar_, swapMVar)
 import Control.Exception (SomeException, catch)
+import Control.Concurrent.Async (Async, async, cancel)
 import Control.Monad (when, unless, forever)
+import System.Timeout (timeout)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import Data.Int (Int64)
@@ -132,6 +134,7 @@ data ObservabilityEnv = ObservabilityEnv
   , otelConfig     :: OtelConfig
   , otelDebugTrace :: DebugTraceEnv
   , otelLogEnv     :: LogEnv
+  , otelServerThread :: Maybe (Async ())
   }
 
 -- ───────────────────────────────────────────────
@@ -572,12 +575,11 @@ initObservability logLevel otelCfg metricsPort debugDir = do
       exportMetricsOTLP otelCfg metrics
     pure ()
 
-  case metricsPort of
+  serverThread <- case metricsPort of
     Just p -> do
       logInfo logEnv $ T.pack $ "Starting Prometheus metrics server on :" ++ show p ++ "/metrics"
-      _ <- forkIO $ startMetricsServer metrics p
-      pure ()
-    Nothing -> pure ()
+      Just <$> async (startMetricsServer metrics p)
+    Nothing -> pure Nothing
 
   pure ObservabilityEnv
     { otelTracer = tracer
@@ -585,17 +587,35 @@ initObservability logLevel otelCfg metricsPort debugDir = do
     , otelConfig = otelCfg
     , otelDebugTrace = debugTrace
     , otelLogEnv = logEnv
+    , otelServerThread = serverThread
     }
 
 -- | Shut down observability: flush debug traces, OTLP logs, and export remaining spans.
+-- Cancels the metrics server thread (if running) to prevent MVar deadlocks.
+-- Each sub-cleanup is wrapped in an independent 5-second timeout with exception
+-- catching so that one component hanging does not prevent the others from running.
 shutdownObservability :: ObservabilityEnv -> IO ()
 shutdownObservability env = do
-  flushDebugTrace (otelDebugTrace env)
-  flushOtlpLogs (otelLogEnv env)
+  let logEnv = otelLogEnv env
+      componentTimeout :: IO () -> String -> IO ()
+      componentTimeout action label = do
+        result <- timeout 5000000 (action `catch` \(e :: SomeException) -> do
+          hPutStrLn stderr $ "[graphos] WARNING: " ++ label ++ " threw exception: " ++ show e)
+        case result of
+          Nothing -> hPutStrLn stderr $ "[graphos] WARNING: " ++ label ++ " timed out after 5s"
+          Just () -> pure ()
+  case otelServerThread env of
+    Just thread -> do
+      logInfo logEnv "Shutting down metrics server..."
+      componentTimeout (cancel thread) "metrics server shutdown"
+      logInfo logEnv "Metrics server shut down."
+    Nothing -> pure ()
+  componentTimeout (flushDebugTrace (otelDebugTrace env)) "debug trace flush"
+  componentTimeout (flushOtlpLogs logEnv) "OTLP logs flush"
   when (otelEnabled (otelConfig env)) $ do
     spans <- readIORef (tracerSpans (otelTracer env))
-    unless (null spans) $ exportTracesOTLP (otelConfig env) spans
-    exportMetricsOTLP (otelConfig env) (otelMetrics env)
+    unless (null spans) $ componentTimeout (exportTracesOTLP (otelConfig env) spans) "OTLP trace export"
+    componentTimeout (exportMetricsOTLP (otelConfig env) (otelMetrics env)) "OTLP metrics export"
 
 -- ───────────────────────────────────────────────
 -- Helpers

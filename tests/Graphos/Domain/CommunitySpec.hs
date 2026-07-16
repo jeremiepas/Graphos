@@ -14,10 +14,7 @@ spec = do
   describe "detectCommunities" $ do
     it "assigns all nodes to communities" $ do
       -- Build a simple graph and detect communities
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
-            , extractionEdges = [testEdge "a" "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
           g = buildGraph False ext
           commMap = detectCommunities g
           allMembers = concat (Map.elems commMap)
@@ -26,7 +23,7 @@ spec = do
     it "generates unique community IDs (no collisions)" $ do
       let nodes = [testNode (T.pack $ "n" ++ show i) | i <- [1..20::Int]]
           edges = [testEdge (T.pack $ "n" ++ show i) (T.pack $ "n" ++ show (i+1)) | i <- [1..19::Int]]
-          ext = emptyExtraction { extractionNodes = nodes, extractionEdges = edges }
+          ext = extractionFromLists nodes edges
           g = buildGraph False ext
           commMap = detectCommunities g
           cids = Map.keys commMap
@@ -34,18 +31,12 @@ spec = do
 
   describe "cohesionScore" $ do
     it "returns 1.0 for a fully connected pair" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b"]
-            , extractionEdges = [testEdge "a" "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
           g = buildGraph False ext
       cohesionScore g ["a", "b"] `shouldSatisfy` (> 0)
 
     it "returns 0 for completely disconnected nodes" $ do
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
-            , extractionEdges = []
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] []
           g = buildGraph False ext
       cohesionScore g ["a", "b", "c"] `shouldBe` 0.0
 
@@ -87,10 +78,7 @@ spec = do
   describe "detectCommunitiesWithResolution" $ do
     it "respects max iterations setting" $ do
       -- With 1 iteration, the algorithm should still produce a valid community map
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b", testNode "c"]
-            , extractionEdges = [testEdge "a" "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
           g = buildGraph False ext
           res = defaultResolution { resMaxIterations = 1 }
           commMap = detectCommunitiesWithResolution g res
@@ -99,10 +87,7 @@ spec = do
 
     it "converges faster on stable graphs" $ do
       -- A simple connected pair should converge in very few iterations
-      let ext = emptyExtraction
-            { extractionNodes = [testNode "a", testNode "b"]
-            , extractionEdges = [testEdge "a" "b"]
-            }
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
           g = buildGraph False ext
           res = defaultResolution { resMaxIterations = 3 }
           commMap = detectCommunitiesWithResolution g res
@@ -111,7 +96,10 @@ spec = do
 
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node
-testNode nid = Node nid nid CodeFile "test.hs" (Just "L1") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+testNode nid = Node nid nid CodeFile "test.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing (Just "L1") Nothing Nothing Nothing Nothing
+
+edgeIdFrom :: Text -> Text -> EdgeId
+edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
 
 testEdge :: Text -> Text -> Edge
-testEdge src tgt = Edge src tgt Calls Extracted 1.0 "test.hs" (Just "L1") 1.0
+testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0)

@@ -31,7 +31,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Graphos.Domain.Types (NodeId, CommunityId, Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, GodNode)
+import Graphos.Domain.Types (NodeId, CommunityId, Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..))
 
 -- ───────────────────────────────────────────────
 -- Query complexity classification
@@ -154,7 +154,7 @@ data SelectedContext = SelectedContext
   , scCommunities   :: Map CommunityId [NodeId]      -- ^ Relevant communities and their members
   , scCommunityLabels :: Map CommunityId Text        -- ^ Human-readable community labels
   , scBridgeNodes   :: [NodeId]                      -- ^ Bridge/articulation nodes
-  , scGodNodes      :: [GodNode]                     -- ^ High-degree hub nodes
+  , scGodNodes      :: [(NodeId, Int)]               -- ^ High-degree hub nodes (nodeId, edgeCount)
   , scStrategy      :: SelectionStrategy             -- ^ Strategy used for selection
   , scBudget        :: ContextBudget                 -- ^ Budget that was applied
   , scMatchScore    :: Double                        -- ^ Overall relevance score of this selection
@@ -267,26 +267,29 @@ enrichWithChatHistory commMap convs =
 chatEdgesForConversation :: ConversationNode -> [Edge]
 chatEdgesForConversation conv =
   [ Edge
-    { edgeSource         = convId conv
-    , edgeTarget         = codeNodeId
-    , edgeRelation       = References
-    , edgeConfidence     = Inferred
-    , edgeConfidenceScore = 0.8
-    , edgeSourceFile     = "memory/" <> convId conv <> ".md"
-    , edgeSourceLocation = Nothing
-    , edgeWeight         = 1.0
+    { edgeId        = EdgeId (convId conv <> "->" <> codeNodeId <> ":references")
+    , edgeSource    = convId conv
+    , edgeTarget    = codeNodeId
+    , edgeRelation  = References
+    , edgeConfidence = Confidence 0.8
+    , edgeWeight    = 1.0
     }
   | codeNodeId <- convRelevantNodes conv
   ]
 
 -- | Convert a ConversationNode to a graph Node for insertion.
---   Stored as DocumentFile with "memory/" source prefix for identification.
+--   Stored as DocFile with "memory/" source prefix for identification.
 conversationNodeToNode :: ConversationNode -> Node
 conversationNodeToNode conv = Node
   { nodeId           = convId conv
   , nodeLabel        = convQuestion conv
-  , nodeFileType     = DocumentFile
+  , nodeFileType     = DocFile
   , nodeSourceFile   = "memory/" <> convId conv <> ".md"
+  , nodeLineStart    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
   , nodeSourceLocation = Nothing
   , nodeLineEnd      = Nothing
   , nodeKind         = Just "Conversation"

@@ -30,9 +30,13 @@ module Graphos.Infrastructure.LSP.Protocol
   , lspDidOpen
   , lspDidClose
   , lspReferences
+  , lspReferencesWithId
   , lspCallHierarchyIncoming
+  , lspCallHierarchyPrepareWithId
+  , lspCallHierarchyIncomingWithId
   , lspShutdown
   , lspExit
+  , rangeToJson
 
     -- * Helpers
   , languageIdFromExt
@@ -220,6 +224,18 @@ lspReferences filePath line char = JSONRPCRequest
       ]
   }
 
+-- | References request with custom message ID (for concurrent requests)
+lspReferencesWithId :: FilePath -> Int -> Int -> Int -> JSONRPCRequest
+lspReferencesWithId filePath line char msgId = JSONRPCRequest
+  { jrpcId     = msgId
+  , jrpcMethod = "textDocument/references"
+  , jrpcParams = Just $ object
+      [ "textDocument" .= object ["uri" .= T.pack ("file://" ++ filePath)]
+      , "position"     .= object ["line" .= line, "character" .= char]
+      , "context"      .= object ["includeDeclaration" .= True]
+      ]
+  }
+
 lspCallHierarchyIncoming :: Text -> Int -> JSONRPCRequest
 lspCallHierarchyIncoming name id_ = JSONRPCRequest
   { jrpcId     = id_
@@ -228,6 +244,39 @@ lspCallHierarchyIncoming name id_ = JSONRPCRequest
       [ "item" .= object ["name" .= name]
       ]
   }
+
+-- | Call hierarchy prepare request with custom message ID
+lspCallHierarchyPrepareWithId :: FilePath -> Int -> Int -> Int -> JSONRPCRequest
+lspCallHierarchyPrepareWithId filePath line char msgId = JSONRPCRequest
+  { jrpcId     = msgId
+  , jrpcMethod = "textDocument/prepareCallHierarchy"
+  , jrpcParams = Just $ object
+      [ "textDocument" .= object ["uri" .= T.pack ("file://" ++ filePath)]
+      , "position"     .= object ["line" .= line, "character" .= char]
+      ]
+  }
+
+-- | Call hierarchy incoming calls with custom message ID
+lspCallHierarchyIncomingWithId :: CallHierarchyItem -> Int -> JSONRPCRequest
+lspCallHierarchyIncomingWithId item msgId = JSONRPCRequest
+  { jrpcId     = msgId
+  , jrpcMethod = "callHierarchy/incomingCalls"
+  , jrpcParams = Just $ object
+      [ "item" .= object
+          [ "name"           .= chiName item
+          , "kind"           .= chiKind item
+          , "uri"            .= chiUri item
+          , "range"          .= rangeToJson (chiRange item)
+          , "selectionRange" .= rangeToJson (chiSelectionRange item)
+          ]
+      ]
+  }
+
+rangeToJson :: Range -> Value
+rangeToJson r = object
+  [ "start" .= object ["line" .= posLine (rangeStart r), "character" .= posCharacter (rangeStart r)]
+  , "end"   .= object ["line" .= posLine (rangeEnd r), "character" .= posCharacter (rangeEnd r)]
+  ]
 
 lspShutdown :: JSONRPCRequest
 lspShutdown = JSONRPCRequest
