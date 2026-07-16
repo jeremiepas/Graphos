@@ -23,6 +23,7 @@ allSupportedExtensions = Map.fromList
   , (PaperFiles, paperExts)
   , (ImageFiles, imageExts)
   , (VideoFiles, videoExts)
+  , (OfficeFiles, officeExts)
   ]
   where
     codeExts = [".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp"
@@ -34,6 +35,7 @@ allSupportedExtensions = Map.fromList
     paperExts = [".pdf"]
     imageExts = [".png", ".jpg", ".jpeg", ".webp", ".gif"]
     videoExts = [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".ogg"]
+    officeExts = [".docx", ".pptx", ".xlsx", ".doc", ".ppt"]
 
 -- | Detect files in a directory
 detectFiles :: FilePath -> IO Detection

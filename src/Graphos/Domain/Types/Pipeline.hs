@@ -77,6 +77,7 @@ data PipelineConfig = PipelineConfig
   , cfgDebugTraceDir  :: Maybe FilePath               -- ^ Directory for debug trace JSONL files
   , cfgEmbed          :: Bool                          -- ^ Enable embedding generation for ingested files (--embed)
   , cfgOtelShutdownTimeout :: Int                      -- ^ OTel shutdown timeout in seconds (--otel-shutdown-timeout, default: 10)
+  , cfgVision         :: Bool                          -- ^ Enable vision analysis (--vision)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -148,6 +149,7 @@ defaultConfig = PipelineConfig
   , cfgDebugTraceDir  = Nothing
   , cfgEmbed          = False
   , cfgOtelShutdownTimeout = 10
+  , cfgVision         = False
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
@@ -239,14 +241,26 @@ data FileCategory
   | PaperFiles
   | ImageFiles
   | VideoFiles
+  | OfficeFiles
   deriving (Eq, Show, Ord, Generic)
 
 instance ToJSON FileCategory where
-  toJSON CodeFiles  = "code"
-  toJSON DocFiles   = "document"
-  toJSON PaperFiles = "paper"
-  toJSON ImageFiles = "image"
-  toJSON VideoFiles = "video"
+  toJSON CodeFiles   = "code"
+  toJSON DocFiles    = "document"
+  toJSON PaperFiles  = "paper"
+  toJSON ImageFiles  = "image"
+  toJSON VideoFiles  = "video"
+  toJSON OfficeFiles = "office"
+
+instance FromJSON FileCategory where
+  parseJSON = withText "FileCategory" $ \t -> case t of
+    "code"     -> pure CodeFiles
+    "document" -> pure DocFiles
+    "paper"    -> pure PaperFiles
+    "image"    -> pure ImageFiles
+    "video"    -> pure VideoFiles
+    "office"   -> pure OfficeFiles
+    _          -> fail $ "Unknown file category: " ++ T.unpack t
 
 -- | Seven-stage pipeline state
 -- Tracks completion of: Detect → Extract → Build → Cluster → Infer → Analyze → Export
