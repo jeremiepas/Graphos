@@ -32,11 +32,15 @@ module Graphos.Domain.Config
   , ObservabilityConfig(..)
   , defaultObservabilityConfig
 
-     -- * Embedding configuration
+      -- * Embedding configuration
   , EmbeddingConfig(..)
   , defaultEmbeddingConfig
 
-     -- * Top-level configuration
+     -- * Vision configuration
+  , VisionConfig(..)
+  , defaultVisionConfig
+
+      -- * Top-level configuration
   , GraphosConfig(..)
   , defaultGraphosConfig
 
@@ -233,6 +237,7 @@ data FileExtensionConfig = FileExtensionConfig
   , fecPaper   :: [String]
   , fecImage   :: [String]
   , fecVideo   :: [String]
+  , fecOffice  :: [String]
   } deriving (Eq, Show, Generic)
 
 instance ToJSON FileExtensionConfig where
@@ -255,6 +260,7 @@ defaultFileExtensions = FileExtensionConfig
   , fecPaper = [ ".pdf" ]
   , fecImage = [ ".png", ".jpg", ".jpeg", ".webp", ".gif" ]
   , fecVideo = [ ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".ogg" ]
+  , fecOffice = [ ".docx", ".pptx", ".xlsx", ".doc", ".ppt" ]
   }
 
 -- ───────────────────────────────────────────────
@@ -455,6 +461,48 @@ defaultEmbeddingConfig = EmbeddingConfig
   }
 
 -- ───────────────────────────────────────────────
+-- Vision Configuration
+-- ───────────────────────────────────────────────
+
+-- | Configuration for multimodal LLM vision analysis.
+-- Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.)
+-- with image_url content type.
+--
+-- When apiKey or baseUrl are not explicitly set, they inherit from
+-- labeling config. Vision is disabled by default.
+data VisionConfig = VisionConfig
+  { vcEnabled   :: Bool     -- ^ Enable vision analysis (default: False)
+  , vcModel     :: String   -- ^ Model name (e.g. "qwen3.6-moe", "gpt-4o")
+  , vcApiKey    :: String   -- ^ API key (env var ${VAR} resolved at runtime)
+  , vcBaseUrl   :: String   -- ^ API base URL (e.g. "http://localhost:11434/v1")
+  , vcMaxTokens :: Int      -- ^ Max tokens for vision response (default: 1000)
+  , vcBatchSize :: Int      -- ^ Images per batch with GC between (default: 5)
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON VisionConfig where
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 2 }
+
+instance FromJSON VisionConfig where
+  parseJSON = withObject "VisionConfig" $ \v -> VisionConfig
+    <$> v .:? "enabled"    .!= False
+    <*> v .:? "model"       .!= "qwen3.6-moe"
+    <*> v .:? "apiKey"      .!= "${OPENAI_API_KEY}"
+    <*> v .:? "baseUrl"     .!= "http://localhost:11434/v1"
+    <*> v .:? "maxTokens"   .!= 1000
+    <*> v .:? "batchSize"   .!= 5
+
+-- | Default vision configuration (disabled, local Ollama qwen3.6-moe).
+defaultVisionConfig :: VisionConfig
+defaultVisionConfig = VisionConfig
+  { vcEnabled   = False
+  , vcModel     = "qwen3.6-moe"
+  , vcApiKey    = "${OPENAI_API_KEY}"
+  , vcBaseUrl   = "http://localhost:11434/v1"
+  , vcMaxTokens = 1000
+  , vcBatchSize = 5
+  }
+
+-- ───────────────────────────────────────────────
 -- Top-level Configuration
 -- ───────────────────────────────────────────────
 
@@ -470,6 +518,7 @@ data GraphosConfig = GraphosConfig
   , gcLabeling       :: LabelingConfig               -- ^ LLM labeling settings
   , gcObservability  :: ObservabilityConfig           -- ^ Tracing, metrics, debug settings
   , gcEmbedding      :: EmbeddingConfig               -- ^ Local embedding settings (Ollama)
+  , gcVision         :: VisionConfig                  -- ^ Vision analysis settings
   } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -484,6 +533,7 @@ defaultGraphosConfig = GraphosConfig
   , gcLabeling       = defaultLabelingConfig
   , gcObservability  = defaultObservabilityConfig
   , gcEmbedding      = defaultEmbeddingConfig
+  , gcVision         = defaultVisionConfig
   }
 
 -- ───────────────────────────────────────────────
@@ -519,6 +569,9 @@ mergeGraphosConfig global project = GraphosConfig
   , gcEmbedding = if gcEmbedding project == defaultEmbeddingConfig
                      then gcEmbedding global
                      else gcEmbedding project
+  , gcVision = if gcVision project == defaultVisionConfig
+                  then gcVision global
+                  else gcVision project
   }
 
 -- | Merge two ObservabilityConfig values: project overrides global.

@@ -151,12 +151,13 @@ countContextTokens txt =
 -- ───────────────────────────────────────────────
 
 showFileType :: FileType -> Text
-showFileType CodeFile     = "code"
-showFileType DocFile      = "doc"
-showFileType PaperFile    = "paper"
-showFileType ImageFile    = "image"
-showFileType VideoFile    = "video"
-showFileType AudioFile    = "audio"
+showFileType CodeFile   = "code"
+showFileType DocFile    = "doc"
+showFileType PaperFile  = "paper"
+showFileType ImageFile  = "image"
+showFileType VideoFile  = "video"
+showFileType AudioFile  = "audio"
+showFileType OfficeFile = "office"
 
 confidenceLabel :: Confidence -> Text
 confidenceLabel (Confidence c)

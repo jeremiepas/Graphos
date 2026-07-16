@@ -36,25 +36,28 @@ data FileType
   | ImageFile
   | VideoFile
   | AudioFile
+  | OfficeFile
   deriving (Eq, Show, Generic)
 
 instance ToJSON FileType where
-  toJSON CodeFile  = "code"
-  toJSON DocFile   = "doc"
-  toJSON PaperFile = "paper"
-  toJSON ImageFile = "image"
-  toJSON VideoFile = "video"
-  toJSON AudioFile = "audio"
+  toJSON CodeFile   = "code"
+  toJSON DocFile    = "doc"
+  toJSON PaperFile  = "paper"
+  toJSON ImageFile  = "image"
+  toJSON VideoFile  = "video"
+  toJSON AudioFile  = "audio"
+  toJSON OfficeFile = "office"
 
 instance FromJSON FileType where
   parseJSON = withText "FileType" $ \t -> case t of
-    "code"  -> pure CodeFile
-    "doc"   -> pure DocFile
-    "paper" -> pure PaperFile
-    "image" -> pure ImageFile
-    "video" -> pure VideoFile
-    "audio" -> pure AudioFile
-    _       -> fail $ "Unknown file type: " ++ T.unpack t
+    "code"   -> pure CodeFile
+    "doc"    -> pure DocFile
+    "paper"  -> pure PaperFile
+    "image"  -> pure ImageFile
+    "video"  -> pure VideoFile
+    "audio"  -> pure AudioFile
+    "office" -> pure OfficeFile
+    _        -> fail $ "Unknown file type: " ++ T.unpack t
 
 -- | A node in the knowledge graph
 --

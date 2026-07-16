@@ -43,17 +43,19 @@ import Graphos.Infrastructure.Logging (LogEnv, logInfo, logDebug, logTrace, logW
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import Graphos.UseCase.Extract.Haskell (makeStubNode, extractHaskellStub)
 import Graphos.UseCase.Extract.Markdown (extractDocFile)
+import Graphos.UseCase.Extract.Office (extractOfficeFile)
 
 -- | Extract entities from all detected files.
 extractAll :: PipelineConfig -> Detection -> LogEnv -> IO Extraction
 extractAll config detection env = do
   let codeFiles = Map.findWithDefault [] CodeFiles (detectionFiles detection)
       docFiles  = Map.findWithDefault [] DocFiles  (detectionFiles detection)
+      officeFiles = Map.findWithDefault [] OfficeFiles (detectionFiles detection)
       numThreads = max 1 (cfgThreads config)
 
   absRoot <- canonicalizePath (cfgInputPath config)
 
-  logInfo env $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files"
+  logInfo env $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files, " ++ show (length officeFiles) ++ " office files"
 
   -- Split code files by extractor mode
   let (treeSitterFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
@@ -82,6 +84,8 @@ extractAll config detection env = do
   codeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
   docNodeMapRef  <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
   docEdgeAccRef   <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  officeNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
+  officeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
 
   let -- Merge a single file's extraction into the accumulator.
       -- Nodes: Map insertWith for O(log n) per key (dedup by id).
@@ -98,65 +102,98 @@ extractAll config detection env = do
         accumulateNodes nodeRef (Map.elems (extractionNodes ext))
         accumulateEdges edgeRef (Map.elems (extractionEdges ext))
 
+  -- Process office files alongside doc files
+  let officeThreadCount = max 1 (min 4 numThreads)
+  unless (null officeFiles) $
+    logInfo env $ T.pack $ "  office: " ++ show (length officeFiles) ++ " files"
+
   void $ concurrently
-    -- Code extraction: merge each result into accumulator immediately
-    (do
-      -- Tree-sitter extraction: process in chunks with GC between batches
-      -- to release intermediate Extraction values and reduce peak memory.
-      let tsChunks = chunkList 500 treeSitterFiles
-      mapM_ (\chunk -> do
+    -- Code + office extraction (concurrently with doc extraction)
+    (void $ concurrently
+      -- Code extraction: merge each result into accumulator immediately
+      (do
+        -- Tree-sitter extraction: process in chunks with GC between batches
+        -- to release intermediate Extraction values and reduce peak memory.
+        let tsChunks = chunkList 500 treeSitterFiles
+        mapM_ (\chunk -> do
+          if numThreads <= 1
+            then mapM_ (\fp -> do
+              ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+              pushExtractionStreaming config env ext
+              accumulate codeNodeMapRef codeEdgeAccRef ext
+              ) chunk
+            else do
+              sem <- newQSemN numThreads
+              mapM_ (\fp -> bracket_
+                (waitQSemN sem 1)
+                (signalQSemN sem 1)
+                (do ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+                    pushExtractionStreaming config env ext
+                    accumulate codeNodeMapRef codeEdgeAccRef ext
+                )) chunk
+          -- Force evaluation of accumulator and GC after each chunk
+          -- so intermediate Extraction values can be reclaimed.
+          n <- readIORef codeNodeMapRef >>= evaluate . Map.size
+          _ <- evaluate n
+          performGC
+          ) tsChunks
+
+        -- LSP extraction
+        let fileGroups = groupByLSPServer lspFiles
+            numGroups = length fileGroups
+        logInfo env $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (threads: " ++ show numThreads ++ ")"
         if numThreads <= 1
-          then mapM_ (\fp -> do
-            ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
-            pushExtractionStreaming config env ext
-            accumulate codeNodeMapRef codeEdgeAccRef ext
-            ) chunk
-          else do
-            sem <- newQSemN numThreads
-            mapM_ (\fp -> bracket_
-              (waitQSemN sem 1)
-              (signalQSemN sem 1)
-              (do ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
-                  pushExtractionStreaming config env ext
-                  accumulate codeNodeMapRef codeEdgeAccRef ext
-              )) chunk
-        -- Force evaluation of accumulator and GC after each chunk
-        -- so intermediate Extraction values can be reclaimed.
-        n <- readIORef codeNodeMapRef >>= evaluate . Map.size
-        _ <- evaluate n
+          then mapM_ (\grp -> do
+            exts <- extractGroup env absRoot config grp
+            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) exts
+            ) fileGroups
+          else if numGroups <= numThreads
+            then do
+              results <- mapConcurrently (extractGroup env absRoot config) fileGroups
+              mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
+            else do
+              sem <- newQSemN numThreads
+              results <- mapConcurrently (\grp -> bracket_
+                (waitQSemN sem 1)
+                (signalQSemN sem 1)
+                (extractGroup env absRoot config grp)) fileGroups
+              mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
+        -- GC after LSP extraction to release connection buffers
         performGC
-        ) tsChunks
 
-      -- LSP extraction
-      let fileGroups = groupByLSPServer lspFiles
-          numGroups = length fileGroups
-      logInfo env $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (threads: " ++ show numThreads ++ ")"
-      if numThreads <= 1
-        then mapM_ (\grp -> do
-          exts <- extractGroup env absRoot config grp
-          mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) exts
-          ) fileGroups
-        else if numGroups <= numThreads
-          then do
-            results <- mapConcurrently (extractGroup env absRoot config) fileGroups
-            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
-          else do
-            sem <- newQSemN numThreads
-            results <- mapConcurrently (\grp -> bracket_
-              (waitQSemN sem 1)
-              (signalQSemN sem 1)
-              (extractGroup env absRoot config grp)) fileGroups
-            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
-      -- GC after LSP extraction to release connection buffers
-      performGC
-
-      -- Stub extraction
-      mapM_ (\fp -> do
-        logDebug env $ T.pack $ "  [stub] " ++ fp
-        let ext = extractionFromLists [makeStubNode fp] []
-        pushExtractionStreaming config env ext
-        accumulate codeNodeMapRef codeEdgeAccRef ext
-        ) stubFiles
+        -- Stub extraction
+        mapM_ (\fp -> do
+          logDebug env $ T.pack $ "  [stub] " ++ fp
+          let ext = extractionFromLists [makeStubNode fp] []
+          pushExtractionStreaming config env ext
+          accumulate codeNodeMapRef codeEdgeAccRef ext
+          ) stubFiles
+      )
+      -- Office extraction: process office files concurrently with code extraction
+      (do
+        unless (null officeFiles) $ do
+          logDebug env $ T.pack $ "  [office] Starting extraction for " ++ show (length officeFiles) ++ " office files"
+          if officeThreadCount <= 1
+            then mapM_ (\fp -> do
+              ext <- extractOfficeFile config env fp
+              pushExtractionStreaming config env ext
+              accumulate officeNodeMapRef officeEdgeAccRef ext
+              ) officeFiles
+            else do
+              sem <- newQSemN officeThreadCount
+              let chunks = chunkList 100 officeFiles
+              mapM_ (\chunk -> do
+                results <- mapConcurrently (\fp -> bracket_
+                  (waitQSemN sem 1)
+                  (signalQSemN sem 1)
+                  (extractOfficeFile config env fp)) chunk
+                mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate officeNodeMapRef officeEdgeAccRef ext) results
+                n <- readIORef officeNodeMapRef >>= evaluate . Map.size
+                _ <- evaluate n
+                performGC
+                ) chunks
+          logDebug env "  [office] Extraction complete"
+      )
     )
     -- Doc extraction: merge each result into accumulator immediately
     (do
@@ -185,7 +222,7 @@ extractAll config detection env = do
       logDebug env "  [doc] Extraction complete"
     )
 
-  logDebug env "  [extract] Code + doc extraction complete"
+  logDebug env "  [extract] Code + doc + office extraction complete"
 
   -- Build final Extraction from Map accumulators + DList flattening
   -- DList flatten is O(n) — just chains the appends without thunk nesting.
@@ -193,8 +230,10 @@ extractAll config detection env = do
   codeEdgeAcc <- readIORef codeEdgeAccRef
   docNodeMap <- readIORef docNodeMapRef
   docEdgeAcc <- readIORef docEdgeAccRef
-  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap  -- code wins on dupes
-      mergedEdgeList = codeEdgeAcc (docEdgeAcc [])  -- flatten DList: O(n)
+  officeNodeMap <- readIORef officeNodeMapRef
+  officeEdgeAcc <- readIORef officeEdgeAccRef
+  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap  -- code wins on dupes
+      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc []))  -- flatten DList: O(n)
       merged = Extraction
         { extractionNodes = mergedNodeMap
         , extractionEdges = Map.fromList [(edgeId e, e) | e <- mergedEdgeList]
