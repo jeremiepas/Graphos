@@ -22,10 +22,11 @@ import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
 import qualified Data.Text as T
 import Foreign.Ptr (Ptr)
 import System.Directory (canonicalizePath)
-import System.FilePath (takeExtension)
+import System.FilePath (takeExtension, takeFileName)
+import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, NodeId, Node(..), Edge(..))
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcVision, VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..))
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.Infrastructure.LSP.Client (LSPClient(..), extractViaLSP, findLSPServer, LSPClientConfig(..), connectToLSP, disconnectLSP, languageServerCommands, extractWorkspaceSymbols, workspaceSymbolsToDocumentSymbols, symbolToNodes, symbolTreeToEdges, isServerConnected)
@@ -44,6 +45,12 @@ import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import Graphos.UseCase.Extract.Haskell (makeStubNode, extractHaskellStub)
 import Graphos.UseCase.Extract.Markdown (extractDocFile)
 import Graphos.UseCase.Extract.Office (extractOfficeFile)
+import Graphos.UseCase.Extract.Image (extractImageFile, extractImageFromBytes)
+import Graphos.Infrastructure.FileSystem.OfficeConvert
+  ( docxExtractMediaPaths
+  , pptxExtractMediaPaths
+  , extractMediaFile
+  )
 
 -- | Extract entities from all detected files.
 extractAll :: PipelineConfig -> Detection -> LogEnv -> IO Extraction
@@ -51,11 +58,13 @@ extractAll config detection env = do
   let codeFiles = Map.findWithDefault [] CodeFiles (detectionFiles detection)
       docFiles  = Map.findWithDefault [] DocFiles  (detectionFiles detection)
       officeFiles = Map.findWithDefault [] OfficeFiles (detectionFiles detection)
+      imageFiles = Map.findWithDefault [] ImageFiles (detectionFiles detection)
       numThreads = max 1 (cfgThreads config)
+      vCfg = gcVision (cfgGraphosConfig config)
 
   absRoot <- canonicalizePath (cfgInputPath config)
 
-  logInfo env $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files, " ++ show (length officeFiles) ++ " office files"
+  logInfo env $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files, " ++ show (length officeFiles) ++ " office files, " ++ show (length imageFiles) ++ " image files"
 
   -- Split code files by extractor mode
   let (treeSitterFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
@@ -86,6 +95,8 @@ extractAll config detection env = do
   docEdgeAccRef   <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
   officeNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
   officeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  imageNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
+  imageEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
 
   let -- Merge a single file's extraction into the accumulator.
       -- Nodes: Map insertWith for O(log n) per key (dedup by id).
@@ -106,9 +117,27 @@ extractAll config detection env = do
   let officeThreadCount = max 1 (min 4 numThreads)
   unless (null officeFiles) $
     logInfo env $ T.pack $ "  office: " ++ show (length officeFiles) ++ " files"
+  unless (null imageFiles) $
+    logInfo env $ T.pack $ "  image: " ++ show (length imageFiles) ++ " files" ++ (if vcEnabled vCfg then "" else " (vision disabled)")
+
+  -- Image extraction: batch size from config, with GC between batches.
+  -- When vision is disabled, each image gets a stub node (no LLM call).
+  let imageBatchSize = max 1 (vcBatchSize vCfg)
+
+  -- Collect embedded image paths from PPTX/DOCX office files.
+  -- These are analyzed alongside standalone images.
+  embeddedImages <- if not (null officeFiles) && vcEnabled vCfg
+    then concat <$> mapM (\fp -> collectEmbeddedImages env fp) officeFiles
+    else pure []
+
+  unless (null embeddedImages) $
+    logInfo env $ T.pack $ "  image: " ++ show (length embeddedImages) ++ " embedded images from office files"
+
+  -- All image sources: standalone image files + embedded images from office docs
+  let allImageSources = map StandaloneImage imageFiles ++ map (uncurry EmbeddedImage) embeddedImages
 
   void $ concurrently
-    -- Code + office extraction (concurrently with doc extraction)
+    -- Code + office extraction (concurrently with doc + image extraction)
     (void $ concurrently
       -- Code extraction: merge each result into accumulator immediately
       (do
@@ -195,34 +224,60 @@ extractAll config detection env = do
           logDebug env "  [office] Extraction complete"
       )
     )
-    -- Doc extraction: merge each result into accumulator immediately
-    (do
-      logDebug env $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files (threads: " ++ show docThreads ++ ")"
-      if docThreads <= 1
-        then mapM_ (\fp -> do
-          ext <- extractDocFile env fp
-          pushExtractionStreaming config env ext
-          accumulate docNodeMapRef docEdgeAccRef ext
-          ) docFiles
-        else do
-          sem <- newQSemN docThreads
-          let chunks = chunkList 500 docFiles
+    -- Doc + Image extraction: run concurrently with code+office
+    (void $ concurrently
+      -- Doc extraction: merge each result into accumulator immediately
+      (do
+        logDebug env $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files (threads: " ++ show docThreads ++ ")"
+        if docThreads <= 1
+          then mapM_ (\fp -> do
+            ext <- extractDocFile env fp
+            pushExtractionStreaming config env ext
+            accumulate docNodeMapRef docEdgeAccRef ext
+            ) docFiles
+          else do
+            sem <- newQSemN docThreads
+            let chunks = chunkList 500 docFiles
+            mapM_ (\chunk -> do
+              results <- mapConcurrently (\fp -> bracket_
+                (waitQSemN sem 1)
+                (signalQSemN sem 1)
+                (extractDocFile env fp)) chunk
+              mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
+              -- Force evaluation and GC after each chunk to release
+              -- intermediate Extraction values.
+              n <- readIORef docNodeMapRef >>= evaluate . Map.size
+              _ <- evaluate n
+              performGC
+              ) chunks
+        logDebug env "  [doc] Extraction complete"
+      )
+      -- Image extraction: batch processing with GC between batches
+      -- Standalone images use extractImageFile; embedded images use extractImageFromBytes.
+      -- When vision is disabled, extractImageFile produces stub nodes.
+      (do
+        unless (null allImageSources) $ do
+          logDebug env $ T.pack $ "  [image] Starting extraction for " ++ show (length imageFiles) ++ " standalone + " ++ show (length embeddedImages) ++ " embedded images (batch: " ++ show imageBatchSize ++ ")"
+          let imageChunks = chunkList imageBatchSize allImageSources
           mapM_ (\chunk -> do
-            results <- mapConcurrently (\fp -> bracket_
-              (waitQSemN sem 1)
-              (signalQSemN sem 1)
-              (extractDocFile env fp)) chunk
-            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
-            -- Force evaluation and GC after each chunk to release
-            -- intermediate Extraction values.
-            n <- readIORef docNodeMapRef >>= evaluate . Map.size
+            -- Process each image source in the batch
+            results <- mapM (extractImageSource config env) chunk
+            mapM_ (\ext -> pushExtractionStreaming config env ext >> accumulate imageNodeMapRef imageEdgeAccRef ext) results
+            -- Force evaluation and GC between batches to release base64 data
+            -- and LLM response buffers — this is critical for memory efficiency
+            -- since each image analysis produces ~1-5MB of base64 data.
+            n <- readIORef imageNodeMapRef >>= evaluate . Map.size
             _ <- evaluate n
             performGC
-            ) chunks
-      logDebug env "  [doc] Extraction complete"
+            ) imageChunks
+          logDebug env "  [image] Extraction complete"
+        unless (null allImageSources) $ do
+          n <- readIORef imageNodeMapRef >>= evaluate . Map.size
+          logInfo env $ T.pack $ "  [image] Produced " ++ show n ++ " image nodes"
+      )
     )
 
-  logDebug env "  [extract] Code + doc + office extraction complete"
+  logDebug env "  [extract] Code + doc + office + image extraction complete"
 
   -- Build final Extraction from Map accumulators + DList flattening
   -- DList flatten is O(n) — just chains the appends without thunk nesting.
@@ -232,8 +287,10 @@ extractAll config detection env = do
   docEdgeAcc <- readIORef docEdgeAccRef
   officeNodeMap <- readIORef officeNodeMapRef
   officeEdgeAcc <- readIORef officeEdgeAccRef
-  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap  -- code wins on dupes
-      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc []))  -- flatten DList: O(n)
+  imageNodeMap <- readIORef imageNodeMapRef
+  imageEdgeAcc <- readIORef imageEdgeAccRef
+  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap `Map.union` imageNodeMap  -- code wins on dupes
+      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc (imageEdgeAcc [])))  -- flatten DList: O(n)
       merged = Extraction
         { extractionNodes = mergedNodeMap
         , extractionEdges = Map.fromList [(edgeId e, e) | e <- mergedEdgeList]
@@ -414,6 +471,68 @@ concatMapM f = fmap concat . mapM f
 chunkList :: Int -> [a] -> [[a]]
 chunkList _ [] = []
 chunkList n xs = take n xs : chunkList n (drop n xs)
+
+-- ───────────────────────────────────────────────
+-- Image extraction helpers
+-- ───────────────────────────────────────────────
+
+-- | An image source: either a standalone file path or an embedded image
+-- from an office document (archive path, media path within archive).
+data ImageSource
+  = StandaloneImage FilePath
+  | EmbeddedImage FilePath FilePath  -- ^ (archive path, media path within archive)
+  deriving (Eq, Show)
+
+-- | Extract an image from either a standalone file or embedded source.
+-- Standalone images use extractImageFile; embedded images use extractImageFromBytes.
+extractImageSource :: PipelineConfig -> LogEnv -> ImageSource -> IO Extraction
+extractImageSource config env (StandaloneImage fp) =
+  extractImageFile config env fp
+extractImageSource config env (EmbeddedImage archivePath mediaPath) = do
+  -- Extract the embedded image bytes from the office archive
+  mediaResult <- extractMediaFile archivePath mediaPath
+  case mediaResult of
+    Left err -> do
+      logWarn env $ T.pack $ "  [vision] Error extracting media " ++ mediaPath ++ " from " ++ archivePath ++ ": " ++ T.unpack err
+      pure (extractionFromLists [imageStubNode mediaPath] [])
+    Right bytes -> do
+      let displayName = archivePath ++ "/" ++ takeFileName mediaPath
+      extractImageFromBytes config env displayName bytes
+  where
+    imageStubNode :: FilePath -> Node
+    imageStubNode fp = Node
+      { nodeId = T.pack fp
+      , nodeLabel = T.pack (takeFileName fp)
+      , nodeFileType = ImageFile
+      , nodeSourceFile = T.pack fp
+      , nodeLineStart = Nothing
+      , nodeLineEnd = Nothing
+      , nodeSignature = Nothing
+      , nodeCommunityId = Nothing
+      , nodeKind = Just "Image"
+      , nodeDegree = Nothing
+      , nodeIsBridge = Nothing
+      , nodeExtra = Nothing
+      , nodeSourceLocation = Nothing
+      , nodeSourceUrl = Nothing
+      , nodeCapturedAt = Nothing
+      , nodeAuthor = Nothing
+      , nodeContributor = Nothing
+      }
+
+-- | Collect embedded image paths from PPTX and DOCX office files.
+-- Returns a list of (archivePath, mediaPath) pairs for each embedded image.
+collectEmbeddedImages :: LogEnv -> FilePath -> IO [(FilePath, FilePath)]
+collectEmbeddedImages _env fp = do
+  let ext = map toLower (takeExtension fp)
+  case ext of
+    ".docx" -> do
+      paths <- docxExtractMediaPaths fp
+      pure [(fp, p) | p <- paths]
+    ".pptx" -> do
+      paths <- pptxExtractMediaPaths fp
+      pure [(fp, p) | p <- paths]
+    _ -> pure []
 
 -- ───────────────────────────────────────────────
 -- Tree-sitter extraction
