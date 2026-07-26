@@ -35,14 +35,14 @@ data ExportResult = ExportResult
 -- Note: graph.json is written incrementally by the Pipeline's IncrementalJSON writer,
 --       so we don't rewrite it here. This avoids holding the full graph in memory
 --       as a JSON AST during export, reducing peak memory by ~1× graph size.
-exportAll :: Graph -> Analysis -> PipelineConfig -> Detection -> IO ExportResult
-exportAll g analysis config detection = do
+exportAll :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId T.Text) -> IO ExportResult
+exportAll g analysis config detection mLabels = do
   -- graph.json is already written incrementally by the Pipeline's IncrementalJSON writer.
   -- No need to rewrite it here — that would double memory usage during export.
   let jsonPath = cfgOutputDir config ++ "/graph.json"
 
   let reportPath = cfgOutputDir config ++ "/GRAPH_REPORT.md"
-  let reportContent = Report.generateReport g analysis config detection
+  let reportContent = Report.generateReport g analysis config detection mLabels
   ExportReport.exportReport reportContent reportPath
 
   htmlPath <- if cfgNoViz config

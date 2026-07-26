@@ -22,20 +22,34 @@ spec = describe "FormatContext" $ do
             , nodeLabel        = "TestNode"
             , nodeFileType     = CodeFile
             , nodeSourceFile   = "src/Test.hs"
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-            , nodeSourceLocation = Just "42"
-            , nodeLineEnd      = Nothing
+            , nodeLineStart    = Just 42
+            , nodeCommunityId  = Nothing
+            , nodeDegree       = Nothing
+            , nodeIsBridge     = Nothing
+            , nodeExtra        = Nothing
+            , nodeLineEnd      = Just 50
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
-            , nodeSourceUrl    = Nothing
-            , nodeCapturedAt   = Nothing
-            , nodeAuthor       = Nothing
-            , nodeContributor  = Nothing
             }
           result = formatNodeCompact "test_node" node
       T.isInfixOf "TestNode" result `shouldBe` True
       T.isInfixOf "code" result `shouldBe` True
+      T.isInfixOf "src:src/Test.hs:42-50" result `shouldBe` True
+
+    it "omits location when line fields are absent" $ do
+      let node = Node
+            { nodeId           = "test_node2"
+            , nodeLabel        = "TestNode"
+            , nodeFileType     = CodeFile
+            , nodeSourceFile   = "src/Test.hs"
+            , nodeLineStart    = Nothing
+            , nodeCommunityId  = Nothing
+            , nodeDegree       = Nothing
+            , nodeIsBridge     = Nothing
+            , nodeExtra        = Nothing
+            , nodeLineEnd      = Nothing
+            , nodeKind         = Nothing
+            , nodeSignature    = Nothing
+            }
+          result = formatNodeCompact "test_node2" node
+      T.isInfixOf "src:src/Test.hs:42" result `shouldBe` False

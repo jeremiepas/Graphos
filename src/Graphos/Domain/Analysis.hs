@@ -1,10 +1,12 @@
+{-# LANGUAGE BangPatterns #-}
 module Graphos.Domain.Analysis
   ( analyze
   , surprisingConnections
   , suggestQuestions
+  , dedupOn
   ) where
 
-import Data.List (sortOn, nubBy)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -17,6 +19,18 @@ import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidenc
                             Analysis(..), relationToText)
 import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, gNodes, gEdges, degree)
 import Graphos.Domain.Community (cohesionScore)
+
+-- | Order-preserving, first-occurrence-wins deduplication by key.
+-- O(k log k) replacement for @nubBy (\\a b -> key a == key b)@, which is
+-- O(k^2) and must never be used on lists that scale with graph size.
+dedupOn :: Ord k => (a -> k) -> [a] -> [a]
+dedupOn key = go Set.empty
+  where
+    go _ [] = []
+    go !seen (x:xs)
+      | k `Set.member` seen = go seen xs
+      | otherwise           = x : go (Set.insert k seen) xs
+      where k = key x
 
 analyze :: Graph -> CommunityMap -> CohesionMap -> Analysis
 analyze g commMap cohesionMap =
@@ -95,7 +109,7 @@ crossCommunitySurprises g nodeComm topN =
                    , edgeRelation d `notElem` [Imports, Contains]
                    ]
       sorted = sortOn (\(_, _, d, _, _) -> Down (edgeConfidence d)) candidates
-      deduped = nubBy (\a b -> ((\(_,_,_,cu,cv) -> (cu,cv)) a == (\(_,_,_,cu,cv) -> (cu,cv)) b)) sorted
+      deduped = dedupOn (\(_,_,_,cu,cv) -> (cu,cv)) sorted
   in take topN [SurprisingConnection
     { scSource      = nodeLabel' g u
     , scTarget      = nodeLabel' g v
@@ -170,14 +184,9 @@ nodeData g nid = Map.findWithDefault (Node
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeSourceLocation = Nothing
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Nothing
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
   }) nid (gNodes g)
 
 nodeLabel' :: Graph -> NodeId -> Text

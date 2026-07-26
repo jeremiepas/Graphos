@@ -17,19 +17,15 @@ testNode nid = Node
   , nodeLabel        = nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
-  , nodeLineStart    = Nothing
+
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeSourceLocation = Just "L1"
+  , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Nothing
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
   }
 
 -- Helper: create a test node with custom label
@@ -39,19 +35,15 @@ testNodeWithLabel nid label = Node
   , nodeLabel        = label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
-  , nodeLineStart    = Nothing
+
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeSourceLocation = Just "L1"
+  , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Nothing
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
   }
 
 -- helper: generate a unique EdgeId from source and target
@@ -86,19 +78,15 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLabel        = nid
   , nodeFileType     = ft
   , nodeSourceFile   = srcFile
-  , nodeLineStart    = Nothing
+
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeSourceLocation = Just "L1"
+  , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Nothing
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
   }
 
 spec :: Spec
@@ -158,19 +146,15 @@ spec = do
             , nodeLabel = "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = "test.hs"
-  , nodeLineStart    = Nothing
+
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-            , nodeSourceLocation = Just "L1"
+            , nodeLineStart    = Just 1
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
             , nodeSignature = Nothing
-            , nodeSourceUrl = Nothing
-            , nodeCapturedAt = Nothing
-            , nodeAuthor = Nothing
-            , nodeContributor = Nothing
             }
           ext = extractionFromLists [fileNode, testNode "func"] [testEdge "test.hs" "func"]
           g = buildGraph False ext
@@ -264,19 +248,14 @@ spec = do
             , nodeLabel = "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = "test.hs"
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-            , nodeSourceLocation = Nothing
-            , nodeLineEnd = Nothing
-            , nodeKind = Nothing
-            , nodeSignature = Nothing
-            , nodeSourceUrl = Nothing
-            , nodeCapturedAt = Nothing
-            , nodeAuthor = Nothing
-            , nodeContributor = Nothing
+            , nodeLineStart    = Just 1
+            , nodeCommunityId  = Nothing
+            , nodeDegree       = Nothing
+            , nodeIsBridge     = Nothing
+            , nodeExtra        = Nothing
+            , nodeLineEnd      = Nothing
+            , nodeKind         = Nothing
+            , nodeSignature    = Nothing
             }
           ext = extractionFromLists [n] []
           g = buildGraph False ext
@@ -288,19 +267,14 @@ spec = do
             , nodeLabel = ".foo()"
             , nodeFileType = CodeFile
             , nodeSourceFile = "test.hs"
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-            , nodeSourceLocation = Nothing
-            , nodeLineEnd = Nothing
-            , nodeKind = Nothing
-            , nodeSignature = Nothing
-            , nodeSourceUrl = Nothing
-            , nodeCapturedAt = Nothing
-            , nodeAuthor = Nothing
-            , nodeContributor = Nothing
+            , nodeLineStart    = Just 1
+            , nodeCommunityId  = Nothing
+            , nodeDegree       = Nothing
+            , nodeIsBridge     = Nothing
+            , nodeExtra        = Nothing
+            , nodeLineEnd      = Nothing
+            , nodeKind         = Nothing
+            , nodeSignature    = Nothing
             }
           ext = extractionFromLists [n] []
           g = buildGraph False ext

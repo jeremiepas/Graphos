@@ -30,6 +30,7 @@ import System.Mem (performGC)
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..), Neo4jPushMode(..))
+import Graphos.Domain.Config (FileExtensionConfig(..))
 import Graphos.Domain.Graph (gNodes, gEdges)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.Infrastructure.Logging (LogLevel(..), logInfo, logDebug, logTrace)
@@ -40,7 +41,8 @@ import Graphos.Infrastructure.Observability.SDK
   , initObservability
   , shutdownObservability
   )
-import Graphos.UseCase.Detect (detectFiles)
+import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore)
+import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns)
 import Graphos.UseCase.Extract (extractAll, extractChangedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
@@ -51,11 +53,19 @@ import Graphos.UseCase.Report (generateReport)
 import Graphos.UseCase.Export (exportAll, ExportResult(..))
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
 import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
+import Graphos.UseCase.Label (labelCommunities)
+import Graphos.Domain.Labeling (LabelingResult(..))
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.Export.CommunityGraph (exportCommunityGraph)
 import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import Graphos.Infrastructure.FileSystem.Cache (loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint)
+
+-- | Minimum ratio of edges to nodes for a code-dominant graph. Values below
+-- this threshold after the build step indicate a likely edge-extraction
+-- collapse and are logged as a prominent warning.
+edgeCollapseThreshold :: Double
+edgeCollapseThreshold = 0.05
 
 -- | Pipeline result
 data PipelineResult = PipelineResult
@@ -108,10 +118,20 @@ runPipeline config = catch (do
                            ++ ", " ++ show (length (chkFilesExtracted chk)) ++ " files already extracted"
     Nothing -> logInfo env "No checkpoint found, starting fresh pipeline"
 
-  -- Step 1: Detect
+  -- Step 1: Detect (using config-driven extensions and ignore patterns)
   logInfo env "Step 1: Detecting files..."
   detectStart <- getCurrentTime
-  detection <- detectFiles (cfgInputPath configWithStreaming)
+  ignorePatterns <- loadIgnorePatterns (cfgInputPath configWithStreaming)
+  let fec = gcFileExtensions (cfgGraphosConfig configWithStreaming)
+      extMap = Map.fromList
+        [ (CodeFiles, fecCode fec)
+        , (DocFiles, fecDoc fec)
+        , (PaperFiles, fecPaper fec)
+        , (ImageFiles, fecImage fec)
+        , (VideoFiles, fecVideo fec)
+        , (OfficeFiles, fecOffice fec)
+        ]
+  detection <- detectFilesWithExtensionsAndIgnore (cfgInputPath configWithStreaming) extMap ignorePatterns
   detectEnd <- getCurrentTime
   observeHistogram metrics "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   incCounter metrics "graphos_pipeline_steps_total" 1
@@ -170,6 +190,10 @@ runPipeline config = catch (do
       logInfo env "Step 3: Building graph..."
       buildStart <- getCurrentTime
       let graph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
+      -- Force evaluation inside the timed window so the recorded span duration
+      -- reflects the real build work, not thunk creation.
+      _ <- evaluate (Map.size (gNodes graph) + Map.size (gEdges graph))
+      graph `deepseq` pure ()
       buildEnd <- getCurrentTime
       observeHistogram metrics "graphos_build_duration_seconds" (realToFrac (diffUTCTime buildEnd buildStart) :: Double)
       incCounter metrics "graphos_pipeline_steps_total" 1
@@ -178,28 +202,34 @@ runPipeline config = catch (do
       debugTraceSpan (otelDebugTrace obsEnv) "build" buildStart buildEnd (Map.fromList [("nodes", T.pack $ show $ Map.size (gNodes graph)), ("edges", T.pack $ show $ Map.size (gEdges graph))])
       logInfo env $ T.pack $ "  Graph: " ++ show (Map.size (gNodes graph)) ++ " nodes, " ++ show (Map.size (gEdges graph)) ++ " edges"
 
-      -- Incremental write
+      -- Sanity check: warn if a code-dominant input produced an implausibly
+      -- sparse graph (e.g. edge extraction collapse).
+      let codeFiles = length $ Map.findWithDefault [] CodeFiles (detectionFiles detection)
+          nonCodeFiles = detectionTotalFiles detection - codeFiles
+          nodeCount = fromIntegral (Map.size (gNodes graph)) :: Double
+          edgeCount = fromIntegral (Map.size (gEdges graph)) :: Double
+          ratio = if nodeCount == 0 then 0 else edgeCount / nodeCount
+      when (codeFiles > nonCodeFiles && nodeCount > 0 && ratio < edgeCollapseThreshold) $
+        logInfo env $ T.pack $ "  WARNING: edge/node ratio (" ++ show ratio ++ ") is below threshold " ++ show edgeCollapseThreshold ++ "; edge extraction may have collapsed"
+
+      -- Incremental write: only open the writer here; node/edge/community sections
+      -- are written from the enriched graph after clustering/inference so that
+      -- graph.json and GRAPH_REPORT.md share the same source of truth.
       createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
       logInfo env $ T.pack $ "  Streaming graph data to " ++ cfgOutputDir configWithStreaming ++ "/graph.json"
       iw <- Inc.openWriter (cfgOutputDir configWithStreaming ++ "/graph.json")
-      Inc.writeNodes iw (Map.elems (gNodes graph))
-      Inc.writeEdges iw (Map.elems (gEdges graph))
 
-      -- Checkpoint
+      -- Checkpoint (pre-inference state; retained for resume support)
       let checkpointPath = cfgOutputDir configWithStreaming ++ "/graph.checkpoint.json"
       ExportJSON.saveCheckpoint graph checkpointPath
       logInfo env $ T.pack $ "  Checkpoint saved: " ++ checkpointPath
 
-      -- Force full evaluation of the graph now that incremental write + checkpoint
-      -- are done, then perform GC to reclaim extraction Maps before clustering starts.
-      -- On 100k+ node graphs, the extraction Maps can be 30-40% of peak memory;
-      -- this boundary lets the runtime reclaim that memory before Leiden begins.
-      _ <- evaluate (Map.size (gNodes graph))
-      _ <- evaluate (Map.size (gEdges graph))
+      -- GC boundary to reclaim extraction Maps before clustering starts.
+      -- On 100k+ node graphs, the extraction Maps can be 30-40% of peak memory.
       performGC
 
       -- Steps 4-5: Cluster + Analyze (skipped when --no-cluster)
-      (enrichedGraph, finalCommMap, _finalCohesion, analysis) <-
+      (enrichedGraph, finalCommMap, _finalCohesion, analysis, llmLabelsResult) <-
         if cfgNoCluster configWithStreaming
           then do
             logInfo env "Step 4: Skipping clustering (--no-cluster)"
@@ -209,8 +239,9 @@ runPipeline config = catch (do
             Inc.writeCommunities iw emptyCommMap
             Inc.writeCohesion iw emptyCohesion
             Inc.writeGodNodes iw (analysisGodNodes noAnalysis)
+            Inc.writeAnalysisTail iw Nothing
             Inc.closeWriter iw
-            pure (graph, emptyCommMap, emptyCohesion, noAnalysis)
+            pure (graph, emptyCommMap, emptyCohesion, noAnalysis, Nothing :: Maybe (Map.Map CommunityId Text))
           else do
             -- Step 4: Cluster
             logInfo env "Step 4: Detecting communities..."
@@ -221,16 +252,15 @@ runPipeline config = catch (do
                                  , resMaxIterations = cfgMaxLeidenIterations configWithStreaming
                                  }
                 (commMap, cohesion) = clusterGraphWithResolution graph res
+            -- Force the cluster result before recording the span end so the
+            -- duration reflects real work, not thunk creation.
+            _ <- evaluate (Map.size commMap + sum (map length (Map.elems commMap)))
+            (commMap, cohesion) `deepseq` pure ()
             clusterEnd <- getCurrentTime
             observeHistogram metrics "graphos_cluster_duration_seconds" (realToFrac (diffUTCTime clusterEnd clusterStart) :: Double)
             incCounter metrics "graphos_pipeline_steps_total" 1
             setGauge metrics "graphos_communities" (fromIntegral $ Map.size commMap)
             debugTraceSpan (otelDebugTrace obsEnv) "cluster" clusterStart clusterEnd (Map.fromList [("communities", T.pack $ show $ Map.size commMap)])
-
-            Inc.writeCommunities iw commMap
-            Inc.writeCohesion iw cohesion
-            Inc.flushWriter iw
-            logDebug env "  Communities and cohesion written incrementally"
 
             -- Step 4b: Infer additional edges
             let allInferred = inferEdges (cfgEdgeDensity configWithStreaming) graph commMap
@@ -251,9 +281,37 @@ runPipeline config = catch (do
             let (finalComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
                 anal = analyzeGraph enrichedGraph' finalComm finalCohes
 
+            -- Write the final graph state to graph.json. All sections are derived
+            -- from the same (enrichedGraph', finalComm, anal) triple that feeds
+            -- GRAPH_REPORT.md, ensuring report/export parity.
+            Inc.writeNodes iw (Map.elems (gNodes enrichedGraph'))
+            Inc.writeEdges iw (Map.elems (gEdges enrichedGraph'))
+            Inc.writeCommunities iw finalComm
+            Inc.writeCohesion iw finalCohes
             Inc.writeGodNodes iw (analysisGodNodes anal)
+
+            -- Step 5b: LLM community labeling (optional, --label)
+            llmLabels <- if cfgLabel configWithStreaming
+              then do
+                logInfo env "Step 5b: Labeling communities via LLM..."
+                let lblCfg = gcLabeling (cfgGraphosConfig configWithStreaming)
+                logInfo env $ T.pack $ "  Labeling config: provider=" ++ labelingProvider lblCfg
+                                       ++ " model=" ++ labelingModel lblCfg
+                                       ++ " baseUrl=" ++ labelingBaseUrl lblCfg
+                                       ++ " batchSize=" ++ show (labelingBatchSize lblCfg)
+                labelingStart <- getCurrentTime
+                result <- labelCommunities enrichedGraph' finalComm finalCohes lblCfg
+                labelingEnd <- getCurrentTime
+                logInfo env $ T.pack $ "  Labeled " ++ show (Map.size (lrLabels result)) ++ " communities in "
+                                       ++ show (diffUTCTime labelingEnd labelingStart) ++ "s"
+                pure (Just (lrLabels result))
+              else pure Nothing
+
+            Inc.writeAnalysisTail iw llmLabels
+            Inc.flushWriter iw
             Inc.closeWriter iw
-            pure (enrichedGraph', finalComm, finalCohes, anal)
+            logDebug env "  Final graph, communities, and cohesion written incrementally"
+            pure (enrichedGraph', finalComm, finalCohes, anal, llmLabels)
 
       logInfo env "  graph.json written incrementally"
 
@@ -265,13 +323,13 @@ runPipeline config = catch (do
 
       -- Step 6: Report
       logInfo env "Step 6: Generating report..."
-      let _report = generateReport enrichedGraph analysis configWithStreaming detection
+      let _report = generateReport enrichedGraph analysis configWithStreaming detection llmLabelsResult
 
       -- Step 7: Export
       logInfo env "Step 7: Exporting outputs..."
       exportStart <- getCurrentTime
       createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
-      exports <- exportAll enrichedGraph analysis configWithStreaming detection
+      exports <- exportAll enrichedGraph analysis configWithStreaming detection llmLabelsResult
       exportEnd <- getCurrentTime
       observeHistogram metrics "graphos_export_duration_seconds" (realToFrac (diffUTCTime exportEnd exportStart) :: Double)
       incCounter metrics "graphos_pipeline_steps_total" 1
@@ -383,7 +441,7 @@ runIncrementalPipeline config changedFiles = catch (do
   -- Export
   createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
   let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
-  exports <- exportAll enrichedGraph analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty)
+  exports <- exportAll enrichedGraph analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty) Nothing
 
   -- Push communities to Neo4j if enabled
   when (cfgNeo4j configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
@@ -511,7 +569,7 @@ runSingleFilePipeline config filePath = catch (do
             , detectionWarning = Nothing
             , detectionFiles = Map.empty
             }
-      exports <- exportAll enrichedGraph analysis config detection
+      exports <- exportAll enrichedGraph analysis config detection Nothing
 
       -- Clean up
       clearPipelineCheckpoint (cfgOutputDir config)

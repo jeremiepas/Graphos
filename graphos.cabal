@@ -136,7 +136,6 @@ library
                      -- Infrastructure - Tracking
                      Graphos.Infrastructure.Tracking.Cost
                      -- Infrastructure - Observability
-                      Graphos.Infrastructure.Observability
                      Graphos.Infrastructure.Observability.SDK
                     -- Infrastructure - Git
                     Graphos.Infrastructure.Git.Hook
@@ -232,6 +231,7 @@ test-suite graphos-test
   hs-source-dirs: tests
   other-modules:
                     Graphos.Domain.TypesSpec
+                    Graphos.Domain.ConfigSpec
                     Graphos.Domain.GraphSpec
                     Graphos.Domain.CommunitySpec
                     Graphos.Domain.Community.LabelSpec
@@ -239,14 +239,19 @@ test-suite graphos-test
                     Graphos.Domain.ContextSpec
                     Graphos.UseCase.PipelineSpec
                     Graphos.UseCase.ExtractSpec
+                    Graphos.UseCase.InferSpec
+                    Graphos.UseCase.Extract.HaskellSpec
                     Graphos.UseCase.Extract.ImageSpec
                     Graphos.UseCase.QuerySpec
                     Graphos.UseCase.SelectContextSpec
                     Graphos.UseCase.FormatContextSpec
                     Graphos.UseCase.ConversationSpec
+                    Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
                     Graphos.Infrastructure.LSP.ClientSpec
                     Graphos.Infrastructure.LSP.TransportSpec
+                    Graphos.Infrastructure.Observability.SDKSpec
                     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
+                    Graphos.Infrastructure.FileSystem.IgnoreSpec
 
   build-depends:
       base
@@ -256,6 +261,9 @@ test-suite graphos-test
     , QuickCheck           >= 2.14
     , aeson
     , containers
+    , deepseq              >= 1.4
+    , directory            >= 1.3
+    , filepath             >= 1.4
     , fgl-arbitrary        >= 0.2
     , process              >= 1.6
     , text

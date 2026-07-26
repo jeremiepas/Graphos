@@ -32,6 +32,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Types (NodeId, CommunityId, Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..))
+import Graphos.Domain.Types.Node (setNodeExtraCapturedAt)
 
 -- ───────────────────────────────────────────────
 -- Query complexity classification
@@ -280,22 +281,19 @@ chatEdgesForConversation conv =
 -- | Convert a ConversationNode to a graph Node for insertion.
 --   Stored as DocFile with "memory/" source prefix for identification.
 conversationNodeToNode :: ConversationNode -> Node
-conversationNodeToNode conv = Node
-  { nodeId           = convId conv
-  , nodeLabel        = convQuestion conv
-  , nodeFileType     = DocFile
-  , nodeSourceFile   = "memory/" <> convId conv <> ".md"
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-  , nodeSourceLocation = Nothing
-  , nodeLineEnd      = Nothing
-  , nodeKind         = Just "Conversation"
-  , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Just (convTimestamp conv)
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
-  }
+conversationNodeToNode conv =
+  (setNodeExtraCapturedAt (convTimestamp conv))
+    Node
+      { nodeId           = convId conv
+      , nodeLabel        = convQuestion conv
+      , nodeFileType     = DocFile
+      , nodeSourceFile   = "memory/" <> convId conv <> ".md"
+      , nodeLineStart    = Nothing
+      , nodeCommunityId  = Nothing
+      , nodeDegree       = Nothing
+      , nodeIsBridge     = Nothing
+      , nodeExtra        = Nothing
+      , nodeLineEnd      = Nothing
+      , nodeKind         = Just "Conversation"
+      , nodeSignature    = Nothing
+      }

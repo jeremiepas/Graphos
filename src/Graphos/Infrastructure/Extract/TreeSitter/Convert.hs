@@ -1,29 +1,49 @@
 -- | Convert tree-sitter AST nodes into Graphos domain types.
 -- Pure conversion — no IO.
+--
+-- Node volume is controlled by 'Granularity':
+--
+--   * 'GranularityFine'     — all whitelisted definition types, full recursion.
+--   * 'GranularityFunction' — structure + API surface only; recursion STOPS at
+--     function/method/constructor boundaries, so nothing inside a function
+--     body produces a node regardless of its AST type.
+--   * 'GranularityFile'     — only the root module/structure node(s).
 {-# LANGUAGE OverloadedStrings #-}
 module Graphos.Infrastructure.Extract.TreeSitter.Convert
   ( tsNodesToExtraction
   , tsNodeToGraphNodes
   , tsNodeToGraphEdges
   , definitionTypes
+  , structureTypes
+  , apiSurfaceTypes
+  , implementationDetailTypes
+  , functionBoundaryTypes
   ) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
 
+import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
   ( Node(..), Edge(..), Extraction(..), extractionFromLists
   , NodeId, FileType(..), Relation(..), Confidence(..), EdgeId(..)
   )
 import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
 
--- | Tree-sitter node types that represent meaningful definitions.
--- Covers: TypeScript/JSX, Python, Go, Rust, Haskell, JSON.
-definitionTypes :: [String]
-definitionTypes =
-  [ -- Cross-language (TypeScript, Python, Go, Haskell, etc.)
-    "module", "program", "source_file"
-  , "function_declaration", "function_definition", "function"
+-- | Tier 1 — file/module structure. Emitted at every granularity level.
+structureTypes :: [String]
+structureTypes =
+  [ "module", "program", "source_file"
+  , "package_clause"        -- Go
+  , "mod_item"              -- Rust
+  , "document"              -- JSON
+  ]
+
+-- | Tier 2 — API surface: definitions visible from outside a function body.
+-- Emitted at 'GranularityFunction' and 'GranularityFine'.
+apiSurfaceTypes :: [String]
+apiSurfaceTypes =
+  [ "function_declaration", "function_definition", "function"
   , "method_declaration", "method_definition"
   , "class_declaration", "class_definition", "class"
   , "interface_declaration", "interface_definition", "interface"
@@ -43,42 +63,79 @@ definitionTypes =
   , "constructor", "field_declaration"
   , "trait", "trait_item", "impl_block", "impl_item"
   , "data_type", "new_type", "type_synonym"
-    -- Python-specific
-  , "decorated_definition", "decorator"
+  , "decorated_definition"
+    -- Rust
+  , "function_item", "struct_item", "use_declaration"
+  , "static_item", "extern_item", "attribute_item"
+    -- Haskell
+  , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
+  ]
+
+-- | Tier 3 — implementation detail: statements, parameters, locals, JSON
+-- values. Emitted only at 'GranularityFine'.
+implementationDetailTypes :: [String]
+implementationDetailTypes =
+  [ "decorator"
   , "expression_statement", "assignment", "augmented_assignment"
   , "return_statement", "parameter", "default_parameter", "typed_parameter"
   , "for_statement", "while_statement", "if_statement"
   , "with_statement", "try_statement", "except_clause"
-    -- Go-specific
-  , "package_clause"
-    -- Rust-specific
-  , "function_item", "struct_item", "mod_item", "use_declaration"
-  , "static_item", "extern_item", "attribute_item"
-    -- Haskell-specific
-  , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
-    -- JSON
-  , "document", "object", "array", "pair"
+    -- JSON values: every pair/object/array of every JSON file
+  , "object", "array", "pair"
   ]
 
--- | Convert a tree of TSNodeInfo into an Extraction.
-tsNodesToExtraction :: FilePath -> [TSNodeInfo] -> Extraction
-tsNodesToExtraction filePath nodes =
-  let graphNodes = concatMap (tsNodeToGraphNodes filePath) nodes
-      graphEdges = concatMap (tsNodeToGraphEdges filePath Nothing) nodes
+-- | AST types that delimit a function body. At 'GranularityFunction' the
+-- walker does not descend past these, making function bodies opaque.
+functionBoundaryTypes :: [String]
+functionBoundaryTypes =
+  [ "function_declaration", "function_definition", "function"
+  , "method_declaration", "method_definition"
+  , "arrow_function", "generator_function_declaration"
+  , "constructor"
+  , "function_item"       -- Rust
+  ]
+
+-- | All node types that can represent definitions (fine level).
+-- Kept for backward compatibility and as the fine-level whitelist.
+definitionTypes :: [String]
+definitionTypes = structureTypes ++ apiSurfaceTypes ++ implementationDetailTypes
+
+-- | Whitelist for a granularity level.
+typesFor :: Granularity -> [String]
+typesFor GranularityFine     = definitionTypes
+typesFor GranularityFunction = structureTypes ++ apiSurfaceTypes
+typesFor GranularityFile     = structureTypes
+
+-- | Whether to recurse into a node's children at the given level.
+-- @isDef@ tells whether the current node was emitted as a definition.
+descendInto :: Granularity -> Bool -> TSNodeInfo -> Bool
+descendInto GranularityFine     _     _    = True
+descendInto GranularityFile     _     _    = False
+descendInto GranularityFunction isDef node =
+  not (isDef && tsnType node `elem` functionBoundaryTypes)
+
+-- | Convert a tree of TSNodeInfo into an Extraction at a given granularity.
+tsNodesToExtraction :: Granularity -> FilePath -> [TSNodeInfo] -> Extraction
+tsNodesToExtraction gran filePath nodes =
+  let graphNodes = concatMap (tsNodeToGraphNodes gran filePath) nodes
+      graphEdges = concatMap (tsNodeToGraphEdges gran filePath Nothing) nodes
   in extractionFromLists graphNodes graphEdges
 
 -- | Convert a TSNodeInfo and its children into Graphos Nodes.
-tsNodeToGraphNodes :: FilePath -> TSNodeInfo -> [Node]
-tsNodeToGraphNodes filePath node
-  | tsnType node `elem` definitionTypes && tsnIsNamed node =
-      [makeNode filePath node] ++ concatMap (tsNodeToGraphNodes filePath) (tsnChildren node)
-  | otherwise = concatMap (tsNodeToGraphNodes filePath) (tsnChildren node)
+tsNodeToGraphNodes :: Granularity -> FilePath -> TSNodeInfo -> [Node]
+tsNodeToGraphNodes gran filePath node =
+  let isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
+      self = [makeNode filePath node | isDef]
+      children = if descendInto gran isDef node
+        then concatMap (tsNodeToGraphNodes gran filePath) (tsnChildren node)
+        else []
+  in self ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
-tsNodeToGraphEdges :: FilePath -> Maybe Text -> TSNodeInfo -> [Edge]
-tsNodeToGraphEdges filePath parentLabel node =
+tsNodeToGraphEdges :: Granularity -> FilePath -> Maybe Text -> TSNodeInfo -> [Edge]
+tsNodeToGraphEdges gran filePath parentLabel node =
   let myLabel = tsNodeLabel node
-      isDef = tsnType node `elem` definitionTypes && tsnIsNamed node
+      isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
       -- Parent → child edge
       myEdges = case (parentLabel, isDef) of
         (Just p, True) ->
@@ -92,10 +149,11 @@ tsNodeToGraphEdges filePath parentLabel node =
             }
           ]
         _ -> []
-      -- Recurse into children
-      childEdges = if isDef
-        then concatMap (tsNodeToGraphEdges filePath (Just myLabel)) (tsnChildren node)
-        else concatMap (tsNodeToGraphEdges filePath parentLabel) (tsnChildren node)
+      -- Recurse into children unless the level makes this subtree opaque
+      childEdges
+        | not (descendInto gran isDef node) = []
+        | isDef     = concatMap (tsNodeToGraphEdges gran filePath (Just myLabel)) (tsnChildren node)
+        | otherwise = concatMap (tsNodeToGraphEdges gran filePath parentLabel) (tsnChildren node)
   in myEdges ++ childEdges
 
 -- ───────────────────────────────────────────────
@@ -109,19 +167,14 @@ makeNode filePath node = Node
   , nodeLabel        = tsNodeLabel node
   , nodeFileType     = CodeFile
   , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
+  , nodeLineStart    = Just (tsnStartRow node + 1)
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeSourceLocation = Just $ T.pack $ "L" ++ show (tsnStartRow node + 1)
   , nodeLineEnd      = Just (tsnEndRow node + 1)
   , nodeKind         = Just $ T.pack $ tsTypeToKind (tsnType node)
   , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Nothing
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
   }
 
 -- | Get a display label for a node — use text if available, otherwise type.

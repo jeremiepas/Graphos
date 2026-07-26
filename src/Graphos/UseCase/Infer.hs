@@ -8,7 +8,7 @@ module Graphos.UseCase.Infer
   , BridgeClassification(..)
   ) where
 
-import Data.List (sortOn, nubBy)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -16,11 +16,24 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
+import Graphos.Domain.Analysis (dedupOn)
 import Graphos.Domain.Graph
   ( Graph, gNodes, gEdges, neighbors, degree
   , articulationPoints, biconnectedComponents
   , edgeBetweenness
   )
+
+-- | Maximum number of inferred community-bridge edges per run.
+-- Guards against pathological community structures; candidates beyond the
+-- cap are dropped.
+maxCommunityBridges :: Int
+maxCommunityBridges = 10000
+
+-- | Maximum number of code nodes a doc label may match to produce edges.
+-- Labels matching more nodes than this ("Config", "Usage", ...) are ambient
+-- noise, not references, and are skipped.
+maxLabelFanOut :: Int
+maxLabelFanOut = 20
 
 data BridgeClassification = BridgeClassification
   { bcNodeId        :: NodeId
@@ -55,18 +68,30 @@ classifyBridgeNodes g commMap =
       | nid <- artPoints
       ]
 
+-- | Bridge communities that are connected by at least one real
+-- inter-community edge. Candidates are derived from the graph's edges
+-- (O(E log C)) — NOT from all community pairs, which is O(C^2) and
+-- materialized ~50M edges at 10k+ communities. Result is capped at
+-- 'maxCommunityBridges'.
 inferCommunityBridges :: Graph -> CommunityMap -> [Edge]
 inferCommunityBridges g commMap =
   let centroids = communityCentroids g commMap
-      communityIds = Map.keys centroids
-      pairs = [(cid1, cid2) | cid1 <- communityIds
-                             , cid2 <- communityIds
-                             , cid1 < cid2]
-  in [makeInferredEdge srcNid tgtNid Inferred 0.5 | (cid1, cid2) <- pairs
-                                                   , Just srcNid <- [Map.lookup cid1 centroids]
-                                                   , Just tgtNid <- [Map.lookup cid2 centroids]
-                                                   , notEdgeAlready g srcNid tgtNid
-                                                   ]
+      nodeComm = nodeCommunityMap commMap
+      adjacentPairs = Set.toList $ Set.fromList
+        [ if c1 < c2 then (c1, c2) else (c2, c1)
+        | (s, t) <- Map.keys (gEdges g)
+        , Just c1 <- [Map.lookup s nodeComm]
+        , Just c2 <- [Map.lookup t nodeComm]
+        , c1 /= c2
+        ]
+  in take maxCommunityBridges
+       [ makeInferredEdge srcNid tgtNid Inferred 0.5
+       | (cid1, cid2) <- adjacentPairs
+       , Just srcNid <- [Map.lookup cid1 centroids]
+       , Just tgtNid <- [Map.lookup cid2 centroids]
+       , srcNid /= tgtNid
+       , notEdgeAlready g srcNid tgtNid
+       ]
 
 inferTransitiveDeps :: Graph -> [Edge]
 inferTransitiveDeps g =
@@ -74,7 +99,7 @@ inferTransitiveDeps g =
       depEdges = [((s, t), e) | ((s, t), e) <- edges
                                , edgeRelation e `elem` [Imports, DependsOn]]
       predMap = Map.fromListWith (++) [(t, [s]) | ((s, t), _) <- depEdges]
-      transitiveDeps = nubBy (\a b -> edgeSource a == edgeSource b && edgeTarget a == edgeTarget b)
+      transitiveDeps = dedupOn (\e -> (edgeSource e, edgeTarget e))
         [makeInferredEdge src tgt DependsOn 0.4
         | ((src, mid), _) <- depEdges
         , Just targets <- [Map.lookup mid predMap]
@@ -112,14 +137,20 @@ inferCodeDocEdges g =
       docNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == DocFile]
       codeNodes = [(nid, n) | (nid, n) <- allNodes, nodeFileType n == CodeFile]
 
+      -- Labels matching more than 'maxLabelFanOut' code nodes are ambiguous
+      -- names ("Config", "Usage") and carry no linking signal; dropping them
+      -- bounds the candidate list on doc-heavy corpora.
+      boundedIdx :: Map Text [NodeId] -> Map Text [NodeId]
+      boundedIdx = Map.filter (\ns -> length ns <= maxLabelFanOut)
+
       codeLabelIdx :: Map Text [NodeId]
-      codeLabelIdx = Map.fromListWith (++)
+      codeLabelIdx = boundedIdx $ Map.fromListWith (++)
         [ (nodeLabel cn, [nid])
         | (nid, cn) <- codeNodes
         ]
 
       codeBaseIdx :: Map Text [NodeId]
-      codeBaseIdx = Map.fromListWith (++)
+      codeBaseIdx = boundedIdx $ Map.fromListWith (++)
         [ (fileBaseName (nodeSourceFile cn), [nid])
         | (nid, cn) <- codeNodes
         , not (T.null (nodeSourceFile cn))
@@ -142,7 +173,7 @@ inferCodeDocEdges g =
         , notEdgeAlready g docNid codeNid
         ]
 
-  in nubBy (\a b -> edgeSource a == edgeSource b && edgeTarget a == edgeTarget b)
+  in dedupOn (\e -> (edgeSource e, edgeTarget e))
        (nameAlignEdges ++ pathAlignEdges)
 
 fileBaseName :: Text -> Text

@@ -86,11 +86,6 @@ makeImageNode filePath analysis = Node
       , "kind" Aeson..= showKind (iaKind analysis)
       , "entities" Aeson..= map entityToJSON (iaEntities analysis)
       ]
-  , nodeSourceLocation = Nothing
-  , nodeSourceUrl = Nothing
-  , nodeCapturedAt = Nothing
-  , nodeAuthor = Nothing
-  , nodeContributor = Nothing
   }
 
 -- | Create an entity node from a vision-extracted entity.
@@ -110,11 +105,6 @@ makeEntityNode filePath entity = Node
   , nodeExtra = Just $ Aeson.object
       [ "confidence" Aeson..= entityConfidence entity
       ]
-  , nodeSourceLocation = Nothing
-  , nodeSourceUrl = Nothing
-  , nodeCapturedAt = Nothing
-  , nodeAuthor = Nothing
-  , nodeContributor = Nothing
   }
 
 -- | Create a Contains edge from image node to entity node.
@@ -143,11 +133,6 @@ imageStubNode fp = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
-  , nodeSourceLocation = Nothing
-  , nodeSourceUrl = Nothing
-  , nodeCapturedAt = Nothing
-  , nodeAuthor = Nothing
-  , nodeContributor = Nothing
   }
 
 -- | Convert ImageKind to Text for JSON serialization.

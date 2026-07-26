@@ -260,9 +260,9 @@ generateInlineNodeStatement n =
                   , "label: " <> cypherQuote (nodeLabel n)
                   , "file_type: " <> cypherQuote (T.pack (show (nodeFileType n)))
                   ]
-      locProp = maybe [] (\loc -> ["source_location: " <> cypherQuote loc]) (nodeSourceLocation n)
-      urlProp = maybe [] (\url -> ["source_url: " <> cypherQuote url]) (nodeSourceUrl n)
-      props = T.intercalate ", " (baseProps ++ locProp ++ urlProp)
+      lineStartProp = maybe [] (\start -> ["line_start: " <> T.pack (show start)]) (nodeLineStart n)
+      lineEndProp   = maybe [] (\end   -> ["line_end: " <> T.pack (show end)])     (nodeLineEnd n)
+      props = T.intercalate ", " (baseProps ++ lineStartProp ++ lineEndProp)
   in "MERGE (:Node {" <> props <> "});"
 
 -- | Generate an inline MERGE statement for a single edge.

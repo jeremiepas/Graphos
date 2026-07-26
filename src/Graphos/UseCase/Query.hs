@@ -100,14 +100,9 @@ explainNodeWithIndex g idx term =
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-    , nodeSourceLocation = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
-    , nodeSourceUrl    = Nothing
-    , nodeCapturedAt   = Nothing
-    , nodeAuthor       = Nothing
-    , nodeContributor  = Nothing
     }) nid (gNodes g)) best
 
 -- | Find shortest path between two concepts

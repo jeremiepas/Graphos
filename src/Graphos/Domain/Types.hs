@@ -79,6 +79,8 @@ module Graphos.Domain.Types
   , ExtractorMode(..)
   , ExtractorConfig(..)
   , defaultExtractors
+  , Granularity(..)
+  , defaultGranularity
   , EmbeddingConfig(..)
   , defaultEmbeddingConfig
   , VisionConfig(..)
@@ -91,4 +93,4 @@ import Graphos.Domain.Types.Graph (Extraction(..), emptyExtraction, extractionFr
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..))
 import Graphos.Domain.Types.Ingest (IngestResult(..), IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex, lookupEmbedding, mergeIndex, lookupIndex, indexSize)
-import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, MemgraphConfig(..), defaultMemgraphConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors, EmbeddingConfig(..), defaultEmbeddingConfig, VisionConfig(..), defaultVisionConfig)
+import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, MemgraphConfig(..), defaultMemgraphConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors, Granularity(..), defaultGranularity, EmbeddingConfig(..), defaultEmbeddingConfig, VisionConfig(..), defaultVisionConfig)

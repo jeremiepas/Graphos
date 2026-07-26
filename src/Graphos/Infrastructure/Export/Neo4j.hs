@@ -202,16 +202,16 @@ generateParameterizedNodeStatement n =
   let stmt = T.concat
         [ "MERGE (n:Node {id: $id})"
         , " ON CREATE SET n.label = $label, n.file_type = $file_type"
-        , maybe "" (const ", n.source_location = $source_location") (nodeSourceLocation n)
-        , maybe "" (const ", n.source_url = $source_url") (nodeSourceUrl n)
+        , maybe "" (const ", n.line_start = $line_start") (nodeLineStart n)
+        , maybe "" (const ", n.line_end = $line_end") (nodeLineEnd n)
         ]
       params = Aeson.object $
         [ "id"              Aeson..= nodeId n
         , "label"           Aeson..= nodeLabel n
         , "file_type"       Aeson..= T.pack (show (nodeFileType n))
         ]
-        ++ maybe [] (\loc -> ["source_location" Aeson..= loc]) (nodeSourceLocation n)
-        ++ maybe [] (\url -> ["source_url" Aeson..= url]) (nodeSourceUrl n)
+        ++ maybe [] (\start -> ["line_start" Aeson..= start]) (nodeLineStart n)
+        ++ maybe [] (\end   -> ["line_end" Aeson..= end])     (nodeLineEnd n)
   in Aeson.object
        [ "statement" Aeson..= stmt
        , "parameters" Aeson..= params
@@ -257,9 +257,9 @@ generateCypherNodeStatement n =
         , "label: " <> cypherQuote (nodeLabel n)
         , "file_type: " <> cypherQuote (T.pack (show (nodeFileType n)))
         ]
-      locProp = maybe [] (\loc -> ["source_location: " <> cypherQuote loc]) (nodeSourceLocation n)
-      urlProp = maybe [] (\url -> ["source_url: " <> cypherQuote url]) (nodeSourceUrl n)
-      props = T.intercalate ", " (baseProps ++ locProp ++ urlProp)
+      lineStartProp = maybe [] (\start -> ["line_start: " <> T.pack (show start)]) (nodeLineStart n)
+      lineEndProp   = maybe [] (\end   -> ["line_end: " <> T.pack (show end)])     (nodeLineEnd n)
+      props = T.intercalate ", " (baseProps ++ lineStartProp ++ lineEndProp)
   in "MERGE (:Node {" <> props <> "})"
   where
     cypherQuote :: Text -> Text
@@ -404,8 +404,8 @@ generateRepresentativeNodeStatement n =
   let stmt = T.concat
         [ "MERGE (n:Node {id: $id})"
         , " ON CREATE SET n.label = $label, n.file_type = $file_type, n.representative = true"
-        , maybe "" (const ", n.source_location = $source_location") (nodeSourceLocation n)
-        , maybe "" (const ", n.source_url = $source_url") (nodeSourceUrl n)
+        , maybe "" (const ", n.line_start = $line_start") (nodeLineStart n)
+        , maybe "" (const ", n.line_end = $line_end") (nodeLineEnd n)
         ]
       params = Aeson.object $
         [ "id"              Aeson..= nodeId n
@@ -413,8 +413,8 @@ generateRepresentativeNodeStatement n =
         , "file_type"       Aeson..= T.pack (show (nodeFileType n))
         , "representative"  Aeson..= Aeson.Bool True
         ]
-        ++ maybe [] (\loc -> ["source_location" Aeson..= loc]) (nodeSourceLocation n)
-        ++ maybe [] (\url -> ["source_url" Aeson..= url]) (nodeSourceUrl n)
+        ++ maybe [] (\start -> ["line_start" Aeson..= start]) (nodeLineStart n)
+        ++ maybe [] (\end   -> ["line_end" Aeson..= end])     (nodeLineEnd n)
   in Aeson.object
        [ "statement" Aeson..= stmt
        , "parameters" Aeson..= params

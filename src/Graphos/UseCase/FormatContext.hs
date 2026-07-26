@@ -111,7 +111,7 @@ formatNodeCompact _nid n =
       base = nodeLabel n <> " " <> kind <> "[" <> showFileType (nodeFileType n) <> "]"
       src = if T.null (nodeSourceFile n) then ""
             else " — src:" <> nodeSourceFile n
-                <> maybe "" (\loc -> ":" <> loc) (nodeSourceLocation n)
+                <> maybe "" (\start -> ":" <> T.pack (show start)) (nodeLineStart n)
                 <> case nodeLineEnd n of
                      Just end -> "-" <> T.pack (show end)
                      Nothing -> ""
