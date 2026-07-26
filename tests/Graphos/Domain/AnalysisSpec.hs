@@ -23,7 +23,7 @@ edgeIdFrom :: Text -> Text -> EdgeId
 edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
 
 testNode :: Text -> Node
-testNode nid = Node nid nid CodeFile "test.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing (Just "L1") Nothing Nothing Nothing Nothing
+testNode nid = Node nid nid CodeFile "test.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0)

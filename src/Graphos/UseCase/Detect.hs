@@ -2,7 +2,9 @@
 module Graphos.UseCase.Detect
   ( detectFiles
   , detectFilesWithExtensions
+  , detectFilesWithExtensionsAndIgnore
   , allSupportedExtensions
+  , hardcodedIgnoreDirNames
   ) where
 
 import Data.Map.Strict (Map)
@@ -12,6 +14,7 @@ import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
+import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern, shouldIgnore)
 
 -- | All supported file extensions organized by category
 -- Prefer using config-driven extensions from GraphosConfig when available.
@@ -65,7 +68,13 @@ detectFiles root = do
 
 -- | Detect files in a directory using config-driven extension categories.
 detectFilesWithExtensions :: FilePath -> Map FileCategory [String] -> IO Detection
-detectFilesWithExtensions root extMap = do
+detectFilesWithExtensions root extMap = detectFilesWithExtensionsAndIgnore root extMap []
+
+-- | Detect files in a directory using config-driven extension categories and ignore patterns.
+-- This is the primary entry point for the pipeline — it applies .gitignore and .graphosignore
+-- patterns in addition to hardcoded directory ignores.
+detectFilesWithExtensionsAndIgnore :: FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO Detection
+detectFilesWithExtensionsAndIgnore root extMap ignorePatterns = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -76,12 +85,12 @@ detectFilesWithExtensions root extMap = do
       , detectionFiles        = Map.empty
       }
     else do
-      files <- findAllFilesWith root extMap
+      files <- findAllFilesWithAndIgnore root extMap ignorePatterns
       let categorized = categorizeFilesWith files extMap
           totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
         { detectionTotalFiles  = totalFiles
-        , detectionTotalWords  = 0
+        , detectionTotalWords  = 0  -- word counting requires file reading
         , detectionNeedsGraph  = totalFiles > 0
         , detectionWarning     = if totalFiles > 200
                                  then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
@@ -95,13 +104,17 @@ findAllFiles dir = findAllFilesWith dir allSupportedExtensions
 
 -- | Find all files recursively using config-driven extension map
 findAllFilesWith :: FilePath -> Map FileCategory [String] -> IO [FilePath]
-findAllFilesWith dir extMap = do
+findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir extMap []
+
+-- | Find all files recursively using config-driven extension map and ignore patterns
+findAllFilesWithAndIgnore :: FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO [FilePath]
+findAllFilesWithAndIgnore dir extMap ignorePatterns = do
   entries <- listDirectory dir
   fmap concat $ mapM (\entry -> do
     let path = dir </> entry
     isDir <- doesDirectoryExist path
-    if isDir && not (isIgnored entry)
-      then findAllFilesWith path extMap
+    if isDir && not (isIgnoredEntry entry path ignorePatterns)
+      then findAllFilesWithAndIgnore path extMap ignorePatterns
       else if isSupportedWith entry extMap
            then pure [path]
            else pure []
@@ -118,9 +131,47 @@ categorizeFilesWith files extMap = Map.fromList
   | (cat, exts) <- Map.toList extMap
   ]
 
--- | Check if a directory entry should be ignored
-isIgnored :: String -> Bool
-isIgnored entry = entry `elem` [".git", "node_modules", "__pycache__", ".venv", "dist", "dist-newstyle", "build", ".stack-work", "graphos-out", ".opencode", ".tmp", ".obsidian", ".github"]
+-- | Hardcoded directory names that should always be ignored.
+-- These cover common build artifacts, dependency directories, IDE folders,
+-- and cache directories across all major ecosystems.
+-- Used as a fast check before applying file-based ignore patterns.
+hardcodedIgnoreDirNames :: [String]
+hardcodedIgnoreDirNames =
+  -- Version control
+  [ ".git", ".svn", ".hg"
+  -- Dependency/package directories
+  , "node_modules", "bower_components", "vendor"
+  , "__pypackages__", ".pnpm-store", ".yarn"
+  -- Build outputs
+  , "dist", "dist-newstyle", "build", "target", "out", "DerivedData"
+  , ".build", ".cache", ".sass-cache"
+  -- Python caches
+  , "__pycache__", ".pytest_cache", ".mypy_cache", ".tox"
+  , ".venv", ".env"
+  -- Haskell/Scala/Java
+  , ".stack-work", ".gradle"
+  -- JS/TS frameworks
+  , ".next", ".nuxt"
+  -- Rust
+  , ".cargo"
+  -- IDE/editor
+  , ".idea", ".vscode", ".lsp", ".elixir_ls", ".clj-kondo"
+  -- Nix
+  , ".direnv"
+  -- Graphos
+  , "graphos-out", ".opencode", ".tmp", ".obsidian"
+  -- Other
+  , ".github", ".DS_Store", ".pdm-build"
+  ]
+
+-- | Check if a directory entry should be ignored.
+-- Combines the hardcoded directory name check with file-based ignore patterns.
+isIgnoredEntry :: String -> FilePath -> [AnnotatedPattern] -> Bool
+isIgnoredEntry entry path ignorePatterns =
+  -- Fast check: hardcoded directory names (always ignored)
+  entry `elem` hardcodedIgnoreDirNames
+  -- Slower check: file-based ignore patterns (.gitignore, .graphosignore)
+  || shouldIgnore ignorePatterns path
 
 -- | Check if a file has a supported extension (using config-driven extensions)
 isSupportedWith :: String -> Map FileCategory [String] -> Bool

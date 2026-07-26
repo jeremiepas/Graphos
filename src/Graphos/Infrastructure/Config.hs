@@ -42,6 +42,7 @@ data ConfigFile = ConfigFile
   , cfLanguageIds     :: Maybe (Map String Text)
   , cfFileExtensions  :: Maybe FileExtensionConfig
   , cfExtractors      :: Maybe (Map String ExtractorConfig)
+  , cfGranularity     :: Maybe Granularity
   , cfNeo4j           :: Maybe Neo4jConfig
   , cfMemgraph        :: Maybe MemgraphConfig
   , cfLabeling        :: Maybe LabelingConfig
@@ -56,6 +57,7 @@ instance FromJSON ConfigFile where
     <*> v .:?  "language_ids"
     <*> v .:? "file_extensions"
     <*> v .:? "extractors"
+    <*> v .:? "granularity"
     <*> v .:? "neo4j"
     <*> v .:? "memgraph"
     <*> v .:? "labeling"
@@ -140,6 +142,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcExtractors = case cfExtractors cfgFile of
       Just userExt -> Map.union userExt (gcExtractors defaults)
       Nothing      -> gcExtractors defaults
+  , gcGranularity = case cfGranularity cfgFile of
+      Just gran -> gran
+      Nothing   -> gcGranularity defaults
   , gcNeo4j = case cfNeo4j cfgFile of
       Just neo4j  -> neo4j
       Nothing     -> gcNeo4j defaults

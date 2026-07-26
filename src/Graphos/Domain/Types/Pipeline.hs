@@ -32,8 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
-import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
+import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig)
 
 -- | Pipeline configuration
 data PipelineConfig = PipelineConfig
@@ -78,6 +77,8 @@ data PipelineConfig = PipelineConfig
   , cfgEmbed          :: Bool                          -- ^ Enable embedding generation for ingested files (--embed)
   , cfgOtelShutdownTimeout :: Int                      -- ^ OTel shutdown timeout in seconds (--otel-shutdown-timeout, default: 10)
   , cfgVision         :: Bool                          -- ^ Enable vision analysis (--vision)
+  , cfgNoObservability :: Bool                         -- ^ Disable all observability (--no-observability)
+  , cfgGranularity    :: Maybe Granularity             -- ^ CLI granularity override (--granularity)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -150,6 +151,8 @@ defaultConfig = PipelineConfig
   , cfgEmbed          = False
   , cfgOtelShutdownTimeout = 10
   , cfgVision         = False
+  , cfgNoObservability = False
+  , cfgGranularity    = Nothing
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

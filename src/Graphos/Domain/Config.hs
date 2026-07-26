@@ -7,6 +7,10 @@ module Graphos.Domain.Config
   , ExtractorConfig(..)
   , defaultExtractors
 
+    -- * Extraction granularity
+  , Granularity(..)
+  , defaultGranularity
+
     -- * LSP configuration
   , LSPServerConfig(..)
   , defaultLSPServers
@@ -31,6 +35,8 @@ module Graphos.Domain.Config
      -- * Observability configuration
   , ObservabilityConfig(..)
   , defaultObservabilityConfig
+  , OtelConfig(..)
+  , defaultOtelConfig
 
       -- * Embedding configuration
   , EmbeddingConfig(..)
@@ -82,11 +88,49 @@ instance FromJSON ExtractorMode where
   parseJSON (String "stub")        = pure ExtractStub
   parseJSON v = fail $ "Unknown extractor mode: " ++ show v ++ ". Expected lsp, tree-sitter, or stub"
 
+-- ───────────────────────────────────────────────
+-- Extraction Granularity
+-- ───────────────────────────────────────────────
+
+-- | Node granularity for tree-sitter extraction.
+--
+--   * 'GranularityFine'     — all whitelisted AST node types with full tree
+--     recursion (statements, parameters, locals, JSON pairs). ~100+ nodes/file.
+--   * 'GranularityFunction' — module/structure nodes, API-surface definitions
+--     (functions, classes, types, fields, imports/exports) and module-level
+--     constants; extraction stops at function bodies. ~15-25 nodes/file.
+--   * 'GranularityFile'     — a single module node per file.
+--
+-- Resolution order (most specific wins): CLI @--granularity@ flag →
+-- per-extension 'ecGranularity' → global config → 'defaultGranularity'.
+data Granularity
+  = GranularityFine
+  | GranularityFunction
+  | GranularityFile
+  deriving (Eq, Show, Generic)
+
+instance ToJSON Granularity where
+  toJSON GranularityFine     = "fine"
+  toJSON GranularityFunction = "function"
+  toJSON GranularityFile     = "file"
+
+instance FromJSON Granularity where
+  parseJSON (String "fine")     = pure GranularityFine
+  parseJSON (String "function") = pure GranularityFunction
+  parseJSON (String "file")     = pure GranularityFile
+  parseJSON v = fail $ "Unknown granularity: " ++ show v ++ ". Expected fine, function, or file"
+
+-- | Built-in default granularity: 'GranularityFunction'.
+-- The previous statement-level behavior is available via @granularity: fine@.
+defaultGranularity :: Granularity
+defaultGranularity = GranularityFunction
+
 -- | Per-extension extractor configuration.
 data ExtractorConfig = ExtractorConfig
   { ecMode        :: ExtractorMode
   , ecGrammar     :: Maybe String   -- ^ tree-sitter grammar name (e.g. "typescript")
   , ecLanguageId  :: Maybe Text      -- ^ LSP language ID (e.g. "typescript")
+  , ecGranularity :: Maybe Granularity  -- ^ per-extension granularity override
   } deriving (Eq, Show, Generic)
 
 instance ToJSON ExtractorConfig where
@@ -106,31 +150,32 @@ lowerFirst (c:cs) = toLower c : cs
 defaultExtractors :: Map String ExtractorConfig
 defaultExtractors = Map.fromList
   [ -- TypeScript: LSP is fragile (typescript-language-server crashes), prefer tree-sitter
-    (".ts",   ExtractorConfig ExtractTreeSitter (Just "typescript") (Just "typescript"))
-  , (".tsx",  ExtractorConfig ExtractTreeSitter (Just "tsx")       (Just "typescriptreact"))
-  , (".js",  ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascript"))
-  , (".jsx", ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascriptreact"))
+    (".ts",   ExtractorConfig ExtractTreeSitter (Just "typescript") (Just "typescript") Nothing)
+  , (".tsx",  ExtractorConfig ExtractTreeSitter (Just "tsx")       (Just "typescriptreact") Nothing)
+  , (".js",  ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascript") Nothing)
+  , (".jsx", ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascriptreact") Nothing)
   -- Mature LSP servers — prefer LSP for richer semantic info
-  , (".hs",  ExtractorConfig ExtractLSP Nothing (Just "haskell"))
-  , (".lhs", ExtractorConfig ExtractLSP Nothing (Just "haskell"))
-  , (".go",  ExtractorConfig ExtractLSP Nothing (Just "go"))
-  , (".rs",  ExtractorConfig ExtractLSP Nothing (Just "rust"))
-  , (".py",  ExtractorConfig ExtractLSP Nothing (Just "python"))
-  , (".pyw", ExtractorConfig ExtractLSP Nothing (Just "python"))
-  , (".c",   ExtractorConfig ExtractLSP Nothing (Just "c"))
-  , (".cpp", ExtractorConfig ExtractLSP Nothing (Just "cpp"))
-  , (".h",   ExtractorConfig ExtractLSP Nothing (Just "c"))
-  , (".hpp", ExtractorConfig ExtractLSP Nothing (Just "cpp"))
-  , (".nix", ExtractorConfig ExtractLSP Nothing (Just "nix"))
-  , (".rb",  ExtractorConfig ExtractLSP Nothing (Just "ruby"))
-  , (".java",ExtractorConfig ExtractLSP Nothing (Just "java"))
-    -- JSON: tree-sitter parser (no reliable LSP for non-VSCode environments)
-  , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json"))
+  , (".hs",  ExtractorConfig ExtractLSP Nothing (Just "haskell") Nothing)
+  , (".lhs", ExtractorConfig ExtractLSP Nothing (Just "haskell") Nothing)
+  , (".go",  ExtractorConfig ExtractLSP Nothing (Just "go") Nothing)
+  , (".rs",  ExtractorConfig ExtractLSP Nothing (Just "rust") Nothing)
+  , (".py",  ExtractorConfig ExtractLSP Nothing (Just "python") Nothing)
+  , (".pyw", ExtractorConfig ExtractLSP Nothing (Just "python") Nothing)
+  , (".c",   ExtractorConfig ExtractLSP Nothing (Just "c") Nothing)
+  , (".cpp", ExtractorConfig ExtractLSP Nothing (Just "cpp") Nothing)
+  , (".h",   ExtractorConfig ExtractLSP Nothing (Just "c") Nothing)
+  , (".hpp", ExtractorConfig ExtractLSP Nothing (Just "cpp") Nothing)
+  , (".nix", ExtractorConfig ExtractLSP Nothing (Just "nix") Nothing)
+  , (".rb",  ExtractorConfig ExtractLSP Nothing (Just "ruby") Nothing)
+  , (".java",ExtractorConfig ExtractLSP Nothing (Just "java") Nothing)
+    -- JSON: tree-sitter parser; data files collapse to one node per file
+    -- so lock files and config JSON do not inflate the graph
+  , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
     -- Markdown: use tree-sitter mode with our built-in parser
     -- (no external LSP server needed for docs)
-  , (".md",  ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "markdown"))
-  , (".rst", ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "rest"))
-  , (".adoc",ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "asciidoc"))
+  , (".md",  ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "markdown") Nothing)
+  , (".rst", ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "rest") Nothing)
+  , (".adoc",ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "asciidoc") Nothing)
   ]
 
 -- ───────────────────────────────────────────────
@@ -146,10 +191,15 @@ data LSPServerConfig = LSPServerConfig
   } deriving (Eq, Show, Generic)
 
 instance ToJSON LSPServerConfig where
-  toJSON = genericToJSON defaultOptions { fieldLabelModifier = drop 3 }
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
 
+-- | Custom FromJSON: accept both camelCase and snake_case field names.
+-- The YAML config uses snake_case (command, args, language_id).
 instance FromJSON LSPServerConfig where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = drop 3 }
+  parseJSON = withObject "LSPServerConfig" $ \v -> LSPServerConfig
+    <$> v .:? "command"     .!= ""
+    <*> v .:? "args"        .!= []
+    <*> v .:? "language_id" .!= "plaintext"
 
 -- | Default LSP server configurations (hardcoded fallback).
 -- Users can override these via graphos.yaml.
@@ -241,10 +291,10 @@ data FileExtensionConfig = FileExtensionConfig
   } deriving (Eq, Show, Generic)
 
 instance ToJSON FileExtensionConfig where
-  toJSON = genericToJSON defaultOptions { fieldLabelModifier = drop 3 }
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
 
 instance FromJSON FileExtensionConfig where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = drop 3 }
+  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
 
 -- | Default file extension categories (hardcoded fallback).
 defaultFileExtensions :: FileExtensionConfig
@@ -421,6 +471,24 @@ defaultObservabilityConfig = ObservabilityConfig
   , obsDebug          = False
   }
 
+-- | Runtime OpenTelemetry configuration derived from CLI flags.
+-- Kept in Domain because it is pure configuration data (no IO), though it is
+-- consumed by 'Graphos.Infrastructure.Observability.SDK'.
+data OtelConfig = OtelConfig
+  { otelEnabled        :: Bool
+  , otelEndpoint       :: String    -- ^ CLI --otel-endpoint override (empty = use env var)
+  , otelServiceName    :: String    -- ^ CLI --otel-service-name override
+  , otelLogsEndpoint   :: String    -- ^ OTLP logs endpoint (for log bridge)
+  } deriving (Eq, Show)
+
+defaultOtelConfig :: OtelConfig
+defaultOtelConfig = OtelConfig
+  { otelEnabled        = False
+  , otelEndpoint       = ""
+  , otelServiceName    = "graphos"
+  , otelLogsEndpoint   = "http://localhost:4318/v1/logs"
+  }
+
 -- ───────────────────────────────────────────────
 -- Embedding Configuration
 -- ───────────────────────────────────────────────
@@ -513,6 +581,7 @@ data GraphosConfig = GraphosConfig
   , gcLanguageIds    :: Map String Text              -- ^ extension → language ID
   , gcFileExtensions :: FileExtensionConfig          -- ^ file extension categories
   , gcExtractors     :: Map String ExtractorConfig  -- ^ extension → extractor config
+  , gcGranularity    :: Granularity                  -- ^ global extraction granularity
   , gcNeo4j          :: Neo4jConfig                  -- ^ Neo4j connection settings
   , gcMemgraph       :: MemgraphConfig               -- ^ Memgraph connection settings
   , gcLabeling       :: LabelingConfig               -- ^ LLM labeling settings
@@ -528,6 +597,7 @@ defaultGraphosConfig = GraphosConfig
   , gcLanguageIds    = defaultLanguageIds
   , gcFileExtensions = defaultFileExtensions
   , gcExtractors     = defaultExtractors
+  , gcGranularity    = defaultGranularity
   , gcNeo4j          = defaultNeo4jConfig
   , gcMemgraph       = defaultMemgraphConfig
   , gcLabeling       = defaultLabelingConfig
@@ -555,6 +625,9 @@ mergeGraphosConfig global project = GraphosConfig
                           then gcFileExtensions global
                           else gcFileExtensions project
   , gcExtractors = Map.union (gcExtractors project) (gcExtractors global)
+  , gcGranularity = if gcGranularity project == defaultGranularity
+                       then gcGranularity global
+                       else gcGranularity project
   , gcNeo4j = if gcNeo4j project == defaultNeo4jConfig
                  then gcNeo4j global
                  else gcNeo4j project

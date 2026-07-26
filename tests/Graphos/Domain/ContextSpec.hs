@@ -1,11 +1,13 @@
 module Graphos.Domain.ContextSpec where
 
 import Test.Hspec
+import Data.Aeson (object, (.=))
 
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Types
 import Graphos.Domain.Context
+import Graphos.Domain.Types.Node (nodeExtraCapturedAt, setNodeExtraCapturedAt)
 
 spec :: Spec
 spec = describe "Context domain types" $ do
@@ -126,5 +128,23 @@ spec = describe "Context domain types" $ do
           node = conversationNodeToNode conv
       nodeId node `shouldBe` "conv_001"
       nodeLabel node `shouldBe` "How does parsing work?"
-      nodeCapturedAt node `shouldBe` Just "2026-04-19T10:00:00Z"
+      nodeExtraCapturedAt node `shouldBe` Just "2026-04-19T10:00:00Z"
       nodeSourceFile node `shouldBe` "memory/conv_001.md"
+
+    it "setNodeExtraCapturedAt merges into existing nodeExtra" $ do
+      let baseNode = conversationNodeToNode (ConversationNode
+            { convId            = "conv_002"
+            , convQuestion      = "Q"
+            , convSummary       = "S"
+            , convTimestamp     = "2026-04-20T12:00:00Z"
+            , convRelevantNodes = []
+            , convTokensUsed    = 0
+            })
+          node = setNodeExtraCapturedAt "2026-04-20T13:00:00Z" (baseNode { nodeExtra = Just (object ["kind" .= ("test" :: String)]) })
+      nodeExtraCapturedAt node `shouldBe` Just "2026-04-20T13:00:00Z"
+      -- Existing extra key preserved
+      nodeExtraCapturedAt (node { nodeExtra = Just (object ["kind" .= ("test" :: String)]) }) `shouldBe` Nothing
+      -- (actual preservation of 'kind' is checked by JSON round-trip below)
+      case nodeExtra node of
+        Just extraVal -> extraVal `shouldBe` object ["kind" .= ("test" :: String), "capturedAt" .= ("2026-04-20T13:00:00Z" :: String)]
+        Nothing       -> expectationFailure "nodeExtra should be Just"

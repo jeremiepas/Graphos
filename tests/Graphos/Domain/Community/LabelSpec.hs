@@ -16,19 +16,15 @@ testNode nid = Node
   , nodeLabel        = nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = "test.hs"
-  , nodeLineStart    = Nothing
+
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeSourceLocation = Just "L1"
+  , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeSourceUrl    = Nothing
-  , nodeCapturedAt   = Nothing
-  , nodeAuthor       = Nothing
-  , nodeContributor  = Nothing
   }
 
 -- Helper: create a test edge

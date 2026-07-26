@@ -114,27 +114,7 @@ import Graphos.Infrastructure.Logging (LogLevel(..), LogEnv, defaultLogEnv, logI
 -- Configuration
 -- ───────────────────────────────────────────────
 
--- | OpenTelemetry configuration (simplified from custom version).
--- Most settings now come from OTEL_* environment variables:
---   * OTEL_EXPORTER_OTLP_ENDPOINT  → endpoint (default: http://localhost:4318)
---   * OTEL_SERVICE_NAME             → service name (default: graphos)
---   * OTEL_RESOURCE_ATTRIBUTES      → service.version, etc.
---   * OTEL_BSP_SCHEDULE_DELAY       → export interval (default: 5000ms)
---   * OTEL_SDK_DISABLED             → disable SDK (default: false)
-data OtelConfig = OtelConfig
-  { otelEnabled        :: Bool
-  , otelEndpoint       :: String    -- ^ CLI --otel-endpoint override (empty = use env var)
-  , otelServiceName    :: String    -- ^ CLI --otel-service-name override
-  , otelLogsEndpoint   :: String    -- ^ OTLP logs endpoint (for log bridge)
-  } deriving (Eq, Show)
-
-defaultOtelConfig :: OtelConfig
-defaultOtelConfig = OtelConfig
-  { otelEnabled        = False
-  , otelEndpoint       = ""
-  , otelServiceName    = "graphos"
-  , otelLogsEndpoint   = "http://localhost:4318/v1/logs"
-  }
+import Graphos.Domain.Config (OtelConfig(..), defaultOtelConfig)
 
 -- ───────────────────────────────────────────────
 -- Observability environment
@@ -250,8 +230,7 @@ data DebugTraceEnv = DebugTraceEnv
   }
 
 newDebugTraceEnv :: Bool -> FilePath -> IO DebugTraceEnv
-newDebugTraceEnv enabled tracePath = do
-  createDirectoryIfMissing True tracePath
+newDebugTraceEnv enabled tracePath =
   DebugTraceEnv enabled tracePath <$> newMVar []
 
 -- | Emit a structured debug trace event.
@@ -274,6 +253,9 @@ debugTraceSpan env name start end attrs
       debugTraceEvent env ("span_" <> name) (Map.insert "duration_s" (T.pack $ show dur) attrs)
 
 -- | Flush buffered trace events to disk.
+-- The trace directory is created lazily here, only when tracing is enabled and
+-- there are buffered events to write. This guarantees that a traces/ folder
+-- exists if and only if a trace JSONL file was actually produced.
 flushDebugTrace :: DebugTraceEnv -> IO ()
 flushDebugTrace env
   | not (dtEnabled env) = pure ()
@@ -282,6 +264,7 @@ flushDebugTrace env
       case events of
         [] -> pure ()
         _  -> do
+          createDirectoryIfMissing True (dtPath env)
           now <- getCurrentTime
           let filename = formatTime defaultTimeLocale "%Y%m%d_%H%M%S" now ++ ".jsonl"
               filepath = dtPath env ++ "/" ++ filename
