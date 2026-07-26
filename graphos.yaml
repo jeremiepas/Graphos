@@ -156,6 +156,8 @@ file_extensions:
 # ──── Observability ─────────────────────────────
 # Enable tracing, metrics, and debug instrumentation.
 # CLI flags (--otel, --metrics, --debug-trace) override these values.
+# Use --no-observability to completely disable all observability (no tracing,
+# metrics, or log shipping) to avoid shutdown delays and reduce overhead.
 observability:
   # Enable OpenTelemetry trace/metric export to an OTLP collector
   enabled: false
@@ -190,6 +192,16 @@ memgraph:
   password: ""
   push_mode: "subgraph"
   subgraph_size: 7
+
+# ──── LLM Labeling ────────────────────────────────
+# Community labeling via Ollama (local, free).
+# Used by: graphos . --label
+labeling:
+  provider: "ollama"
+  model: "llama3.2"
+  apiKey: ""
+  baseUrl: "http://localhost:11434/v1"
+  batchSize: 20
 
 # ──── Vision ──────────────────────────────────────
 # Multimodal LLM configuration for image analysis.

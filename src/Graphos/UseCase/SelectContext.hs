@@ -345,14 +345,9 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-      , nodeSourceLocation = Nothing
       , nodeLineEnd      = Nothing
       , nodeKind         = Nothing
       , nodeSignature    = Nothing
-      , nodeSourceUrl    = Nothing
-      , nodeCapturedAt   = Nothing
-      , nodeAuthor       = Nothing
-      , nodeContributor  = Nothing
       }
 
 -- | Build a reverse map: NodeId → CommunityId

@@ -8,6 +8,8 @@ module Graphos.UseCase.Extract
   , extractFromFile
   , extractViaTreeSitterFFI
   , extractorForExt
+  , resolveGranularity
+  , granularityForFile
   , pushExtractionStreaming
   ) where
 
@@ -26,7 +28,7 @@ import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcVision, VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..))
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..))
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.Infrastructure.LSP.Client (LSPClient(..), extractViaLSP, findLSPServer, LSPClientConfig(..), connectToLSP, disconnectLSP, languageServerCommands, extractWorkspaceSymbols, workspaceSymbolsToDocumentSymbols, symbolToNodes, symbolTreeToEdges, isServerConnected)
@@ -65,6 +67,9 @@ extractAll config detection env = do
   absRoot <- canonicalizePath (cfgInputPath config)
 
   logInfo env $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files, " ++ show (length officeFiles) ++ " office files, " ++ show (length imageFiles) ++ " image files"
+  logInfo env $ T.pack $ "  Granularity: " ++ granularityName (resolveGranularity (cfgGranularity config) (cfgGraphosConfig config) "") ++ case cfgGranularity config of
+    Just _  -> " (CLI override)"
+    Nothing -> ""
 
   -- Split code files by extractor mode
   let (treeSitterFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
@@ -147,7 +152,7 @@ extractAll config detection env = do
         mapM_ (\chunk -> do
           if numThreads <= 1
             then mapM_ (\fp -> do
-              ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+              ext <- extractViaTreeSitterFFI env (granularityForFile config fp) (grammarForFile config fp) fp
               pushExtractionStreaming config env ext
               accumulate codeNodeMapRef codeEdgeAccRef ext
               ) chunk
@@ -156,7 +161,7 @@ extractAll config detection env = do
               mapM_ (\fp -> bracket_
                 (waitQSemN sem 1)
                 (signalQSemN sem 1)
-                (do ext <- extractViaTreeSitterFFI env (grammarForFile config fp) fp
+                (do ext <- extractViaTreeSitterFFI env (granularityForFile config fp) (grammarForFile config fp) fp
                     pushExtractionStreaming config env ext
                     accumulate codeNodeMapRef codeEdgeAccRef ext
                 )) chunk
@@ -513,11 +518,6 @@ extractImageSource config env (EmbeddedImage archivePath mediaPath) = do
       , nodeDegree = Nothing
       , nodeIsBridge = Nothing
       , nodeExtra = Nothing
-      , nodeSourceLocation = Nothing
-      , nodeSourceUrl = Nothing
-      , nodeCapturedAt = Nothing
-      , nodeAuthor = Nothing
-      , nodeContributor = Nothing
       }
 
 -- | Collect embedded image paths from PPTX and DOCX office files.
@@ -541,9 +541,10 @@ collectEmbeddedImages _env fp = do
 -- | Extract from a single file using tree-sitter FFI bindings.
 -- For "markdown" grammar, delegates to the built-in Markdown parser
 -- (no tree-sitter-markdown C grammar available on Hackage).
-extractViaTreeSitterFFI :: LogEnv -> String -> FilePath -> IO Extraction
-extractViaTreeSitterFFI env "markdown" filePath = extractDocFile env filePath
-extractViaTreeSitterFFI env grammar filePath =
+-- Node volume is controlled by the resolved 'Granularity'.
+extractViaTreeSitterFFI :: LogEnv -> Granularity -> String -> FilePath -> IO Extraction
+extractViaTreeSitterFFI env _ "markdown" filePath = extractDocFile env filePath
+extractViaTreeSitterFFI env gran grammar filePath =
   case getGrammarPtr grammar of
     Nothing -> do
       logWarn env $ T.pack $ "  [tree-sitter] No grammar for " ++ grammar ++ " — using stub"
@@ -556,7 +557,7 @@ extractViaTreeSitterFFI env grammar filePath =
           logWarn env $ T.pack $ "  [tree-sitter] Parse failed for " ++ filePath
           pure (extractionFromLists [makeStubNode filePath] [])
         Just nodes -> do
-          let extraction = tsNodesToExtraction filePath nodes
+          let extraction = tsNodesToExtraction gran filePath nodes
               nNodes = Map.size (extractionNodes extraction)
               nEdges = Map.size (extractionEdges extraction)
           logDebug env $ T.pack $ "  [tree-sitter] " ++ filePath ++ " → " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
@@ -588,6 +589,32 @@ extractorForExt config ext =
     Just ec -> ecMode ec
     Nothing -> ExtractStub  -- unknown extensions get stubs, not LSP
 
+-- | Resolve the effective granularity for a file extension.
+-- Pure resolution, most specific wins:
+--
+--   1. CLI @--granularity@ flag (run-wide override)
+--   2. per-extension 'ecGranularity' from the extractors config
+--   3. global 'gcGranularity' config value (default 'GranularityFunction')
+resolveGranularity :: Maybe Granularity -> GraphosConfig -> String -> Granularity
+resolveGranularity cliOverride gcfg ext =
+  case cliOverride of
+    Just g  -> g
+    Nothing ->
+      case Map.lookup ext (gcExtractors gcfg) >>= ecGranularity of
+        Just g  -> g
+        Nothing -> gcGranularity gcfg
+
+-- | Resolve the effective granularity for a concrete file path.
+granularityForFile :: PipelineConfig -> FilePath -> Granularity
+granularityForFile config fp =
+  resolveGranularity (cfgGranularity config) (cfgGraphosConfig config) (takeExtension fp)
+
+-- | Human-readable granularity name for logs.
+granularityName :: Granularity -> String
+granularityName GranularityFine     = "fine"
+granularityName GranularityFunction = "function"
+granularityName GranularityFile     = "file"
+
 -- | Build an Extraction from a file's DocumentSymbolResults.
 extractionFromSymbols :: FilePath -> [DocumentSymbolResult] -> Extraction
 extractionFromSymbols filePath symbols =
@@ -609,7 +636,7 @@ extractChangedFiles config changedFiles env = do
   let (tsFiles, lspFiles, stubFiles) = partitionByExtractor config changedFiles
 
   -- Tree-sitter files
-  tsExtractions <- mapM (\fp -> extractViaTreeSitterFFI env (grammarForFile config fp) fp) tsFiles
+  tsExtractions <- mapM (\fp -> extractViaTreeSitterFFI env (granularityForFile config fp) (grammarForFile config fp) fp) tsFiles
   mapM_ (\ext -> pushExtractionStreaming config env ext) tsExtractions
 
   -- LSP files (grouped by server)

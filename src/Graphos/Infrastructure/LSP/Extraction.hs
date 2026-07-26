@@ -419,19 +419,14 @@ symbolToNodes filePath symbols =
     , nodeLabel        = safeLabel (dsrName sym)
     , nodeFileType     = CodeFile
     , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-    , nodeSourceLocation = Just $ T.pack ("L" ++ show (posLine (rangeStart (dsrRange sym))))
+    , nodeLineStart    = Just $ posLine (rangeStart (dsrRange sym))
+    , nodeCommunityId  = Nothing
+    , nodeDegree       = Nothing
+    , nodeIsBridge     = Nothing
+    , nodeExtra        = Nothing
     , nodeLineEnd      = Just $ posLine (rangeEnd (dsrRange sym))
     , nodeKind         = Just $ symbolKindToText (dsrKind sym)
     , nodeSignature    = Nothing
-    , nodeSourceUrl    = Nothing
-    , nodeCapturedAt   = Nothing
-    , nodeAuthor       = Nothing
-    , nodeContributor  = Nothing
     }
   | sym <- symbols
   ]
@@ -524,14 +519,9 @@ makeStubNode filePath =
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-    , nodeSourceLocation = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
-    , nodeSourceUrl    = Nothing
-    , nodeCapturedAt   = Nothing
-    , nodeAuthor       = Nothing
-    , nodeContributor  = Nothing
     }
 
 -- | Convert LSP SymbolKind integer to a human-readable text label.

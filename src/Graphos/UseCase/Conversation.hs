@@ -12,12 +12,14 @@ module Graphos.UseCase.Conversation
 
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Context (ConversationNode(..), chatCommunityId)
+import Graphos.Domain.Types.Node (nodeExtraCapturedAt)
 
 -- ───────────────────────────────────────────────
 -- Edge creation (pure, one-way)
@@ -113,7 +115,7 @@ nodeToConversation n g =
     { convId            = nid
     , convQuestion      = nodeLabel n
     , convSummary       = ""  -- Summary not stored in node label, needs separate storage
-    , convTimestamp     = maybe "" id (nodeCapturedAt n)
+    , convTimestamp     = fromMaybe "" (nodeExtraCapturedAt n)
     , convRelevantNodes = relatedNodes
     , convTokensUsed    = 0   -- Token cost not stored in graph nodes
     }

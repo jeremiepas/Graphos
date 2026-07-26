@@ -3,7 +3,8 @@ module Graphos.UseCase.Report
   ( generateReport
   ) where
 
-import Data.List (intercalate)
+import Data.List (intercalate, sortOn)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -14,8 +15,8 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, articulationPoint
 import Graphos.Domain.Community (cohesionScore)
 
 -- | Generate a markdown report
-generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Text
-generateReport g analysis _config _detection =
+generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Text
+generateReport g analysis _config _detection mLabels =
   T.unlines
     [ "# Graph Report"
     , ""
@@ -29,7 +30,7 @@ generateReport g analysis _config _detection =
     , ""
     , "## Communities"
     , ""
-    , communitiesSection (analysisCommunities analysis) g
+    , communitiesSection (analysisCommunities analysis) g mLabels
     , ""
     , "## God Nodes (Top Hubs)"
     , ""
@@ -55,16 +56,25 @@ generateReport g analysis _config _detection =
 fmtCohesion :: Double -> String
 fmtCohesion d = take 5 (show d)
 
-communitiesSection :: CommunityMap -> Graph -> Text
-communitiesSection commMap g =
+communitiesSection :: CommunityMap -> Graph -> Maybe (Map.Map CommunityId Text) -> Text
+communitiesSection commMap g mLabels =
   let header = "| Community | Members | Cohesion | Top Nodes |"
       sep    = "|-----------|---------|----------|-----------|"
       rows   = [T.pack $ "| " ++ show cid ++ " | " ++ show (length members)
                        ++ " | " ++ fmtCohesion (cohesionScore g members)
                        ++ " | " ++ intercalate ", " (take 3 [T.unpack (nodeLabel n) | nid <- members, Just n <- [Map.lookup nid (gNodes g)]])
                        ++ " |"
-               | (cid, members) <- Map.toList commMap]
-  in T.unlines (header : sep : rows)
+                | (cid, members) <- Map.toList commMap]
+      labelRows = case mLabels of
+        Just labels | not (Map.null labels) ->
+            let header' = "\n### Community Labels (LLM)\n"
+                sep'    = "| Community | Label |"
+                sep2    = "|-----------|-------|"
+                rows'   = [T.pack $ "| " ++ show cid ++ " | " ++ T.unpack lbl ++ " |"
+                          | (cid, lbl) <- Map.toList labels]
+            in T.unlines (header' : sep' : sep2 : rows')
+        _ -> ""
+  in T.unlines (header : sep : rows) <> labelRows
 
 godNodesSection :: [GodNode] -> Text
 godNodesSection nodes =
@@ -85,7 +95,14 @@ bridgeNodesSection artPoints g =
 
 surprisesSection :: [SurprisingConnection] -> Text
 surprisesSection surprises =
-  T.unlines $ map (\s -> "- **" <> scSource s <> " → " <> scTarget s <> "** (" <> scRelation s <> ") " <> scWhy s) surprises
+  T.unlines $ map renderSurprise $ dedupSurprises surprises
+  where
+    renderSurprise s = "- **" <> scSource s <> " -> " <> scTarget s <> "** (" <> scRelation s <> ") " <> scWhy s
+    dedupSurprises = map NE.head . NE.groupBy sameSurprise . sortOn key
+      where
+        key s = (scSource s, scTarget s, scRelation s, scWhy s)
+        sameSurprise a b = key a == key b
+
 
 questionsSection :: [SuggestedQuestion] -> Text
 questionsSection questions =

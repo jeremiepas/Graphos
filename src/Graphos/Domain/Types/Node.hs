@@ -6,20 +6,22 @@
 -- (each unevaluated thunk = 16-24 bytes overhead + pointer indirection).
 -- Bang patterns force immediate evaluation, reducing memory by 3-4×.
 --
--- Migration note: Fields nodeSourceLocation, nodeSourceUrl, nodeCapturedAt,
--- nodeAuthor, nodeContributor are LEGACY and will be removed once all
--- referencing modules are updated to use nodeLineStart, nodeCommunityId,
--- nodeDegree, nodeIsBridge, nodeExtra instead.
 {-# LANGUAGE StrictData #-}
 module Graphos.Domain.Types.Node
   ( -- * Node types
     NodeId
   , Node(..)
   , FileType(..)
+
+    -- * Extra helpers
+  , nodeExtraCapturedAt
+  , setNodeExtraCapturedAt
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, (.=), (.:), (.:?), withObject, withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), object, (.=), (.:), (.:?), withObject, withText)
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -61,9 +63,7 @@ instance FromJSON FileType where
 
 -- | A node in the knowledge graph
 --
--- Fields are organized: spec-required first, legacy last.
--- Legacy fields (nodeSourceLocation..nodeContributor) will be removed
--- once all modules are migrated to the new field names.
+
 data Node = Node
   { -- Spec-required fields
     nodeId           :: !NodeId
@@ -78,13 +78,28 @@ data Node = Node
   , nodeDegree       :: !(Maybe Int)       -- ^ Node degree in graph (spec field)
   , nodeIsBridge     :: !(Maybe Bool)      -- ^ Is articulation point (spec field)
   , nodeExtra        :: !(Maybe Value)     -- ^ Extensible metadata (spec field)
-    -- Legacy fields (to be removed after migration)
-  , nodeSourceLocation :: !(Maybe Text)    -- ^ LEGACY: use nodeLineStart
-  , nodeSourceUrl      :: !(Maybe Text)    -- ^ LEGACY: to be removed
-  , nodeCapturedAt     :: !(Maybe Text)    -- ^ LEGACY: use nodeExtra
-  , nodeAuthor         :: !(Maybe Text)    -- ^ LEGACY: to be removed
-  , nodeContributor    :: !(Maybe Text)    -- ^ LEGACY: to be removed
   } deriving (Eq, Show, Generic)
+
+-- | Read the conversation timestamp stored under @capturedAt@ in 'nodeExtra'.
+-- Returns 'Nothing' when the key is absent or not a JSON string.
+nodeExtraCapturedAt :: Node -> Maybe Text
+nodeExtraCapturedAt n =
+  case nodeExtra n of
+    Just (Object km) ->
+      case KM.lookup (Key.fromText "capturedAt") km of
+        Just (String t) -> Just t
+        _               -> Nothing
+    _                -> Nothing
+
+-- | Store a conversation timestamp under @capturedAt@ in 'nodeExtra',
+-- merging with any existing JSON object values.
+setNodeExtraCapturedAt :: Text -> Node -> Node
+setNodeExtraCapturedAt ts n =
+  let key = Key.fromText "capturedAt"
+      base = case nodeExtra n of
+             Just (Object km) -> km
+             _                -> KM.empty
+  in n { nodeExtra = Just (Object (KM.insert key (String ts) base)) }
 
 instance NFData FileType
 instance NFData Node
@@ -103,11 +118,6 @@ instance ToJSON Node where
     , "degree"       .= nodeDegree n
     , "is_bridge"    .= nodeIsBridge n
     , "extra"        .= nodeExtra n
-    , "source_location" .= nodeSourceLocation n  -- legacy
-    , "source_url"     .= nodeSourceUrl n        -- legacy
-    , "captured_at"    .= nodeCapturedAt n       -- legacy
-    , "author"         .= nodeAuthor n           -- legacy
-    , "contributor"    .= nodeContributor n       -- legacy
     ]
 
 instance FromJSON Node where
@@ -124,8 +134,3 @@ instance FromJSON Node where
     <*> v .:? "degree"
     <*> v .:? "is_bridge"
     <*> v .:? "extra"
-    <*> v .:? "source_location"   -- legacy
-    <*> v .:? "source_url"         -- legacy
-    <*> v .:? "captured_at"        -- legacy
-    <*> v .:? "author"             -- legacy
-    <*> v .:? "contributor"        -- legacy

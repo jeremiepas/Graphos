@@ -31,7 +31,7 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision)
+import Graphos.Domain.Config (defaultGraphosConfig, Granularity(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision)
 import Graphos.Infrastructure.Config (loadConfig)
 import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
@@ -105,6 +105,16 @@ pipelineOpts = PipelineConfig
     <*> switch (long "embed" <> help "Generate embeddings for ingested files via local Ollama")
     <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
     <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
+    <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
+    <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
+
+-- | Parse a granularity level from the CLI.
+granularityReader :: ReadM Granularity
+granularityReader = eitherReader $ \s -> case s of
+  "fine"     -> Right GranularityFine
+  "function" -> Right GranularityFunction
+  "file"     -> Right GranularityFile
+  other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -185,15 +195,18 @@ main = do
       let obsCfg = gcObservability graphosCfg
           -- Merge config file + CLI flags: CLI flags override config file values
           -- SDK reads OTEL_* env vars; we set them from CLI flags
+          -- When --no-observability is set, force-disable all observability
           otelCfg = defaultOtelConfig
-            { otelEnabled        = obsEnabled obsCfg || cfgOtelEnabled config || isJust (cfgMetricsPort config)
+            { otelEnabled        = (not (cfgNoObservability config)) && (obsEnabled obsCfg || cfgOtelEnabled config || isJust (cfgMetricsPort config))
             , otelEndpoint       = obsEndpoint obsCfg
             , otelServiceName    = obsServiceName obsCfg
             , otelLogsEndpoint   = obsEndpoint obsCfg ++ "/v1/logs"
             }
-          metricsPort = case cfgMetricsPort config of
-                           Just p  -> Just p
-                           Nothing -> if obsMetricsPort obsCfg > 0 then Just (obsMetricsPort obsCfg) else Nothing
+          metricsPort = if cfgNoObservability config
+                           then Nothing
+                           else case cfgMetricsPort config of
+                                    Just p  -> Just p
+                                    Nothing -> if obsMetricsPort obsCfg > 0 then Just (obsMetricsPort obsCfg) else Nothing
           debugDir = case cfgDebugTraceDir config of
                        Just d  -> d
                        Nothing -> if null (obsDebugTraceDir obsCfg)
@@ -347,9 +360,10 @@ main = do
               putStrLn $ "NODE: " ++ T.unpack (nodeLabel n)
               putStrLn $ "  ID: " ++ T.unpack (nodeId n)
               putStrLn $ "  Source: " ++ T.unpack (nodeSourceFile n)
-              case nodeSourceLocation n of
-                Just loc -> putStrLn $ "  Location: " ++ T.unpack loc
-                Nothing  -> pure ()
+              case (nodeLineStart n, nodeLineEnd n) of
+                (Just start, Just end) | start /= end -> putStrLn $ "  Location: L" ++ show start ++ "-" ++ show end
+                (Just start, _)                        -> putStrLn $ "  Location: L" ++ show start
+                _                                      -> pure ()
               putStrLn $ "  Type: " ++ show (nodeFileType n)
               putStrLn $ "  Degree: " ++ show (degree g (nodeId n))
               -- Show community (O(log N) via index instead of O(C×M) scan)
@@ -489,7 +503,7 @@ main = do
                         , detectionFiles = Map.empty
                         }
               logInfo env "[merge] Exporting..."
-              exports <- Export.exportAll mergedGraph analysis config detection
+              exports <- Export.exportAll mergedGraph analysis config detection Nothing
               logInfo env "[merge] Merge complete!"
               logInfo env $ T.pack $ "  Nodes: " ++ show (Map.size (gNodes mergedGraph))
               logInfo env $ T.pack $ "  Edges: " ++ show (Map.size (gEdges mergedGraph))
@@ -693,4 +707,12 @@ defaultConfigYaml = unlines
   , "  serviceVersion: \"0.1.0\""
   , "  exportInterval: 15"
   , "  debugTraceDir: \"\""
+  , ""
+  , "# Extraction granularity: fine | function | file"
+  , "#   fine     — statement-level nodes (verbose, ~100+ nodes/file)"
+  , "#   function — functions/types/classes + module-level constants (default)"
+  , "#   file     — one node per file"
+  , "# Per-extension override: add `granularity: file` under an extractors entry."
+  , "# CLI flag --granularity overrides both."
+  , "granularity: function"
   ]

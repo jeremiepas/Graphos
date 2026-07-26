@@ -62,9 +62,4 @@ officeStubNode fp = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
-  , nodeSourceLocation = Nothing
-  , nodeSourceUrl = Nothing
-  , nodeCapturedAt = Nothing
-  , nodeAuthor = Nothing
-  , nodeContributor = Nothing
   }

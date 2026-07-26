@@ -60,23 +60,18 @@ docFileNode filePath =
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       nid = T.pack (show dirHash) <> "_doc_" <> name
   in Node
-    { nodeId           = nid
+     { nodeId           = nid
     , nodeLabel        = name
     , nodeFileType     = DocFile
     , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-    , nodeSourceLocation = Just "L1"
+    , nodeLineStart    = Just 1
+    , nodeCommunityId  = Nothing
+    , nodeDegree       = Nothing
+    , nodeIsBridge     = Nothing
+    , nodeExtra        = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Just "File"
     , nodeSignature    = Nothing
-    , nodeSourceUrl    = Nothing
-    , nodeCapturedAt   = Nothing
-    , nodeAuthor       = Nothing
-    , nodeContributor  = Nothing
     }
 
 -- ───────────────────────────────────────────────
@@ -115,19 +110,14 @@ mkHeaderNode filePath level title lineNum =
     , nodeLabel        = cleanTitle
     , nodeFileType     = DocFile
     , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-    , nodeSourceLocation = Just (T.pack $ "L" ++ show lineNum)
+    , nodeLineStart    = Just lineNum
+    , nodeCommunityId  = Nothing
+    , nodeDegree       = Nothing
+    , nodeIsBridge     = Nothing
+    , nodeExtra        = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Just "Header"
     , nodeSignature    = Nothing
-    , nodeSourceUrl    = Nothing
-    , nodeCapturedAt   = Nothing
-    , nodeAuthor       = Nothing
-    , nodeContributor  = Nothing
     }
 
 -- ───────────────────────────────────────────────
@@ -177,14 +167,9 @@ mkTagNode filePath tag =
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-    , nodeSourceLocation = Nothing
     , nodeLineEnd      = Nothing
     , nodeKind         = Just "Tag"
     , nodeSignature    = Nothing
-    , nodeSourceUrl    = Nothing
-    , nodeCapturedAt   = Nothing
-    , nodeAuthor       = Nothing
-    , nodeContributor  = Nothing
     }
 
 -- ───────────────────────────────────────────────

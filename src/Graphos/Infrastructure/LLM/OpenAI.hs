@@ -50,9 +50,10 @@ callLLM cfg prompt = catch (do
         [ "model" Aeson..= model
         , "messages" Aeson..= [Aeson.Object systemMsg, Aeson.Object userMsg]
         , "temperature" Aeson..= (0.3 :: Double)
-        , "max_tokens" Aeson..= (500 :: Int)
+        , "max_tokens" Aeson..= (2000 :: Int)
         ]
-      payloadPath = "/tmp/graphos-llm-payload.json"
+      -- Use unique temp file per call to avoid file locking
+      payloadPath = "/tmp/graphos-llm-payload-" ++ show (hashPayload payload) ++ ".json"
 
   BSL8.writeFile payloadPath payload
 
@@ -77,6 +78,10 @@ callLLM cfg prompt = catch (do
     ExitSuccess -> pure $ parseResponse (T.pack stdout)
     ExitFailure code -> pure $ Left $ T.pack $ "LLM API call failed (curl exit " ++ show code ++ "): " ++ take 200 stderr
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "LLM API call error: " ++ show e
+
+-- | Simple hash for generating unique temp file names
+hashPayload :: BSL8.ByteString -> Int
+hashPayload = BSL8.foldl' (\acc c -> acc * 31 + fromEnum c) 0
 
 -- | Parse the OpenAI chat completion response to extract the assistant message content.
 parseResponse :: Text -> Either Text Text
@@ -113,9 +118,34 @@ parseLabelsFromResponse response =
        _ -> Map.empty
 
 -- | Strip markdown code blocks from LLM response.
-stripCodeBlocks :: Text -> Text
+-- Handles ```json ... ``` and ``` ... ``` patterns, plus
+-- any trailing/leading text around the JSON object.
+stripCodeBlocks :: Text -> T.Text
 stripCodeBlocks t =
-  T.strip $ T.replace "```" "" $ T.replace "```json" "" t
+  let -- Remove ```json and ``` markers
+      step1 = T.replace "```json" "" t
+      step2 = T.replace "```" "" step1
+      stripped = T.strip step2
+  in case T.breakOn "{" stripped of
+       (_, rest) | "{" `T.isPrefixOf` rest ->
+         -- Find the matching closing brace
+         T.strip (extractJsonObject rest)
+       _ -> stripped
+
+-- | Extract the first complete JSON object from text starting with '{'.
+extractJsonObject :: Text -> Text
+extractJsonObject t =
+  -- Count braces to find the end of the JSON object
+  let go :: Int -> Text -> Text
+      go depth txt
+        | depth == 0 = ""
+        | T.null txt = ""
+        | T.head txt == '{' = T.cons '{' (go (depth + 1) (T.tail txt))
+        | T.head txt == '}' = if depth == 1 then "}" else T.cons '}' (go (depth - 1) (T.tail txt))
+        | otherwise = T.cons (T.head txt) (go depth (T.tail txt))
+  in case T.uncons t of
+       Just ('{', rest) -> "{" <> go 1 rest
+       _ -> t
 
 -- | Resolve environment variable references like ${VAR} in a string.
 -- Uses unsafePerformIO for env var lookup in pure context.
