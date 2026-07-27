@@ -58,6 +58,13 @@ jobs:
       - name: Run tests
         run: cabal test all
 
+      - name: Install OpenSpec CLI
+        run: npm install -g openspec
+
+      - name: Validate OpenSpec changes
+        continue-on-error: true
+        run: openspec validate --changes --json
+
   haddock:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.actor == 'jeremiepas'
