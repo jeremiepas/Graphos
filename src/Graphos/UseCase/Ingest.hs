@@ -32,6 +32,7 @@ import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtension
 import Graphos.Infrastructure.Security (validateUrl)
 import qualified Graphos.Infrastructure.LLM.Embedding as Emb
 import qualified Graphos.UseCase.Extract as Extract
+import Graphos.UseCase.AppEnv (AppEnv)
 import Graphos.Infrastructure.Logging (LogEnv, logInfo)
 
 -- ───────────────────────────────────────────────
@@ -124,8 +125,8 @@ data FileIngestResult = FileIngestResult
 --
 -- When --embed is enabled, generates an embedding vector for each extracted node
 -- using the configured Ollama model.
-ingestFile :: PipelineConfig -> FilePath -> LogEnv -> IO (Either Text FileIngestResult)
-ingestFile config filePath env = do
+ingestFile :: AppEnv -> PipelineConfig -> FilePath -> LogEnv -> IO (Either Text FileIngestResult)
+ingestFile appEnv config filePath env = do
   -- Verify file exists
   exists <- doesFileExist filePath
   if not exists
@@ -149,7 +150,7 @@ ingestFile config filePath env = do
             }
 
       -- Extract entities from the single file
-      extraction <- Extract.extractAll config detection env
+      extraction <- Extract.extractAll appEnv config detection
 
       let nodes = Map.elems (extractionNodes extraction)
           nodeCount = length nodes

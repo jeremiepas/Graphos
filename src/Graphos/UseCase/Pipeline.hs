@@ -58,8 +58,9 @@ import Graphos.Domain.Labeling (LabelingResult(..))
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.Export.CommunityGraph (exportCommunityGraph)
 import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
-import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import Graphos.Infrastructure.FileSystem.Cache (loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint)
+import Graphos.Infrastructure.Wiring (productionAppEnv)
+import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 
 -- | Minimum ratio of edges to nodes for a code-dominant graph. Values below
 -- this threshold after the build step indicate a likely edge-extraction
@@ -94,6 +95,7 @@ runPipeline config = catch (do
   let _tracer = otelTracer obsEnv
       metrics = otelMetrics obsEnv
       env = otelLogEnv obsEnv  -- Use the LogEnv from ObservabilityEnv (has OTLP shipping enabled)
+      appEnv = productionAppEnv env obsEnv
 
   -- Set up Neo4j streaming: when --neo4j is enabled, push nodes during extraction
   let configWithStreaming = case (cfgNeo4j config, cfgNeo4jPush config) of
@@ -159,7 +161,7 @@ runPipeline config = catch (do
       -- Step 2: Extract (nodes are pushed to Neo4j during extraction if streaming is enabled)
       logInfo env "Step 2: Extracting entities and relationships..."
       extractStart <- getCurrentTime
-      extraction <- extractAll configWithStreaming detection env
+      extraction <- extractAll appEnv configWithStreaming detection
       extractEnd <- getCurrentTime
       observeHistogram metrics "graphos_extract_duration_seconds" (realToFrac (diffUTCTime extractEnd extractStart) :: Double)
       incCounter metrics "graphos_pipeline_steps_total" 1
@@ -381,6 +383,7 @@ runIncrementalPipeline config changedFiles = catch (do
   obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
   let _metrics = otelMetrics obsEnv
       env = otelLogEnv obsEnv  -- Use the LogEnv from ObservabilityEnv (has OTLP shipping enabled)
+      appEnv = productionAppEnv env obsEnv
 
   -- Set up Neo4j streaming if enabled
   let configWithStreaming = case (cfgNeo4j config, cfgNeo4jPush config) of
@@ -400,7 +403,7 @@ runIncrementalPipeline config changedFiles = catch (do
   logInfo env $ T.pack $ "[watch] Re-extracting " ++ show (length changedFiles) ++ " changed files..."
 
   -- Extract only changed files (with streaming push to Neo4j)
-  extraction <- extractChangedFiles configWithStreaming changedFiles env
+  extraction <- extractChangedFiles appEnv configWithStreaming changedFiles
 
   -- Build graph from delta extraction
   let graph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
@@ -512,11 +515,12 @@ runSingleFilePipeline config filePath = catch (do
   obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
   let _metrics = otelMetrics obsEnv
       env = otelLogEnv obsEnv
+      appEnv = productionAppEnv env obsEnv
 
   logInfo env $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
 
   -- Step 1: Ingest file (detect + extract + optional embeddings)
-  ingestResult <- ingestFile config filePath env
+  ingestResult <- ingestFile appEnv config filePath env
   case ingestResult of
     Left err -> pure $ Left err
     Right fir -> do
