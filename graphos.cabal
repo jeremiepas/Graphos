@@ -87,10 +87,19 @@ library
                      Graphos.UseCase.Query.Normalize
                       -- UseCase - Detect submodules
                       Graphos.UseCase.Detect.Paper
-                     -- UseCase - Context optimization
-                     Graphos.UseCase.SelectContext
-                     Graphos.UseCase.FormatContext
-                     Graphos.UseCase.Conversation
+                      -- UseCase - Context optimization
+                      Graphos.UseCase.SelectContext
+                      Graphos.UseCase.FormatContext
+                      Graphos.UseCase.Conversation
+                      -- UseCase - Ports (dependency injection)
+                      Graphos.UseCase.Port.ExtractionPort
+                      Graphos.UseCase.Port.ExportPort
+                      Graphos.UseCase.Port.FileSystemPort
+                      Graphos.UseCase.Port.LoggingPort
+                      Graphos.UseCase.Port.ObservabilityPort
+                      Graphos.UseCase.Port.LLMPort
+                      -- UseCase - App environment
+                      Graphos.UseCase.AppEnv
                      -- Infrastructure - LSP
                      Graphos.Infrastructure.LSP.Client
                      Graphos.Infrastructure.LSP.Protocol
