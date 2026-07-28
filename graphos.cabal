@@ -146,7 +146,12 @@ library
                      -- Domain - Context optimization
                      Graphos.Domain.Context
                      -- Domain - Config
-                     Graphos.Domain.Config
+                      Graphos.Domain.Config
+                      Graphos.Domain.Config.Core
+                      Graphos.Domain.Config.Extraction
+                      Graphos.Domain.Config.Export
+                      Graphos.Domain.Config.Observability
+                      Graphos.Domain.Config.Vision
 
   other-modules:
                     Paths_graphos
