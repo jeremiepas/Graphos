@@ -110,6 +110,8 @@ library
                        Graphos.Infrastructure.LSP.Extraction
                          -- Infrastructure - Config
                          Graphos.Infrastructure.Config
+                      -- Infrastructure - Wiring
+                      Graphos.Infrastructure.Wiring
                          -- Infrastructure - TreeSitter
                          Graphos.Infrastructure.Extract.TreeSitter.Core
                          Graphos.Infrastructure.Extract.TreeSitter.Grammar
