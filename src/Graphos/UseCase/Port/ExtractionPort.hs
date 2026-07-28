@@ -1,33 +1,64 @@
 -- | Port interface for extraction operations.
 -- Record-of-functions that decouples UseCase from Infrastructure.
 -- Infrastructure.Wiring provides the concrete implementations.
--- Only Domain types appear in signatures — no Infrastructure types.
 module Graphos.UseCase.Port.ExtractionPort
   ( -- * Extraction port
     ExtractionPort(..)
+    -- * Opaque LSP handle
+  , LSPHandle(..)
+  , SymbolResult(..)
   ) where
 
 import Data.ByteString (ByteString)
-import Graphos.Domain.Types (Extraction, PipelineConfig, Detection)
+import Data.Dynamic (Dynamic)
+import Data.Map.Strict (Map)
+import Data.Text (Text)
+import Graphos.Domain.Types (Extraction, Node, Edge)
+import Graphos.Domain.Types.Pipeline (PipelineConfig)
+
+-- | Opaque handle to an LSP server connection.
+-- Internally stores the real Infrastructure.LSP.Client as Dynamic.
+-- UseCase only passes this around — never inspects it.
+data LSPHandle = LSPHandle
+  { lhHandle :: !Dynamic
+  , lhCommand :: !String
+  , lhArgs :: ![String]
+  , lhRootUri :: !String
+  }
+
+-- | Result of workspace symbol extraction.
+data SymbolResult = SymbolResult
+  { srNodes :: [Node]
+  , srEdges :: [Edge]
+  }
 
 -- | Record-of-functions port for extraction operations.
--- Each field corresponds to an Infrastructure capability that UseCase.Extract needs.
--- Inject via AppEnv; mock for testing.
---
--- Note: 'PipelineConfig' already contains extractor mode, granularity,
--- file extension, and LSP config — no separate LSP client parameter needed.
--- The concrete implementation in Wiring will handle LSP client lifecycle internally.
+-- Provides fine-grained primitives that UseCase.Extract uses
+-- to orchestrate the extraction workflow.
 data ExtractionPort = ExtractionPort
-  { -- | Extract all files matching the detection config
-    epExtractAll          :: PipelineConfig -> Detection -> IO Extraction
-    -- | Extract a group of files with a specific language server command
-  , epExtractGroup       :: FilePath -> PipelineConfig -> (String, [FilePath]) -> IO [Extraction]
-    -- | Extract a single file (stub / fallback)
-  , epExtractFromFile   :: FilePath -> IO Extraction
-    -- | Extract image from file path
-  , epExtractImageFile  :: PipelineConfig -> FilePath -> IO Extraction
-    -- | Extract image from raw bytes
-  , epExtractImageBytes :: PipelineConfig -> FilePath -> ByteString -> IO Extraction
-    -- | Extract changed files (incremental mode)
-  , epExtractChanged    :: PipelineConfig -> [FilePath] -> IO Extraction
+  { -- LSP lifecycle
+    epFindLSPServer        :: String -> IO (Maybe (String, [String]))
+  , epConnectLSP           :: String -> [String] -> String -> IO (Either Text LSPHandle)
+  , epDisconnectLSP        :: LSPHandle -> IO ()
+  , epIsServerConnected    :: LSPHandle -> IO Bool
+    -- LSP extraction
+  , epExtractViaLSP        :: LSPHandle -> FilePath -> IO Extraction
+  , epHasWorkspaceSymbols  :: LSPHandle -> IO Bool
+  , epExtractWorkspaceSymbols :: LSPHandle -> IO (Either Text (Map FilePath SymbolResult))
+    -- TreeSitter extraction
+  , epParseWithGrammar     :: String -> FilePath -> ByteString -> IO (Maybe Extraction)
+    -- File-level extraction (delegates to sub-modules)
+  , epExtractDocFile       :: FilePath -> IO Extraction
+  , epExtractOfficeFile    :: PipelineConfig -> FilePath -> IO Extraction
+  , epExtractHaskellStub   :: FilePath -> IO Extraction
+  , epExtractImageFile     :: PipelineConfig -> FilePath -> IO Extraction
+  , epExtractImageFromBytes :: PipelineConfig -> FilePath -> ByteString -> IO Extraction
+    -- Office media extraction
+  , epExtractMediaFile     :: FilePath -> FilePath -> IO (Either Text ByteString)
+  , epDocxMediaPaths       :: FilePath -> IO [FilePath]
+  , epPptxMediaPaths       :: FilePath -> IO [FilePath]
+    -- Neo4j streaming
+  , epPushExtractionStreaming :: PipelineConfig -> Extraction -> IO ()
+    -- Config lookups
+  , epLanguageServerCommands :: Map String (String, [String])
   }
