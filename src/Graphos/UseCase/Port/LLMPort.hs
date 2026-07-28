@@ -4,24 +4,32 @@
 module Graphos.UseCase.Port.LLMPort
   ( -- * LLM port
     LLMPort(..)
-  , -- * Image analysis types (moved from Infrastructure to avoid cross-layer import)
+  , -- * Image analysis types (mirrors Infrastructure.LLM.Vision)
     ImageAnalysis(..)
   , ImageKind(..)
+  , Entity(..)
   ) where
 
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Graphos.Domain.Config (LabelingConfig, EmbeddingConfig, VisionConfig)
+import Graphos.Domain.Types (CommunityId)
 
--- | Image kind classification
-data ImageKind = PhotoKind | DiagramKind | ScreenshotKind | IconKind
+-- | Image kind classification (mirrors Infrastructure.LLM.Vision.ImageKind)
+data ImageKind = Photo | Screenshot | Diagram | Resume | Chart | OtherKind
   deriving (Eq, Show)
 
--- | Image analysis result
+-- | Image analysis result (mirrors Infrastructure.LLM.Vision.ImageAnalysis)
 data ImageAnalysis = ImageAnalysis
   { iaDescription :: Text
-  , iaEntities    :: [Text]
+  , iaEntities    :: [Entity]
   , iaKind        :: ImageKind
+  } deriving (Eq, Show)
+
+-- | Entity extracted from image analysis
+data Entity = Entity
+  { entityLabel :: Text
+  , entityType  :: Text
   } deriving (Eq, Show)
 
 -- | Record-of-functions port for LLM operations.
@@ -29,7 +37,7 @@ data LLMPort = LLMPort
   { -- | Call LLM for community labeling
     lpCallLLM              :: LabelingConfig -> Text -> IO (Either Text Text)
     -- | Parse labels from LLM response
-  , lpParseLabelsFromResponse :: Text -> Map Text Text
+  , lpParseLabelsFromResponse :: Text -> Map CommunityId Text
     -- | Generate embeddings for text
   , lpGenerateEmbedding    :: EmbeddingConfig -> Text -> IO (Either Text [Double])
     -- | Analyze image with vision model
