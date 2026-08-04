@@ -2,9 +2,13 @@
 --
 -- Optimized: uses GraphIndex for O(k×hits) term lookup instead of O(N) full-scan,
 -- and direct adjacency-map BFS instead of FGL conversion.
+--
+-- Scored query path (improve-query-agent-ergonomics): verdict, scored nodes,
+-- did-you-mean suggestions, and result-set hash replace the legacy unscored path.
 module Graphos.UseCase.Query
   ( queryGraph
   , queryGraphWithIndex
+  , queryGraphWithIndexScored
   , pathQuery
   , pathQueryWithIndex
   , explainNode
@@ -14,6 +18,13 @@ module Graphos.UseCase.Query
   , queryBiconnectedComponents
   , queryDominatorTree
   , QueryResult(..)
+  , QueryResponse(..)
+  , MatchVerdict(..)
+  , ScoredNode(..)
+  , computeVerdict
+  , verdictThreshold
+  , resultHash
+  , findSuggestions
   ) where
 
 import Data.Map.Strict (Map)
@@ -23,11 +34,23 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing)
+import Data.List (sortOn)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, shortestPath, depthFirstSearch, gNodes, gEdges
                             , articulationPoints, biconnectedComponents, dominators)
 import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet)
+import Graphos.Domain.Graph.Score
+  ( MatchVerdict(..)
+  , ScoredNode(..)
+  , QueryResponse(..)
+  , computeVerdict
+  , verdictThreshold
+  , normalizeScore
+  , fullLabelBoost
+  , resultHash
+  , findSuggestions
+  )
 
 -- | Query result
 data QueryResult = QueryResult
@@ -76,6 +99,105 @@ queryGraph g query mode budget =
 
 fromMaybeLbl :: NodeId -> Map NodeId Text -> Text
 fromMaybeLbl nid m = Map.findWithDefault nid nid m
+
+-- | Extract the first whitespace-delimited token from a label.
+firstToken :: Text -> Text
+firstToken label =
+  case T.words (T.toLower label) of
+    (w:_) -> w
+    _     -> T.empty
+
+-- | Unwrap Confidence newtype to get the underlying Double.
+unConfidence :: Confidence -> Double
+unConfidence (Confidence d) = d
+
+-- | Scored query path — returns QueryResponse with verdict, scored nodes, and suggestions.
+--
+-- Normalized scoring = matched-terms / query-terms with exact full-label boost.
+-- No traversal when best score is 0 (deleted the degenerate-fallback path).
+-- Verdict thresholds: strong ≥ 0.5, weak > 0, none = 0.
+queryGraphWithIndexScored :: Graph -> GraphIndex -> Text -> Text -> Int -> QueryResponse
+queryGraphWithIndexScored g idx query mode _budget =
+  let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
+      -- Scored term matching via inverted index
+      matched :: [(NodeId, Int)]
+      matched = findMatchingNodes terms idx
+      -- Build score map: NodeId -> raw score
+      scoreMap :: Map NodeId Int
+      scoreMap = Map.fromList matched
+      -- Compute normalized scores with full-label boost
+      scoredPairs :: [(NodeId, Double)]
+      scoredPairs =
+        [ (nid, normalizeScore rawScore (length terms) + fullLabelBoost term (nodeLabel n))
+        | (nid, rawScore) <- matched
+        , Just n <- [Map.lookup nid (gNodes g)]
+        , let term = firstToken (nodeLabel n)
+        ]
+      bestScore :: Double
+      bestScore = case scoredPairs of
+        (_, s):_ -> s
+        []       -> 0
+      verdict :: MatchVerdict
+      verdict = computeVerdict bestScore
+      -- BFS from top-scoring nodes (only when not NoMatch)
+      topNodes :: [NodeId]
+      topNodes = take 5 [nid | (nid, _) <- scoredPairs]
+      expanded :: Set.Set NodeId
+      expanded = case verdict of
+        NoMatch -> Set.empty
+        _       -> if mode == T.pack "dfs"
+                    then Set.unions [depthFirstSearch g nid 6 | nid <- topNodes]
+                    else bfsFromSet idx (Set.fromList topNodes) 3
+      -- Gather scored nodes in the expanded subgraph
+      nodeMap :: Map NodeId Node
+      nodeMap = gNodes g
+      -- Build a quick lookup from scoreMap for expanded nodes
+      scoredNodes :: [ScoredNode]
+      scoredNodes =
+        [ ScoredNode
+            { snNodeId      = nid
+            , snLabel       = nodeLabel n
+            , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoost (firstToken (nodeLabel n)) (nodeLabel n)
+            , snSourceFile  = nodeSourceFile n
+            , snCommunityId = nodeCommunityId n
+            }
+        | nid <- Set.toList expanded
+        , Just n <- [Map.lookup nid nodeMap]
+        ]
+      -- Sort score-descending
+      scoredNodesSorted :: [ScoredNode]
+      scoredNodesSorted = sortOn (negate . snScore) scoredNodes
+      -- Edges within the subgraph
+      nodeLblMap :: Map NodeId Text
+      nodeLblMap = Map.fromList [(nid, nodeLabel n) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
+      edges :: [(Text, Text, Text, Double)]
+      edges =
+        [ ( fromMaybeLbl src nodeLblMap
+          , fromMaybeLbl tgt nodeLblMap
+          , relationToText (edgeRelation e)
+          , unConfidence (edgeConfidence e)
+          )
+        | ((src, tgt), e) <- Map.toList (gEdges g)
+        , src `Set.member` expanded
+        , tgt `Set.member` expanded
+        ]
+      -- Suggestions for NoMatch and Weak
+      suggestions :: [Text]
+      suggestions = case verdict of
+        NoMatch -> findSuggestions terms idx
+        Weak    -> findSuggestions terms idx
+        _       -> []
+      -- Result-set hash
+      hash :: Text
+      hash = resultHash [snNodeId n | n <- scoredNodesSorted]
+  in QueryResponse
+    { qrespVerdict     = verdict
+    , qrespBestScore   = bestScore
+    , qrespHash        = hash
+    , qrespNodes       = scoredNodesSorted
+    , qrespEdges       = edges
+    , qrespSuggestions = suggestions
+    }
 
 -- | Find shortest path between two concepts (using index for fast node lookup)
 pathQueryWithIndex :: Graph -> GraphIndex -> Text -> Text -> Maybe [NodeId]
