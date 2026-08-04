@@ -58,6 +58,7 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
+                    Graphos.Domain.Graph.Score
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
@@ -112,10 +113,12 @@ library
                          Graphos.Infrastructure.Config
                       -- Infrastructure - Wiring
                       Graphos.Infrastructure.Wiring
-                         -- Infrastructure - TreeSitter
-                         Graphos.Infrastructure.Extract.TreeSitter.Core
-                         Graphos.Infrastructure.Extract.TreeSitter.Grammar
-                         Graphos.Infrastructure.Extract.TreeSitter.Convert
+                          -- Infrastructure - TreeSitter
+                          Graphos.Infrastructure.Extract.TreeSitter.Core
+                          Graphos.Infrastructure.Extract.TreeSitter.Grammar
+                          Graphos.Infrastructure.Extract.TreeSitter.Convert
+                      -- Infrastructure - PDF
+                      Graphos.Infrastructure.Extract.Pdf
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache
@@ -156,8 +159,10 @@ library
                       Graphos.Domain.Community.Label
                      -- Domain - Context optimization
                      Graphos.Domain.Context
-                     -- Domain - Config
-                      Graphos.Domain.Config
+                       -- Domain - PDF structure
+                       Graphos.Domain.PdfStructure
+                       -- Domain - Config
+                       Graphos.Domain.Config
                       Graphos.Domain.Config.Core
                       Graphos.Domain.Config.Extraction
                       Graphos.Domain.Config.Export

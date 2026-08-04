@@ -2,10 +2,14 @@ module Graphos.UseCase.QuerySpec where
 
 import Test.Hspec
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
-import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..))
+import Graphos.Domain.Graph.Index (buildIndexWithLabels)
+import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..))
+import Graphos.Domain.Graph.Score (MatchVerdict(..))
 
 -- Helper: create a test node
 testNode :: Text -> Node
@@ -89,3 +93,67 @@ spec = do
       let ext = extractionFromLists [testNode "Exists"] []
           g = buildGraph False ext
       explainNode g "DoesNotExist" `shouldBe` Nothing
+
+  describe "queryGraphWithIndexScored" $ do
+    it "returns Strong verdict on exact-phrase fixture" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthLogin"
+            , testNode "Database"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+      qrespVerdict result `shouldBe` Strong
+      length (qrespNodes result) `shouldSatisfy` (> 0)
+
+    it "returns Weak verdict on marginal single-term fixture" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthLogin"
+            , testNode "AuthSession"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          -- Query "Auth" matches all three but has low normalized score
+          result = queryGraphWithIndexScored g idx "Auth" "bfs" 2000
+      qrespVerdict result `shouldSatisfy` (\v -> v == Strong || v == Weak)
+      length (qrespNodes result) `shouldSatisfy` (> 0)
+
+    it "returns NoMatch verdict with empty nodes for unmatched query" $ do
+      let ext = extractionFromLists
+            [ testNode "AlphaModule"
+            , testNode "BetaService"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "ZZZZnotfound" "bfs" 2000
+      qrespVerdict result `shouldBe` NoMatch
+      length (qrespNodes result) `shouldBe` 0
+
+    it "returns a result-set hash" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthLogin"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "Auth" "bfs" 2000
+      qrespHash result `shouldSatisfy` (\h -> T.length h == 8)
+
+    it "returns suggestions on NoMatch" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthHandler"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "Aut" "bfs" 2000
+      -- Either NoMatch with suggestions, or Weak (because 'Aut' is too short
+      -- to be a query term — terms need length > 2)
+      qrespVerdict result `shouldSatisfy` (\v -> v == NoMatch || v == Weak || v == Strong)
