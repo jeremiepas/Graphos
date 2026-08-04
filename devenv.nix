@@ -63,8 +63,11 @@ in
   env.EXTRA_LIBRARY_PATH = lib.makeLibraryPath systemDeps;
   env.OPENCODE_EXPERIMENTAL_LSP_TOOL = "true";
 
-  # Shell activation greeting (no stale PATH entries)
+  # Shell activation greeting, clean stale PATH entries
   enterShell = ''
+    # Remove stale PATH entries that are no longer used
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.cache/.bun/bin' | grep -v '\.npm-global/bin' | tr '\n' ':' | sed 's/:$//')"
+
     echo "graphos dev shell"
     echo "  ghc:   $(ghc --version)"
     echo "  cabal: $(cabal --version)"
