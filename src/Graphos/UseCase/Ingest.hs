@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | File and URL ingestion — single-file and URL ingestion for the Graphos pipeline.
 --
 -- Two ingestion modes:
@@ -15,12 +16,19 @@ module Graphos.UseCase.Ingest
   , FileIngestResult(..)
   ) where
 
+import Control.Exception (SomeException, catch)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, UTCTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeExtension, (</>))
+import Network.HTTP.Client
+  ( newManager, parseRequest, responseBody, httpLbs, responseStatus
+  , defaultManagerSettings
+  )
+import Network.HTTP.Types (statusCode)
+import qualified Data.ByteString.Lazy as LBS
 
 import Graphos.Domain.Types
   ( Node(..), Extraction(..)
@@ -32,6 +40,7 @@ import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtension
 import Graphos.Infrastructure.Security (validateUrl)
 import qualified Graphos.Infrastructure.LLM.Embedding as Emb
 import qualified Graphos.UseCase.Extract as Extract
+import Graphos.UseCase.AppEnv (AppEnv)
 import Graphos.Infrastructure.Logging (LogEnv, logInfo)
 
 -- ───────────────────────────────────────────────
@@ -66,6 +75,7 @@ detectUrlType url
   | otherwise = GenericWeb
 
 -- | Ingest a URL - fetch content and save as annotated markdown
+-- For PDFs, downloads the actual content instead of creating a stub.
 ingest :: Text -> FilePath -> Maybe Text -> Maybe Text -> IO (Either Text IngestResult)
 ingest url rawDir author contributor =
   case validateUrl url of
@@ -78,30 +88,57 @@ ingest url rawDir author contributor =
       createDirectoryIfMissing True rawDir
 
       now <- getCurrentTime
-      let timestamp = T.pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" now)
+      let timestamp = T.pack (formatTime defaultTimeLocale "%Y-%m-%m-%dT%H:%M:%SZ" now)
           frontmatter = buildFrontmatter validUrl timestamp author contributor
-          stubContent = case urlType of
-            TwitterUrl -> frontmatter <> "\n[Tweet content - to be fetched]\n"
-            ArxivUrl   -> frontmatter <> "\n[arXiv abstract - to be fetched]\n"
-            PdfUrl     -> frontmatter <> "\n[PDF content - to be fetched]\n"
-            ImageUrl   -> frontmatter <> "\n[Image description - to be fetched]\n"
-            YoutubeUrl -> frontmatter <> "\n[Video transcript - to be fetched]\n"
-            GenericWeb -> frontmatter <> "\n[Webpage content - to be fetched]\n"
 
-      exists <- doesFileExist filepath
-      if exists
-        then pure (Right IngestResult
-              { irPath = filepath
-              , irType = typeToText urlType
-              , irSummary = "File already exists, skipped"
-              })
-        else do
-          writeFile filepath (T.unpack stubContent)
-          pure (Right IngestResult
-            { irPath = filepath
-            , irType = typeToText urlType
-            , irSummary = "Saved stub file - populate with fetched content"
-            })
+      -- For PDFs, download the actual content instead of a stub
+      case urlType of
+        PdfUrl -> do
+          exists <- doesFileExist filepath
+          if exists
+            then pure (Right IngestResult
+                  { irPath = filepath
+                  , irType = typeToText urlType
+                  , irSummary = "File already exists, skipped"
+                  })
+            else do
+              result <- downloadFile validUrl filepath
+              case result of
+                Left err -> do
+                  -- Fallback to stub on download failure
+                  let stubContent = frontmatter <> "\n[PDF content - to be fetched]\n"
+                  writeFile filepath (T.unpack stubContent)
+                  pure (Right IngestResult
+                    { irPath = filepath
+                    , irType = typeToText urlType
+                    , irSummary = "Download failed: " <> err <> " - saved stub"
+                    })
+                Right _ -> pure (Right IngestResult
+                  { irPath = filepath
+                  , irType = typeToText urlType
+                  , irSummary = "Downloaded PDF content"
+                  })
+        _ -> do
+          let stubContent = case urlType of
+                TwitterUrl -> frontmatter <> "\n[Tweet content - to be fetched]\n"
+                ArxivUrl   -> frontmatter <> "\n[arXiv abstract - to be fetched]\n"
+                ImageUrl   -> frontmatter <> "\n[Image description - to be fetched]\n"
+                YoutubeUrl -> frontmatter <> "\n[Video transcript - to be fetched]\n"
+                GenericWeb -> frontmatter <> "\n[Webpage content - to be fetched]\n"
+          exists <- doesFileExist filepath
+          if exists
+            then pure (Right IngestResult
+                  { irPath = filepath
+                  , irType = typeToText urlType
+                  , irSummary = "File already exists, skipped"
+                  })
+            else do
+              writeFile filepath (T.unpack stubContent)
+              pure (Right IngestResult
+                { irPath = filepath
+                , irType = typeToText urlType
+                , irSummary = "Saved stub file - populate with fetched content"
+                })
 
 -- ───────────────────────────────────────────────
 -- Single-File Ingestion
@@ -124,8 +161,8 @@ data FileIngestResult = FileIngestResult
 --
 -- When --embed is enabled, generates an embedding vector for each extracted node
 -- using the configured Ollama model.
-ingestFile :: PipelineConfig -> FilePath -> LogEnv -> IO (Either Text FileIngestResult)
-ingestFile config filePath env = do
+ingestFile :: AppEnv -> PipelineConfig -> FilePath -> LogEnv -> IO (Either Text FileIngestResult)
+ingestFile appEnv config filePath env = do
   -- Verify file exists
   exists <- doesFileExist filePath
   if not exists
@@ -149,7 +186,7 @@ ingestFile config filePath env = do
             }
 
       -- Extract entities from the single file
-      extraction <- Extract.extractAll config detection env
+      extraction <- Extract.extractAll appEnv config detection
 
       let nodes = Map.elems (extractionNodes extraction)
           nodeCount = length nodes
@@ -275,3 +312,25 @@ typeToText PdfUrl     = "pdf"
 typeToText ImageUrl   = "image"
 typeToText YoutubeUrl = "youtube"
 typeToText GenericWeb = "webpage"
+
+-- ───────────────────────────────────────────────
+-- URL download helper
+-- ───────────────────────────────────────────────
+
+-- | Download a file from a URL and save it to a local path.
+-- Returns Left with error message on failure, Right () on success.
+downloadFile :: Text -> FilePath -> IO (Either Text ())
+downloadFile url destPath = do
+  result <- catch
+    (do manager <- newManager defaultManagerSettings
+        request <- parseRequest (T.unpack url)
+        response <- httpLbs request manager
+        let status = statusCode (responseStatus response)
+        if status >= 200 && status < 300
+          then do
+            LBS.writeFile destPath (responseBody response)
+            pure (Right ())
+          else pure (Left $ "HTTP " <> T.pack (show status) <> " downloading " <> url)
+    )
+    (\(e :: SomeException) -> pure (Left $ "Download failed: " <> T.pack (show e)))
+  pure result

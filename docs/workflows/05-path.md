@@ -69,3 +69,5 @@ Requires an existing `graph.json`. Run the full pipeline first.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--graph PATH` | `graphos-out/graph.json` | Path to graph.json |
+| `--json` | off | Output as JSON |
+| `--budget N` | 2000 | Token budget for output |

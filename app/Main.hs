@@ -3,22 +3,24 @@ module Main where
 
 import Options.Applicative
 import System.Exit (exitWith, ExitCode(..))
-import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
 import Data.Maybe (isJust)
 import System.IO (hPutStrLn, stderr)
 
-import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.CLI.Parser
+import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
-import Graphos.UseCase.Query (queryGraphWithIndex, pathQueryWithIndex, explainNodeWithIndex, QueryResult(..))
+import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import Graphos.Domain.Graph (gNodes, gEdges, neighbors, degree)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.Domain.Graph.Index (communityOfNode)
+import Graphos.UseCase.Query.Refine (defaultRefineConfig, refineResponse)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
@@ -31,159 +33,29 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, Granularity(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision)
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision)
 import Graphos.Infrastructure.Config (loadConfig)
 import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.List.NonEmpty (NonEmpty(..))
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.Timeout (timeout)
 
 import qualified Graphos.UseCase.Export as Export
+import Graphos.Domain.Scaffold (parseTarget, ScaffoldRequest(..))
+import Graphos.UseCase.Scaffold (selectTargets, planScaffold, CommandReference(..))
+import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFacts)
 
 
 -- ───────────────────────────────────────────────
--- CLI argument parsing
+-- CLI argument parsing (imported from Graphos.CLI.Parser)
 -- ───────────────────────────────────────────────
 
-data Command
-  = Run PipelineConfig
-  | QueryCmd Text Text Int FilePath
-  | PathCmd Text Text FilePath
-  | ExplainCmd Text FilePath
-  | PushCmd FilePath String String String Neo4jPushMode Int
-  | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
-  | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
-  | IngestCmd FilePath Bool FilePath  -- ^ (file path, embed flag, output dir)
-  | LServers
-  | Serve FilePath Int
-  | Init
-
-pipelineOpts :: Parser PipelineConfig
-pipelineOpts = PipelineConfig
-  <$> argument str (metavar "PATH" <> value "." <> help "Input directory (default: .)")
-  <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
-  <*> switch (long "directed" <> help "Build directed graph")
-  <*> switch (long "deep" <> help "Deep extraction mode")
-  <*> switch (long "no-viz" <> help "Skip HTML visualization")
-  <*> switch (long "update" <> help "Incremental update")
-  <*> switch (long "cluster-only" <> help "Rerun clustering only")
-  <*> switch (long "no-cluster" <> help "Skip clustering entirely")
-  <*> switch (long "label" <> help "Use LLM to label communities (requires --neo4j or graphos.yaml config)")
-  <*> switch (long "obsidian" <> help "Generate Obsidian vault")
-  <*> optional (strOption (long "obsidian-dir" <> help "Obsidian vault output directory"))
-  <*> switch (long "neo4j" <> help "Generate Cypher for Neo4j")
-  <*> optional (strOption (long "neo4j-push" <> help "Push to Neo4j at URI"))
-  <*> option auto (long "neo4j-push-mode" <> value SubgraphPush <> help "Neo4j push mode: full|subgraph|community (default: subgraph)")
-  <*> option auto (long "neo4j-subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode (default: 7)")
-  <*> optional (strOption (long "mcp" <> metavar "GRAPH_JSON" <> help "Start MCP server with graph file"))
-  <*> switch (long "svg" <> help "Export SVG")
-  <*> switch (long "graphml" <> help "Export GraphML")
-  <*> switch (long "watch" <> help "Watch for file changes")
-  <*> switch (long "wiki" <> help "Build agent-crawlable wiki")
-  <*> switch (long "verbose" <> short 'v' <> help "Verbose output: show DEBUG level logs")
-  <*> switch (long "debug" <> help "Debug output: show TRACE level logs + internal details")
-  <*> option auto (long "edge-density" <> value Normal <> help "Edge density: sparse|normal|dense|maximum (default: normal)")
-  <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0, try 0.3-0.5 for 100k+ nodes)")
-   <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3, try 10-20 for 100k+ nodes)")
-   <*> option auto (long "max-leiden-iterations" <> value 50 <> help "Max Leiden iterations (default: 50, try 10-20 for 100k+ nodes)")
-   <*> option auto (long "threads" <> short 'j' <> value 1 <> help "Number of parallel extraction threads (default: 1)")
-   <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
-    <*> pure defaultGraphosConfig  -- placeholder; loaded from graphos.yaml at runtime
-    <*> pure Nothing  -- cfgNeo4jStreaming: set programmatically when --neo4j is enabled
-    <*> switch (long "memgraph" <> help "Generate Cypher for Memgraph")
-    <*> optional (strOption (long "memgraph-push" <> help "Push to Memgraph at Bolt URI"))
-    <*> option auto (long "memgraph-push-mode" <> value MemgraphSubgraph <> help "Memgraph push mode: MemgraphFull|MemgraphSubgraph|MemgraphCommunity (default: MemgraphSubgraph)")
-    <*> option auto (long "memgraph-subgraph-size" <> value 7 <> help "Representatives per community for Memgraph subgraph mode (default: 7)")
-    <*> optional (option auto (long "metrics" <> help "Start Prometheus metrics server on given port (e.g. 9090)"))
-    <*> switch (long "otel" <> help "Enable OpenTelemetry trace/metric export via OTLP")
-    <*> fmap (\ep -> case ep of Nothing -> defaultOtelConfig; Just e -> defaultOtelConfig { otelEndpoint = e, otelLogsEndpoint = e ++ "/v1/logs" })
-             (optional (strOption (long "otel-endpoint" <> help "OTLP endpoint base (default: http://localhost:4318)")))
-    <*> optional (strOption (long "debug-trace" <> help "Directory for debug trace JSONL files"))
-    <*> switch (long "embed" <> help "Generate embeddings for ingested files via local Ollama")
-    <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
-    <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
-    <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
-    <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
-
--- | Parse a granularity level from the CLI.
-granularityReader :: ReadM Granularity
-granularityReader = eitherReader $ \s -> case s of
-  "fine"     -> Right GranularityFine
-  "function" -> Right GranularityFunction
-  "file"     -> Right GranularityFile
-  other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
-
-queryOpts :: Parser Command
-queryOpts = QueryCmd
-  <$> argument str (metavar "QUESTION")
-  <*> flag "bfs" "dfs" (long "dfs" <> help "Use DFS traversal instead of BFS")
-  <*> option auto (long "budget" <> value 2000 <> help "Token budget for query")
-  <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
-
-pathOpts :: Parser Command
-pathOpts = PathCmd
-  <$> argument str (metavar "FROM")
-  <*> argument str (metavar "TO")
-  <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
-
-serveOpts :: Parser Command
-serveOpts = Serve
-  <$> strOption (long "dir" <> value "graphos-out" <> help "Directory to serve (default: graphos-out)")
-  <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
-
-pushOpts :: Parser Command
-pushOpts = PushCmd
-  <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
-  <*> strOption (long "uri" <> value "http://localhost:7474" <> help "Neo4j URI")
-  <*> strOption (long "user" <> value "neo4j" <> help "Neo4j username")
-  <*> strOption (long "password" <> value "graphos_dev" <> help "Neo4j password")
-  <*> option auto (long "mode" <> value SubgraphPush <> help "Push mode: FullPush|SubgraphPush|CommunityPush")
-  <*> option auto (long "subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode")
-
-pushMemgraphOpts :: Parser Command
-pushMemgraphOpts = PushMemgraphCmd
-  <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
-  <*> strOption (long "uri" <> value "bolt://localhost:7688" <> help "Memgraph Bolt URI")
-  <*> strOption (long "user" <> value "" <> help "Memgraph username (empty = no auth)")
-  <*> strOption (long "password" <> value "" <> help "Memgraph password (empty = no auth)")
-  <*> option auto (long "mode" <> value MemgraphSubgraph <> help "Push mode: MemgraphFull|MemgraphSubgraph|MemgraphCommunity")
-  <*> option auto (long "subgraph-size" <> value 7 <> help "Representatives per community for subgraph mode")
-
-mergeOpts :: Parser Command
-mergeOpts = MergeCmd
-  <$> argument str (metavar "GRAPH_A" <> help "Path to first graph.json")
-  <*> argument str (metavar "GRAPH_B" <> help "Path to second graph.json")
-  <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
-  <*> option auto (long "edge-density" <> value Normal <> help "Edge density: sparse|normal|dense|maximum (default: normal)")
-  <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0)")
-  <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3)")
-  <*> option auto (long "max-leiden-iterations" <> value 50 <> help "Max Leiden iterations (default: 50)")
-  <*> switch (long "no-viz" <> help "Skip HTML visualization")
-  <*> switch (long "verbose" <> short 'v' <> help "Verbose output: show DEBUG level logs")
-
-ingestOpts :: Parser Command
-ingestOpts = IngestCmd
-  <$> argument str (metavar "FILE" <> help "Single file to ingest")
-  <*> switch (long "embed" <> help "Generate embeddings via local Ollama (nomic-embed-text)")
-  <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
-
-commandOpts :: Parser Command
-commandOpts = subparser
-  ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
-  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
-  <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
-  <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
-  <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
-  <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
-  <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
-  <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
-  <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
-  <> command "init" (info (pure Init) (progDesc "Generate a graphos.yaml config file"))
-  )
-  <|> Run <$> pipelineOpts
+-- All parsers (pipelineOpts, queryOpts, commandOpts, etc.)
+-- and the Command type are defined in Graphos.CLI.Parser
 
 main :: IO ()
 main = do
@@ -295,26 +167,10 @@ main = do
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-              result = queryGraphWithIndex g idx question mode budget
-          if null (qrNodes result)
-            then putStrLn "No matching nodes found. Try different terms."
-            else do
-              putStrLn $ "# Query: " ++ T.unpack question
-              putStrLn ""
-              putStrLn $ "Found " ++ show (length (qrNodes result)) ++ " relevant nodes (" ++ T.unpack (qrTraverse result) ++ " traversal):"
-              putStrLn ""
-              mapM_ (\(nid, label) ->
-                putStrLn $ "  - " ++ T.unpack label ++ " [" ++ T.unpack nid ++ "]"
-                ) (take 30 (qrNodes result))
-              let edges = qrEdges result
-              if not (null edges)
-                then do
-                  putStrLn ""
-                  putStrLn "Connections:"
-                  mapM_ (\(from, to, rel, conf) ->
-                    putStrLn $ "  " ++ T.unpack from ++ " --" ++ T.unpack rel ++ "--> " ++ T.unpack to ++ " [" ++ show conf ++ "]"
-                    ) edges
-                else pure ()
+              scoredResp = queryGraphWithIndexScored g idx question mode budget
+              refineCfg = defaultRefineConfig
+              refinedResp = refineResponse refineCfg (gNodes g) scoredResp
+          putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
 
     PathCmd from to graphPath -> do
       env <- defaultLogEnv LevelInfo
@@ -384,6 +240,30 @@ main = do
                         confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
                     putStrLn $ "  --" ++ relLabel ++ "--> " ++ T.unpack (nodeLabel nb) ++ confLabel
                   Nothing -> pure ()
+
+    SymbolsCmd name symOpts -> do
+      loadResult <- loadGraphFromFile (cqoGraphPath symOpts)
+      case loadResult of
+        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Right loaded -> do
+          let g = lrGraph loaded
+              idx = lrIndex loaded
+              result = symbolLookup name g idx
+          if cqoJson symOpts
+            then putStrLn $ T.unpack $ renderSymbolResultJSON result
+            else putStrLn $ T.unpack $ renderSymbolResultText (cqoBudget symOpts) result
+
+    NeighborsCmd nodeIdArg depth nbrOpts -> do
+      loadResult <- loadGraphFromFile (cqoGraphPath nbrOpts)
+      case loadResult of
+        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Right loaded -> do
+          let g = lrGraph loaded
+              idx = lrIndex loaded
+              result = neighborhoodExpansion nodeIdArg depth g idx
+          if cqoJson nbrOpts
+            then putStrLn $ T.unpack $ renderNeighborsResultJSON result
+            else putStrLn $ T.unpack $ renderNeighborsResultText (cqoBudget nbrOpts) result
 
     PushCmd graphPath uri user password pushMode topN -> do
       putStrLn $ "[graphos] Push: loading " ++ graphPath
@@ -553,8 +433,37 @@ main = do
       putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
       startStaticServer dir port
 
-    Init -> do
+    Init agentsOpt -> do
       initConfigFile
+      case agentsOpt of
+        Nothing -> putStrLn "[init] Hint: use --agents to scaffold AI agent integration files."
+        Just rawTargets -> do
+          let targetStrs = case rawTargets of
+                "auto" -> Nothing
+                ""     -> Nothing
+                ts     -> Just $ map (parseTarget . T.pack) $ splitCommas ts
+          case targetStrs of
+            Just parsed | Left err <- sequence parsed -> do
+              putStrLn $ "[init] Error: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            _ -> do
+              let validTargets = case targetStrs of
+                    Just parsed -> rights parsed
+                    Nothing -> []
+              facts <- gatherDetectionFacts
+              let selected = case validTargets of
+                    [] -> selectTargets Nothing facts
+                    ts -> case nonEmpty ts of
+                      Nothing -> selectTargets Nothing facts
+                      Just ne -> ne
+              let req = ScaffoldRequest
+                    { srTargets = selected
+                    , srVersion = "0.1.0.0"
+                    }
+                  ref = CommandReference renderCommandReference
+                  files = planScaffold req ref
+              _ <- writeScaffold files
+              pure ()
 
   where
     opts = info (commandOpts <**> helper)
@@ -586,23 +495,36 @@ initConfigFile = do
 -- | Default graphos.yaml content with comments explaining each section.
 defaultConfigYaml :: String
 defaultConfigYaml = unlines
-  [ "# Graphos configuration file"
-  , "# Generated by: graphos init"
+  [ "# ───────────────────────────────────────────────"
+  , "# Graphos Configuration"
+  , "# ───────────────────────────────────────────────"
+  , "# This file configures extraction, LLM, embedding, vision, and observability."
+  , "# Any field left out will fall back to built-in defaults."
+  , "# User values override defaults (for LSP/language_ids maps)."
   , "#"
   , "# Config resolution (later wins):"
   , "#   1. Built-in defaults"
   , "#   2. Global config: ~/.config/graphos/graphos.yaml"
   , "#   3. This file (project graphos.yaml)"
   , "#   4. CLI flags (--otel, --metrics, etc.)"
-  , "#"
-  , "# Extractors: how to extract symbols from each file type."
-  , "#   lsp          — use Language Server Protocol (requires server installed)"
-  , "#   tree-sitter   — use tree-sitter CLI for fast AST parsing (no server needed)"
-  , "#   stub          — create a single node per file (no parsing)"
-  , "#"
-  , "# Override any extension below. Missing extensions use defaults."
   , ""
+  , "# ──── Extraction granularity ──────────────────"
+  , "# fine     — statement-level nodes (verbose, ~100+ nodes/file)"
+  , "# function — functions/types/classes + module-level constants (default)"
+  , "# file     — one node per file"
+  , "# Per-extension override: add `granularity: file` under an extractors entry."
+  , "# CLI flag --granularity overrides both."
+  , "granularity: function"
+  , ""
+  , "# ──── Extractors ─────────────────────────────"
+  , "# How to extract symbols from each file type."
+  , "#   tree-sitter — fast AST parsing, no server needed (default for all)"
+  , "#   lsp         — Language Server Protocol (richer semantic info, requires server)"
+  , "#   stub        — single node per file (no parsing)"
+  , "#"
+  , "# All languages default to tree-sitter. Uncomment `mode: lsp` to switch."
   , "extractors:"
+  , "  # TypeScript (default: tree-sitter)"
   , "  \".ts\":"
   , "    mode: tree-sitter"
   , "    grammar: typescript"
@@ -619,55 +541,129 @@ defaultConfigYaml = unlines
   , "    mode: tree-sitter"
   , "    grammar: javascript"
   , "    language_id: javascriptreact"
+  , "  # Haskell (default: tree-sitter; uncomment for LSP)"
   , "  \".hs\":"
-  , "    mode: lsp"
+  , "    mode: tree-sitter"
+  , "    grammar: haskell"
   , "    language_id: haskell"
+  , "    # mode: lsp"
+  , "    # language_id: haskell"
+  , "  \".lhs\":"
+  , "    mode: tree-sitter"
+  , "    grammar: haskell"
+  , "    language_id: haskell"
+  , "  # Go (default: tree-sitter; uncomment for LSP)"
   , "  \".go\":"
-  , "    mode: lsp"
+  , "    mode: tree-sitter"
+  , "    grammar: go"
   , "    language_id: go"
+  , "    # mode: lsp"
+  , "    # language_id: go"
+  , "  # Rust (default: tree-sitter; uncomment for LSP)"
+  , "  \".rs\":"
+  , "    mode: tree-sitter"
+  , "    grammar: rust"
+  , "    language_id: rust"
+  , "    # mode: lsp"
+  , "    # language_id: rust"
+  , "  # Python (default: tree-sitter; uncomment for LSP)"
   , "  \".py\":"
   , "    mode: tree-sitter"
   , "    grammar: python"
   , "    language_id: python"
-  , "  \".rs\":"
-  , "    mode: lsp"
-  , "    language_id: rust"
-  , "  \".nix\":"
-  , "    mode: lsp"
-  , "    language_id: nix"
-  , "  \".md\":"
+  , "    # mode: lsp"
+  , "    # language_id: python"
+  , "  \".pyw\":"
   , "    mode: tree-sitter"
-  , "    grammar: markdown"
-  , "    language_id: markdown"
+  , "    grammar: python"
+  , "    language_id: python"
+  , "  # C/C++ (default: tree-sitter; uncomment for LSP)"
+  , "  \".c\":"
+  , "    mode: tree-sitter"
+  , "    grammar: c"
+  , "    language_id: c"
+  , "    # mode: lsp"
+  , "    # language_id: c"
+  , "  \".cpp\":"
+  , "    mode: tree-sitter"
+  , "    grammar: cpp"
+  , "    language_id: cpp"
+  , "  \".h\":"
+  , "    mode: tree-sitter"
+  , "    grammar: c"
+  , "    language_id: c"
+  , "  \".hpp\":"
+  , "    mode: tree-sitter"
+  , "    grammar: cpp"
+  , "    language_id: cpp"
+  , "  # Nix (default: tree-sitter; uncomment for LSP)"
+  , "  \".nix\":"
+  , "    mode: tree-sitter"
+  , "    grammar: nix"
+  , "    language_id: nix"
+  , "    # mode: lsp"
+  , "    # language_id: nix"
+  , "  # Ruby (default: tree-sitter; uncomment for LSP)"
+  , "  \".rb\":"
+  , "    mode: tree-sitter"
+  , "    grammar: ruby"
+  , "    language_id: ruby"
+  , "    # mode: lsp"
+  , "    # language_id: ruby"
+  , "  # Java (default: tree-sitter; uncomment for LSP)"
+  , "  \".java\":"
+  , "    mode: tree-sitter"
+  , "    grammar: java"
+  , "    language_id: java"
+  , "    # mode: lsp"
+  , "    # language_id: java"
+  , "  # JSON: tree-sitter with file-level granularity (data files don't inflate the graph)"
   , "  \".json\":"
   , "    mode: tree-sitter"
   , "    grammar: json"
   , "    language_id: json"
+  , "    granularity: file"
+  , "  # Markdown: tree-sitter with built-in parser"
+  , "  \".md\":"
+  , "    mode: tree-sitter"
+  , "    grammar: markdown"
+  , "    language_id: markdown"
+  , "  \".rst\":"
+  , "    mode: tree-sitter"
+  , "    grammar: markdown"
+  , "    language_id: rest"
+  , "  \".adoc\":"
+  , "    mode: tree-sitter"
+  , "    grammar: markdown"
+  , "    language_id: asciidoc"
   , ""
-  , "# LSP server overrides (merged with defaults)"
-  , "# Uncomment to customize:"
+  , "# ──── LSP Servers ─────────────────────────────"
+  , "# Map file extension → {command, args, language_id}."
+  , "# Set command to \"\" to explicitly disable an extension's LSP."
+  , "# Unlisted extensions use defaults from Graphos.Domain.Config."
   , "# lsp:"
   , "#   \".ts\":"
   , "#     command: typescript-language-server"
   , "#     args: [\"--stdio\"]"
   , "#     language_id: typescript"
   , ""
-  , "# Language ID overrides (merged with defaults)"
+  , "# ──── Language IDs ─────────────────────────────"
+  , "# Override or add language IDs for file extensions."
   , "# language_ids:"
-  , "#   \".ts\": typescript"
+  , "#   \".nix\": nix"
   , ""
-  , "# File extension categories (full override if specified)"
+  , "# ──── File Extension Categories ────────────────"
+  , "# Full override for each category (replaces defaults)."
   , "# file_extensions:"
-  , "#   code: [\".ts\", \".tsx\", \".js\", \".jsx\", \".py\", \".go\", \".rs\", \".hs\", \".nix\"]"
+  , "#   code: [\".py\", \".ts\", \".tsx\", \".js\", \".jsx\", \".go\", \".rs\", \".hs\", \".nix\"]"
   , "#   doc: [\".md\", \".txt\", \".rst\"]"
   , "#   paper: [\".pdf\"]"
   , "#   image: [\".png\", \".jpg\", \".jpeg\", \".webp\", \".gif\"]"
   , "#   video: [\".mp4\", \".mov\", \".mkv\", \".webm\"]"
   , ""
-  , "# Neo4j connection settings for --neo4j push"
+  , "# ──── Neo4j ──────────────────────────────────────"
   , "# Used by: graphos . --neo4j --neo4j-push"
   , "# push_mode: full (all nodes), subgraph (communities + representatives), community (communities only)"
-  , "# subgraph_size: representatives per community for subgraph mode"
   , "neo4j:"
   , "  uri: \"http://localhost:7474\""
   , "  user: \"neo4j\""
@@ -675,10 +671,10 @@ defaultConfigYaml = unlines
   , "  push_mode: \"subgraph\""
   , "  subgraph_size: 7"
   , ""
-  , "# Memgraph connection settings for --memgraph push"
-  , "# Memgraph uses Bolt protocol (bolt://) instead of HTTP"
-  , "# No auth by default (leave user/password empty)"
-  , "# push_mode: full (all nodes), subgraph (communities + representatives), community (communities only)"
+  , "# ──── Memgraph ────────────────────────────────────"
+  , "# In-memory graph database, Bolt-protocol compatible."
+  , "# Used by: graphos . --memgraph --memgraph-push bolt://localhost:7688"
+  , "# No auth by default — leave user/password empty for local dev."
   , "memgraph:"
   , "  uri: \"bolt://localhost:7688\""
   , "  user: \"\""
@@ -686,33 +682,82 @@ defaultConfigYaml = unlines
   , "  push_mode: \"subgraph\""
   , "  subgraph_size: 7"
   , ""
-  , "# LLM-based community labeling (use --label to enable)"
-  , "# Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.)"
-  , "# Set api_key to an env var reference ${VAR} or a literal string."
-  , "# For Ollama: set provider=ollama, base_url=http://localhost:11434/v1"
+  , "# ──── LLM Labeling ────────────────────────────────"
+  , "# Community labeling via LLM. Default: local Ollama (zero-config)."
+  , "# Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.)."
+  , "# Set api_key to env var reference ${VAR} or a literal string."
+  , "# Use headers for custom auth (e.g. X-API-Key for enterprise gateways)."
+  , "# For OpenAI: uncomment provider/model/api_key/base_url below."
   , "labeling:"
-  , "  provider: openai"
-  , "  model: gpt-4o-mini"
-  , "  api_key: \"${OPENAI_API_KEY}\""
-  , "  base_url: \"https://api.openai.com/v1\""
-  , "  batch_size: 10"
+  , "  provider: ollama              # ollama | openai | litellm (default: ollama)"
+  , "  model: llama3.2               # default: llama3.2 (ollama); gpt-4o-mini (openai)"
+  , "  api_key: \"\"                   # empty for ollama; ${OPENAI_API_KEY} for openai"
+  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
+  , "  batch_size: 20                # communities per LLM call (default: 20)"
+  , "  # headers:                    # custom HTTP headers for auth (default: none)"
+  , "  #   X-API-Key: \"${MY_TOKEN}\""
+  , "  #   X-Tenant-ID: \"my-tenant\""
+  , "  # --- OpenAI example (uncomment to use) ---"
+  , "  # provider: openai"
+  , "  # model: gpt-4o-mini"
+  , "  # api_key: \"${OPENAI_API_KEY}\""
+  , "  # base_url: \"https://api.openai.com/v1\""
   , ""
-  , "# Observability: tracing, metrics, and debug instrumentation"
+  , "# ──── Embedding ───────────────────────────────────"
+  , "# Local embedding generation via Ollama. Disabled by default."
+  , "# Enable with --embed flag or embedding.enabled: true."
+  , "# Targets small local models (nomic-embed-text, all-minilm)."
+  , "embedding:"
+  , "  enabled: false               # default: false (enable with --embed)"
+  , "  provider: ollama              # ollama (default, only local for now)"
+  , "  model: nomic-embed-text       # default: nomic-embed-text"
+  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
+  , "  dimension: 0                  # 0 = auto-detect from model"
+  , "  # headers:                    # custom HTTP headers for auth (default: none)"
+  , "  #   X-API-Key: \"${MY_TOKEN}\""
+  , ""
+  , "# ──── Vision ──────────────────────────────────────"
+  , "# Multimodal LLM for image analysis. Disabled by default."
+  , "# Enable with --vision flag or vision.enabled: true."
+  , "# When apiKey/baseUrl not set, inherits from labeling config."
+  , "vision:"
+  , "  enabled: false                # default: false (enable with --vision)"
+  , "  model: qwen3.6-moe            # default: qwen3.6-moe (ollama)"
+  , "  api_key: \"\"                   # empty: inherits from labeling"
+  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
+  , "  max_tokens: 1000             # max tokens for vision response"
+  , "  batch_size: 5                 # images per batch with GC between"
+  , "  # headers:                    # custom HTTP headers for auth (default: none)"
+  , "  #   X-API-Key: \"${MY_TOKEN}\""
+  , ""
+  , "# ──── Observability ─────────────────────────────────"
+  , "# Tracing, metrics, and debug instrumentation."
   , "# CLI flags (--otel, --metrics, --debug-trace) override these values."
+  , "# Use --no-observability to completely disable all observability."
   , "observability:"
-  , "  enabled: false"
-  , "  endpoint: \"http://localhost:4318\""
-  , "  metricsPort: 0"
+  , "  enabled: false               # default: false (enable with --otel)"
+  , "  endpoint: \"http://localhost:4318\"  # OTLP collector endpoint"
+  , "  metricsPort: 0               # Prometheus metrics port (0 = disabled)"
   , "  serviceName: graphos"
   , "  serviceVersion: \"0.1.0\""
-  , "  exportInterval: 15"
-  , "  debugTraceDir: \"\""
-  , ""
-  , "# Extraction granularity: fine | function | file"
-  , "#   fine     — statement-level nodes (verbose, ~100+ nodes/file)"
-  , "#   function — functions/types/classes + module-level constants (default)"
-  , "#   file     — one node per file"
-  , "# Per-extension override: add `granularity: file` under an extractors entry."
-  , "# CLI flag --granularity overrides both."
-  , "granularity: function"
+  , "  exportInterval: 15           # metrics export interval in seconds"
+  , "  debugTraceDir: \"\"            # directory for debug trace JSONL (empty = disabled)"
   ]
+
+-- ───────────────────────────────────────────────
+-- Helpers for --agents
+-- ───────────────────────────────────────────────
+
+splitCommas :: String -> [String]
+splitCommas s = case break (== ',') s of
+  (chunk, "")     -> [chunk | not (null chunk)]
+  (chunk, _:rest) -> chunk : splitCommas rest
+
+rights :: [Either a b] -> [b]
+rights = foldr go []
+  where go (Left _) acc = acc
+        go (Right x) acc = x : acc
+
+nonEmpty :: [a] -> Maybe (NonEmpty a)
+nonEmpty []     = Nothing
+nonEmpty (x:xs) = Just (x :| xs)

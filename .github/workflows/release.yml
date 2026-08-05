@@ -16,42 +16,26 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: haskell-actions/setup@v2
-      id: setup-haskell
+    - uses: cachix/install-nix-action@v31
+
+    - uses: cachix/cachix-action@v16
       with:
-        ghc-version: "9.10"
-        cabal-version: "3.14"
+        name: devenv
 
-    - name: Configure
-      run: cabal configure --enable-tests --flag dev
-
-    - name: Cache
-      uses: actions/cache@v4
-      env:
-        cache-name: cache-cabal
-      with:
-        path: |
-          ${{ steps.setup-haskell.outputs.cabal-store }}
-          dist-newstyle
-        key: ${{ runner.os }}-release-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
-        restore-keys: |
-          ${{ runner.os }}-release-${{ env.cache-name }}-
-          ${{ runner.os }}-release-
-          ${{ runner.os }}-
-
-    - name: Install dependencies
-      run: cabal build --only-dependencies all
+    - name: Install devenv.sh
+      run: nix profile add nixpkgs#devenv
 
     - name: Build
-      run: cabal build all
+      run: devenv tasks run ci:release-build
 
     - name: Run tests
-      run: cabal test all
+      run: devenv tasks run ci:release-test
 
     - name: Generate SHA256 checksums
       run: |
         mkdir -p dist/release
-        cp "$(cabal list-bin graphos)" dist/release/graphos-linux-x86_64
+        BIN_PATH=$(devenv shell -- cabal list-bin graphos)
+        cp "$BIN_PATH" dist/release/graphos-linux-x86_64
         cd dist/release
         sha256sum graphos-linux-x86_64 > graphos-linux-x86_64.sha256
 
