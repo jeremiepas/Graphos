@@ -66,6 +66,9 @@ import Graphos.UseCase.Extract.Office (extractOfficeFile)
 import Graphos.UseCase.Extract.Haskell (extractHaskellStub)
 import Graphos.UseCase.Extract.Image (extractImageFile, extractImageFromBytes)
 
+-- Infrastructure imports for PDF extraction
+import qualified Graphos.Infrastructure.Extract.Pdf as Pdf
+
 -- | Create a production AppEnv from a LogEnv and ObservabilityEnv.
 -- Called once at startup in Main.hs.
 productionAppEnv :: LogEnv -> ObservabilityEnv -> AppEnv
@@ -158,6 +161,7 @@ productionExtractionPort logEnv = ExtractionPort
             Just nodes -> pure $ Just $ tsNodesToExtraction GranularityFunction filePath nodes
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
+  , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
   , epExtractHaskellStub = extractHaskellStub
   , epExtractImageFile = \config fp -> extractImageFile config logEnv fp
   , epExtractImageFromBytes = \config fp bytes -> extractImageFromBytes config logEnv fp bytes

@@ -24,7 +24,7 @@
 #   graphos . --neo4j --neo4j-push http://localhost:7474            # Push to Neo4j
 #   graphos . --memgraph                                           # Export Cypher to graphos-out/
 #   graphos . --memgraph --memgraph-push bolt://localhost:7688     # Push to Memgraph
-#   graphos . --otel --metrics 9090 --debug                        # Full observability
+#   graphos . --otel --metrics 9190 --debug                        # Full observability
 #   graphos . --otel --otel-endpoint http://localhost:14319         # OTLP via OTel Collector (Docker Compose)
 #   graphos . --otel --otel-endpoint http://localhost:4318          # OTLP direct (local Tempo)
 
@@ -145,7 +145,7 @@ services:
       - tempo
 
   # ── Prometheus ─────────────────────────────────────────────────
-  # Scrapes metrics from Graphos (--metrics 9090) and the OTel Collector.
+  # Scrapes metrics from Graphos (--metrics 9190) and the OTel Collector.
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: graphos-prometheus

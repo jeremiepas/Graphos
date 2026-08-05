@@ -25,6 +25,10 @@ module Graphos.UseCase.Query
   , verdictThreshold
   , resultHash
   , findSuggestions
+  , SymbolResult(..)
+  , symbolLookup
+  , NeighborsResult(..)
+  , neighborhoodExpansion
   ) where
 
 import Data.Map.Strict (Map)
@@ -35,11 +39,14 @@ import qualified Data.Text as T
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing)
 import Data.List (sortOn)
+import GHC.Generics (Generic)
+import Control.DeepSeq (NFData(..))
+import Data.Aeson (ToJSON(..), object, (.=))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, shortestPath, depthFirstSearch, gNodes, gEdges
                             , articulationPoints, biconnectedComponents, dominators)
-import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet)
+import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet, bfsFrom, giLabelIndex, giAdj)
 import Graphos.Domain.Graph.Score
   ( MatchVerdict(..)
   , ScoredNode(..)
@@ -265,6 +272,124 @@ saveQueryResult outputDir question answer answerType sourceNodes = do
   writeFile filepath (T.unpack content)
   where
     quoteWrap t = "\"" <> t <> "\""
+
+-- ───────────────────────────────────────────────
+-- Symbol lookup and neighborhood expansion
+-- ───────────────────────────────────────────────
+
+-- | Result of an exact symbol lookup.
+-- Returns all matching nodes with their details.
+-- No fuzzy scoring, no BFS — just identifier match.
+data SymbolResult = SymbolResult
+  { srFound      :: ![ScoredNode]
+  , srNotFound   :: !Bool
+  , srSuggestions:: ![Text]
+  } deriving (Eq, Show, Generic)
+
+instance NFData SymbolResult
+
+instance ToJSON SymbolResult where
+  toJSON r = object
+    [ "found"       .= srFound r
+    , "not_found"   .= srNotFound r
+    , "suggestions" .= srSuggestions r
+    ]
+
+-- | Exact symbol lookup: case-sensitive first, then case-insensitive fallback.
+-- No fuzzy scoring, no BFS. Returns all matches with locations.
+symbolLookup :: Text -> Graph -> GraphIndex -> SymbolResult
+symbolLookup name g idx =
+  let lowerName = T.toLower name
+      labelIdx = giLabelIndex idx
+      nodeMap = gNodes g
+      exactHits = Map.findWithDefault [] name labelIdx
+      ciHits = if null exactHits
+                then Map.findWithDefault [] lowerName labelIdx
+                else []
+      allHitIds = if null exactHits then ciHits else exactHits
+      scoredNodes = [ ScoredNode
+                        { snNodeId      = nid
+                        , snLabel       = nodeLabel n
+                        , snScore       = if null exactHits then 0.5 else 1.0
+                        , snSourceFile  = nodeSourceFile n
+                        , snCommunityId = nodeCommunityId n
+                        }
+                    | nid <- allHitIds
+                    , Just n <- [Map.lookup nid nodeMap]
+                    ]
+      isNotFound = null allHitIds
+      suggestions = if isNotFound then findSuggestions [name] idx else []
+  in SymbolResult
+       { srFound       = scoredNodes
+       , srNotFound    = isNotFound
+       , srSuggestions = suggestions
+       }
+
+-- | Result of a neighborhood expansion from a known node.
+data NeighborsResult = NeighborsResult
+  { nrCenterNode :: !(Maybe NodeId)
+  , nrNodes     :: ![ScoredNode]
+  , nrEdges     :: ![(Text, Text, Text, Double)]
+  , nrMaxDepth  :: !Int
+  } deriving (Eq, Show, Generic)
+
+instance NFData NeighborsResult
+
+instance ToJSON NeighborsResult where
+  toJSON r = object
+    [ "center_node" .= nrCenterNode r
+    , "nodes"       .= nrNodes r
+    , "edges"       .= nrEdges r
+    , "max_depth"   .= nrMaxDepth r
+    ]
+
+-- | Neighborhood expansion from an exact node ID.
+-- BFS to `--depth` (default 2), proximity score = 1/(1+hops).
+-- Returns nodes ordered by proximity (closer hops first).
+neighborhoodExpansion :: NodeId -> Int -> Graph -> GraphIndex -> NeighborsResult
+neighborhoodExpansion startId depth g idx =
+  let nodeMap = gNodes g
+      adj = giAdj idx
+  in case Map.lookup startId adj of
+       Nothing -> NeighborsResult
+                    { nrCenterNode = Nothing
+                    , nrNodes      = []
+                    , nrEdges      = []
+                    , nrMaxDepth   = depth
+                    }
+       Just _ -> let expanded = bfsFrom idx startId depth
+                     scoredNodes = [ ScoredNode
+                                       { snNodeId      = nid
+                                       , snLabel       = nodeLabel n
+                                       , snScore       = proximityScore startId nid idx
+                                       , snSourceFile  = nodeSourceFile n
+                                       , snCommunityId = nodeCommunityId n
+                                       }
+                                   | nid <- Set.toList expanded
+                                   , Just n <- [Map.lookup nid nodeMap]
+                                   ]
+                     nodeLblMap = Map.fromList [(nid, nodeLabel n) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
+                     edges = [ ( fromMaybeLbl src nodeLblMap
+                               , fromMaybeLbl tgt nodeLblMap
+                               , relationToText (edgeRelation e)
+                               , unConfidence (edgeConfidence e)
+                               )
+                             | ((src, tgt), e) <- Map.toList (gEdges g)
+                             , src `Set.member` expanded
+                             , tgt `Set.member` expanded
+                             ]
+                 in NeighborsResult
+                      { nrCenterNode = Just startId
+                      , nrNodes      = sortOn (negate . snScore) scoredNodes
+                      , nrEdges      = edges
+                      , nrMaxDepth   = depth
+                      }
+
+-- | Compute proximity score: 1/(1+hops) where hops is the BFS distance.
+proximityScore :: NodeId -> NodeId -> GraphIndex -> Double
+proximityScore _start _target _idx = 1.0 -- Simplified: exact proximity requires full BFS tracking
+                                       -- which is done during expansion. This is a placeholder
+                                       -- that will be replaced in Task 6 with proper hop tracking.
 
 -- ───────────────────────────────────────────────
 -- Helpers
