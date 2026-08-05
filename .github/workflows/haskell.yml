@@ -10,10 +10,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GHC_VERSION: "9.10"
-  CABAL_VERSION: "3.14"
-
 permissions:
   contents: read
 
@@ -24,39 +20,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: haskell-actions/setup@v2
-        id: setup-haskell
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
         with:
-          ghc-version: ${{ env.GHC_VERSION }}
-          cabal-version: ${{ env.CABAL_VERSION }}
+          name: devenv
 
-      - name: Configure
-        run: cabal configure --enable-tests --flag dev -j4
-
-      - name: Freeze dependencies
-        run: cabal freeze
-
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.setup-haskell.outputs.cabal-store }}
-            dist-newstyle
-          key: ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-${{ hashFiles('cabal.project.freeze') }}
-          restore-keys: |
-            ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-
-
-      - name: Install dependencies
-        run: cabal build --only-dependencies all -j4
-
-      - name: Install test tooling
-        run: cabal install hspec-discover --install-method=copy -j4
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
 
       - name: Build
-        run: cabal build all -j4
+        run: devenv tasks run ci:build
 
       - name: Run tests
-        run: cabal test all
+        run: devenv tasks run ci:test
 
       - name: Install OpenSpec CLI
         run: npm install -g openspec
@@ -72,36 +49,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: haskell-actions/setup@v2
-        id: setup-haskell
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
         with:
-          ghc-version: ${{ env.GHC_VERSION }}
-          cabal-version: ${{ env.CABAL_VERSION }}
+          name: devenv
 
-      - name: Configure
-        run: cabal configure --enable-tests --flag dev -j4
-
-      - name: Freeze dependencies
-        run: cabal freeze
-
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.setup-haskell.outputs.cabal-store }}
-            dist-newstyle
-          key: ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-${{ hashFiles('cabal.project.freeze') }}
-          restore-keys: |
-            ${{ runner.os }}-ghc${{ env.GHC_VERSION }}-cabal-
-
-      - name: Build dependencies
-        run: cabal build --only-dependencies all -j4
-
-      - name: Install test tooling
-        run: cabal install hspec-discover --install-method=copy -j4
-
-      - name: Build
-        run: cabal build all -j4
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
 
       - name: Haddock
-        run: cabal haddock all
+        run: devenv tasks run ci:haddock

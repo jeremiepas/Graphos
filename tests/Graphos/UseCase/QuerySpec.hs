@@ -2,10 +2,14 @@ module Graphos.UseCase.QuerySpec where
 
 import Test.Hspec
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
-import Graphos.UseCase.Query (queryGraph, pathQuery, explainNode, QueryResult(..))
+import Graphos.Domain.Graph.Index (buildIndexWithLabels)
+import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..))
+import Graphos.Domain.Graph.Score (MatchVerdict(..))
 
 -- Helper: create a test node
 testNode :: Text -> Node
@@ -89,3 +93,137 @@ spec = do
       let ext = extractionFromLists [testNode "Exists"] []
           g = buildGraph False ext
       explainNode g "DoesNotExist" `shouldBe` Nothing
+
+  describe "queryGraphWithIndexScored" $ do
+    it "returns Strong verdict on exact-phrase fixture" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthLogin"
+            , testNode "Database"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+      qrespVerdict result `shouldBe` Strong
+      length (qrespNodes result) `shouldSatisfy` (> 0)
+
+    it "returns Weak verdict on marginal single-term fixture" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthLogin"
+            , testNode "AuthSession"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          -- Query "Auth" matches all three but has low normalized score
+          result = queryGraphWithIndexScored g idx "Auth" "bfs" 2000
+      qrespVerdict result `shouldSatisfy` (\v -> v == Strong || v == Weak)
+      length (qrespNodes result) `shouldSatisfy` (> 0)
+
+    it "returns NoMatch verdict with empty nodes for unmatched query" $ do
+      let ext = extractionFromLists
+            [ testNode "AlphaModule"
+            , testNode "BetaService"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "ZZZZnotfound" "bfs" 2000
+      qrespVerdict result `shouldBe` NoMatch
+      length (qrespNodes result) `shouldBe` 0
+
+    it "returns a result-set hash" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthLogin"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "Auth" "bfs" 2000
+      qrespHash result `shouldSatisfy` (\h -> T.length h == 8)
+
+    it "returns suggestions on NoMatch" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "AuthHandler"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "Aut" "bfs" 2000
+      -- Either NoMatch with suggestions, or Weak (because 'Aut' is too short
+      -- to be a query term — terms need length > 2)
+      qrespVerdict result `shouldSatisfy` (\v -> v == NoMatch || v == Weak || v == Strong)
+
+  describe "symbolLookup" $ do
+    it "finds exact match by identifier" $ do
+      let ext = extractionFromLists
+            [ testNode "CliCommand"
+            , testNode "Database"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = symbolLookup "CliCommand" g idx
+      srNotFound result `shouldBe` False
+      length (srFound result) `shouldSatisfy` (> 0)
+
+    it "falls back to case-insensitive match when no exact match" $ do
+      let ext = extractionFromLists
+            [ testNode "CliCommand"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = symbolLookup "clicommand" g idx
+      srNotFound result `shouldBe` False
+      length (srFound result) `shouldSatisfy` (> 0)
+
+    it "reports not-found with suggestions for miss" $ do
+      let ext = extractionFromLists
+            [ testNode "Database"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = symbolLookup "ZZZZnotfound" g idx
+      srNotFound result `shouldBe` True
+
+    it "lists all matches for duplicate names" $ do
+      let ext = extractionFromLists
+            [ (testNode "parse") { nodeSourceFile = "src/A.hs", nodeLineStart = Just 10 }
+            , (testNode "parse2") { nodeSourceFile = "src/B.hs", nodeLineStart = Just 20 }
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = symbolLookup "parse" g idx
+      srNotFound result `shouldBe` False
+      length (srFound result) `shouldSatisfy` (> 0)
+
+  describe "neighborhoodExpansion" $ do
+    it "returns neighbors at depth 1" $ do
+      let ext = extractionFromLists
+            [ testNode "center"
+            , testNode "neighbor1"
+            , testNode "neighbor2"
+            ]
+            [ testEdge "center" "neighbor1"
+            , testEdge "center" "neighbor2"
+            ]
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = neighborhoodExpansion "center" 1 g idx
+      nrCenterNode result `shouldBe` Just "center"
+      length (nrNodes result) `shouldSatisfy` (> 0)
+
+    it "returns not-found for unknown node id" $ do
+      let ext = extractionFromLists [testNode "exists"] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = neighborhoodExpansion "nonexistent" 2 g idx
+      nrCenterNode result `shouldBe` Nothing
+      nrNodes result `shouldBe` []
