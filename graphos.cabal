@@ -84,8 +84,12 @@ library
                       Graphos.UseCase.Ingest
                       Graphos.UseCase.IngestIndex
                       Graphos.UseCase.Benchmark
+                      -- UseCase - Scaffold
+                      Graphos.UseCase.Scaffold
                      -- UseCase - Query submodules
                      Graphos.UseCase.Query.Normalize
+                     Graphos.UseCase.Query.Refine
+                      Graphos.UseCase.Query.Render
                       -- UseCase - Detect submodules
                       Graphos.UseCase.Detect.Paper
                       -- UseCase - Context optimization
@@ -148,11 +152,13 @@ library
                      Graphos.Infrastructure.Server.MCP
                      Graphos.Infrastructure.Server.Static
                      -- Infrastructure - Tracking
-                     Graphos.Infrastructure.Tracking.Cost
-                     -- Infrastructure - Observability
-                     Graphos.Infrastructure.Observability.SDK
-                    -- Infrastructure - Git
-                    Graphos.Infrastructure.Git.Hook
+                      Graphos.Infrastructure.Tracking.Cost
+                      -- Infrastructure - Observability
+                      Graphos.Infrastructure.Observability.SDK
+                      -- Infrastructure - Scaffold
+                      Graphos.Infrastructure.Scaffold.Writer
+                     -- Infrastructure - Git
+                     Graphos.Infrastructure.Git.Hook
                     -- Infrastructure - Logging
                     Graphos.Infrastructure.Logging
                     -- Domain - Community
@@ -168,6 +174,10 @@ library
                       Graphos.Domain.Config.Export
                       Graphos.Domain.Config.Observability
                       Graphos.Domain.Config.Vision
+                     -- Domain - Scaffold
+                     Graphos.Domain.Scaffold
+                     -- CLI
+                     Graphos.CLI.Parser
 
   other-modules:
                     Paths_graphos
@@ -264,15 +274,22 @@ test-suite graphos-test
                     Graphos.UseCase.Extract.HaskellSpec
                     Graphos.UseCase.Extract.ImageSpec
                     Graphos.UseCase.QuerySpec
+                    Graphos.UseCase.Query.RefineSpec
                     Graphos.UseCase.SelectContextSpec
                     Graphos.UseCase.FormatContextSpec
                     Graphos.UseCase.ConversationSpec
+                    Graphos.Domain.Graph.ScoreSpec
+                    Graphos.Domain.Graph.IndexSpec
                     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
                     Graphos.Infrastructure.LSP.ClientSpec
                     Graphos.Infrastructure.LSP.TransportSpec
                     Graphos.Infrastructure.Observability.SDKSpec
-                    Graphos.Infrastructure.FileSystem.OfficeConvertSpec
-                    Graphos.Infrastructure.FileSystem.IgnoreSpec
+                     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
+                     Graphos.Infrastructure.FileSystem.IgnoreSpec
+                     Graphos.Infrastructure.Scaffold.WriterSpec
+                     Graphos.Domain.ScaffoldSpec
+                     Graphos.UseCase.ScaffoldSpec
+                     Graphos.CLI.ParserSpec
 
   build-depends:
       base
@@ -288,3 +305,4 @@ test-suite graphos-test
     , fgl-arbitrary        >= 0.2
     , process              >= 1.6
     , text
+    , temporary            >= 1.3

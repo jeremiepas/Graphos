@@ -253,6 +253,8 @@ findNearest vocab word =
 
 -- | Compute Damerau-Levenshtein distance, bounded at 2.
 -- Returns 3 if distance exceeds 2 (for pruning).
+-- Uses standard DP with early termination when minimum possible
+-- distance exceeds 2.
 boundedDL :: Text -> Text -> Int
 boundedDL a b
   | abs (T.length a - T.length b) > 2 = 3
@@ -261,20 +263,22 @@ boundedDL a b
     dl :: String -> String -> Int
     dl xs ys = go (length xs) (length ys)
       where
-        go 0 j = j
-        go i 0 = i
+        go 0 j = if j > 2 then 3 else j
+        go i 0 = if i > 2 then 3 else i
         go i j
-          | i + j > 6 = 3  -- early exit: already beyond bound
           | xa == xb  = go (i-1) (j-1)
-          | otherwise = 1 + min (min (go (i-1) j) (go i (j-1)))
-                                (transposition)
+          | otherwise =
+              let del = go (i-1) j
+                  ins = go i (j-1)
+                  sub = go (i-1) (j-1)
+                  trans = if i > 1 && j > 1 && xa == ys !! (j-2) && xb == xs !! (i-2)
+                          then go (i-2) (j-2)
+                          else 3
+                  m = min (min del ins) (min sub trans)
+              in if m >= 3 then 3 else 1 + m
           where
             xa = xs !! (i-1)
             xb = ys !! (j-1)
-            transposition
-              | i > 1 && j > 1 && xa == ys !! (j-2) && xb == xs !! (i-2)
-              = go (i-2) (j-2)
-              | otherwise = 3
 
 -- | Count of shared leading characters between two texts.
 sharedPrefixCount :: Text -> Text -> Int

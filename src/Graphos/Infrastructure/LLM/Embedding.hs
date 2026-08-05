@@ -12,6 +12,7 @@ import Control.Exception (catch, SomeException)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy.Char8 as BSL8
+import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -20,6 +21,7 @@ import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
 import Graphos.Domain.Config (EmbeddingConfig(..))
+import Graphos.Infrastructure.LLM.OpenAI (resolveEnvVars)
 
 -- | Generate an embedding vector for a text input using Ollama.
 -- Calls the OpenAI-compatible /embeddings endpoint.
@@ -38,12 +40,15 @@ generateEmbedding cfg inputText = catch (do
 
   BSL8.writeFile payloadPath payload
 
-  let curlArgs = [ "-s", "--max-time", "30"
+  let customHeaders = Map.toList (embHeaders cfg) >>= \(k, v) -> ["-H", k ++ ": " ++ resolveEnvVars v]
+      curlArgs = [ "-s", "--max-time", "30"
                  , "-X", "POST"
                  , "-H", "Content-Type: application/json"
-                 , "--data-binary", "@" ++ payloadPath
-                 , apiBase ++ "/embeddings"
                  ]
+                 ++ customHeaders
+                 ++ [ "--data-binary", "@" ++ payloadPath
+                    , apiBase ++ "/embeddings"
+                    ]
 
   (exitCode, stdout, stderr) <- readProcessWithExitCode "curl" curlArgs ""
 

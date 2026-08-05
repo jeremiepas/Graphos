@@ -120,29 +120,36 @@ lowerFirst (c:cs) = toLower c : cs
 -- Languages where LSP is mature (Haskell, Go, Rust) prefer LSP.
 defaultExtractors :: Map String ExtractorConfig
 defaultExtractors = Map.fromList
-  [ -- TypeScript: LSP is fragile (typescript-language-server crashes), prefer tree-sitter
+  [ -- TypeScript: tree-sitter (fast, reliable AST parsing; uncomment for LSP)
     (".ts",   ExtractorConfig ExtractTreeSitter (Just "typescript") (Just "typescript") Nothing)
   , (".tsx",  ExtractorConfig ExtractTreeSitter (Just "tsx")       (Just "typescriptreact") Nothing)
   , (".js",  ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascript") Nothing)
   , (".jsx", ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascriptreact") Nothing)
-  -- Mature LSP servers — prefer LSP for richer semantic info
-  , (".hs",  ExtractorConfig ExtractLSP Nothing (Just "haskell") Nothing)
-  , (".lhs", ExtractorConfig ExtractLSP Nothing (Just "haskell") Nothing)
-  , (".go",  ExtractorConfig ExtractLSP Nothing (Just "go") Nothing)
-  , (".rs",  ExtractorConfig ExtractLSP Nothing (Just "rust") Nothing)
-  , (".py",  ExtractorConfig ExtractLSP Nothing (Just "python") Nothing)
-  , (".pyw", ExtractorConfig ExtractLSP Nothing (Just "python") Nothing)
-  , (".c",   ExtractorConfig ExtractLSP Nothing (Just "c") Nothing)
-  , (".cpp", ExtractorConfig ExtractLSP Nothing (Just "cpp") Nothing)
-  , (".h",   ExtractorConfig ExtractLSP Nothing (Just "c") Nothing)
-  , (".hpp", ExtractorConfig ExtractLSP Nothing (Just "cpp") Nothing)
-  , (".nix", ExtractorConfig ExtractLSP Nothing (Just "nix") Nothing)
-  , (".rb",  ExtractorConfig ExtractLSP Nothing (Just "ruby") Nothing)
-  , (".java",ExtractorConfig ExtractLSP Nothing (Just "java") Nothing)
+    -- Haskell: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".hs",  ExtractorConfig ExtractTreeSitter (Just "haskell") (Just "haskell") Nothing)
+  , (".lhs", ExtractorConfig ExtractTreeSitter (Just "haskell") (Just "haskell") Nothing)
+    -- Go: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".go",  ExtractorConfig ExtractTreeSitter (Just "go") (Just "go") Nothing)
+    -- Rust: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".rs",  ExtractorConfig ExtractTreeSitter (Just "rust") (Just "rust") Nothing)
+    -- Python: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".py",  ExtractorConfig ExtractTreeSitter (Just "python") (Just "python") Nothing)
+  , (".pyw", ExtractorConfig ExtractTreeSitter (Just "python") (Just "python") Nothing)
+    -- C/C++: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".c",   ExtractorConfig ExtractTreeSitter (Just "c")   (Just "c") Nothing)
+  , (".cpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".h",   ExtractorConfig ExtractTreeSitter (Just "c")   (Just "c") Nothing)
+  , (".hpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+    -- Nix: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".nix", ExtractorConfig ExtractTreeSitter (Just "nix") (Just "nix") Nothing)
+    -- Ruby: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".rb",  ExtractorConfig ExtractTreeSitter (Just "ruby") (Just "ruby") Nothing)
+    -- Java: tree-sitter (zero-dependency; uncomment for LSP)
+  , (".java",ExtractorConfig ExtractTreeSitter (Just "java") (Just "java") Nothing)
     -- JSON: tree-sitter parser; data files collapse to one node per file
     -- so lock files and config JSON do not inflate the graph
   , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
-    -- Markdown: use tree-sitter mode with our built-in parser
+    -- Markdown: use tree-sitter mode with built-in parser
     -- (no external LSP server needed for docs)
   , (".md",  ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "markdown") Nothing)
   , (".rst", ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "rest") Nothing)

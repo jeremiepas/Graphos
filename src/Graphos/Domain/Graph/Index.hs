@@ -1,9 +1,10 @@
 -- | Graph index for fast query and traversal on large graphs.
 --
--- Two key optimizations:
+-- Key optimizations:
 --   1. Inverted label index: O(k) term lookup instead of O(N) full-scan
 --   2. Community reverse index: O(1) NodeId → CommunityId instead of O(C×M) linear scan
 --   3. Precomputed adjacency for direct BFS (no FGL conversion needed)
+--   4. Path index: lowercased source-file segments → NodeIds for path-scoped queries
 --
 -- Built once at load time, shared across all queries.
 -- Pure — no IO, fully testable.
@@ -19,12 +20,17 @@ module Graphos.Domain.Graph.Index
     -- * Queries
   , lookupTerm
   , findMatchingNodes
+  , lookupPath
+  , pathGlobFilter
   , communityOfNode
   , communityMembers
 
     -- * Direct BFS (no FGL conversion)
   , bfsFrom
   , bfsFromSet
+
+    -- * Glob matching (pure)
+  , matchGlob
   ) where
 
 import Data.Map.Strict (Map)
@@ -51,6 +57,11 @@ data GraphIndex = GraphIndex
     -- ^ Inverted index: lowercased word → NodeIds with that word in their label.
     --   Replaces O(N) full-scan with O(k×hits) where k = #query terms.
 
+  , giPathIndex     :: !(Map Text [NodeId])
+    -- ^ Path index: lowercased source-file path segments → NodeIds.
+    --   Enables path-scoped queries like "src/cli/**" and bare path terms "src/cli/commands".
+    --   Segments are split on '/' from nodeSourceFile.
+
   , giCommunityIdx  :: !(Map NodeId CommunityId)
     -- ^ Reverse index: NodeId → CommunityId.
     --   Replaces O(C×M) community-of scan with O(log N) lookup.
@@ -73,14 +84,14 @@ data GraphIndex = GraphIndex
 buildIndex :: Graph -> CommunityMap -> GraphIndex
 buildIndex g commMap =
   let labelIdx = buildLabelIndex (gNodes g)
+      pathIdx  = buildPathIndex (gNodes g)
       commIdx  = buildCommunityReverseIdx commMap
-      -- For undirected graphs, union forward and backward adjacency
-      -- so BFS can traverse in both directions.
       adj = if gDirected g
             then gAdjFwd g
             else Map.unionWith Set.union (gAdjFwd g) (gAdjBack g)
   in GraphIndex
        { giLabelIndex   = labelIdx
+       , giPathIndex    = pathIdx
        , giCommunityIdx = commIdx
        , giAdj          = adj
        }
@@ -92,12 +103,14 @@ buildIndexWithLabels :: Graph -> CommunityMap -> Map CommunityId Text -> GraphIn
 buildIndexWithLabels g commMap labels =
   let baseIdx  = buildLabelIndex (gNodes g)
       labelIdx = Map.unionWith (++) baseIdx (buildCommunityLabelIndex labels)
+      pathIdx  = buildPathIndex (gNodes g)
       commIdx  = buildCommunityReverseIdx commMap
       adj = if gDirected g
             then gAdjFwd g
             else Map.unionWith Set.union (gAdjFwd g) (gAdjBack g)
   in GraphIndex
        { giLabelIndex   = labelIdx
+       , giPathIndex    = pathIdx
        , giCommunityIdx = commIdx
        , giAdj          = adj
        }
@@ -137,6 +150,64 @@ communityOfNode nid idx = Map.lookup nid (giCommunityIdx idx)
 -- O(log C + M) where C = number of communities, M = members.
 communityMembers :: CommunityId -> CommunityMap -> [NodeId]
 communityMembers cid commMap = Map.findWithDefault [] cid commMap
+
+-- ───────────────────────────────────────────────
+-- Path index queries
+-- ───────────────────────────────────────────────
+
+-- | Look up node IDs whose source file contains a path segment.
+-- O(log N + hits). Lowercased lookup.
+lookupPath :: Text -> GraphIndex -> [NodeId]
+lookupPath segment idx = Map.findWithDefault [] (T.toLower segment) (giPathIndex idx)
+
+-- | Filter a set of candidate NodeIds by a path glob pattern.
+-- Requires the node map to look up source files.
+-- Supports `*` (any segment) and `**` (any depth).
+pathGlobFilter :: Map NodeId Node -> Text -> Set NodeId -> Set NodeId
+pathGlobFilter nodeMap pattern candidates =
+  Set.filter (\nid -> case Map.lookup nid nodeMap of
+                       Just n  -> matchGlob (T.toLower pattern) (T.toLower (nodeSourceFile n))
+                       Nothing -> False
+             ) candidates
+
+-- | Pure glob matching: supports `*` (matches any single path segment)
+-- and `**` (matches any number of path segments including zero).
+-- Both pattern and path should be lowercased before calling.
+matchGlob :: Text -> Text -> Bool
+matchGlob pattern path =
+  let pSegs = T.splitOn "/" pattern
+      sSegs = T.splitOn "/" path
+  in matchSegs pSegs sSegs
+
+-- | Match pattern segments against path segments.
+-- * matches exactly one segment
+-- ** matches zero or more segments
+matchSegs :: [Text] -> [Text] -> Bool
+matchSegs [] [] = True
+matchSegs [] _ = False
+matchSegs ("**":ps) ss = matchSegs ps ss || any (\k -> matchSegs ("**":ps) (drop k ss)) [1..length ss]
+matchSegs (p:ps) (s:ss)
+  | T.null p && T.null s = matchSegs ps ss
+  | segMatch p s          = matchSegs ps ss
+  | otherwise             = False
+matchSegs _ _ = False
+
+-- | Match a single segment pattern against a segment.
+-- * matches any segment; otherwise exact match.
+segMatch :: Text -> Text -> Bool
+segMatch pat seg
+  | pat == "*" = True
+  | T.null pat && T.null seg = True
+  | otherwise = wildcardMatch (T.unpack pat) (T.unpack seg)
+
+-- | Simple wildcard: * matches any characters within a segment.
+wildcardMatch :: String -> String -> Bool
+wildcardMatch [] [] = True
+wildcardMatch ('*':ps) ss = wildcardMatch ps ss || any (\k -> wildcardMatch ('*':ps) (drop k ss)) [1..length ss]
+wildcardMatch (p:ps) (s:ss)
+  | p == s || p == '?' = wildcardMatch ps ss
+  | otherwise = False
+wildcardMatch _ _ = False
 
 -- ───────────────────────────────────────────────
 -- Direct BFS (no FGL conversion)
@@ -198,6 +269,27 @@ buildLabelIndex nodeMap =
         , T.length (T.toLower (nodeLabel n)) > 2
         ]
   in Map.unionWith (++) splitTokens fullLabels
+
+-- | Build path index from node source files.
+-- Splits each source file on '/' into segments and indexes each
+-- segment → NodeId. Also indexes the full lowercased path for
+-- exact path matching. O(N) build time.
+buildPathIndex :: Map NodeId Node -> Map Text [NodeId]
+buildPathIndex nodeMap =
+  let segments = Map.fromListWith (++)
+        [ (seg, [nid])
+        | (nid, n) <- Map.toList nodeMap
+        , let src = nodeSourceFile n
+        , not (T.null src)
+        , seg <- T.splitOn "/" (T.toLower src)
+        , not (T.null seg)
+        ]
+      fullPaths = Map.fromListWith (++)
+        [ (T.toLower (nodeSourceFile n), [nid])
+        | (nid, n) <- Map.toList nodeMap
+        , not (T.null (nodeSourceFile n))
+        ]
+  in Map.unionWith (++) segments fullPaths
 
 -- | Expand camelCase and separator boundaries for tokenization.
 -- "AuthModule" → "Auth Module"  (then T.toLower → "auth module")
