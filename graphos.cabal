@@ -58,6 +58,7 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
+                    Graphos.Domain.Graph.Score
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
@@ -83,14 +84,27 @@ library
                       Graphos.UseCase.Ingest
                       Graphos.UseCase.IngestIndex
                       Graphos.UseCase.Benchmark
+                      -- UseCase - Scaffold
+                      Graphos.UseCase.Scaffold
                      -- UseCase - Query submodules
                      Graphos.UseCase.Query.Normalize
+                     Graphos.UseCase.Query.Refine
+                      Graphos.UseCase.Query.Render
                       -- UseCase - Detect submodules
                       Graphos.UseCase.Detect.Paper
-                     -- UseCase - Context optimization
-                     Graphos.UseCase.SelectContext
-                     Graphos.UseCase.FormatContext
-                     Graphos.UseCase.Conversation
+                      -- UseCase - Context optimization
+                      Graphos.UseCase.SelectContext
+                      Graphos.UseCase.FormatContext
+                      Graphos.UseCase.Conversation
+                      -- UseCase - Ports (dependency injection)
+                      Graphos.UseCase.Port.ExtractionPort
+                      Graphos.UseCase.Port.ExportPort
+                      Graphos.UseCase.Port.FileSystemPort
+                      Graphos.UseCase.Port.LoggingPort
+                      Graphos.UseCase.Port.ObservabilityPort
+                      Graphos.UseCase.Port.LLMPort
+                      -- UseCase - App environment
+                      Graphos.UseCase.AppEnv
                      -- Infrastructure - LSP
                      Graphos.Infrastructure.LSP.Client
                      Graphos.Infrastructure.LSP.Protocol
@@ -101,10 +115,14 @@ library
                        Graphos.Infrastructure.LSP.Extraction
                          -- Infrastructure - Config
                          Graphos.Infrastructure.Config
-                         -- Infrastructure - TreeSitter
-                         Graphos.Infrastructure.Extract.TreeSitter.Core
-                         Graphos.Infrastructure.Extract.TreeSitter.Grammar
-                         Graphos.Infrastructure.Extract.TreeSitter.Convert
+                      -- Infrastructure - Wiring
+                      Graphos.Infrastructure.Wiring
+                          -- Infrastructure - TreeSitter
+                          Graphos.Infrastructure.Extract.TreeSitter.Core
+                          Graphos.Infrastructure.Extract.TreeSitter.Grammar
+                          Graphos.Infrastructure.Extract.TreeSitter.Convert
+                      -- Infrastructure - PDF
+                      Graphos.Infrastructure.Extract.Pdf
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache
@@ -134,19 +152,32 @@ library
                      Graphos.Infrastructure.Server.MCP
                      Graphos.Infrastructure.Server.Static
                      -- Infrastructure - Tracking
-                     Graphos.Infrastructure.Tracking.Cost
-                     -- Infrastructure - Observability
-                     Graphos.Infrastructure.Observability.SDK
-                    -- Infrastructure - Git
-                    Graphos.Infrastructure.Git.Hook
+                      Graphos.Infrastructure.Tracking.Cost
+                      -- Infrastructure - Observability
+                      Graphos.Infrastructure.Observability.SDK
+                      -- Infrastructure - Scaffold
+                      Graphos.Infrastructure.Scaffold.Writer
+                     -- Infrastructure - Git
+                     Graphos.Infrastructure.Git.Hook
                     -- Infrastructure - Logging
                     Graphos.Infrastructure.Logging
                     -- Domain - Community
                       Graphos.Domain.Community.Label
                      -- Domain - Context optimization
                      Graphos.Domain.Context
-                     -- Domain - Config
-                     Graphos.Domain.Config
+                       -- Domain - PDF structure
+                       Graphos.Domain.PdfStructure
+                       -- Domain - Config
+                       Graphos.Domain.Config
+                      Graphos.Domain.Config.Core
+                      Graphos.Domain.Config.Extraction
+                      Graphos.Domain.Config.Export
+                      Graphos.Domain.Config.Observability
+                      Graphos.Domain.Config.Vision
+                     -- Domain - Scaffold
+                     Graphos.Domain.Scaffold
+                     -- CLI
+                     Graphos.CLI.Parser
 
   other-modules:
                     Paths_graphos
@@ -243,15 +274,22 @@ test-suite graphos-test
                     Graphos.UseCase.Extract.HaskellSpec
                     Graphos.UseCase.Extract.ImageSpec
                     Graphos.UseCase.QuerySpec
+                    Graphos.UseCase.Query.RefineSpec
                     Graphos.UseCase.SelectContextSpec
                     Graphos.UseCase.FormatContextSpec
                     Graphos.UseCase.ConversationSpec
+                    Graphos.Domain.Graph.ScoreSpec
+                    Graphos.Domain.Graph.IndexSpec
                     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
                     Graphos.Infrastructure.LSP.ClientSpec
                     Graphos.Infrastructure.LSP.TransportSpec
                     Graphos.Infrastructure.Observability.SDKSpec
-                    Graphos.Infrastructure.FileSystem.OfficeConvertSpec
-                    Graphos.Infrastructure.FileSystem.IgnoreSpec
+                     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
+                     Graphos.Infrastructure.FileSystem.IgnoreSpec
+                     Graphos.Infrastructure.Scaffold.WriterSpec
+                     Graphos.Domain.ScaffoldSpec
+                     Graphos.UseCase.ScaffoldSpec
+                     Graphos.CLI.ParserSpec
 
   build-depends:
       base
@@ -267,3 +305,4 @@ test-suite graphos-test
     , fgl-arbitrary        >= 0.2
     , process              >= 1.6
     , text
+    , temporary            >= 1.3

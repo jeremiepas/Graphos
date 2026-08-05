@@ -17,6 +17,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy.Char8 as BSL8
+import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -174,11 +175,13 @@ analyzeImage vCfg lCfg filePath = catch (do
           let authHeaders = if not (null apiKey)
                              then ["-H", "Authorization: Bearer " ++ apiKey]
                              else []
+              customHeaders = Map.toList (vcHeaders vCfg) >>= \(k, v) -> ["-H", k ++ ": " ++ resolveEnvVars v]
               curlArgs = [ "-s", "--max-time", "120"
                          , "-X", "POST"
                          , "-H", "Content-Type: application/json"
                          ]
                          ++ authHeaders
+                         ++ customHeaders
                          ++ [ "--data-binary", "@" ++ payloadPath
                             , apiBase ++ "/chat/completions"
                             ]

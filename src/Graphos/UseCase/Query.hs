@@ -2,9 +2,13 @@
 --
 -- Optimized: uses GraphIndex for O(k×hits) term lookup instead of O(N) full-scan,
 -- and direct adjacency-map BFS instead of FGL conversion.
+--
+-- Scored query path (improve-query-agent-ergonomics): verdict, scored nodes,
+-- did-you-mean suggestions, and result-set hash replace the legacy unscored path.
 module Graphos.UseCase.Query
   ( queryGraph
   , queryGraphWithIndex
+  , queryGraphWithIndexScored
   , pathQuery
   , pathQueryWithIndex
   , explainNode
@@ -14,6 +18,17 @@ module Graphos.UseCase.Query
   , queryBiconnectedComponents
   , queryDominatorTree
   , QueryResult(..)
+  , QueryResponse(..)
+  , MatchVerdict(..)
+  , ScoredNode(..)
+  , computeVerdict
+  , verdictThreshold
+  , resultHash
+  , findSuggestions
+  , SymbolResult(..)
+  , symbolLookup
+  , NeighborsResult(..)
+  , neighborhoodExpansion
   ) where
 
 import Data.Map.Strict (Map)
@@ -23,11 +38,26 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing)
+import Data.List (sortOn)
+import GHC.Generics (Generic)
+import Control.DeepSeq (NFData(..))
+import Data.Aeson (ToJSON(..), object, (.=))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, shortestPath, depthFirstSearch, gNodes, gEdges
                             , articulationPoints, biconnectedComponents, dominators)
-import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet)
+import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet, bfsFrom, giLabelIndex, giAdj)
+import Graphos.Domain.Graph.Score
+  ( MatchVerdict(..)
+  , ScoredNode(..)
+  , QueryResponse(..)
+  , computeVerdict
+  , verdictThreshold
+  , normalizeScore
+  , fullLabelBoost
+  , resultHash
+  , findSuggestions
+  )
 
 -- | Query result
 data QueryResult = QueryResult
@@ -76,6 +106,105 @@ queryGraph g query mode budget =
 
 fromMaybeLbl :: NodeId -> Map NodeId Text -> Text
 fromMaybeLbl nid m = Map.findWithDefault nid nid m
+
+-- | Extract the first whitespace-delimited token from a label.
+firstToken :: Text -> Text
+firstToken label =
+  case T.words (T.toLower label) of
+    (w:_) -> w
+    _     -> T.empty
+
+-- | Unwrap Confidence newtype to get the underlying Double.
+unConfidence :: Confidence -> Double
+unConfidence (Confidence d) = d
+
+-- | Scored query path — returns QueryResponse with verdict, scored nodes, and suggestions.
+--
+-- Normalized scoring = matched-terms / query-terms with exact full-label boost.
+-- No traversal when best score is 0 (deleted the degenerate-fallback path).
+-- Verdict thresholds: strong ≥ 0.5, weak > 0, none = 0.
+queryGraphWithIndexScored :: Graph -> GraphIndex -> Text -> Text -> Int -> QueryResponse
+queryGraphWithIndexScored g idx query mode _budget =
+  let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
+      -- Scored term matching via inverted index
+      matched :: [(NodeId, Int)]
+      matched = findMatchingNodes terms idx
+      -- Build score map: NodeId -> raw score
+      scoreMap :: Map NodeId Int
+      scoreMap = Map.fromList matched
+      -- Compute normalized scores with full-label boost
+      scoredPairs :: [(NodeId, Double)]
+      scoredPairs =
+        [ (nid, normalizeScore rawScore (length terms) + fullLabelBoost term (nodeLabel n))
+        | (nid, rawScore) <- matched
+        , Just n <- [Map.lookup nid (gNodes g)]
+        , let term = firstToken (nodeLabel n)
+        ]
+      bestScore :: Double
+      bestScore = case scoredPairs of
+        (_, s):_ -> s
+        []       -> 0
+      verdict :: MatchVerdict
+      verdict = computeVerdict bestScore
+      -- BFS from top-scoring nodes (only when not NoMatch)
+      topNodes :: [NodeId]
+      topNodes = take 5 [nid | (nid, _) <- scoredPairs]
+      expanded :: Set.Set NodeId
+      expanded = case verdict of
+        NoMatch -> Set.empty
+        _       -> if mode == T.pack "dfs"
+                    then Set.unions [depthFirstSearch g nid 6 | nid <- topNodes]
+                    else bfsFromSet idx (Set.fromList topNodes) 3
+      -- Gather scored nodes in the expanded subgraph
+      nodeMap :: Map NodeId Node
+      nodeMap = gNodes g
+      -- Build a quick lookup from scoreMap for expanded nodes
+      scoredNodes :: [ScoredNode]
+      scoredNodes =
+        [ ScoredNode
+            { snNodeId      = nid
+            , snLabel       = nodeLabel n
+            , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoost (firstToken (nodeLabel n)) (nodeLabel n)
+            , snSourceFile  = nodeSourceFile n
+            , snCommunityId = nodeCommunityId n
+            }
+        | nid <- Set.toList expanded
+        , Just n <- [Map.lookup nid nodeMap]
+        ]
+      -- Sort score-descending
+      scoredNodesSorted :: [ScoredNode]
+      scoredNodesSorted = sortOn (negate . snScore) scoredNodes
+      -- Edges within the subgraph
+      nodeLblMap :: Map NodeId Text
+      nodeLblMap = Map.fromList [(nid, nodeLabel n) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
+      edges :: [(Text, Text, Text, Double)]
+      edges =
+        [ ( fromMaybeLbl src nodeLblMap
+          , fromMaybeLbl tgt nodeLblMap
+          , relationToText (edgeRelation e)
+          , unConfidence (edgeConfidence e)
+          )
+        | ((src, tgt), e) <- Map.toList (gEdges g)
+        , src `Set.member` expanded
+        , tgt `Set.member` expanded
+        ]
+      -- Suggestions for NoMatch and Weak
+      suggestions :: [Text]
+      suggestions = case verdict of
+        NoMatch -> findSuggestions terms idx
+        Weak    -> findSuggestions terms idx
+        _       -> []
+      -- Result-set hash
+      hash :: Text
+      hash = resultHash [snNodeId n | n <- scoredNodesSorted]
+  in QueryResponse
+    { qrespVerdict     = verdict
+    , qrespBestScore   = bestScore
+    , qrespHash        = hash
+    , qrespNodes       = scoredNodesSorted
+    , qrespEdges       = edges
+    , qrespSuggestions = suggestions
+    }
 
 -- | Find shortest path between two concepts (using index for fast node lookup)
 pathQueryWithIndex :: Graph -> GraphIndex -> Text -> Text -> Maybe [NodeId]
@@ -143,6 +272,124 @@ saveQueryResult outputDir question answer answerType sourceNodes = do
   writeFile filepath (T.unpack content)
   where
     quoteWrap t = "\"" <> t <> "\""
+
+-- ───────────────────────────────────────────────
+-- Symbol lookup and neighborhood expansion
+-- ───────────────────────────────────────────────
+
+-- | Result of an exact symbol lookup.
+-- Returns all matching nodes with their details.
+-- No fuzzy scoring, no BFS — just identifier match.
+data SymbolResult = SymbolResult
+  { srFound      :: ![ScoredNode]
+  , srNotFound   :: !Bool
+  , srSuggestions:: ![Text]
+  } deriving (Eq, Show, Generic)
+
+instance NFData SymbolResult
+
+instance ToJSON SymbolResult where
+  toJSON r = object
+    [ "found"       .= srFound r
+    , "not_found"   .= srNotFound r
+    , "suggestions" .= srSuggestions r
+    ]
+
+-- | Exact symbol lookup: case-sensitive first, then case-insensitive fallback.
+-- No fuzzy scoring, no BFS. Returns all matches with locations.
+symbolLookup :: Text -> Graph -> GraphIndex -> SymbolResult
+symbolLookup name g idx =
+  let lowerName = T.toLower name
+      labelIdx = giLabelIndex idx
+      nodeMap = gNodes g
+      exactHits = Map.findWithDefault [] name labelIdx
+      ciHits = if null exactHits
+                then Map.findWithDefault [] lowerName labelIdx
+                else []
+      allHitIds = if null exactHits then ciHits else exactHits
+      scoredNodes = [ ScoredNode
+                        { snNodeId      = nid
+                        , snLabel       = nodeLabel n
+                        , snScore       = if null exactHits then 0.5 else 1.0
+                        , snSourceFile  = nodeSourceFile n
+                        , snCommunityId = nodeCommunityId n
+                        }
+                    | nid <- allHitIds
+                    , Just n <- [Map.lookup nid nodeMap]
+                    ]
+      isNotFound = null allHitIds
+      suggestions = if isNotFound then findSuggestions [name] idx else []
+  in SymbolResult
+       { srFound       = scoredNodes
+       , srNotFound    = isNotFound
+       , srSuggestions = suggestions
+       }
+
+-- | Result of a neighborhood expansion from a known node.
+data NeighborsResult = NeighborsResult
+  { nrCenterNode :: !(Maybe NodeId)
+  , nrNodes     :: ![ScoredNode]
+  , nrEdges     :: ![(Text, Text, Text, Double)]
+  , nrMaxDepth  :: !Int
+  } deriving (Eq, Show, Generic)
+
+instance NFData NeighborsResult
+
+instance ToJSON NeighborsResult where
+  toJSON r = object
+    [ "center_node" .= nrCenterNode r
+    , "nodes"       .= nrNodes r
+    , "edges"       .= nrEdges r
+    , "max_depth"   .= nrMaxDepth r
+    ]
+
+-- | Neighborhood expansion from an exact node ID.
+-- BFS to `--depth` (default 2), proximity score = 1/(1+hops).
+-- Returns nodes ordered by proximity (closer hops first).
+neighborhoodExpansion :: NodeId -> Int -> Graph -> GraphIndex -> NeighborsResult
+neighborhoodExpansion startId depth g idx =
+  let nodeMap = gNodes g
+      adj = giAdj idx
+  in case Map.lookup startId adj of
+       Nothing -> NeighborsResult
+                    { nrCenterNode = Nothing
+                    , nrNodes      = []
+                    , nrEdges      = []
+                    , nrMaxDepth   = depth
+                    }
+       Just _ -> let expanded = bfsFrom idx startId depth
+                     scoredNodes = [ ScoredNode
+                                       { snNodeId      = nid
+                                       , snLabel       = nodeLabel n
+                                       , snScore       = proximityScore startId nid idx
+                                       , snSourceFile  = nodeSourceFile n
+                                       , snCommunityId = nodeCommunityId n
+                                       }
+                                   | nid <- Set.toList expanded
+                                   , Just n <- [Map.lookup nid nodeMap]
+                                   ]
+                     nodeLblMap = Map.fromList [(nid, nodeLabel n) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
+                     edges = [ ( fromMaybeLbl src nodeLblMap
+                               , fromMaybeLbl tgt nodeLblMap
+                               , relationToText (edgeRelation e)
+                               , unConfidence (edgeConfidence e)
+                               )
+                             | ((src, tgt), e) <- Map.toList (gEdges g)
+                             , src `Set.member` expanded
+                             , tgt `Set.member` expanded
+                             ]
+                 in NeighborsResult
+                      { nrCenterNode = Just startId
+                      , nrNodes      = sortOn (negate . snScore) scoredNodes
+                      , nrEdges      = edges
+                      , nrMaxDepth   = depth
+                      }
+
+-- | Compute proximity score: 1/(1+hops) where hops is the BFS distance.
+proximityScore :: NodeId -> NodeId -> GraphIndex -> Double
+proximityScore _start _target _idx = 1.0 -- Simplified: exact proximity requires full BFS tracking
+                                       -- which is done during expansion. This is a placeholder
+                                       -- that will be replaced in Task 6 with proper hop tracking.
 
 -- ───────────────────────────────────────────────
 -- Helpers

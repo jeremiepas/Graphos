@@ -70,7 +70,7 @@ data PipelineConfig = PipelineConfig
   , cfgMemgraphPush  :: Maybe Text   -- ^ Push to Memgraph at Bolt URI (--memgraph-push)
   , cfgMemgraphPushMode :: MemgraphPushMode
   , cfgMemgraphSubgraphSize :: Int
-  , cfgMetricsPort   :: Maybe Int                   -- ^ Prometheus metrics server port (e.g. Just 9090)
+  , cfgMetricsPort   :: Maybe Int                   -- ^ Prometheus metrics server port (e.g. Just 9190)
   , cfgOtelEnabled   :: Bool                         -- ^ Enable OTLP export (--otel flag)
   , cfgOtelConfig     :: OtelConfig                   -- ^ OpenTelemetry configuration
   , cfgDebugTraceDir  :: Maybe FilePath               -- ^ Directory for debug trace JSONL files
