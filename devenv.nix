@@ -15,6 +15,7 @@ let
     uv
     nixd
     vscode-langservers-extracted
+    openspec
   ];
 in
 {
@@ -34,6 +35,27 @@ in
     ]
     ++ systemDeps
     ++ tooling;
+
+  # CI tasks - runnable locally and in CI
+  tasks = {
+    "ci:build" = {
+      exec = ''cabal configure --enable-tests --flag dev -j4 && cabal build all -j4'';
+    };
+    "ci:test" = {
+      exec = "cabal test all";
+      after = [ "ci:build@succeeded" ];
+    };
+    "ci:haddock" = {
+      exec = "cabal haddock all";
+      after = [ "ci:build@succeeded" ];
+    };
+    "ci:release-build" = {
+      exec = "cabal configure --enable-tests && cabal build all";
+    };
+    "ci:release-test" = {
+      exec = "cabal test all";
+    };
+  };
 
   # mgconsole script: remap host port 7688 -> container port 7687
   scripts.mgconsole.exec = ''

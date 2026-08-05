@@ -13,6 +13,8 @@ module Graphos.Domain.Config.Vision
 
 import Data.Aeson (ToJSON(..), FromJSON(..), genericToJSON, withObject, (.:?), (.!=))
 import Data.Aeson.Types (defaultOptions, fieldLabelModifier)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Graphos.Domain.Config.Extraction (lowerFirst)
 import GHC.Generics (Generic)
 
@@ -25,11 +27,12 @@ import GHC.Generics (Generic)
 --
 -- All fields are optional in graphos.yaml — missing values fall back to defaults.
 data LabelingConfig = LabelingConfig
-  { labelingProvider  :: String  -- ^ Provider: "openai" | "ollama" | "litellm"
-  , labelingModel     :: String  -- ^ Model name: "gpt-4o-mini" | "llama3" etc.
-  , labelingApiKey    :: String  -- ^ API key (env var ${VAR} resolved at runtime)
-  , labelingBaseUrl   :: String  -- ^ API base URL (e.g. "https://api.openai.com/v1")
-  , labelingBatchSize :: Int     -- ^ Communities per LLM call (default: 10)
+  { labelingProvider  :: String            -- ^ Provider: "ollama" | "openai" | "litellm"
+  , labelingModel     :: String            -- ^ Model name: "llama3.2" | "gpt-4o-mini" etc.
+  , labelingApiKey    :: String            -- ^ API key (env var ${VAR} resolved at runtime; empty for Ollama)
+  , labelingBaseUrl   :: String            -- ^ API base URL (e.g. "http://localhost:11434/v1")
+  , labelingBatchSize :: Int               -- ^ Communities per LLM call (default: 20)
+  , labelingHeaders   :: Map String String -- ^ Custom HTTP headers (env vars in values resolved at runtime)
   } deriving (Eq, Show, Generic)
 
 instance ToJSON LabelingConfig where
@@ -38,20 +41,22 @@ instance ToJSON LabelingConfig where
 -- | Custom FromJSON: all fields optional with sensible defaults for graphos.yaml.
 instance FromJSON LabelingConfig where
   parseJSON = withObject "LabelingConfig" $ \v -> LabelingConfig
-    <$> v .:? "provider"   .!= "openai"
-    <*> v .:? "model"      .!= "gpt-4o-mini"
-    <*> v .:? "apiKey"     .!= "${OPENAI_API_KEY}"
-    <*> v .:? "baseUrl"    .!= "https://api.openai.com/v1"
-    <*> v .:? "batchSize"  .!= 10
+    <$> v .:? "provider"   .!= "ollama"
+    <*> v .:? "model"      .!= "llama3.2"
+    <*> v .:? "apiKey"     .!= ""
+    <*> v .:? "baseUrl"    .!= "http://localhost:11434/v1"
+    <*> v .:? "batchSize"  .!= 20
+    <*> v .:? "headers"    .!= Map.empty
 
--- | Default labeling configuration (OpenAI gpt-4o-mini).
+-- | Default labeling configuration (local Ollama llama3.2).
 defaultLabelingConfig :: LabelingConfig
 defaultLabelingConfig = LabelingConfig
-  { labelingProvider  = "openai"
-  , labelingModel     = "gpt-4o-mini"
-  , labelingApiKey    = "${OPENAI_API_KEY}"
-  , labelingBaseUrl   = "https://api.openai.com/v1"
-  , labelingBatchSize = 10
+  { labelingProvider  = "ollama"
+  , labelingModel     = "llama3.2"
+  , labelingApiKey    = ""
+  , labelingBaseUrl   = "http://localhost:11434/v1"
+  , labelingBatchSize = 20
+  , labelingHeaders   = Map.empty
   }
 
 -- ───────────────────────────────────────────────
@@ -65,11 +70,12 @@ defaultLabelingConfig = LabelingConfig
 -- Targets small local models (nomic-embed-text, all-minilm) via
 -- Ollama's OpenAI-compatible /embeddings endpoint.
 data EmbeddingConfig = EmbeddingConfig
-  { embEnabled   :: Bool     -- ^ Enable embedding generation (default: False)
-  , embProvider  :: String   -- ^ Provider: "ollama" (only local for now)
-  , embModel     :: String   -- ^ Model name (e.g. "nomic-embed-text")
-  , embBaseUrl   :: String   -- ^ Ollama API base URL (e.g. "http://localhost:11434/v1")
-  , embDimension :: Int      -- ^ Embedding vector dimension (0 = auto-detect from model)
+  { embEnabled   :: Bool               -- ^ Enable embedding generation (default: False)
+  , embProvider  :: String             -- ^ Provider: "ollama" (only local for now)
+  , embModel     :: String             -- ^ Model name (e.g. "nomic-embed-text")
+  , embBaseUrl   :: String             -- ^ Ollama API base URL (e.g. "http://localhost:11434/v1")
+  , embDimension :: Int                -- ^ Embedding vector dimension (0 = auto-detect from model)
+  , embHeaders   :: Map String String  -- ^ Custom HTTP headers for embedding API calls
   } deriving (Eq, Show, Generic)
 
 instance ToJSON EmbeddingConfig where
@@ -82,6 +88,7 @@ instance FromJSON EmbeddingConfig where
     <*> v .:? "model"     .!= "nomic-embed-text"
     <*> v .:? "baseUrl"   .!= "http://localhost:11434/v1"
     <*> v .:? "dimension" .!= 0
+    <*> v .:? "headers"   .!= Map.empty
 
 -- | Default embedding configuration (disabled, local Ollama).
 defaultEmbeddingConfig :: EmbeddingConfig
@@ -91,6 +98,7 @@ defaultEmbeddingConfig = EmbeddingConfig
   , embModel     = "nomic-embed-text"
   , embBaseUrl   = "http://localhost:11434/v1"
   , embDimension = 0
+  , embHeaders   = Map.empty
   }
 
 -- ───────────────────────────────────────────────
@@ -104,12 +112,13 @@ defaultEmbeddingConfig = EmbeddingConfig
 -- When apiKey or baseUrl are not explicitly set, they inherit from
 -- labeling config. Vision is disabled by default.
 data VisionConfig = VisionConfig
-  { vcEnabled   :: Bool     -- ^ Enable vision analysis (default: False)
-  , vcModel     :: String   -- ^ Model name (e.g. "qwen3.6-moe", "gpt-4o")
-  , vcApiKey    :: String   -- ^ API key (env var ${VAR} resolved at runtime)
-  , vcBaseUrl   :: String   -- ^ API base URL (e.g. "http://localhost:11434/v1")
-  , vcMaxTokens :: Int      -- ^ Max tokens for vision response (default: 1000)
-  , vcBatchSize :: Int      -- ^ Images per batch with GC between (default: 5)
+  { vcEnabled   :: Bool                -- ^ Enable vision analysis (default: False)
+  , vcModel     :: String              -- ^ Model name (e.g. "qwen3.6-moe", "gpt-4o")
+  , vcApiKey    :: String              -- ^ API key (env var ${VAR} resolved at runtime; empty for Ollama)
+  , vcBaseUrl   :: String              -- ^ API base URL (e.g. "http://localhost:11434/v1")
+  , vcMaxTokens :: Int                 -- ^ Max tokens for vision response (default: 1000)
+  , vcBatchSize :: Int                 -- ^ Images per batch with GC between (default: 5)
+  , vcHeaders   :: Map String String   -- ^ Custom HTTP headers for vision API calls
   } deriving (Eq, Show, Generic)
 
 instance ToJSON VisionConfig where
@@ -119,18 +128,20 @@ instance FromJSON VisionConfig where
   parseJSON = withObject "VisionConfig" $ \v -> VisionConfig
     <$> v .:? "enabled"    .!= False
     <*> v .:? "model"       .!= "qwen3.6-moe"
-    <*> v .:? "apiKey"      .!= "${OPENAI_API_KEY}"
+    <*> v .:? "apiKey"      .!= ""
     <*> v .:? "baseUrl"     .!= "http://localhost:11434/v1"
     <*> v .:? "maxTokens"   .!= 1000
     <*> v .:? "batchSize"   .!= 5
+    <*> v .:? "headers"     .!= Map.empty
 
 -- | Default vision configuration (disabled, local Ollama qwen3.6-moe).
 defaultVisionConfig :: VisionConfig
 defaultVisionConfig = VisionConfig
   { vcEnabled   = False
   , vcModel     = "qwen3.6-moe"
-  , vcApiKey    = "${OPENAI_API_KEY}"
+  , vcApiKey    = ""
   , vcBaseUrl   = "http://localhost:11434/v1"
   , vcMaxTokens = 1000
   , vcBatchSize = 5
+  , vcHeaders   = Map.empty
   }

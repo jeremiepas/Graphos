@@ -50,6 +50,7 @@ data ExtractionPort = ExtractionPort
     -- File-level extraction (delegates to sub-modules)
   , epExtractDocFile       :: FilePath -> IO Extraction
   , epExtractOfficeFile    :: PipelineConfig -> FilePath -> IO Extraction
+  , epExtractPdfFile       :: PipelineConfig -> FilePath -> IO Extraction
   , epExtractHaskellStub   :: FilePath -> IO Extraction
   , epExtractImageFile     :: PipelineConfig -> FilePath -> IO Extraction
   , epExtractImageFromBytes :: PipelineConfig -> FilePath -> ByteString -> IO Extraction

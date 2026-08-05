@@ -49,12 +49,13 @@ extractAll appEnv config detection = do
       docFiles  = Map.findWithDefault [] DocFiles  (detectionFiles detection)
       officeFiles = Map.findWithDefault [] OfficeFiles (detectionFiles detection)
       imageFiles = Map.findWithDefault [] ImageFiles (detectionFiles detection)
+      paperFiles = Map.findWithDefault [] PaperFiles (detectionFiles detection)
       numThreads = max 1 (cfgThreads config)
       vCfg = gcVision (cfgGraphosConfig config)
 
   absRoot <- canonicalizePath (cfgInputPath config)
 
-  logInfo $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files, " ++ show (length officeFiles) ++ " office files, " ++ show (length imageFiles) ++ " image files"
+  logInfo $ T.pack $ "  Processing " ++ show (length codeFiles) ++ " code files, " ++ show (length docFiles) ++ " doc files, " ++ show (length officeFiles) ++ " office files, " ++ show (length imageFiles) ++ " image files, " ++ show (length paperFiles) ++ " paper files"
   logInfo $ T.pack $ "  Granularity: " ++ granularityName (resolveGranularity (cfgGranularity config) (cfgGraphosConfig config) "") ++ case cfgGranularity config of
     Just _  -> " (CLI override)"
     Nothing -> ""
@@ -82,6 +83,8 @@ extractAll appEnv config detection = do
   officeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
   imageNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
   imageEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  paperNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
+  paperEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
 
   let -- Merge a single file's extraction into the accumulator.
       accumulateNodes :: IORef (Map.Map NodeId Node) -> [Node] -> IO ()
@@ -195,53 +198,81 @@ extractAll appEnv config detection = do
                 performGC
                 ) chunks
           logDebug "  [office] Extraction complete"
-      )
-    )
-    (void $ concurrently
-      -- Doc extraction
-      (do
-        logDebug $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files (threads: " ++ show docThreads ++ ")"
-        if docThreads <= 1
-          then mapM_ (\fp -> do
-            ext <- epExtractDocFile ep fp
-            epPushExtractionStreaming ep config ext
-            accumulate docNodeMapRef docEdgeAccRef ext
-            ) docFiles
-          else do
-            sem <- newQSemN docThreads
-            let chunks = chunkList 500 docFiles
-            mapM_ (\chunk -> do
-              results <- mapConcurrently (\fp -> bracket_
-                (waitQSemN sem 1)
-                (signalQSemN sem 1)
-                (epExtractDocFile ep fp)) chunk
-              mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
-              n <- readIORef docNodeMapRef >>= evaluate . Map.size
-              _ <- evaluate n
-              performGC
-              ) chunks
-        logDebug "  [doc] Extraction complete"
-      )
-      -- Image extraction
-      (do
-        unless (null allImageSources) $ do
-          logDebug $ T.pack $ "  [image] Starting extraction for " ++ show (length imageFiles) ++ " standalone + " ++ show (length embeddedImagesList) ++ " embedded images (batch: " ++ show imageBatchSize ++ ")"
-          let imageChunks = chunkList imageBatchSize allImageSources
-          mapM_ (\chunk -> do
-            results <- mapM (extractImageSource appEnv config) chunk
-            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate imageNodeMapRef imageEdgeAccRef ext) results
-            n <- readIORef imageNodeMapRef >>= evaluate . Map.size
-            _ <- evaluate n
-            performGC
-            ) imageChunks
-          logDebug "  [image] Extraction complete"
-        unless (null allImageSources) $ do
-          n <- readIORef imageNodeMapRef >>= evaluate . Map.size
-          logInfo $ T.pack $ "  [image] Produced " ++ show n ++ " image nodes"
-      )
-    )
+       )
+     )
+     (void $ concurrently
+       -- Doc extraction
+       (do
+         logDebug $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files (threads: " ++ show docThreads ++ ")"
+         if docThreads <= 1
+           then mapM_ (\fp -> do
+             ext <- epExtractDocFile ep fp
+             epPushExtractionStreaming ep config ext
+             accumulate docNodeMapRef docEdgeAccRef ext
+             ) docFiles
+           else do
+             sem <- newQSemN docThreads
+             let chunks = chunkList 500 docFiles
+             mapM_ (\chunk -> do
+               results <- mapConcurrently (\fp -> bracket_
+                 (waitQSemN sem 1)
+                 (signalQSemN sem 1)
+                 (epExtractDocFile ep fp)) chunk
+               mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
+               n <- readIORef docNodeMapRef >>= evaluate . Map.size
+               _ <- evaluate n
+               performGC
+               ) chunks
+         logDebug "  [doc] Extraction complete"
+       )
+       (void $ concurrently
+         -- Image extraction
+         (do
+           unless (null allImageSources) $ do
+             logDebug $ T.pack $ "  [image] Starting extraction for " ++ show (length imageFiles) ++ " standalone + " ++ show (length embeddedImagesList) ++ " embedded images (batch: " ++ show imageBatchSize ++ ")"
+             let imageChunks = chunkList imageBatchSize allImageSources
+             mapM_ (\chunk -> do
+               results <- mapM (extractImageSource appEnv config) chunk
+               mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate imageNodeMapRef imageEdgeAccRef ext) results
+               n <- readIORef imageNodeMapRef >>= evaluate . Map.size
+               _ <- evaluate n
+               performGC
+               ) imageChunks
+             logDebug "  [image] Extraction complete"
+           unless (null allImageSources) $ do
+             n <- readIORef imageNodeMapRef >>= evaluate . Map.size
+             logInfo $ T.pack $ "  [image] Produced " ++ show n ++ " image nodes"
+         )
+         -- Paper (PDF) extraction
+         (do
+           unless (null paperFiles) $ do
+             logInfo $ T.pack $ "  [paper] Starting extraction for " ++ show (length paperFiles) ++ " paper files"
+             let paperThreadCount = max 1 (min 4 numThreads)
+             if paperThreadCount <= 1
+               then mapM_ (\fp -> do
+                 ext <- epExtractPdfFile ep config fp
+                 epPushExtractionStreaming ep config ext
+                 accumulate paperNodeMapRef paperEdgeAccRef ext
+                 ) paperFiles
+               else do
+                 sem <- newQSemN paperThreadCount
+                 let chunks = chunkList 50 paperFiles
+                 mapM_ (\chunk -> do
+                   results <- mapConcurrently (\fp -> bracket_
+                     (waitQSemN sem 1)
+                     (signalQSemN sem 1)
+                     (epExtractPdfFile ep config fp)) chunk
+                   mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext) results
+                   n <- readIORef paperNodeMapRef >>= evaluate . Map.size
+                   _ <- evaluate n
+                   performGC
+                   ) chunks
+           logDebug "  [paper] Extraction complete"
+         )
+       )
+     )
 
-  logDebug "  [extract] Code + doc + office + image extraction complete"
+  logDebug "  [extract] Code + doc + office + image + paper extraction complete"
 
   -- Build final Extraction from accumulators
   codeNodeMap <- readIORef codeNodeMapRef
@@ -252,8 +283,10 @@ extractAll appEnv config detection = do
   officeEdgeAcc <- readIORef officeEdgeAccRef
   imageNodeMap <- readIORef imageNodeMapRef
   imageEdgeAcc <- readIORef imageEdgeAccRef
-  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap `Map.union` imageNodeMap
-      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc (imageEdgeAcc [])))
+  paperNodeMap <- readIORef paperNodeMapRef
+  paperEdgeAcc <- readIORef paperEdgeAccRef
+  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap `Map.union` imageNodeMap `Map.union` paperNodeMap
+      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc (imageEdgeAcc (paperEdgeAcc []))))
       merged = Extraction
         { extractionNodes = mergedNodeMap
         , extractionEdges = Map.fromList [(edgeId e, e) | e <- mergedEdgeList]

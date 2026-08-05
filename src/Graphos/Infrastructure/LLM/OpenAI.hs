@@ -60,11 +60,15 @@ callLLM cfg prompt = catch (do
   let authHeaders = if not (null apiKey) && labelingProvider cfg /= "ollama"
                       then ["-H", "Authorization: Bearer " ++ apiKey]
                       else []
+      customHeaders = Map.toList (labelingHeaders cfg) >>= \(k, v) -> ["-H", k ++ ": " ++ resolveEnvVars v]
+      -- Custom headers override Authorization on collision (applied after, so they win)
+      -- Env var expansion ${VAR} is resolved in header values
       curlArgs = [ "-s", "--max-time", "60"
                   , "-X", "POST"
                   , "-H", "Content-Type: application/json"
                   ]
                   ++ authHeaders
+                  ++ customHeaders
                   ++ [ "--data-binary", "@" ++ payloadPath
                      , apiBase ++ "/chat/completions"
                      ]
