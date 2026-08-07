@@ -25,5 +25,5 @@ traces/
 monitoring/prometheus/data/
 monitoring/grafana/data/
 .direnv/
-.devenv*
+.devenv/
 .devenv.flake.nix
