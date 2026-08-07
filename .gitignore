@@ -26,4 +26,3 @@ monitoring/prometheus/data/
 monitoring/grafana/data/
 .direnv/
 .devenv/
-.devenv.flake.nix
