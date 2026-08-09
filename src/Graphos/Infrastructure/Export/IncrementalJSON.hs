@@ -10,6 +10,7 @@ module Graphos.Infrastructure.Export.IncrementalJSON
   , writeCohesion
   , writeGodNodes
   , writeAnalysisTail
+  , writeCommunityAggregates
   ) where
 
 import Data.Aeson (encode)
@@ -102,3 +103,8 @@ writeAnalysisTail iw mLabels = do
       writeKey iw "\"community_labels\""
       BSL.hPut (iwHandle iw) (encode labels)
     Nothing -> pure ()
+
+writeCommunityAggregates :: IncrementalWriter -> [CommunityAggregate] -> IO ()
+writeCommunityAggregates iw aggregates = do
+  writeKey iw "\"community_aggregates\""
+  BSL.hPut (iwHandle iw) (encode aggregates)

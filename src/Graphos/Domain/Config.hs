@@ -11,6 +11,10 @@ module Graphos.Domain.Config
   , Granularity(..)
   , defaultGranularity
 
+    -- * PDF extraction modes
+  , PdfExtractionMode(..)
+  , defaultPdfExtractionMode
+
     -- * LSP configuration
   , LSPServerConfig(..)
   , defaultLSPServers

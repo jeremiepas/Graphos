@@ -23,10 +23,10 @@ import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(.
 import Graphos.Domain.Config.Extraction (Granularity(..))
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
-import Graphos.UseCase.Port.ExportPort (ExportPort(..))
+import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
-import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..))
+import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..), ImageAnalysis(..), ImageKind(..), Entity(..))
 
 -- Infrastructure imports (only Wiring imports Infrastructure directly)
@@ -35,6 +35,13 @@ import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
+import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
+import qualified Graphos.Infrastructure.Export.Obsidian as ExportObsidian
+import qualified Graphos.Infrastructure.Export.Report as ExportReport
+import qualified Graphos.Infrastructure.Export.Memgraph as ExportMemgraph
+import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
+import qualified Graphos.Infrastructure.Export.CommunityGraph as CommunityGraph
+import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint )
 import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns)
@@ -44,8 +51,8 @@ import Graphos.Infrastructure.Logging
   ( LogEnv, logInfo, logDebug, logTrace, logWarn, logError )
 import Graphos.Infrastructure.Observability.SDK
   ( ObservabilityEnv(..)
-  , shutdownObservability, incCounter, setGauge
-  , debugTraceEvent
+  , shutdownObservability, incCounter, setGauge, observeHistogram
+  , debugTraceEvent, debugTraceSpan
   )
 import qualified Graphos.Infrastructure.LLM.OpenAI as OpenAI
 import qualified Graphos.Infrastructure.LLM.Embedding as Emb
@@ -65,6 +72,7 @@ import Graphos.UseCase.Extract.Markdown (extractDocFile)
 import Graphos.UseCase.Extract.Office (extractOfficeFile)
 import Graphos.UseCase.Extract.Haskell (extractHaskellStub)
 import Graphos.UseCase.Extract.Image (extractImageFile, extractImageFromBytes)
+import qualified Graphos.UseCase.Export as UE
 
 -- Infrastructure imports for PDF extraction
 import qualified Graphos.Infrastructure.Extract.Pdf as Pdf
@@ -94,11 +102,15 @@ productionLoggingPort env = LoggingPort
 -- | Production observability port — delegates to Infrastructure.Observability.SDK.
 productionObservabilityPort :: ObservabilityEnv -> ObservabilityPort
 productionObservabilityPort obsEnv = ObservabilityPort
-  { opInitObservability = \_ _ _ -> pure ()  -- already initialized by Main
+  { opLogEnv = otelLogEnv obsEnv
+  , opInitObservability = \_ _ _ -> pure ()  -- already initialized by Main
   , opShutdownObservability = shutdownObservability obsEnv
   , opIncCounter = \name delta -> incCounter (otelMetrics obsEnv) name delta
   , opSetGauge = \name val -> setGauge (otelMetrics obsEnv) name val
+  , opRecordHistogram = \name val -> observeHistogram (otelMetrics obsEnv) name val
   , opTraceEvent = \name attrs -> debugTraceEvent (otelDebugTrace obsEnv) name (Map.fromList attrs)
+  , opDebugTraceSpan = \name (StartTime start) (EndTime end) attrs ->
+      debugTraceSpan (otelDebugTrace obsEnv) name start end attrs
   }
 
 -- | Production file system port — delegates to Infrastructure.FileSystem.
@@ -181,12 +193,43 @@ productionExtractionPort logEnv = ExtractionPort
   , epLanguageServerCommands = LSP.languageServerCommands
   }
 
--- | Production export port — delegates to Infrastructure.Export.* and UseCase.Export.
-productionExportPort :: LogEnv -> ObservabilityEnv -> ExportPort
-productionExportPort _logEnv _obsEnv = ExportPort
-  { epExportAll = \_outputDir _analysis _config _detection _mLabels ->
-      -- TODO: Will be wired to UseCase.Export.exportAll once UseCase.Export is refactored
-      error "productionExportPort: not yet wired — call UseCase.Export.exportAll directly for now"
+-- | Production export port — delegates to Infrastructure.Export.* modules.
+productionExportPort :: LogEnv -> ObservabilityEnv -> UEP.ExportPort
+productionExportPort _logEnv _obsEnv = UEP.ExportPort
+  { UEP.epExportHTML = ExportHTML.exportHTML
+  , UEP.epExportObsidian = ExportObsidian.exportObsidian
+  , UEP.epExportReport = ExportReport.exportReport
+  , UEP.epExportCypher = Neo4j.exportCypher
+  , UEP.epExportMemgraphCypher = ExportMemgraph.exportMemgraphCypher
+  , UEP.epPushToNeo4jFull = Neo4j.pushToNeo4jWithCommunities
+  , UEP.epPushToNeo4jSubgraph = Neo4j.pushSubgraphToNeo4j
+  , UEP.epPushToNeo4jCommunity = Neo4j.pushCommunityGraphToNeo4j
+  , UEP.epPushToMemgraphFull = ExportMemgraph.pushToMemgraphWithCommunities
+  , UEP.epPushToMemgraphSubgraph = ExportMemgraph.pushSubgraphToMemgraph
+  , UEP.epPushToMemgraphCommunity = ExportMemgraph.pushCommunityGraphToMemgraph
+  , UEP.epPushEdgeRepair = Neo4j.pushEdgeRepair
+  , UEP.epOpenIncrementalWriter = \fp -> pure (unsafeCoerce (Inc.openWriter fp))
+  , UEP.epWriteNodes = \_ nodes -> Inc.writeNodes (unsafeCoerce ()) nodes
+  , UEP.epWriteEdges = \_ edges -> Inc.writeEdges (unsafeCoerce ()) edges
+  , UEP.epWriteCommunities = \_ cmap -> Inc.writeCommunities (unsafeCoerce ()) cmap
+  , UEP.epWriteCohesion = \_ cmap -> Inc.writeCohesion (unsafeCoerce ()) cmap
+  , UEP.epWriteGodNodes = \_ gnodes -> Inc.writeGodNodes (unsafeCoerce ()) gnodes
+  , UEP.epWriteAnalysisTail = \_ mbLabels -> Inc.writeAnalysisTail (unsafeCoerce ()) mbLabels
+  , UEP.epWriteCommunityAggregates = \_ aggregates -> Inc.writeCommunityAggregates (unsafeCoerce ()) aggregates
+  , UEP.epFlushWriter = \_ -> Inc.flushWriter (unsafeCoerce ())
+  , UEP.epCloseWriter = \_ -> Inc.closeWriter (unsafeCoerce ())
+  , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
+  , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
+  , UEP.epExportAll = \g _outputDir analysis config detection mLabels ->
+      UE.exportAll g analysis config detection mLabels >>= \er ->
+        pure $ UEP.ExportResult
+          { UEP.erReport = UE.erReport er
+          , UEP.erJSON = UE.erJSON er
+          , UEP.erHTML = UE.erHTML er
+          , UEP.erObsidian = UE.erObsidian er
+          , UEP.erNeo4j = UE.erNeo4j er
+          , UEP.erMemgraph = UE.erMemgraph er
+          }
   }
 
 -- | Production LLM port — delegates to Infrastructure.LLM.*.

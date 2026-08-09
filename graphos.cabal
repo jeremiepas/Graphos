@@ -62,8 +62,9 @@ library
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
-                   Graphos.Domain.Labeling
-                   -- Use Cases
+                    Graphos.Domain.Labeling
+                    Graphos.Domain.Logging
+                    -- Use Cases
                    Graphos.UseCase.Pipeline
                    Graphos.UseCase.Detect
                      Graphos.UseCase.Extract

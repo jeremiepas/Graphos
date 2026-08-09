@@ -62,7 +62,7 @@ staticApp rootDir req respond = do
 
 startStaticServer :: FilePath -> Int -> IO ()
 startStaticServer dir port = do
-  env <- defaultLogEnv LevelInfo
+  env <- defaultLogEnv LogInfo
   let app = staticApp dir
       warpSettings = setPort port
                    $ setHost "0.0.0.0"

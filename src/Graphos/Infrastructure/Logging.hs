@@ -7,12 +7,15 @@
 -- shipped as a structured JSON OTLP log record to the OpenTelemetry Collector,
 -- which forwards to Loki for Grafana visualization.
 module Graphos.Infrastructure.Logging
-  ( -- * Log levels
+  ( -- * Log levels (re-exported from Domain.Logging for backward compat)
     LogLevel(..)
   , logLevelToInt
   , logLevelFromInt
-    -- * Logging monad
+  , logLevelToOtlpSeverity
+    -- * Log environment (re-exported from Domain.Logging for backward compat)
+  , OtlpLogConfig(..)
   , LogEnv(..)
+    -- * Logging monad
   , defaultLogEnv
   , runWithLog
     -- * Log functions
@@ -30,10 +33,19 @@ module Graphos.Infrastructure.Logging
   , withTimingDebug
   ) where
 
-import Control.Concurrent.MVar (MVar, newMVar, modifyMVar_, tryTakeMVar)
+import Graphos.Domain.Logging
+  ( LogLevel(..)
+  , logLevelToInt
+  , logLevelFromInt
+  , logLevelToOtlpSeverity
+  , OtlpLogConfig(..)
+  , LogEnv(..)
+  )
+
+import Control.Concurrent.MVar (newMVar, modifyMVar_, tryTakeMVar)
 import Control.Exception (SomeException, catch)
 import Control.Monad (when, unless)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.ByteString.Lazy as BSL
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -53,62 +65,9 @@ import Network.HTTP.Client
 import System.IO (hFlush, stdout, stderr, hPutStrLn)
 
 -- ───────────────────────────────────────────────
--- Log levels
--- ───────────────────────────────────────────────
-
--- | Log severity level
-data LogLevel
-  = LevelError   -- ^ Errors only (always shown)
-  | LevelWarn    -- ^ Warnings + errors
-  | LevelInfo    -- ^ Info + warnings + errors (default)
-  | LevelDebug   -- ^ Debug + info + warnings + errors (--verbose)
-  | LevelTrace   -- ^ Everything, including internal tracing (--debug)
-  deriving (Eq, Ord, Show, Enum, Bounded)
-
--- | Convert log level to integer (for comparison)
-logLevelToInt :: LogLevel -> Int
-logLevelToInt LevelError = 0
-logLevelToInt LevelWarn  = 1
-logLevelToInt LevelInfo  = 2
-logLevelToInt LevelDebug = 3
-logLevelToInt LevelTrace = 4
-
--- | Parse log level from an integer (0=error, 1=warn, etc.)
-logLevelFromInt :: Int -> LogLevel
-logLevelFromInt n
-  | n <= 0    = LevelError
-  | n == 1    = LevelWarn
-  | n == 2    = LevelInfo
-  | n == 3    = LevelDebug
-  | otherwise = LevelTrace
-
--- | Map log level to OTLP severity number
-logLevelToOtlpSeverity :: LogLevel -> Int
-logLevelToOtlpSeverity LevelError = 17  -- ERROR
-logLevelToOtlpSeverity LevelWarn  = 13  -- WARN
-logLevelToOtlpSeverity LevelInfo  = 9   -- INFO
-logLevelToOtlpSeverity LevelDebug = 5   -- DEBUG
-logLevelToOtlpSeverity LevelTrace = 1   -- TRACE
-
--- ───────────────────────────────────────────────
 -- Log environment
 -- ───────────────────────────────────────────────
-
--- | OTLP log shipping config (set when --otel --debug are both active)
-data OtlpLogConfig = OtlpLogConfig
-  { olcEndpoint     :: String    -- ^ OTLP HTTP endpoint (e.g. "http://localhost:4318/v1/logs")
-  , olcServiceName  :: String    -- ^ Service name for resource attributes
-  , olcBuffer       :: MVar [Text]  -- ^ Buffer of pending OTLP log records
-  , olcBatchSize    :: Int       -- ^ Flush after this many records (1 = immediate flush)
-  }
-
--- | Logging environment, threaded through the application
-data LogEnv = LogEnv
-  { leLevel       :: IORef LogLevel       -- ^ Current log level (mutable for runtime adjustment)
-  , lePrefix      :: Text                 -- ^ Module/component prefix
-  , leOtlpConfig  :: IORef (Maybe OtlpLogConfig)  -- ^ OTLP log shipping (Nothing = disabled)
-  , leTraceId     :: IORef (Maybe Text)   -- ^ Current trace ID for log correlation
-  }
+-- (LogLevel, OtlpLogConfig, LogEnv are re-exported from Domain.Logging)
 
 -- | Create a default log environment at the given level
 defaultLogEnv :: LogLevel -> IO LogEnv
@@ -229,13 +188,13 @@ logMessage env level msg = do
       let ts = formatTime defaultTimeLocale "%H:%M:%S" timestamp
           prefix = lePrefix env
           levelTag = case level of
-            LevelError -> "ERROR"
-            LevelWarn  -> " WARN"
-            LevelInfo  -> " INFO"
-            LevelDebug -> "DEBUG"
-            LevelTrace -> "TRACE"
+            LogError -> "ERROR"
+            LogWarn  -> " WARN"
+            LogInfo  -> " INFO"
+            LogDebug -> "DEBUG"
+            LogTrace -> "TRACE"
           line = "[" ++ ts ++ "] [" ++ levelTag ++ "] [" ++ T.unpack prefix ++ "] " ++ T.unpack msg
-      if level == LevelError
+      if level == LogError
         then hPutStrLn stderr line
         else putStrLn line
       hFlush stdout
@@ -245,23 +204,23 @@ logMessage env level msg = do
 
 -- | Log an error message (always shown)
 logError :: LogEnv -> Text -> IO ()
-logError env = logMessage env LevelError
+logError env = logMessage env LogError
 
 -- | Log a warning message
 logWarn :: LogEnv -> Text -> IO ()
-logWarn env = logMessage env LevelWarn
+logWarn env = logMessage env LogWarn
 
 -- | Log an info message (default level)
 logInfo :: LogEnv -> Text -> IO ()
-logInfo env = logMessage env LevelInfo
+logInfo env = logMessage env LogInfo
 
 -- | Log a debug message (shown with --verbose)
 logDebug :: LogEnv -> Text -> IO ()
-logDebug env = logMessage env LevelDebug
+logDebug env = logMessage env LogDebug
 
 -- | Log a trace message (shown with --debug)
 logTrace :: LogEnv -> Text -> IO ()
-logTrace env = logMessage env LevelTrace
+logTrace env = logMessage env LogTrace
 
 -- ───────────────────────────────────────────────
 -- Timing helpers
