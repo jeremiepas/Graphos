@@ -45,7 +45,9 @@ saveIndex path idx = BSL.writeFile path (Aeson.encode idx)
 -- | Merge two indices (right-biased: overwrites on nodeId collision).
 mergeIndices :: IngestIndex -> IngestIndex -> IngestIndex
 mergeIndices a b = IngestIndex
-  { iiNodes = iiNodes a <> iiNodes b
+  { iiVersion = max (iiVersion a) (iiVersion b)
+  , iiFiles   = iiFiles b <> iiFiles a
+  , iiNodes   = iiNodes b <> iiNodes a
   }
 
 -- | Search for nodes similar to a query vector by cosine similarity.
