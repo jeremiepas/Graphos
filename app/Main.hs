@@ -14,6 +14,7 @@ import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToT
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
+import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
@@ -46,6 +47,7 @@ import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.Timeout (timeout)
 
 import qualified Graphos.UseCase.Export as Export
+import Graphos.UseCase.Port.ExportPort (ExportResult(..))
 import Graphos.Domain.Scaffold (parseTarget, ScaffoldRequest(..))
 import Graphos.UseCase.Scaffold (selectTargets, planScaffold, CommandReference(..))
 import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFacts)
@@ -337,6 +339,8 @@ main = do
     MergeCmd pathA pathB outputDir density resolution minCommSize maxLeidenIterations noViz verbose -> do
       let logLevel = if verbose then LogDebug else LogInfo
       env <- defaultLogEnv logLevel
+      obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir ++ "/traces")
+      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv
       logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
       resultA <- loadGraphFromFile pathA
       case resultA of
@@ -384,14 +388,14 @@ main = do
                         , detectionFiles = Map.empty
                         }
               logInfo env "[merge] Exporting..."
-              exports <- Export.exportAll mergedGraph analysis config detection Nothing
+              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing
               logInfo env "[merge] Merge complete!"
               logInfo env $ T.pack $ "  Nodes: " ++ show (Map.size (gNodes mergedGraph))
               logInfo env $ T.pack $ "  Edges: " ++ show (Map.size (gEdges mergedGraph))
               logInfo env $ T.pack $ "  Communities: " ++ show (Map.size commMap)
-              logInfo env $ T.pack $ "  Report: " ++ Export.erReport exports
-              logInfo env $ T.pack $ "  Graph: " ++ Export.erJSON exports
-              case Export.erHTML exports of
+              logInfo env $ T.pack $ "  Report: " ++ erReport exports
+              logInfo env $ T.pack $ "  Graph: " ++ erJSON exports
+              case erHTML exports of
                 Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
                 Nothing   -> pure ()
 

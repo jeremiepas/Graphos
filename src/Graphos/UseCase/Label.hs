@@ -23,20 +23,22 @@ import Graphos.Domain.Types (CommunityId, CommunityMap, CohesionMap)
 import Graphos.Domain.Graph (Graph)
 import Graphos.Domain.Config (LabelingConfig(..), Neo4jConfig(..))
 import Graphos.Domain.Labeling (LabelingResult(..), labelPrompt, batchCommunities)
-import Graphos.Infrastructure.LLM.OpenAI (callLLM, parseLabelsFromResponse)
+import Graphos.UseCase.AppEnv (AppEnv(..))
+import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 
 -- | Label communities using an LLM.
 -- Batches communities, sends prompts, parses responses.
-labelCommunities :: Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> IO LabelingResult
-labelCommunities g commMap cohesion cfg = do
-  let cids = Map.keys commMap
+labelCommunities :: AppEnv -> Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> IO LabelingResult
+labelCommunities appEnv g commMap cohesion cfg = do
+  let lp = llmPort appEnv
+      cids = Map.keys commMap
       batchSize = labelingBatchSize cfg
       batches = batchCommunities cids batchSize
 
   TIO.putStrLn $ "[label] Labeling " <> T.pack (show (length cids)) <> " communities in "
               <> T.pack (show (length batches)) <> " batch(es)"
 
-  allLabels <- mapM (labelBatch g commMap cohesion cfg) batches
+  allLabels <- mapM (labelBatch lp g commMap cohesion cfg) batches
 
   let mergedLabels = Map.unions allLabels
   pure LabelingResult
@@ -47,16 +49,16 @@ labelCommunities g commMap cohesion cfg = do
     }
 
 -- | Label a single batch of communities.
-labelBatch :: Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> [CommunityId] -> IO (Map CommunityId Text)
-labelBatch g commMap cohesion cfg cids = do
+labelBatch :: LLMPort -> Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> [CommunityId] -> IO (Map CommunityId Text)
+labelBatch lp g commMap cohesion cfg cids = do
   let prompt = labelPrompt g commMap cohesion cids
-  result <- callLLM cfg prompt
+  result <- lpCallLLM lp cfg prompt
   case result of
     Left err -> do
       TIO.putStrLn $ "[label] Error in batch: " <> err
       pure Map.empty
     Right response -> do
-      let labels = parseLabelsFromResponse response
+      let labels = lpParseLabelsFromResponse lp response
       if Map.null labels
         then TIO.putStrLn "[label] Warning: no labels parsed from response"
         else TIO.putStrLn $ "[label] Labeled " <> T.pack (show (Map.size labels)) <> " communities"

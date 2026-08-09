@@ -3,6 +3,7 @@ module Graphos.UseCase.Detect
   ( detectFiles
   , detectFilesWithExtensions
   , detectFilesWithExtensionsAndIgnore
+  , detectFilesWithExtensionsAndIgnore'
   , allSupportedExtensions
   , hardcodedIgnoreDirNames
   ) where
@@ -14,7 +15,7 @@ import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
-import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern, shouldIgnore)
+import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..))
 
 -- | All supported file extensions organized by category
 -- Prefer using config-driven extensions from GraphosConfig when available.
@@ -61,20 +62,27 @@ detectFiles root = do
         , detectionTotalWords  = 0  -- word counting requires file reading
         , detectionNeedsGraph  = totalFiles > 0
         , detectionWarning     = if totalFiles > 200
-                                 then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
-                                 else Nothing
+                                  then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
+                                  else Nothing
         , detectionFiles       = categorized
         }
 
 -- | Detect files in a directory using config-driven extension categories.
-detectFilesWithExtensions :: FilePath -> Map FileCategory [String] -> IO Detection
-detectFilesWithExtensions root extMap = detectFilesWithExtensionsAndIgnore root extMap []
+detectFilesWithExtensions :: FileSystemPort -> FilePath -> Map FileCategory [String] -> IO Detection
+detectFilesWithExtensions fsp root extMap = detectFilesWithExtensionsAndIgnore fsp root extMap
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- This is the primary entry point for the pipeline — it applies .gitignore and .graphosignore
 -- patterns in addition to hardcoded directory ignores.
-detectFilesWithExtensionsAndIgnore :: FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO Detection
-detectFilesWithExtensionsAndIgnore root extMap ignorePatterns = do
+detectFilesWithExtensionsAndIgnore :: FileSystemPort -> FilePath -> Map FileCategory [String] -> IO Detection
+detectFilesWithExtensionsAndIgnore fsp root extMap = do
+  ignorePatterns <- fspLoadIgnorePatterns fsp root
+  detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns
+
+-- | Detect files in a directory using config-driven extension categories and ignore patterns.
+-- Internal version that takes pre-loaded ignore patterns.
+detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO Detection
+detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -85,7 +93,7 @@ detectFilesWithExtensionsAndIgnore root extMap ignorePatterns = do
       , detectionFiles        = Map.empty
       }
     else do
-      files <- findAllFilesWithAndIgnore root extMap ignorePatterns
+      files <- findAllFilesWithAndIgnore (fspShouldIgnore fsp) root extMap ignorePatterns
       let categorized = categorizeFilesWith files extMap
           totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
@@ -93,8 +101,8 @@ detectFilesWithExtensionsAndIgnore root extMap ignorePatterns = do
         , detectionTotalWords  = 0  -- word counting requires file reading
         , detectionNeedsGraph  = totalFiles > 0
         , detectionWarning     = if totalFiles > 200
-                                 then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
-                                 else Nothing
+                                  then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
+                                  else Nothing
         , detectionFiles       = categorized
         }
 
@@ -104,17 +112,17 @@ findAllFiles dir = findAllFilesWith dir allSupportedExtensions
 
 -- | Find all files recursively using config-driven extension map
 findAllFilesWith :: FilePath -> Map FileCategory [String] -> IO [FilePath]
-findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir extMap []
+findAllFilesWith dir extMap = findAllFilesWithAndIgnore (\_ _ -> False) dir extMap []
 
 -- | Find all files recursively using config-driven extension map and ignore patterns
-findAllFilesWithAndIgnore :: FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO [FilePath]
-findAllFilesWithAndIgnore dir extMap ignorePatterns = do
+findAllFilesWithAndIgnore :: ([AnnotatedPattern] -> FilePath -> Bool) -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO [FilePath]
+findAllFilesWithAndIgnore shouldIgnoreFn dir extMap ignorePatterns = do
   entries <- listDirectory dir
   fmap concat $ mapM (\entry -> do
     let path = dir </> entry
     isDir <- doesDirectoryExist path
-    if isDir && not (isIgnoredEntry entry path ignorePatterns)
-      then findAllFilesWithAndIgnore path extMap ignorePatterns
+    if isDir && not (isIgnoredEntry shouldIgnoreFn entry path ignorePatterns)
+      then findAllFilesWithAndIgnore shouldIgnoreFn path extMap ignorePatterns
       else if isSupportedWith entry extMap
            then pure [path]
            else pure []
@@ -166,12 +174,12 @@ hardcodedIgnoreDirNames =
 
 -- | Check if a directory entry should be ignored.
 -- Combines the hardcoded directory name check with file-based ignore patterns.
-isIgnoredEntry :: String -> FilePath -> [AnnotatedPattern] -> Bool
-isIgnoredEntry entry path ignorePatterns =
+isIgnoredEntry :: ([AnnotatedPattern] -> FilePath -> Bool) -> String -> FilePath -> [AnnotatedPattern] -> Bool
+isIgnoredEntry shouldIgnoreFn entry path ignorePatterns =
   -- Fast check: hardcoded directory names (always ignored)
   entry `elem` hardcodedIgnoreDirNames
   -- Slower check: file-based ignore patterns (.gitignore, .graphosignore)
-  || shouldIgnore ignorePatterns path
+  || shouldIgnoreFn ignorePatterns path
 
 -- | Check if a file has a supported extension (using config-driven extensions)
 isSupportedWith :: String -> Map FileCategory [String] -> Bool

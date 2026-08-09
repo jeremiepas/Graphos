@@ -3,7 +3,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.UseCase.Extract.Haskell
   ( extractHaskellStub
-  , makeStubNode
   , parseHaskellModule
   , parseHaskellImports
   , parseHaskellDecls
@@ -20,29 +19,7 @@ import Data.List (find, isPrefixOf)
 import qualified Data.Text as T
 
 import Graphos.Domain.Types
-
--- | Create a stub node when no LSP is available
-makeStubNode :: FilePath -> Node
-makeStubNode filePath =
-  let name = T.pack $ takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath
-      dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
-      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
-      hashPrefix = T.pack $ show dirHash
-      nodeId' = hashPrefix <> T.pack "_" <> name
-  in Node
-    { nodeId           = nodeId'
-    , nodeLabel        = name
-    , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-    , nodeLineEnd      = Nothing
-    , nodeKind         = Nothing
-    , nodeSignature    = Nothing
-    }
+import Graphos.Domain.Graph (makeStubNode)
 
 -- | Haskell-aware stub extraction
 extractHaskellStub :: FilePath -> IO Extraction

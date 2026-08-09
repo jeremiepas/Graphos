@@ -22,7 +22,7 @@ import System.Directory (doesFileExist)
 import Graphos.Domain.Types
   ( NodeId, IngestIndex(..), emptyIngestIndex
   )
-import qualified Graphos.Infrastructure.LLM.Embedding as Emb
+import Graphos.UseCase.Port.LLMPort (cosineSimilarity)
 
 -- | Load an IngestIndex from a JSON file.
 -- Returns empty index if file doesn't exist or can't be parsed.
@@ -55,7 +55,7 @@ mergeIndices a b = IngestIndex
 -- Only considers entries that have non-empty embedding vectors.
 searchSimilar :: [Double] -> IngestIndex -> Int -> [(NodeId, Double)]
 searchSimilar queryVec idx topN =
-  let scored = [ (nid, Emb.cosineSimilarity queryVec vec)
+  let scored = [ (nid, cosineSimilarity queryVec vec)
                | (nid, vec) <- Map.toList (iiNodes idx)
                , not (null vec)
                ]
