@@ -32,7 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig)
+import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
 
 -- | Pipeline configuration
 data PipelineConfig = PipelineConfig
@@ -79,6 +79,7 @@ data PipelineConfig = PipelineConfig
   , cfgVision         :: Bool                          -- ^ Enable vision analysis (--vision)
   , cfgNoObservability :: Bool                         -- ^ Disable all observability (--no-observability)
   , cfgGranularity    :: Maybe Granularity             -- ^ CLI granularity override (--granularity)
+  , cfgIngest         :: IngestConfig                  -- ^ Single-file ingest configuration
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -153,6 +154,7 @@ defaultConfig = PipelineConfig
   , cfgVision         = False
   , cfgNoObservability = False
   , cfgGranularity    = Nothing
+  , cfgIngest         = defaultIngestConfig
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

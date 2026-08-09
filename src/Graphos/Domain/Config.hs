@@ -54,6 +54,14 @@ module Graphos.Domain.Config
   , GraphosConfig(..)
   , defaultGraphosConfig
 
+     -- * Ingest configuration
+  , IngestConfig(..)
+  , IngestUrlConfig(..)
+  , IngestCategoryConfig(..)
+  , IngestCategories(..)
+  , FileEntry(..)
+  , defaultIngestConfig
+
      -- * Config merging
   , mergeGraphosConfig
   , mergeObservabilityConfig
@@ -62,5 +70,6 @@ module Graphos.Domain.Config
 import Graphos.Domain.Config.Core
 import Graphos.Domain.Config.Extraction
 import Graphos.Domain.Config.Export
+import Graphos.Domain.Config.Ingest
 import Graphos.Domain.Config.Observability
 import Graphos.Domain.Config.Vision

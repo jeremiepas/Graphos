@@ -170,11 +170,12 @@ library
                        Graphos.Domain.PdfStructure
                        -- Domain - Config
                        Graphos.Domain.Config
-                      Graphos.Domain.Config.Core
-                      Graphos.Domain.Config.Extraction
-                      Graphos.Domain.Config.Export
-                      Graphos.Domain.Config.Observability
-                      Graphos.Domain.Config.Vision
+                       Graphos.Domain.Config.Core
+                       Graphos.Domain.Config.Extraction
+                       Graphos.Domain.Config.Export
+                       Graphos.Domain.Config.Ingest
+                       Graphos.Domain.Config.Observability
+                       Graphos.Domain.Config.Vision
                      -- Domain - Scaffold
                      Graphos.Domain.Scaffold
                      -- CLI
@@ -230,7 +231,9 @@ library
      , zip-archive           >= 0.4
      , xml-conduit           >= 1.9
      , xml-types             >= 0.3
-     , base64-bytestring     >= 1.0
+     , base16-bytestring     >= 1.0
+    , base64-bytestring     >= 1.0
+    , cryptohash-sha256     >= 0.11
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -261,9 +264,13 @@ test-suite graphos-test
   type:           exitcode-stdio-1.0
   main-is:        Spec.hs
   hs-source-dirs: tests
+  build-tool-depends:
+      hspec-discover:hspec-discover >= 2.10
   other-modules:
                     Graphos.Domain.TypesSpec
                     Graphos.Domain.ConfigSpec
+                    Graphos.Domain.Config.IngestSpec
+                    Graphos.Domain.Types.IngestSpec
                     Graphos.Domain.GraphSpec
                     Graphos.Domain.CommunitySpec
                     Graphos.Domain.Community.LabelSpec
@@ -299,6 +306,7 @@ test-suite graphos-test
     , hspec-discover       >= 2.10
     , QuickCheck           >= 2.14
     , aeson
+    , bytestring           >= 0.11
     , containers
     , deepseq              >= 1.4
     , directory            >= 1.3
@@ -307,3 +315,4 @@ test-suite graphos-test
     , process              >= 1.6
     , text
     , temporary            >= 1.3
+    , yaml                 >= 0.11

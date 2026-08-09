@@ -30,7 +30,7 @@ import System.Mem (performGC)
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..), Neo4jPushMode(..))
-import Graphos.Domain.Config (FileExtensionConfig(..))
+import Graphos.Domain.Config (FileExtensionConfig(..), IngestConfig(..))
 import Graphos.Domain.Graph (gNodes, gEdges)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
@@ -491,6 +491,9 @@ runSingleFilePipeline appEnv config filePath = catch (do
 
   lpLogInfo lp $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
 
+  let ingestCfg = cfgIngest config
+      indexPath = icIndexPath ingestCfg
+
   -- Step 1: Ingest file (detect + extract + optional embeddings)
   ingestResult <- ingestFile appEnv config filePath env
   case ingestResult of
@@ -503,6 +506,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
                                 ++ show (Map.size (gEdges graph)) ++ " edges"
 
       -- Step 3: Cluster (fast subgraph clustering if not --no-cluster)
+      -- Uses ingest-specific cluster parameters (smaller graphs).
       (enrichedGraph, finalCommMap) <-
         if cfgNoCluster config
           then pure (graph, Map.empty)
@@ -512,10 +516,10 @@ runSingleFilePipeline appEnv config filePath = catch (do
             let nodesMap = extractionNodes (firExtraction fir)
             case Map.elems nodesMap of
               (seedNode: _) -> do
-                let res = Resolution { resGamma = cfgResolution config
-                                     , resMinSize = cfgMinCommSize config
+                let res = Resolution { resGamma = icResolution ingestCfg
+                                     , resMinSize = icMinCommSize ingestCfg
                                      , resMergeInto = MergeToNeighbor
-                                     , resMaxIterations = cfgMaxLeidenIterations config
+                                     , resMaxIterations = icMaxLeidenIter ingestCfg
                                      }
                     (commMap, _cohesion) = clusterSingle graph (nodeId seedNode) 3 res
                     allInferred = inferEdges (cfgEdgeDensity config) graph commMap
@@ -530,13 +534,12 @@ runSingleFilePipeline appEnv config filePath = catch (do
 
       -- Step 4: Update index (merge with existing)
       createDirectoryIfMissing True (cfgOutputDir config)
-      let indexPath = cfgOutputDir config ++ "/index.json"
       existingIndex <- loadIndex indexPath
       let mergedIndex = mergeIndices existingIndex (firIndex fir)
       saveIndex indexPath mergedIndex
       lpLogInfo lp $ T.pack $ "  Index: " ++ show (Map.size (iiNodes mergedIndex)) ++ " entries → " ++ indexPath
 
-      -- Step 5: Export
+      -- Step 5: Export (standalone mode writes to ingest-specific output)
       let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
           detection = Detection
             { detectionTotalFiles = 1
@@ -545,7 +548,11 @@ runSingleFilePipeline appEnv config filePath = catch (do
             , detectionWarning = Nothing
             , detectionFiles = Map.empty
             }
-      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection Nothing
+          outputDir = if icMerge ingestCfg
+                        then cfgOutputDir config
+                        else cfgOutputDir config ++ "/ingest"
+      createDirectoryIfMissing True outputDir
+      exports <- UEP.epExportAll ep enrichedGraph outputDir analysis config detection Nothing
 
       -- Clean up
       fspClearCheckpoint fsp (cfgOutputDir config)

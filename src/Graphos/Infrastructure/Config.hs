@@ -41,6 +41,7 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , ExtractorConfig(..)
                              , Granularity(..)
                              , LSPServerConfig(..)
+                             , IngestConfig(..)
                              , defaultGraphosConfig
                              , mergeGraphosConfig
                              )
@@ -64,6 +65,7 @@ data ConfigFile = ConfigFile
   , cfObservability     :: Maybe ObservabilityConfig
   , cfEmbedding         :: Maybe EmbeddingConfig
   , cfVision            :: Maybe VisionConfig
+  , cfIngest            :: Maybe IngestConfig
   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -80,6 +82,7 @@ instance FromJSON ConfigFile where
     <*> v .:? "observability"
     <*> v .:? "embedding"
     <*> v .:? "vision"
+    <*> v .:? "ingest"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -182,6 +185,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcVision = case cfVision cfgFile of
       Just vision -> vision
       Nothing     -> gcVision defaults
+  , gcIngest = case cfIngest cfgFile of
+      Just ingest -> ingest
+      Nothing     -> gcIngest defaults
   }
 
 -- ───────────────────────────────────────────────
