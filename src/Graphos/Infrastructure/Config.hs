@@ -29,7 +29,21 @@ import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDi
 import System.FilePath ((</>))
 import qualified Data.Yaml as Yaml
 
-import Graphos.Domain.Config
+import Graphos.Domain.Config ( PdfExtractionMode(..)
+                             , GraphosConfig(..)
+                             , Neo4jConfig(..)
+                             , MemgraphConfig(..)
+                             , LabelingConfig(..)
+                             , ObservabilityConfig(..)
+                             , EmbeddingConfig(..)
+                             , VisionConfig(..)
+                             , FileExtensionConfig(..)
+                             , ExtractorConfig(..)
+                             , Granularity(..)
+                             , LSPServerConfig(..)
+                             , defaultGraphosConfig
+                             , mergeGraphosConfig
+                             )
 
 -- ───────────────────────────────────────────────
 -- Configuration file format (YAML)
@@ -38,17 +52,18 @@ import Graphos.Domain.Config
 -- | Intermediate type for parsing the YAML file.
 -- User provides only overrides; defaults are merged.
 data ConfigFile = ConfigFile
-  { cfLsp            :: Maybe (Map String LSPServerConfig)
-  , cfLanguageIds     :: Maybe (Map String Text)
-  , cfFileExtensions  :: Maybe FileExtensionConfig
-  , cfExtractors      :: Maybe (Map String ExtractorConfig)
-  , cfGranularity     :: Maybe Granularity
-  , cfNeo4j           :: Maybe Neo4jConfig
-  , cfMemgraph        :: Maybe MemgraphConfig
-  , cfLabeling        :: Maybe LabelingConfig
-  , cfObservability   :: Maybe ObservabilityConfig
-  , cfEmbedding       :: Maybe EmbeddingConfig
-  , cfVision          :: Maybe VisionConfig
+  { cfLsp              :: Maybe (Map String LSPServerConfig)
+  , cfLanguageIds       :: Maybe (Map String Text)
+  , cfFileExtensions    :: Maybe FileExtensionConfig
+  , cfExtractors        :: Maybe (Map String ExtractorConfig)
+  , cfGranularity       :: Maybe Granularity
+  , cfPdfExtraction     :: Maybe PdfExtractionMode
+  , cfNeo4j             :: Maybe Neo4jConfig
+  , cfMemgraph          :: Maybe MemgraphConfig
+  , cfLabeling          :: Maybe LabelingConfig
+  , cfObservability     :: Maybe ObservabilityConfig
+  , cfEmbedding         :: Maybe EmbeddingConfig
+  , cfVision            :: Maybe VisionConfig
   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -58,6 +73,7 @@ instance FromJSON ConfigFile where
     <*> v .:? "file_extensions"
     <*> v .:? "extractors"
     <*> v .:? "granularity"
+    <*> v .:? "pdf_extraction"
     <*> v .:? "neo4j"
     <*> v .:? "memgraph"
     <*> v .:? "labeling"
@@ -145,6 +161,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcGranularity = case cfGranularity cfgFile of
       Just gran -> gran
       Nothing   -> gcGranularity defaults
+  , gcPdfExtraction = case cfPdfExtraction cfgFile of
+      Just mode -> mode
+      Nothing   -> gcPdfExtraction defaults
   , gcNeo4j = case cfNeo4j cfgFile of
       Just neo4j  -> neo4j
       Nothing     -> gcNeo4j defaults

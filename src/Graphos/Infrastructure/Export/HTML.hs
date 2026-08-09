@@ -1,4 +1,6 @@
--- | HTML export - interactive graph visualization with community coloring
+-- | HTML export - two-phase LOD (level-of-detail) graph visualization
+-- Phase 1: Overview showing one dot per community (forceAtlas2Based physics)
+-- Phase 2: Drill-down expanding a single community into member nodes
 -- Embeds JSON data inline for self-contained HTML that works from file://
 -- Streams to handle to reduce peak memory (avoids building full HTML Text in memory).
 module Graphos.Infrastructure.Export.HTML
@@ -29,16 +31,13 @@ communityColors =
 colorForCommunity :: Int -> Text
 colorForCommunity cid = communityColors !! (cid `mod` length communityColors)
 
--- | Export graph as interactive HTML with vis.js
--- Streams to file handle to reduce peak memory: avoids building the entire
--- HTML Text in memory. JSON data is written directly to the handle, so only
--- one node's/edge's JSON is in memory at a time.
+-- | Export graph as interactive HTML with two-phase LOD viewer
 exportHTML :: Graph -> Analysis -> FilePath -> IO ()
 exportHTML g analysis htmlPath = do
   h <- openFile htmlPath WriteMode
   -- Write HTML header + CSS + sidebar (static content)
   hPutStr h $ T.unpack (htmlHeader g analysis)
-  -- Stream nodes JSON directly to handle (no intermediate Text)
+  -- Stream nodes JSON directly to handle
   hPutStr h "  const _nodesData = "
   BSL.hPut h (encode (nodesToJSON g (analysisCommunities analysis) (articulationPoints g)))
   hPutStr h ";\n"
@@ -46,13 +45,16 @@ exportHTML g analysis htmlPath = do
   hPutStr h "  const _edgesData = "
   BSL.hPut h (encode (edgesToJSON g))
   hPutStr h ";\n"
+  -- Stream community aggregates JSON
+  hPutStr h "  const _communityAggregatesData = "
+  BSL.hPut h (encode (communityAggregatesToJSON g (analysisCommunities analysis)))
+  hPutStr h ";\n"
   -- Write the rest of the HTML (JS + closing tags)
   hPutStr h $ T.unpack htmlBody
   hFlush h
   hClose h
 
 -- | HTML header: everything before the embedded JSON data.
--- Parameterized by Graph and Analysis for stats and community sidebar.
 htmlHeader :: Graph -> Analysis -> Text
 htmlHeader g analysis =
   T.unlines
@@ -109,7 +111,10 @@ htmlHeader g analysis =
     , "  .no-results { color: #888; font-size: 12px; text-align: center; padding: 20px; }"
     , "  .btn-reset { background: #252540; border: 1px solid #3a3a5e; color: #7dd3fc; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }"
     , "  .btn-reset:hover { background: #2a2a50; }"
+    , "  .btn-back { background: #252540; border: 1px solid #3a3a5e; color: #7dd3fc; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 8px; display: none; }"
+    , "  .btn-back:hover { background: #2a2a50; }"
     , "  .sidebar-scroll { flex: 1; overflow-y: auto; }"
+    , "  .overview-hint { color: #888; font-size: 11px; text-align: center; padding: 10px; }"
     , "</style>"
     , "</head><body>"
     , "<header>"
@@ -118,6 +123,7 @@ htmlHeader g analysis =
     , "    <div class='stats'>" <> statsText <> "</div>"
     , "  </div>"
     , "  <div class='search-box'>"
+    , "    <button class='btn-back' id='btnBack' title='Back to overview'>← Back</button>"
     , "    <input type='text' id='searchInput' placeholder='Search notes...' autocomplete='off' />"
     , "    <span class='search-count' id='searchCount'></span>"
     , "    <button class='btn-reset' id='btnReset' style='display:none' title='Clear search and show full graph'>Reset</button>"
@@ -141,8 +147,8 @@ htmlHeader g analysis =
     , "      </div>"
     , "      <div class='sidebar-section' id='communitiesSection'>"
     , "        <h3>Communities</h3>"
-    , "        <p>Click a community to focus. Click a node for details.</p>"
-    , commInfo
+    , "        <p id='phaseHint'>Click a community dot to explore.</p>"
+    , "        <div id='communityList'></div>"
     , "      </div>"
     , "      <div class='sidebar-section'>"
     , "        <div class='legend'>"
@@ -150,8 +156,7 @@ htmlHeader g analysis =
     , "          <div class='legend-item'><div class='legend-dot' style='background:#7dd3fc'></div> Community member</div>"
     , "          <div class='legend-item'><div class='legend-dot' style='background:#fbbf24'></div> H1 heading (document)</div>"
     , "          <div class='legend-item'><div class='legend-dot' style='background:#a78bfa'></div> H2 heading (section)</div>"
-    , "          <div class='legend-item'><div class='legend-dot' style='background:#f87171; border: 2px solid #f87171'></div> Bridge node</div>"
-    , "          <div class='legend-item'><div style='width:20px; border-top: 2px dashed #6a6a8a'></div> Inferred edge</div>"
+    , "          <div class='legend-item'><div style='width:20px; border-top: 2px dashed #6a6a8a'></div> Bridge edge</div>"
     , "        </div>"
     , "      </div>"
     , "    </div>"
@@ -162,22 +167,52 @@ htmlHeader g analysis =
     ]
   where
     statsText = T.pack $ show (Map.size $ gNodes g) ++ " nodes, "
-             ++ show (Map.size $ gEdges g) ++ " edges, "
-             ++ show (length $ analysisCommunities analysis) ++ " communities, "
-             ++ show (length $ articulationPoints g) ++ " bridge nodes"
-    commInfo = communitiesToHTML (analysisCommunities analysis) g
+              ++ show (Map.size $ gEdges g) ++ " edges, "
+              ++ show (length $ analysisCommunities analysis) ++ " communities"
 
 -- | HTML body: JavaScript code and closing tags.
--- Written after the JSON data is streamed to the file handle.
 htmlBody :: Text
 htmlBody =
   T.unlines
     [ ""
     , "  let allNodes = _nodesData;"
     , "  let allEdges = _edgesData;"
-    , "  let network = null;"
-    , "  let nodesDataset = null;"
-    , "  let edgesDataset = null;"
+    , "  let communityAggregates = _communityAggregatesData;"
+    , "  let overviewNetwork = null;"
+    , "  let drilldownNetwork = null;"
+    , "  let overviewNodesDataset = null;"
+    , "  let overviewEdgesDataset = null;"
+    , "  let drilldownNodesDataset = null;"
+    , "  let drilldownEdgesDataset = null;"
+    , "  let currentPhase = 'overview';"
+    , "  let expandedCommunity = null;"
+    , "  let nodeCommMap = {};"
+    , ""
+    , "  // Build lookup: nodeId -> communityId"
+    , "  allNodes.forEach(n => {"
+    , "    if (n.community_id !== undefined && n.community_id !== null) {"
+    , "      nodeCommMap[n.id] = n.community_id;"
+    , "    }"
+    , "  });"
+    , ""
+    , "  // Build community -> nodes map"
+    , "  let commToNodes = {};"
+    , "  allNodes.forEach(n => {"
+    , "    const cid = n.community_id || -1;"
+    , "    if (!commToNodes[cid]) commToNodes[cid] = [];"
+    , "    commToNodes[cid].push(n);"
+    , "  });"
+    , ""
+    , "  // Build community -> edges map"
+    , "  let commToEdges = {};"
+    , "  allEdges.forEach(e => {"
+    , "    const src = e.from;"
+    , "    const tgt = e.to;"
+    , "    const srcComm = nodeCommMap[src] || -1;"
+    , "    const tgtComm = nodeCommMap[tgt] || -1;"
+    , "    if (!commToEdges[srcComm]) commToEdges[srcComm] = [];"
+    , "    commToEdges[srcComm].push(e);"
+    , "  });"
     , ""
     , "  // Return CSS class based on node id prefix"
     , "  function nodeTypeClass(nodeId) {"
@@ -192,6 +227,296 @@ htmlBody =
     , "    if (!filePath) return '';"
     , "    const parts = filePath.split('/');"
     , "    return parts.slice(-2).join('/');"
+    , "  }"
+    , ""
+    , "  // Escape HTML"
+    , "  function escHtml(s) {"
+    , "    if (!s) return '';"
+    , "    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');"
+    , "  }"
+    , ""
+    , "  // Render community list in sidebar"
+    , "  function renderCommunityList() {"
+    , "    const container = document.getElementById('communityList');"
+    , "    const items = communityAggregates.sort((a, b) => b.member_count - a.member_count).slice(0, 50);"
+    , "    container.innerHTML = items.map(c =>"
+    , "      '<div class=\"comm-item\" data-community=\"' + c.id + '\">'"
+    , "      + '<strong style=\"color:' + c.color + '\">'"
+    , "      + 'Community ' + c.id + '</strong>'"
+    , "      + ' <span class=\"members\">'"
+    , "      + ' — ' + c.member_count + ' members, '"
+    , "      + c.bridge_count + ' bridges</span>'"
+    , "      + '<br><span style=\"color:#4ade80;font-size:10px\">'"
+    , "      + 'cohesion: ' + c.cohesion.toFixed(3) + '</span>'"
+    , "      + '<br><span style=\"color:#888;font-size:10px\">'"
+    , "      + ' ' + escHtml(c.label) + '</span>'"
+    , "      + '</div>'"
+    , "    ).join('');"
+    , ""
+    , "    // Bind click to expand community"
+    , "    container.querySelectorAll('.comm-item[data-community]').forEach(item => {"
+    , "      item.addEventListener('click', function() {"
+    , "        const cid = this.getAttribute('data-community');"
+    , "        expandCommunity(cid);"
+    , "      });"
+    , "    });"
+    , "  }"
+    , ""
+    , "  // Build overview community dots"
+    , "  function buildOverviewData() {"
+    , "    const dots = communityAggregates.map(c => {"
+    , "      const size = Math.max(4, Math.min(20, Math.sqrt(c.member_count) * 2));"
+    , "      return {"
+    , "        id: 'comm_' + c.id,"
+    , "        label: '',"
+    , "        title: 'Community ' + c.id + ': ' + c.member_count + ' members, cohesion: ' + c.cohesion.toFixed(3),"
+    , "        color: { background: c.color, border: '#1a1a2e', highlight: c.color, hover: c.color },"
+    , "        size: size,"
+    , "        shape: 'dot',"
+    , "        font: { size: 0 },"
+    , "        borderWidth: 1,"
+    , "        group: parseInt(c.id)"
+    , "      };"
+    , "    });"
+    , "    return dots;"
+    , "  }"
+    , ""
+    , "  // Build overview edges (inter-community connections)"
+    , "  function buildOverviewEdges() {"
+    , "    const edges = [];"
+    , "    const seen = new Set();"
+    , "    allEdges.forEach(e => {"
+    , "      const srcComm = nodeCommMap[e.from];"
+    , "      const tgtComm = nodeCommMap[e.to];"
+    , "      if (srcComm !== undefined && tgtComm !== undefined && srcComm !== tgtComm) {"
+    , "        const key = Math.min(srcComm, tgtComm) + '-' + Math.max(srcComm, tgtComm);"
+    , "        if (!seen.has(key)) {"
+    , "          seen.add(key);"
+    , "          edges.push({"
+    , "            from: 'comm_' + Math.min(srcComm, tgtComm),"
+    , "            to: 'comm_' + Math.max(srcComm, tgtComm),"
+    , "            color: { color: '#3a3a5e', opacity: 0.3 },"
+    , "            width: 1,"
+    , "            smooth: false,"
+    , "            dashes: true"
+    , "          });"
+    , "        }"
+    , "      }"
+    , "    });"
+    , "    return edges;"
+    , "  }"
+    , ""
+    , "  // Build drill-down data for a community"
+    , "  function buildDrilldownData(cid) {"
+    , "    const members = commToNodes[cid] || [];"
+    , "    const memberIds = new Set(members.map(n => n.id));"
+    , "    const nodes = members.map(n => ({ ...n }));"
+    , "    const edges = allEdges.filter(e => memberIds.has(e.from) && memberIds.has(e.to));"
+    , "    return { nodes, edges };"
+    , "  }"
+    , ""
+    , "  // Expand a community into drill-down view"
+    , "  function expandCommunity(cid) {"
+    , "    if (currentPhase === 'drilldown') return;"
+    , "    expandedCommunity = cid;"
+    , "    currentPhase = 'drilldown';"
+    , ""
+    , "    const { nodes, edges } = buildDrilldownData(cid);"
+    , "    const agg = communityAggregates.find(c => c.id === cid);"
+    , "    const color = agg ? agg.color : '#7dd3fc';"
+    , ""
+    , "    // Update nodes with community color"
+    , "    nodes.forEach(n => {"
+    , "      n.color = { background: color, border: '#1a1a2e', highlight: color, hover: color };"
+    , "    });"
+    , ""
+    , "    // Remove old network if exists"
+    , "    if (drilldownNetwork) {"
+    , "      const container = document.getElementById('graph');"
+    , "      const oldCanvas = container.querySelector('canvas');"
+    , "      if (oldCanvas) oldCanvas.remove();"
+    , "      drilldownNetwork.destroy();"
+    , "      drilldownNetwork = null;"
+    , "    }"
+    , ""
+    , "    const container = document.getElementById('graph');"
+    , "    document.getElementById('loading').style.display = 'none';"
+    , ""
+    , "    drilldownNodesDataset = new vis.DataSet(nodes);"
+    , "    drilldownEdgesDataset = new vis.DataSet(edges);"
+    , ""
+    , "    const options = {"
+    , "      nodes: {"
+    , "        shape: 'dot',"
+    , "        size: 12,"
+    , "        font: { color: '#e0e0e0', size: 10, face: 'Inter, -apple-system, sans-serif', strokeWidth: 0 },"
+    , "        borderWidth: 2,"
+    , "        borderWidthSelected: 4,"
+    , "        shadow: { enabled: false }"
+    , "      },"
+    , "      edges: {"
+    , "        arrows: { to: { enabled: true, scaleFactor: 0.5, type: 'arrow' } },"
+    , "        color: { color: '#8b8baa', highlight: '#7dd3fc', hover: '#a0a0cc' },"
+    , "        shadow: { enabled: false },"
+    , "        smooth: false,"
+    , "        font: { color: '#777', size: 9, strokeWidth: 0, align: 'middle' }"
+    , "      },"
+    , "      physics: {"
+    , "        enabled: true,"
+    , "        stabilization: { enabled: true, iterations: 300, fit: true },"
+    , "        barnesHut: { gravitationalConstant: -2000, centralGravity: 0.03, springLength: 80, springConstant: 0.05, damping: 0.4 },"
+    , "        maxVelocity: 3,"
+    , "        minVelocity: 0.2,"
+    , "        solver: 'barnesHut'"
+    , "      },"
+    , "      interaction: {"
+    , "        hover: true,"
+    , "        tooltipDelay: 200,"
+    , "        navigationButtons: false,"
+    , "        keyboard: true,"
+    , "        zoomView: true,"
+    , "        dragView: true"
+    , "      }"
+    , "    };"
+    , ""
+    , "    drilldownNetwork = new vis.Network(container, { nodes: drilldownNodesDataset, edges: drilldownEdgesDataset }, options);"
+    , ""
+    , "    drilldownNetwork.once('stabilizationIterationsDone', function() {"
+    , "      drilldownNetwork.setOptions({ physics: { enabled: false } });"
+    , "    });"
+    , ""
+    , "    // Show back button"
+    , "    document.getElementById('btnBack').style.display = 'inline-block';"
+    , "    document.getElementById('phaseHint').textContent = 'Exploring Community ' + cid + ' — ' + nodes.length + ' nodes';"
+    , ""
+    , "    // Click node to show details"
+    , "    drilldownNetwork.on('click', function(params) {"
+    , "      if (params.nodes.length > 0) {"
+    , "        showNodeDetail(params.nodes[0]);"
+    , "      } else {"
+    , "        document.getElementById('selectedInfo').style.display = 'none';"
+    , "      }"
+    , "    });"
+    , "  }"
+    , ""
+    , "  // Back to overview"
+    , "  function backToOverview() {"
+    , "    if (currentPhase === 'overview') return;"
+    , "    currentPhase = 'overview';"
+    , "    expandedCommunity = null;"
+    , ""
+    , "    // Remove drilldown network"
+    , "    if (drilldownNetwork) {"
+    , "      const container = document.getElementById('graph');"
+    , "      const oldCanvas = container.querySelector('canvas');"
+    , "      if (oldCanvas) oldCanvas.remove();"
+    , "      drilldownNetwork.destroy();"
+    , "      drilldownNetwork = null;"
+    , "      drilldownNodesDataset = null;"
+    , "      drilldownEdgesDataset = null;"
+    , "    }"
+    , ""
+    , "    const container = document.getElementById('graph');"
+    , "    document.getElementById('loading').style.display = 'none';"
+    , ""
+    , "    overviewNodesDataset = new vis.DataSet(overviewData);"
+    , "    overviewEdgesDataset = new vis.DataSet(overviewEdgesData);"
+    , ""
+    , "    const options = {"
+    , "      nodes: {"
+    , "        shape: 'dot',"
+    , "        size: 10,"
+    , "        font: { size: 0 },"
+    , "        borderWidth: 1,"
+    , "        shadow: { enabled: false }"
+    , "      },"
+    , "      edges: {"
+    , "        arrows: {},"
+    , "        color: { color: '#3a3a5e', opacity: 0.3 },"
+    , "        shadow: { enabled: false },"
+    , "        smooth: false,"
+    , "        dashes: true,"
+    , "        width: 1"
+    , "      },"
+    , "      physics: {"
+    , "        enabled: true,"
+    , "        stabilization: { enabled: true, iterations: 300, fit: true },"
+    , "        forceAtlas2Based: {"
+    , "          type: 'ForceAtlas2', "
+    , "          gravitationalConstant: -50,"
+    , "          centralGravity: 0.01,"
+    , "          springLength: 100,"
+    , "          springConstant: 0.001,"
+    , "          damping: 0.4"
+    , "        },"
+    , "        maxVelocity: 50,"
+    , "        solver: 'forceAtlas2Based',"
+    , "        hideEdgesOnDrag: true,"
+    , "        hideEdgesOnZoom: true"
+    , "      },"
+    , "      interaction: {"
+    , "        hover: true,"
+    , "        tooltipDelay: 200,"
+    , "        navigationButtons: false,"
+    , "        keyboard: false,"
+    , "        zoomView: true,"
+    , "        dragView: true,"
+    , "        dragCanvas: true"
+    , "      }"
+    , "    };"
+    , ""
+    , "    overviewNetwork = new vis.Network(container, { nodes: overviewNodesDataset, edges: overviewEdgesDataset }, options);"
+    , ""
+    , "    overviewNetwork.once('stabilizationIterationsDone', function() {"
+    , "      overviewNetwork.setOptions({ physics: { enabled: false } });"
+    , "    });"
+    , ""
+    , "    overviewNetwork.on('click', function(params) {"
+    , "      if (params.nodes.length > 0) {"
+    , "        const nodeId = params.nodes[0];"
+    , "        if (nodeId.startsWith('comm_')) {"
+    , "          const cid = nodeId.substring(5);"
+    , "          expandCommunity(cid);"
+    , "        }"
+    , "      }"
+    , "    });"
+    , ""
+    , "    document.getElementById('btnBack').style.display = 'none';"
+    , "    document.getElementById('phaseHint').textContent = 'Click a community dot to explore.';"
+    , "  }"
+    , ""
+    , "  // Focus on a node in the graph"
+    , "  function focusNode(nodeId) {"
+    , "    if (currentPhase === 'overview') return;"
+    , "    if (!drilldownNetwork) return;"
+    , "    drilldownNetwork.focus(nodeId, { scale: 1.5, animation: false });"
+    , "    drilldownNetwork.selectNodes([nodeId]);"
+    , "    showNodeDetail(nodeId);"
+    , "  }"
+    , ""
+    , "  // Show node detail in sidebar"
+    , "  function showNodeDetail(nodeId) {"
+    , "    let node = null;"
+    , "    if (currentPhase === 'drilldown' && drilldownNodesDataset) {"
+    , "      const all = drilldownNodesDataset.get();"
+    , "      node = all.find(n => n.id === nodeId);"
+    , "    }"
+    , "    if (!node) return;"
+    , "    const info = document.getElementById('selectedInfo');"
+    , "    info.style.display = 'block';"
+    , "    document.getElementById('selectedLabel').textContent = node.label;"
+    , "    document.getElementById('selectedFile').textContent = node.source_file || node.title || '';"
+    , "    const cid = node.community_id || -1;"
+    , "    const agg = communityAggregates.find(c => c.id === cid);"
+    , "    document.getElementById('selectedCommunity').textContent = 'Community ' + cid + (agg ? ' (' + agg.label + ')' : '');'"
+    , "    // Count neighbors"
+    , "    const neighborEdges = (drilldownEdgesDataset ? drilldownEdgesDataset.get() : allEdges).filter(e => e.from === nodeId || e.to === nodeId);"
+    , "    const neighborIds = new Set();"
+    , "    neighborEdges.forEach(e => {"
+    , "      if (e.from === nodeId) neighborIds.add(e.to);"
+    , "      if (e.to === nodeId) neighborIds.add(e.from);"
+    , "    });"
+    , "    document.getElementById('selectedNeighbors').innerHTML = '<span>' + neighborIds.size + '</span> connections';"
     , "  }"
     , ""
     , "  // Build search results HTML"
@@ -235,7 +560,7 @@ htmlBody =
     , "      '<div class=\"result-item ' + nodeTypeClass(n.id) + '\" data-nodeid=\"' + n.id + '\">'"
     , "      + '<div class=\"rlabel\">' + escHtml(n.label) + '</div>'"
     , "      + '<div class=\"rfile\">' + escHtml(shortPath(n.source_file)) + '</div>'"
-    , "      + '<div class=\"rcommunity\">Community ' + n.group + '</div>'"
+    , "      + '<div class=\"rcommunity\">Community ' + (n.community_id || '?') + '</div>'"
     , "      + '</div>'"
     , "    ).join('');"
     , ""
@@ -250,84 +575,6 @@ htmlBody =
     , "    });"
     , "  }"
     , ""
-    , "  // Focus on a node in the graph"
-    , "  function focusNode(nodeId) {"
-    , "    if (!network) return;"
-    , "    network.focus(nodeId, { scale: 1.5, animation: false });"
-    , "    network.selectNodes([nodeId]);"
-    , "    showNodeDetail(nodeId);"
-    , "  }"
-    , ""
-    , "  // Show node detail in sidebar"
-    , "  function showNodeDetail(nodeId) {"
-    , "    const node = allNodes.find(n => n.id === nodeId);"
-    , "    if (!node) return;"
-    , "    const info = document.getElementById('selectedInfo');"
-    , "    info.style.display = 'block';"
-    , "    document.getElementById('selectedLabel').textContent = node.label;"
-    , "    document.getElementById('selectedFile').textContent = node.source_file || node.title || '';"
-    , "    document.getElementById('selectedCommunity').textContent = 'Community ' + node.group;"
-    , "    // Count neighbors"
-    , "    const neighborEdges = allEdges.filter(e => e.from === nodeId || e.to === nodeId);"
-    , "    const neighborIds = new Set();"
-    , "    neighborEdges.forEach(e => {"
-    , "      if (e.from === nodeId) neighborIds.add(e.to);"
-    , "      if (e.to === nodeId) neighborIds.add(e.from);"
-    , "    });"
-    , "    document.getElementById('selectedNeighbors').innerHTML = '<span>' + neighborIds.size + '</span> connections';"
-    , "  }"
-    , ""
-    , "  // Escape HTML"
-    , "  function escHtml(s) {"
-    , "    if (!s) return '';"
-    , "    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');"
-    , "  }"
-    , ""
-    , "  // Filter graph to show only matching nodes + their neighbors"
-    , "  function filterGraph(query) {"
-    , "    if (!nodesDataset || !edgesDataset) return;"
-    , ""
-    , "    if (!query || query.length < 2) {"
-    , "      // Reset: show all"
-    , "      nodesDataset.update(allNodes.map(n => ({...n, opacity: 1.0, font: { color: '#e0e0e0', size: 14 }})));"
-    , "      edgesDataset.update(allEdges.map(e => ({...e, opacity: 1.0})));"
-    , "      return;"
-    , "    }"
-    , ""
-    , "    const q = query.toLowerCase();"
-    , "    const matchIds = new Set(allNodes"
-    , "      .filter(n => n.label.toLowerCase().includes(q) || (n.source_file && n.source_file.toLowerCase().includes(q)))"
-    , "      .map(n => n.id));"
-    , ""
-    , "    // Also include direct neighbors of matched nodes"
-    , "    const neighborIds = new Set();"
-    , "    allEdges.forEach(e => {"
-    , "      if (matchIds.has(e.from)) neighborIds.add(e.to);"
-    , "      if (matchIds.has(e.to)) neighborIds.add(e.from);"
-    , "    });"
-    , ""
-    , "    const visibleIds = new Set([...matchIds, ...neighborIds]);"
-    , ""
-    , "    nodesDataset.update(allNodes.map(n => {"
-    , "      const isMatch = matchIds.has(n.id);"
-    , "      const isNeighbor = neighborIds.has(n.id);"
-    , "      return {"
-    , "        ...n,"
-    , "        opacity: isMatch ? 1.0 : (isNeighbor ? 0.5 : 0.08),"
-    , "        font: { color: isMatch ? '#ffffff' : (isNeighbor ? '#888' : '#333'), size: isMatch ? 16 : 12 }"
-    , "      };"
-    , "    }));"
-    , ""
-    , "    edgesDataset.update(allEdges.map(e => {"
-    , "      const bothVisible = visibleIds.has(e.from) && visibleIds.has(e.to);"
-    , "      const oneMatch = matchIds.has(e.from) || matchIds.has(e.to);"
-    , "      return {"
-    , "        ...e,"
-    , "        opacity: (bothVisible && oneMatch) ? 0.8 : 0.05"
-    , "      };"
-    , "    }));"
-    , "  }"
-    , ""
     , "  // Debounce helper"
     , "  let debounceTimer = null;"
     , "  function debounce(fn, ms) {"
@@ -337,8 +584,11 @@ htmlBody =
     , "    };"
     , "  }"
     , ""
-    , "  function initGraph() {"
-    , "    // Check if vis-network loaded from CDN"
+    , "  // Initialize overview phase"
+    , "  let overviewData = null;"
+    , "  let overviewEdgesData = null;"
+    , ""
+    , "  function initOverview() {"
     , "    if (typeof vis === 'undefined' || window._visLoadFailed) {"
     , "      const loading = document.getElementById('loading');"
     , "      loading.innerHTML = '<div style=\"text-align:center;max-width:400px\">'"
@@ -350,72 +600,86 @@ htmlBody =
     , "      return;"
     , "    }"
     , ""
+    , "    overviewData = buildOverviewData();"
+    , "    overviewEdgesData = buildOverviewEdges();"
+    , ""
     , "    const container = document.getElementById('graph');"
     , "    document.getElementById('loading').style.display = 'none';"
     , ""
-    , "    // Create vis.js datasets for dynamic updates"
-    , "    nodesDataset = new vis.DataSet(allNodes);"
-    , "    edgesDataset = new vis.DataSet(allEdges);"
+    , "    overviewNodesDataset = new vis.DataSet(overviewData);"
+    , "    overviewEdgesDataset = new vis.DataSet(overviewEdgesData);"
     , ""
     , "    const options = {"
     , "      nodes: {"
     , "        shape: 'dot',"
-    , "        size: 22,"
-    , "        font: { color: '#e0e0e0', size: 14, face: 'Inter, -apple-system, sans-serif', strokeWidth: 0 },"
-    , "        borderWidth: 2,"
-    , "        borderWidthSelected: 4,"
+    , "        size: 10,"
+    , "        font: { size: 0 },"
+    , "        borderWidth: 1,"
     , "        shadow: { enabled: false }"
     , "      },"
     , "      edges: {"
-    , "        arrows: { to: { enabled: true, scaleFactor: 0.5, type: 'arrow' } },"
-    , "        color: { color: '#8b8baa', highlight: '#7dd3fc', hover: '#a0a0cc' },"
+    , "        arrows: {},"
+    , "        color: { color: '#3a3a5e', opacity: 0.3 },"
     , "        shadow: { enabled: false },"
     , "        smooth: false,"
-    , "        font: { color: '#777', size: 9, strokeWidth: 0, align: 'middle' }"
+    , "        dashes: true,"
+    , "        width: 1"
     , "      },"
     , "      physics: {"
     , "        enabled: true,"
     , "        stabilization: { enabled: true, iterations: 300, fit: true },"
-    , "        barnesHut: { gravitationalConstant: -8000, centralGravity: 0.05, springLength: 150, springConstant: 0.01, damping: 0.5 },"
-    , "        maxVelocity: 5,"
-    , "        minVelocity: 0.5,"
-    , "        solver: 'barnesHut'"
+    , "        forceAtlas2Based: {"
+    , "          type: 'ForceAtlas2', "
+    , "          gravitationalConstant: -50,"
+    , "          centralGravity: 0.01,"
+    , "          springLength: 100,"
+    , "          springConstant: 0.001,"
+    , "          damping: 0.4"
+    , "        },"
+    , "        maxVelocity: 50,"
+    , "        solver: 'forceAtlas2Based',"
+    , "        hideEdgesOnDrag: true,"
+    , "        hideEdgesOnZoom: true"
     , "      },"
     , "      interaction: {"
     , "        hover: true,"
     , "        tooltipDelay: 200,"
-    , "        navigationButtons: true,"
-    , "        keyboard: true,"
+    , "        navigationButtons: false,"
+    , "        keyboard: false,"
     , "        zoomView: true,"
-    , "        dragView: true"
+    , "        dragView: true,"
+    , "        dragCanvas: true"
     , "      }"
     , "    };"
     , ""
-    , "    network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, options);"
+    , "    overviewNetwork = new vis.Network(container, { nodes: overviewNodesDataset, edges: overviewEdgesDataset }, options);"
     , ""
-    , "    // After stabilization, disable physics so graph is static and readable"
-    , "    network.once('stabilizationIterationsDone', function() {"
-    , "      network.setOptions({ physics: { enabled: false } });"
+    , "    overviewNetwork.once('stabilizationIterationsDone', function() {"
+    , "      overviewNetwork.setOptions({ physics: { enabled: false } });"
     , "    });"
     , ""
-    , "    // Click node to show details"
-    , "    network.on('click', function(params) {"
+    , "    overviewNetwork.on('click', function(params) {"
     , "      if (params.nodes.length > 0) {"
-    , "        showNodeDetail(params.nodes[0]);"
-    , "      } else {"
-    , "        document.getElementById('selectedInfo').style.display = 'none';"
+    , "        const nodeId = params.nodes[0];"
+    , "        if (nodeId.startsWith('comm_')) {"
+    , "          const cid = nodeId.substring(5);"
+    , "          expandCommunity(cid);"
+    , "        }"
     , "      }"
     , "    });"
     , "  }"
     , ""
     , "  // Wire search input"
     , "  document.addEventListener('DOMContentLoaded', function() {"
+    , "    renderCommunityList();"
+    , "    initOverview();"
+    , ""
     , "    const input = document.getElementById('searchInput');"
     , "    const btn = document.getElementById('btnReset');"
+    , "    const btnBack = document.getElementById('btnBack');"
     , "    const doSearch = debounce(function() {"
     , "      const q = input.value.trim();"
     , "      showSearchResults(q);"
-    , "      filterGraph(q);"
     , "      btn.style.display = q.length >= 2 ? 'inline-block' : 'none';"
     , "    }, 200);"
     , "    input.addEventListener('input', doSearch);"
@@ -425,53 +689,17 @@ htmlBody =
     , "    btn.addEventListener('click', function() {"
     , "      input.value = '';"
     , "      showSearchResults('');"
-    , "      filterGraph('');"
     , "      btn.style.display = 'none';"
     , "      document.getElementById('searchCount').textContent = '';"
     , "    });"
-    , ""
-    , "    // Community items: click to focus on that community in the graph"
-    , "    document.querySelectorAll('.comm-item[data-community]').forEach(item => {"
-    , "      item.addEventListener('click', function() {"
-    , "        const cid = this.getAttribute('data-community');"
-    , "        if (!network || !nodesDataset) return;"
-    , "        const matchIds = allNodes.filter(n => String(n.group) === cid).map(n => n.id);"
-    , "        if (matchIds.length === 0) return;"
-    , "        // Highlight this community, dim others"
-    , "        nodesDataset.update(allNodes.map(n => {"
-    , "          const inComm = String(n.group) === cid;"
-    , "          return { ...n, opacity: inComm ? 1.0 : 0.08, font: { color: inComm ? '#ffffff' : '#333', size: inComm ? 16 : 12 } };"
-    , "        }));"
-    , "        edgesDataset.update(allEdges.map(e => {"
-    , "          const bothInComm = matchIds.includes(e.from) && matchIds.includes(e.to);"
-    , "          return { ...e, opacity: bothInComm ? 0.8 : 0.05 };"
-    , "        }));"
-    , "        network.fit({ nodes: matchIds, animation: false });"
-    , "        input.value = ''; btn.style.display = 'none';"
-    , "        document.getElementById('searchCount').textContent = '';"
-    , "      });"
+    , "    btnBack.addEventListener('click', function() {"
+    , "      backToOverview();"
     , "    });"
     , "  });"
     , ""
-    , "  initGraph();"
     , "</script>"
     , "</body></html>"
     ]
-
--- | Convert communities to sidebar HTML with cohesion scores
--- Community items are clickable to focus the graph view on that community
-communitiesToHTML :: CommunityMap -> Graph -> Text
-communitiesToHTML commMap g =
-  let items = [T.unlines
-        [ "    <div class='comm-item' data-community='" <> T.pack (show cid) <> "'>"
-        , "      <strong style='color:" <> colorForCommunity cid <> "'>Community " <> T.pack (show cid) <> "</strong>"
-        , "      <span class='members'> — " <> T.pack (show (length members)) <> " members</span>"
-        , "      <br><span class='cohesion'>cohesion: " <> T.pack (take 5 (show (cohesionScore g members))) <> "</span>"
-        , "      <br><span class='members'>" <> T.intercalate ", " (take 3 [nodeLabel n | nid <- members, Just n <- [Map.lookup nid (gNodes g)]]) <> "</span>"
-        , "    </div>"
-        ]
-        | (cid, members) <- Map.toList commMap]
-  in T.concat items
 
 -- ───────────────────────────────────────────────
 -- JSON data generation (using Aeson, NOT manual string building)
@@ -487,17 +715,19 @@ data VisNode = VisNode
   , vnBorder     :: Text
   , vnBw         :: Int
   , vnGroup      :: Int
+  , vnCommId     :: Maybe Int
   } deriving (Show)
 
 instance ToJSON VisNode where
   toJSON n = object
-    [ "id"          .= vnId n
-    , "label"       .= vnLabel n
-    , "title"       .= vnTitle n
-    , "source_file" .= vnSourceFile n
-    , "color"       .= object ["background" .= vnBgColor n, "border" .= vnBorder n]
-    , "borderWidth" .= vnBw n
-    , "group"       .= vnGroup n
+    [ "id"             .= vnId n
+    , "label"          .= vnLabel n
+    , "title"          .= vnTitle n
+    , "source_file"    .= vnSourceFile n
+    , "color"          .= object ["background" .= vnBgColor n, "border" .= vnBorder n]
+    , "borderWidth"    .= vnBw n
+    , "group"          .= vnGroup n
+     , "community_id" .= vnCommId n
     ]
 
 -- | Edge data for JSON export
@@ -523,6 +753,30 @@ instance ToJSON VisEdge where
     , "arrows" .= object ["to" .= object ["enabled" .= True, "scaleFactor" .= (0.5 :: Double)]]
     ]
 
+-- | Community aggregate data for JSON export
+data VisCommunityAggregate = VisCommunityAggregate
+  { vcaId                     :: Text
+  , vcaMemberCount            :: Int
+  , vcaCohesion               :: Double
+  , vcaBridgeCount            :: Int
+  , vcaColor                  :: Text
+  , vcaLabel                  :: Text
+  , vcaRepresentativeLabels   :: [Text]
+  , vcaInterCommunityEdges    :: Int
+  } deriving (Show)
+
+instance ToJSON VisCommunityAggregate where
+  toJSON ca = object
+    [ "id"                       .= vcaId ca
+    , "member_count"             .= vcaMemberCount ca
+    , "cohesion"                 .= vcaCohesion ca
+    , "bridge_count"             .= vcaBridgeCount ca
+    , "color"                    .= vcaColor ca
+    , "label"                    .= vcaLabel ca
+    , "representative_labels"    .= vcaRepresentativeLabels ca
+    , "inter_community_edges"    .= vcaInterCommunityEdges ca
+    ]
+
 -- | Convert graph nodes to JSON (via Aeson, no manual string building)
 nodesToJSON :: Graph -> CommunityMap -> [NodeId] -> [VisNode]
 nodesToJSON g commMap artPoints =
@@ -531,40 +785,64 @@ nodesToJSON g commMap artPoints =
       sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
       truncateLabel t = if T.length t > 80 then T.take 80 t <> "…" else t
    in [ VisNode
-        { vnId         = sanitize (nodeId n)
-        , vnLabel      = truncateLabel (sanitize (nodeLabel n))
-        , vnTitle      = sanitize (nodeSourceFile n) <> " [" <> T.pack (show cid) <> "]"
-        , vnSourceFile = nodeSourceFile n
-        , vnBgColor    = if nid `Set.member` artSet then "#f87171" else colorForCommunity cid
-        , vnBorder     = if nid `Set.member` artSet then "#f87171" else "#333"
-        , vnBw         = if nid `Set.member` artSet then 3 else 1
-        , vnGroup      = cid
-        }
-      | n <- Map.elems (gNodes g)
-      , let nid = sanitize (nodeId n)
-      , let cid = Map.findWithDefault (-1) nid nodeCommMap
-      ]
+         { vnId         = sanitize (nodeId n)
+         , vnLabel      = truncateLabel (sanitize (nodeLabel n))
+         , vnTitle      = sanitize (nodeSourceFile n) <> " [" <> T.pack (show cid) <> "]"
+         , vnSourceFile = nodeSourceFile n
+         , vnBgColor    = if nid `Set.member` artSet then "#f87171" else colorForCommunity cid
+         , vnBorder     = if nid `Set.member` artSet then "#f87171" else "#333"
+         , vnBw         = if nid `Set.member` artSet then 3 else 1
+         , vnGroup      = cid
+         , vnCommId     = Just cid
+         }
+       | n <- Map.elems (gNodes g)
+       , let nid = sanitize (nodeId n)
+       , let cid = Map.findWithDefault (-1) nid nodeCommMap
+       ]
 
 -- | Convert graph edges to JSON (via Aeson, no manual string building)
--- Filters out edges that reference non-existent nodes to prevent vis.js rendering issues.
 edgesToJSON :: Graph -> [VisEdge]
 edgesToJSON g =
   let sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
       nodeSet = Set.fromList [sanitize (nodeId n) | n <- Map.elems (gNodes g)]
   in [ VisEdge
-     { veFrom   = sanitize (edgeSource e)
-     , veTo     = sanitize (edgeTarget e)
-     , veTitle  = relLabel
-     , veLabel  = relLabel
-     , veDashes = isInferred
-     , veWidth  = if isInferred then 1 else 2
-     , veColor  = if isInferred then "#6a6a8a" else "#8b8baa"
-     }
-   | ((_, _), e) <- Map.toList (gEdges g)
-    , let src = sanitize (edgeSource e)
-          tgt = sanitize (edgeTarget e)
-          isInferred = case edgeConfidence e of Confidence c -> c < 1.0
-          relLabel = relationToText (edgeRelation e)
-   , src `Set.member` nodeSet
-   , tgt `Set.member` nodeSet
-   ]
+      { veFrom   = sanitize (edgeSource e)
+      , veTo     = sanitize (edgeTarget e)
+      , veTitle  = relLabel
+      , veLabel  = relLabel
+      , veDashes = isInferred
+      , veWidth  = if isInferred then 1 else 2
+      , veColor  = if isInferred then "#6a6a8a" else "#8b8baa"
+      }
+    | ((_, _), e) <- Map.toList (gEdges g)
+     , let src = sanitize (edgeSource e)
+           tgt = sanitize (edgeTarget e)
+           isInferred = case edgeConfidence e of Confidence c -> c < 1.0
+           relLabel = relationToText (edgeRelation e)
+    , src `Set.member` nodeSet
+    , tgt `Set.member` nodeSet
+    ]
+
+-- | Convert community aggregates to JSON
+communityAggregatesToJSON :: Graph -> CommunityMap -> [VisCommunityAggregate]
+communityAggregatesToJSON g commMap =
+  let sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
+      truncateLabel t = if T.length t > 80 then T.take 80 t <> "…" else t
+      artPoints = articulationPoints g
+      artSet = Set.fromList artPoints
+      nodeMap = gNodes g
+      isBridge m = case Map.lookup m nodeMap of
+        Just n -> sanitize (nodeId n) `Set.member` artSet
+        Nothing -> False
+   in [ VisCommunityAggregate
+         { vcaId                     = T.pack (show cid)
+         , vcaMemberCount            = length members
+         , vcaCohesion               = cohesionScore g members
+         , vcaBridgeCount            = length [m | m <- members, isBridge m]
+         , vcaColor                  = colorForCommunity cid
+         , vcaLabel                  = T.pack ("Community " ++ show cid)
+         , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
+         , vcaInterCommunityEdges    = 0 -- Placeholder: computed inter-community edge count
+         }
+       | (cid, members) <- Map.toList commMap
+       ]

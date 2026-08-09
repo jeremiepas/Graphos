@@ -14,6 +14,7 @@ module Graphos.UseCase.Extract
   , resolveGranularity
   , granularityForFile
   , pushExtractionStreaming
+  , isStubExtraction
   ) where
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
@@ -243,32 +244,48 @@ extractAll appEnv config detection = do
              n <- readIORef imageNodeMapRef >>= evaluate . Map.size
              logInfo $ T.pack $ "  [image] Produced " ++ show n ++ " image nodes"
          )
-         -- Paper (PDF) extraction
-         (do
-           unless (null paperFiles) $ do
-             logInfo $ T.pack $ "  [paper] Starting extraction for " ++ show (length paperFiles) ++ " paper files"
-             let paperThreadCount = max 1 (min 4 numThreads)
-             if paperThreadCount <= 1
-               then mapM_ (\fp -> do
-                 ext <- epExtractPdfFile ep config fp
-                 epPushExtractionStreaming ep config ext
-                 accumulate paperNodeMapRef paperEdgeAccRef ext
-                 ) paperFiles
-               else do
-                 sem <- newQSemN paperThreadCount
-                 let chunks = chunkList 50 paperFiles
-                 mapM_ (\chunk -> do
-                   results <- mapConcurrently (\fp -> bracket_
-                     (waitQSemN sem 1)
-                     (signalQSemN sem 1)
-                     (epExtractPdfFile ep config fp)) chunk
-                   mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext) results
-                   n <- readIORef paperNodeMapRef >>= evaluate . Map.size
-                   _ <- evaluate n
-                   performGC
-                   ) chunks
-           logDebug "  [paper] Extraction complete"
-         )
+          -- Paper (PDF) extraction
+          (do
+            if null paperFiles
+              then logDebug "  [paper] Extraction complete"
+              else do
+                logInfo $ T.pack $ "  [paper] Starting extraction for " ++ show (length paperFiles) ++ " paper files"
+                let paperThreadCount = max 1 (min 4 numThreads)
+                paperSuccessRef <- newIORef 0 :: IO (IORef Int)
+                paperStubRef    <- newIORef 0 :: IO (IORef Int)
+                let recordResult ext = do
+                      if isStubExtraction ext
+                        then modifyIORef' paperStubRef (+ 1)
+                        else modifyIORef' paperSuccessRef (+ 1)
+                if paperThreadCount <= 1
+                  then mapM_ (\fp -> do
+                    ext <- epExtractPdfFile ep config fp
+                    epPushExtractionStreaming ep config ext
+                    accumulate paperNodeMapRef paperEdgeAccRef ext
+                    recordResult ext
+                    ) paperFiles
+                  else do
+                    sem <- newQSemN paperThreadCount
+                    let chunks = chunkList 50 paperFiles
+                    mapM_ (\chunk -> do
+                      results <- mapConcurrently (\fp -> bracket_
+                        (waitQSemN sem 1)
+                        (signalQSemN sem 1)
+                         (do ext <- epExtractPdfFile ep config fp
+                             recordResult ext
+                             pure ext)) chunk
+                      mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext) results
+                      n <- readIORef paperNodeMapRef >>= evaluate . Map.size
+                      _ <- evaluate n
+                      performGC
+                      ) chunks
+                    _ <- readIORef paperSuccessRef
+                    _ <- readIORef paperStubRef
+                    pure ()
+                successCount <- readIORef paperSuccessRef
+                stubCount <- readIORef paperStubRef
+                logInfo $ T.pack $ "  [paper] Extraction complete: " ++ show (length paperFiles) ++ " files, " ++ show successCount ++ " successful, " ++ show stubCount ++ " stubbed"
+          )
        )
      )
 
@@ -570,6 +587,21 @@ granularityName :: Granularity -> String
 granularityName GranularityFine     = "fine"
 granularityName GranularityFunction = "function"
 granularityName GranularityFile     = "file"
+
+-- | Classify whether an Extraction represents a stub (single file node, no edges).
+--
+-- A stub extraction is one that has exactly one node with 'nodeKind' equal to
+-- @Just "File"@ and zero edges.  This matches the output of 'pdfStubNode' and
+-- 'makeStubNode' helpers used across extractors.
+isStubExtraction :: Extraction -> Bool
+isStubExtraction ext =
+  let nodes = extractionNodes ext
+      edges = extractionEdges ext
+  in Map.size nodes == 1
+     && Map.null edges
+     && case Map.lookupMin nodes of
+          Just (_, node) -> nodeKind node == Just "File"
+          Nothing        -> False
 
 -- ───────────────────────────────────────────────
 -- Incremental extraction for watch mode

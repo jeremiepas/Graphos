@@ -6,6 +6,8 @@ module Graphos.Domain.Types.Analysis
   , GodNode(..)
   , SurprisingConnection(..)
   , SuggestedQuestion(..)
+    -- * Community aggregate types
+  , CommunityAggregate(..)
   ) where
 
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
@@ -78,3 +80,38 @@ instance ToJSON SuggestedQuestion where
     , "question" .= sqQuestion q
     , "why"      .= sqWhy q
     ]
+
+-- | A community aggregate computed from Leiden detection
+data CommunityAggregate = CommunityAggregate
+  { caId                     :: !Text
+  , caMemberCount            :: !Int
+  , caCohesion               :: !Double
+  , caBridgeCount            :: !Int
+  , caColor                  :: !Text
+  , caLabel                  :: !Text
+  , caRepresentativeLabels   :: ![Text]
+  , caInterCommunityEdges    :: !Int
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON CommunityAggregate where
+  toJSON ca = object
+    [ "id"                      .= caId ca
+    , "member_count"            .= caMemberCount ca
+    , "cohesion"                .= caCohesion ca
+    , "bridge_count"            .= caBridgeCount ca
+    , "color"                   .= caColor ca
+    , "label"                   .= caLabel ca
+    , "representative_labels"   .= caRepresentativeLabels ca
+    , "inter_community_edges"   .= caInterCommunityEdges ca
+    ]
+
+instance FromJSON CommunityAggregate where
+  parseJSON = withObject "CommunityAggregate" $ \v -> CommunityAggregate
+    <$> v .: "id"
+    <*> v .: "member_count"
+    <*> v .: "cohesion"
+    <*> v .: "bridge_count"
+    <*> v .: "color"
+    <*> v .: "label"
+    <*> v .: "representative_labels"
+    <*> v .: "inter_community_edges"

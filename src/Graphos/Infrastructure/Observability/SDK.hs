@@ -277,7 +277,7 @@ flushDebugTrace env
 -- | Start an HTTP server exposing /metrics in Prometheus format.
 startMetricsServer :: MetricsStore -> Int -> IO ()
 startMetricsServer ms listenPort = do
-  env <- defaultLogEnv LevelInfo
+  env <- defaultLogEnv LogInfo
   let app req respond =
         case pathInfo req of
           ["metrics"] -> do
@@ -313,7 +313,7 @@ initObservability :: LogLevel -> OtelConfig -> Maybe Int -> FilePath -> IO Obser
 initObservability logLevel otelCfg metricsPort debugDir = do
   logEnv <- defaultLogEnv logLevel
   metrics <- newMetricsStore
-  debugTrace <- newDebugTraceEnv (logLevel >= LevelDebug) debugDir
+  debugTrace <- newDebugTraceEnv (logLevel >= LogDebug) debugDir
 
   mProvider <- if otelEnabled otelCfg
     then do
