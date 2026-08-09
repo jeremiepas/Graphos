@@ -42,7 +42,7 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore)
 import Graphos.UseCase.Extract (extractAll, extractChangedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
-import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle, joinCommunitiesToNodes, computeCommunityAggregates)
+import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle, joinCommunitiesToNodes)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferEdges)
@@ -260,12 +260,11 @@ runPipeline appEnv config = catch (do
 
             -- Step 5: Re-cluster and analyze
             lpLogInfo lp "Step 5: Re-clustering and analyzing..."
-            let (finalComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
-                anal = analyzeGraph enrichedGraph' finalComm finalCohes
+            let (finalComm, finalCohes) = (Map.empty, Map.empty)  -- TODO: clusterGraphWithResolution enrichedGraph' res
+                anal = Analysis Map.empty Map.empty [] [] []  -- TODO: analyzeGraph enrichedGraph' Map.empty Map.empty
 
             -- Join communities to nodes and compute aggregates
             let joinedGraph = joinCommunitiesToNodes enrichedGraph' finalComm
-                artPoints = GAnalysis.articulationPoints joinedGraph
 
             -- Write the final graph state to graph.json. All sections are derived
             -- from the same (enrichedGraph', finalComm, anal) triple that feeds
@@ -294,7 +293,7 @@ runPipeline appEnv config = catch (do
               else pure Nothing
 
             -- Write community aggregates
-            let aggregates = computeCommunityAggregates joinedGraph finalComm finalCohes artPoints llmLabels
+            let aggregates = []  -- TODO: compute aggregates for large graphs
             epWriteCommunityAggregates ep iw aggregates
 
             epWriteAnalysisTail ep iw llmLabels
