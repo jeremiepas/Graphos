@@ -44,7 +44,7 @@ import qualified Graphos.Infrastructure.Export.CommunityGraph as CommunityGraph
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint )
-import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns)
+import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, shouldIgnore)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
   ( docxExtractMediaPaths, pptxExtractMediaPaths, extractMediaFile )
 import Graphos.Infrastructure.Logging
@@ -68,10 +68,10 @@ import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Language as TS_LANG
 
 -- UseCase imports (for delegation to sub-modules)
-import Graphos.UseCase.Extract.Markdown (extractDocFile)
-import Graphos.UseCase.Extract.Office (extractOfficeFile)
 import Graphos.UseCase.Extract.Haskell (extractHaskellStub)
-import Graphos.UseCase.Extract.Image (extractImageFile, extractImageFromBytes)
+import Graphos.Infrastructure.Extract.Markdown (extractDocFile)
+import Graphos.Infrastructure.Extract.Office (extractOfficeFile)
+import Graphos.Infrastructure.Extract.Image (extractImageFile, extractImageFromBytes)
 import qualified Graphos.UseCase.Export as UE
 
 -- Infrastructure imports for PDF extraction
@@ -120,6 +120,7 @@ productionFileSystemPort = FileSystemPort
   , fspSaveCheckpoint     = savePipelineCheckpoint
   , fspClearCheckpoint    = clearPipelineCheckpoint
   , fspLoadIgnorePatterns = loadIgnorePatterns
+  , fspShouldIgnore = shouldIgnore
   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.
@@ -195,42 +196,36 @@ productionExtractionPort logEnv = ExtractionPort
 
 -- | Production export port — delegates to Infrastructure.Export.* modules.
 productionExportPort :: LogEnv -> ObservabilityEnv -> UEP.ExportPort
-productionExportPort _logEnv _obsEnv = UEP.ExportPort
-  { UEP.epExportHTML = ExportHTML.exportHTML
-  , UEP.epExportObsidian = ExportObsidian.exportObsidian
-  , UEP.epExportReport = ExportReport.exportReport
-  , UEP.epExportCypher = Neo4j.exportCypher
-  , UEP.epExportMemgraphCypher = ExportMemgraph.exportMemgraphCypher
-  , UEP.epPushToNeo4jFull = Neo4j.pushToNeo4jWithCommunities
-  , UEP.epPushToNeo4jSubgraph = Neo4j.pushSubgraphToNeo4j
-  , UEP.epPushToNeo4jCommunity = Neo4j.pushCommunityGraphToNeo4j
-  , UEP.epPushToMemgraphFull = ExportMemgraph.pushToMemgraphWithCommunities
-  , UEP.epPushToMemgraphSubgraph = ExportMemgraph.pushSubgraphToMemgraph
-  , UEP.epPushToMemgraphCommunity = ExportMemgraph.pushCommunityGraphToMemgraph
-  , UEP.epPushEdgeRepair = Neo4j.pushEdgeRepair
-  , UEP.epOpenIncrementalWriter = \fp -> pure (unsafeCoerce (Inc.openWriter fp))
-  , UEP.epWriteNodes = \_ nodes -> Inc.writeNodes (unsafeCoerce ()) nodes
-  , UEP.epWriteEdges = \_ edges -> Inc.writeEdges (unsafeCoerce ()) edges
-  , UEP.epWriteCommunities = \_ cmap -> Inc.writeCommunities (unsafeCoerce ()) cmap
-  , UEP.epWriteCohesion = \_ cmap -> Inc.writeCohesion (unsafeCoerce ()) cmap
-  , UEP.epWriteGodNodes = \_ gnodes -> Inc.writeGodNodes (unsafeCoerce ()) gnodes
-  , UEP.epWriteAnalysisTail = \_ mbLabels -> Inc.writeAnalysisTail (unsafeCoerce ()) mbLabels
-  , UEP.epWriteCommunityAggregates = \_ aggregates -> Inc.writeCommunityAggregates (unsafeCoerce ()) aggregates
-  , UEP.epFlushWriter = \_ -> Inc.flushWriter (unsafeCoerce ())
-  , UEP.epCloseWriter = \_ -> Inc.closeWriter (unsafeCoerce ())
-  , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
-  , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
-  , UEP.epExportAll = \g _outputDir analysis config detection mLabels ->
-      UE.exportAll g analysis config detection mLabels >>= \er ->
-        pure $ UEP.ExportResult
-          { UEP.erReport = UE.erReport er
-          , UEP.erJSON = UE.erJSON er
-          , UEP.erHTML = UE.erHTML er
-          , UEP.erObsidian = UE.erObsidian er
-          , UEP.erNeo4j = UE.erNeo4j er
-          , UEP.erMemgraph = UE.erMemgraph er
-          }
-  }
+productionExportPort _logEnv _obsEnv =
+  let ep = UEP.ExportPort
+        { UEP.epExportHTML = ExportHTML.exportHTML
+        , UEP.epExportObsidian = ExportObsidian.exportObsidian
+        , UEP.epExportReport = ExportReport.exportReport
+        , UEP.epExportCypher = Neo4j.exportCypher
+        , UEP.epExportMemgraphCypher = ExportMemgraph.exportMemgraphCypher
+        , UEP.epPushToNeo4jFull = Neo4j.pushToNeo4jWithCommunities
+        , UEP.epPushToNeo4jSubgraph = Neo4j.pushSubgraphToNeo4j
+        , UEP.epPushToNeo4jCommunity = Neo4j.pushCommunityGraphToNeo4j
+        , UEP.epPushToMemgraphFull = ExportMemgraph.pushToMemgraphWithCommunities
+        , UEP.epPushToMemgraphSubgraph = ExportMemgraph.pushSubgraphToMemgraph
+        , UEP.epPushToMemgraphCommunity = ExportMemgraph.pushCommunityGraphToMemgraph
+        , UEP.epPushEdgeRepair = Neo4j.pushEdgeRepair
+        , UEP.epOpenIncrementalWriter = \fp -> pure (unsafeCoerce (Inc.openWriter fp))
+        , UEP.epWriteNodes = \_ nodes -> Inc.writeNodes (unsafeCoerce ()) nodes
+        , UEP.epWriteEdges = \_ edges -> Inc.writeEdges (unsafeCoerce ()) edges
+        , UEP.epWriteCommunities = \_ cmap -> Inc.writeCommunities (unsafeCoerce ()) cmap
+        , UEP.epWriteCohesion = \_ cmap -> Inc.writeCohesion (unsafeCoerce ()) cmap
+        , UEP.epWriteGodNodes = \_ gnodes -> Inc.writeGodNodes (unsafeCoerce ()) gnodes
+        , UEP.epWriteAnalysisTail = \_ mbLabels -> Inc.writeAnalysisTail (unsafeCoerce ()) mbLabels
+        , UEP.epWriteCommunityAggregates = \_ aggregates -> Inc.writeCommunityAggregates (unsafeCoerce ()) aggregates
+        , UEP.epFlushWriter = \_ -> Inc.flushWriter (unsafeCoerce ())
+        , UEP.epCloseWriter = \_ -> Inc.closeWriter (unsafeCoerce ())
+        , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
+        , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
+        , UEP.epExportAll = \g _outputDir analysis config detection mLabels ->
+            UE.exportAll ep g analysis config detection mLabels
+        }
+  in ep
 
 -- | Production LLM port — delegates to Infrastructure.LLM.*.
 productionLLMPort :: LLMPort
