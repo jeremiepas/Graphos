@@ -19,11 +19,12 @@ import System.Directory (doesFileExist)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
-import Graphos.Domain.Config.Extraction (Granularity(..))
+import Graphos.Domain.Config.Extraction (Granularity(..), PdfExtractionMode(..))
+import Graphos.Domain.Config.Core (GraphosConfig(..), gcPdfExtraction)
 import Graphos.Domain.PdfStructure (parsePdfStructure, pdfStructureToExtraction)
 import Graphos.Domain.Types (Extraction, extractionFromLists, extractionNodes, extractionEdges, Node(..), FileType(..))
-import Graphos.Domain.Types.Pipeline (PipelineConfig(..))
-import Graphos.Infrastructure.Logging (LogEnv, logInfo, logWarn)
+import Graphos.Domain.Types.Pipeline (PipelineConfig(..), cfgGraphosConfig)
+import Graphos.Infrastructure.Logging (LogEnv, logDebug, logInfo, logWarn)
 
 -- | Extract entities from a PDF file.
 --
@@ -34,13 +35,15 @@ import Graphos.Infrastructure.Logging (LogEnv, logInfo, logWarn)
 extractPdfFile :: LogEnv -> PipelineConfig -> FilePath -> IO Extraction
 extractPdfFile logEnv config filePath = do
   exists <- doesFileExist filePath
-  if not exists
-    then do
+  case exists of
+    False -> do
       logWarn logEnv $ T.pack $ "[pdf] File not found: " ++ filePath
+      logDebug logEnv $ T.pack $ "[pdf] " ++ filePath ++ " -> stub (1 node, 0 edges)"
       pure (extractionFromLists [pdfStubNode filePath] [])
-    else do
-      let granularity = resolvePdfGranularity config
-      logInfo logEnv $ T.pack $ "[pdf] Extracting: " ++ filePath ++ " (granularity: " ++ showGranularity granularity ++ ")"
+    True -> do
+      let pdfMode = resolvePdfExtractionMode config
+          granularity = pdfModeToGranularity pdfMode
+      logInfo logEnv $ T.pack $ "[pdf] Extracting: " ++ filePath ++ " (mode: " ++ showPdfMode pdfMode ++ ", granularity: " ++ showGranularity granularity ++ ")"
       catch
         (do (exitCode, stdout, stderr) <- readProcessWithExitCode "pdftotext" [filePath, "-"] ""
             case exitCode of
@@ -49,29 +52,46 @@ extractPdfFile logEnv config filePath = do
                 if T.null (T.strip text)
                   then do
                     logWarn logEnv $ T.pack $ "[pdf] Empty text from: " ++ filePath
+                    logDebug logEnv $ T.pack $ "[pdf] " ++ filePath ++ " -> stub (1 node, 0 edges)"
                     pure (extractionFromLists [pdfStubNode filePath] [])
                   else do
                     let struct = parsePdfStructure granularity text
                         extraction = pdfStructureToExtraction filePath struct
                         nNodes = Map.size (extractionNodes extraction)
                         nEdges = Map.size (extractionEdges extraction)
-                    logInfo logEnv $ T.pack $ "[pdf] " ++ filePath ++ " -> " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
+                    logDebug logEnv $ T.pack $ "[pdf] " ++ filePath ++ " -> " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
                     pure extraction
               ExitFailure code -> do
                 logWarn logEnv $ T.pack $ "[pdf] pdftotext failed (exit " ++ show code ++ ") for " ++ filePath ++ ": " ++ take 200 stderr
+                logDebug logEnv $ T.pack $ "[pdf] " ++ filePath ++ " -> stub (1 node, 0 edges)"
                 pure (extractionFromLists [pdfStubNode filePath] [])
         )
         (\(e :: SomeException) -> do
           logWarn logEnv $ T.pack $ "[pdf] Exception extracting " ++ filePath ++ ": " ++ show e
+          logDebug logEnv $ T.pack $ "[pdf] " ++ filePath ++ " -> stub (1 node, 0 edges)"
           pure (extractionFromLists [pdfStubNode filePath] [])
         )
 
--- | Resolve the PDF granularity from config, defaulting to Fine.
-resolvePdfGranularity :: PipelineConfig -> Granularity
-resolvePdfGranularity config =
-  case cfgGranularity config of
-    Just g  -> g
-    Nothing -> GranularityFine
+-- | Resolve PDF extraction mode from config.
+-- Priority: global gcPdfExtraction setting.
+resolvePdfExtractionMode :: PipelineConfig -> PdfExtractionMode
+resolvePdfExtractionMode config =
+  gcPdfExtraction (cfgGraphosConfig config)
+
+-- | Convert PdfExtractionMode to Granularity for PDF parsing.
+--   * PdfSmall  → GranularityFile  (top-level titles only, no paragraphs)
+--   * PdfMedium → GranularityFunction (titles + sections, no paragraphs)
+--   * PdfLarge  → GranularityFine  (all levels + paragraphs)
+pdfModeToGranularity :: PdfExtractionMode -> Granularity
+pdfModeToGranularity PdfSmall  = GranularityFile
+pdfModeToGranularity PdfMedium = GranularityFunction
+pdfModeToGranularity PdfLarge  = GranularityFine
+
+-- | Human-readable PDF mode name for logging.
+showPdfMode :: PdfExtractionMode -> String
+showPdfMode PdfSmall  = "small"
+showPdfMode PdfMedium = "medium"
+showPdfMode PdfLarge  = "large"
 
 -- | Human-readable granularity name for logging.
 showGranularity :: Granularity -> String

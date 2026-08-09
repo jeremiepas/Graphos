@@ -1,6 +1,6 @@
 -- | Extraction configuration types.
--- ExtractorMode, Granularity, ExtractorConfig, LSPServerConfig, FileExtensionConfig
--- and their defaults.
+-- ExtractorMode, Granularity, ExtractorConfig, LSPServerConfig, FileExtensionConfig,
+-- PdfExtractionMode and their defaults.
 -- Pure data types — no IO.
 {-# LANGUAGE DeriveGeneric #-}
 module Graphos.Domain.Config.Extraction
@@ -12,6 +12,10 @@ module Graphos.Domain.Config.Extraction
     -- * Extraction granularity
   , Granularity(..)
   , defaultGranularity
+
+    -- * PDF extraction modes
+  , PdfExtractionMode(..)
+  , defaultPdfExtractionMode
 
     -- * LSP configuration
   , LSPServerConfig(..)
@@ -95,6 +99,39 @@ instance FromJSON Granularity where
 -- The previous statement-level behavior is available via @granularity: fine@.
 defaultGranularity :: Granularity
 defaultGranularity = GranularityFunction
+
+-- ───────────────────────────────────────────────
+-- PDF Extraction Modes
+-- ───────────────────────────────────────────────
+
+-- | How aggressively to extract content from PDF files.
+--
+--   * 'PdfSmall'       — file node + title only (no sections, minimal graph footprint)
+--   * 'PdfMedium'      — file node + top-level titles and sections (no subsections or paragraphs)
+--   * 'PdfLarge'       — full hierarchy: all section levels + paragraphs (default, ~max nodes)
+--
+-- Resolution order: per-extension extractor config → global granularity → 'PdfMedium'.
+data PdfExtractionMode
+  = PdfSmall       -- ^ File + title only
+  | PdfMedium      -- ^ File + titles + sections (no subsections/paragraphs)
+  | PdfLarge       -- ^ Full hierarchy: all levels + paragraphs
+  deriving (Eq, Show, Generic)
+
+instance ToJSON PdfExtractionMode where
+  toJSON PdfSmall  = "small"
+  toJSON PdfMedium = "medium"
+  toJSON PdfLarge  = "large"
+
+instance FromJSON PdfExtractionMode where
+  parseJSON (String "small")  = pure PdfSmall
+  parseJSON (String "medium") = pure PdfMedium
+  parseJSON (String "large")  = pure PdfLarge
+  parseJSON v = fail $ "Unknown PDF extraction mode: " ++ show v ++ ". Expected small, medium, or large"
+
+-- | Default PDF extraction mode: 'PdfMedium'.
+-- Medium gives a good balance between graph size and information density.
+defaultPdfExtractionMode :: PdfExtractionMode
+defaultPdfExtractionMode = PdfMedium
 
 -- | Per-extension extractor configuration.
 data ExtractorConfig = ExtractorConfig

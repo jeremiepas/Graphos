@@ -13,6 +13,7 @@ import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
+import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
@@ -90,12 +91,14 @@ main = do
                             , cfgDebugTraceDir  = Just debugDir
                             }
       -- Initialize observability (tracing, metrics, debug trace)
-      let logLevel = if cfgDebug config || obsDebug obsCfg then LevelTrace
-                      else if cfgVerbose config then LevelDebug
-                      else LevelInfo
+      let logLevel = if cfgDebug config || obsDebug obsCfg then LogTrace
+                      else if cfgVerbose config then LogDebug
+                      else LogInfo
       obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
       let _tracer = otelTracer obsEnv
           _metrics = otelMetrics obsEnv
+          env = otelLogEnv obsEnv
+          appEnv = productionAppEnv env obsEnv
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
          Just graphPath -> do
@@ -105,9 +108,8 @@ main = do
            -- Watch mode: run initial pipeline, then watch for changes
            if cfgWatch config'
              then do
-               let env = otelLogEnv obsEnv
                logInfo env "Starting initial pipeline (watch mode)..."
-               result <- runPipeline config'
+               result <- runPipeline appEnv config'
                case result of
                  Left err -> do
                    logError env $ "Initial pipeline failed: " <> err
@@ -122,17 +124,16 @@ main = do
                    watchDirectory (cfgInputPath config') (\changedFiles -> do
                      let filesList = T.splitOn ", " (T.pack changedFiles)
                      logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
-                     incResult <- runIncrementalPipeline config' (map T.unpack filesList)
+                     incResult <- runIncrementalPipeline appEnv config' (map T.unpack filesList)
                      case incResult of
                        Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
                        Right _ -> logInfo env "[watch] Incremental update complete"
                      ) defaultGraphosWatchConfig shutdownVar
               else do
                 -- Normal mode: run once and exit
-                let env = otelLogEnv obsEnv
                 logInfo env "Starting pipeline..."
                 logDebug env $ "Config: " <> T.pack (show config')
-                result <- runPipeline config'
+                result <- runPipeline appEnv config'
                 let shutdownMicros = cfgOtelShutdownTimeout config' * 1000000
                 shutdownResult <- timeout shutdownMicros (shutdownObservability obsEnv)
                 case shutdownResult of
@@ -159,7 +160,7 @@ main = do
                      Nothing     -> pure ()
 
     QueryCmd question mode budget graphPath -> do
-      env <- defaultLogEnv LevelInfo
+      env <- defaultLogEnv LogInfo
       logInfo env $ "Query: " <> question <> " (" <> mode <> ", budget=" <> T.pack (show budget) <> ")"
       loadResult <- loadGraphFromFile graphPath
       case loadResult of
@@ -173,7 +174,7 @@ main = do
           putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
 
     PathCmd from to graphPath -> do
-      env <- defaultLogEnv LevelInfo
+      env <- defaultLogEnv LogInfo
       logInfo env $ "Path: " <> from <> " -> " <> to
       logDebug env "Loading graph from disk..."
       loadResult <- loadGraphFromFile graphPath
@@ -285,7 +286,7 @@ main = do
             else pure (lrCommunities loaded, lrCohesion loaded)
           let numCommunities = Map.size commMap
           putStrLn $ "[graphos] Graph loaded: " ++ show totalNodes ++ " nodes, " ++ show totalEdges ++ " edges, " ++ show numCommunities ++ " communities"
-          env <- defaultLogEnv LevelInfo
+          env <- defaultLogEnv LogInfo
           (msg, _stmts, _batches) <- case pushMode of
             FullPush -> do
               logInfo env $ T.pack $ "[neo4j] Push mode: full (all nodes + edges + communities)"
@@ -319,7 +320,7 @@ main = do
             else pure (lrCommunities loaded, lrCohesion loaded)
           let numCommunities = Map.size commMap
           putStrLn $ "[graphos] Graph loaded: " ++ show totalNodes ++ " nodes, " ++ show totalEdges ++ " edges, " ++ show numCommunities ++ " communities"
-          env <- defaultLogEnv LevelInfo
+          env <- defaultLogEnv LogInfo
           (msg, _stmts, _batches) <- case pushMode of
             MemgraphFull -> do
               logInfo env $ "[memgraph] Push mode: full (all nodes + edges + communities)"
@@ -334,7 +335,7 @@ main = do
           logInfo env $ "[memgraph] " <> msg
 
     MergeCmd pathA pathB outputDir density resolution minCommSize maxLeidenIterations noViz verbose -> do
-      let logLevel = if verbose then LevelDebug else LevelInfo
+      let logLevel = if verbose then LogDebug else LogInfo
       env <- defaultLogEnv logLevel
       logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
       resultA <- loadGraphFromFile pathA
@@ -397,15 +398,17 @@ main = do
     IngestCmd filePath embed outputDir -> do
       -- Load graphos.yaml config
       graphosCfg <- loadConfig
-      let logLevel = LevelInfo
+      let logLevel = LogInfo
           config = defaultConfig
                 { cfgOutputDir = outputDir
                 , cfgEmbed = embed
                 , cfgGraphosConfig = graphosCfg
                 }
       env <- defaultLogEnv logLevel
+      obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
+      let appEnv = productionAppEnv env obsEnv
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if embed then " (embeddings enabled)" else "")
-      result <- Graphos.UseCase.Pipeline.runSingleFilePipeline config filePath
+      result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of
         Left err -> do
           logError env $ "[ingest] Failed: " <> err
@@ -636,6 +639,13 @@ defaultConfigYaml = unlines
   , "    mode: tree-sitter"
   , "    grammar: markdown"
   , "    language_id: asciidoc"
+  , ""
+  , "# ──── PDF Extraction ───────────────────────────"
+  , "# How aggressively to extract content from PDF files."
+  , "#   small  — file node + title only (minimal graph footprint)"
+  , "#   medium — file + titles + sections, no subsections/paragraphs (default)"
+  , "#   large  — full hierarchy: all section levels + paragraphs (~max nodes)"
+  , "pdf_extraction: medium"
   , ""
   , "# ──── LSP Servers ─────────────────────────────"
   , "# Map file extension → {command, args, language_id}."

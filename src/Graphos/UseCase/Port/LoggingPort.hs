@@ -4,14 +4,12 @@
 module Graphos.UseCase.Port.LoggingPort
   ( -- * Logging port
     LoggingPort(..)
+    -- * Log levels (re-exported from Domain.Logging)
   , LogLevel(..)
   ) where
 
 import Data.Text (Text)
-
--- | Log levels, matching Infrastructure.Logging.
-data LogLevel = LogTrace | LogDebug | LogInfo | LogWarn | LogError
-  deriving (Eq, Show, Ord, Enum, Bounded)
+import Graphos.Domain.Logging (LogLevel(..))
 
 -- | Record-of-functions port for logging.
 data LoggingPort = LoggingPort

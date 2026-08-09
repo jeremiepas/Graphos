@@ -10,7 +10,7 @@
 
 **Task slug**: `07-refactor-usecase-pipeline-to-ports`
 **Attempt**: 1
-**Status**: pending
+**Status**: done
 
 ## Summary
 
@@ -57,4 +57,23 @@ Infrastructure.Wiring (productionAppEnv)  ← SUSPICIOUS: Pipeline should not cr
 
 ## Result
 
-NOT YET IMPLEMENTED — awaiting Do phase.
+**DONE — Attempt 1**
+
+Changes made:
+1. Created `src/Graphos/Domain/Logging.hs` with pure logging types (`LogLevel`, `OtlpLogConfig`, `LogEnv`)
+2. Re-exported types from `Infrastructure/Logging.hs` for backward compatibility (removed duplicate definitions)
+3. Added `opLogEnv :: LogEnv` field to `ObservabilityPort`
+4. Wired `opLogEnv = otelLogEnv obsEnv` in `Infrastructure/Wiring.hs`
+5. Updated `LoggingPort` to import `LogLevel` from `Domain.Logging` (removed local definition)
+6. Updated `UseCase/Pipeline.hs`:
+   - Removed `ObservabilityEnv(..)` import
+   - Removed unused `LLMPort` and `UTCTime` imports
+   - Replaced `otelLogEnv _obsEnv` with `opLogEnv op`
+   - Fixed indentation in `runSingleFilePipeline` let block
+7. Updated `UseCase/Ingest.hs` to import `LogEnv` from `Domain.Logging`
+8. Updated `Infrastructure/Observability/SDK.hs` — replaced `LevelInfo`/`LevelDebug` with `LogInfo`/`LogDebug`
+9. Updated `Infrastructure/Server/Static.hs` — replaced `LevelInfo` with `LogInfo`
+10. Updated `app/Main.hs` — replaced `LevelInfo`/`LevelDebug` with `LogInfo`/`LogDebug`, removed `obsEnv` from pipeline calls
+11. Updated test spec `SDKSpec.hs` — replaced old constructor names
+
+Build: `cabal build` succeeds cleanly. No errors.
