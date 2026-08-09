@@ -4,10 +4,13 @@
 module Graphos.UseCase.Port.FileSystemPort
   ( -- * File system port
     FileSystemPort(..)
+    -- * Pattern types for ignore patterns
+  , AnnotatedPattern(..)
+  , IgnorePattern(..)
   ) where
 
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint)
-import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
+import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), IgnorePattern(..))
 
 -- | Record-of-functions port for file system operations.
 data FileSystemPort = FileSystemPort
@@ -19,4 +22,6 @@ data FileSystemPort = FileSystemPort
   , fspClearCheckpoint   :: FilePath -> IO ()
     -- | Load ignore patterns from config and .gitignore
   , fspLoadIgnorePatterns :: FilePath -> IO [AnnotatedPattern]
+    -- | Check if a path should be ignored given patterns (pure)
+  , fspShouldIgnore      :: [AnnotatedPattern] -> FilePath -> Bool
     }
