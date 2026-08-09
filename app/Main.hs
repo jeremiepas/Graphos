@@ -34,7 +34,7 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision)
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed)
 import Graphos.Infrastructure.Config (loadConfig)
 import Graphos.Infrastructure.Server.Static (startStaticServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
@@ -395,19 +395,21 @@ main = do
                 Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
                 Nothing   -> pure ()
 
-    IngestCmd filePath embed outputDir -> do
+    IngestCmd filePath embedOverride outputDir -> do
       -- Load graphos.yaml config
       graphosCfg <- loadConfig
       let logLevel = LogInfo
+          ingestCfg = gcIngest graphosCfg
+          effectiveEmbed = maybe (icEmbed ingestCfg) id embedOverride
           config = defaultConfig
                 { cfgOutputDir = outputDir
-                , cfgEmbed = embed
+                , cfgEmbed = effectiveEmbed
                 , cfgGraphosConfig = graphosCfg
                 }
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
       let appEnv = productionAppEnv env obsEnv
-      logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if embed then " (embeddings enabled)" else "")
+      logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of
         Left err -> do
@@ -509,7 +511,27 @@ defaultConfigYaml = unlines
   , "#   1. Built-in defaults"
   , "#   2. Global config: ~/.config/graphos/graphos.yaml"
   , "#   3. This file (project graphos.yaml)"
-  , "#   4. CLI flags (--otel, --metrics, etc.)"
+  , "#   4. CLI flags (--otel, --metrics, --embed, --no-embed, etc.)"
+  , ""
+  , "# ──── Ingest (single-file) ───────────────────"
+  , "# Settings for `graphos ingest <file>`. Optimized for codebase analysis."
+  , "ingest:"
+  , "  embed: true                   # generate embeddings by default (override with --no-embed)"
+  , "  merge: true                  # merge into existing graph.json"
+  , "  deduplicate: true            # skip unchanged files via SHA256"
+  , "  resolution: 0.8              # smaller communities for single-file graphs"
+  , "  min_comm_size: 2             # minimum community size for ingest"
+  , "  max_leiden_iter: 20          # converge quickly on small graphs"
+  , "  index_path: graphos-out/index.json"
+  , "  url:"
+  , "    timeout: 30                # seconds to wait for URL response"
+  , "    user_agent: graphos/0.1.0"
+  , "    retry: 1                   # retries on download failure"
+  , "  categories:                  # per-category overrides (Nothing = inherit top-level)"
+  , "    image:"
+  , "      embed: false             # images: don't embed by default"
+  , "    video:"
+  , "      embed: false             # videos: don't embed by default"
   , ""
   , "# ──── Extraction granularity ──────────────────"
   , "# fine     — statement-level nodes (verbose, ~100+ nodes/file)"
@@ -666,10 +688,11 @@ defaultConfigYaml = unlines
   , "# Full override for each category (replaces defaults)."
   , "# file_extensions:"
   , "#   code: [\".py\", \".ts\", \".tsx\", \".js\", \".jsx\", \".go\", \".rs\", \".hs\", \".nix\"]"
-  , "#   doc: [\".md\", \".txt\", \".rst\"]"
+  , "#   doc: [\".md\"]"
   , "#   paper: [\".pdf\"]"
   , "#   image: [\".png\", \".jpg\", \".jpeg\", \".webp\", \".gif\"]"
   , "#   video: [\".mp4\", \".mov\", \".mkv\", \".webm\"]"
+  , "#   office: [\".docx\", \".pptx\", \".xlsx\", \".doc\", \".ppt\"]"
   , ""
   , "# ──── Neo4j ──────────────────────────────────────"
   , "# Used by: graphos . --neo4j --neo4j-push"
