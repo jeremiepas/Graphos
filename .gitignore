@@ -16,6 +16,7 @@ graphos-out/
 result
 result-*
 .tmp/
+.worktrees/
 # .opencode local dev config (agent files tracked separately)
 .opencode/*
 !.opencode/agent/

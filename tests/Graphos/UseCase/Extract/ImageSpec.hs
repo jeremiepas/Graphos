@@ -10,7 +10,7 @@ import qualified Data.Text as T
 
 import Graphos.Domain.Types
 import Graphos.Infrastructure.LLM.Vision (ImageAnalysis(..), Entity(..), ImageKind(..))
-import Graphos.UseCase.Extract.Image (imageAnalysisToExtraction, imageStubNode)
+import Graphos.Infrastructure.Extract.Image (imageAnalysisToExtraction, imageStubNode)
 
 spec :: Spec
 spec = do

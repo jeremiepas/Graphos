@@ -65,13 +65,15 @@ library
                     Graphos.Domain.Labeling
                     Graphos.Domain.Logging
                     -- Use Cases
-                   Graphos.UseCase.Pipeline
-                   Graphos.UseCase.Detect
-                     Graphos.UseCase.Extract
-                     Graphos.UseCase.Extract.Haskell
-                     Graphos.UseCase.Extract.Markdown
-                     Graphos.UseCase.Extract.Office
-                     Graphos.UseCase.Extract.Image
+                    Graphos.UseCase.Pipeline
+                    Graphos.UseCase.Pipeline.Core
+                    Graphos.UseCase.Pipeline.Incremental
+                    Graphos.UseCase.Detect
+                      Graphos.UseCase.Extract
+                      Graphos.UseCase.Extract.Haskell
+                      Graphos.UseCase.Extract.Core
+                      Graphos.UseCase.Extract.LSP
+                      Graphos.UseCase.Extract.TreeSitter
                     Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
                      Graphos.UseCase.Analyze
@@ -124,6 +126,10 @@ library
                           Graphos.Infrastructure.Extract.TreeSitter.Convert
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
+                      -- Infrastructure - Image/Office/Markdown extractors
+                      Graphos.Infrastructure.Extract.Image
+                      Graphos.Infrastructure.Extract.Office
+                      Graphos.Infrastructure.Extract.Markdown
                      -- Infrastructure - FileSystem
                      Graphos.Infrastructure.FileSystem.Watcher
                      Graphos.Infrastructure.FileSystem.Cache

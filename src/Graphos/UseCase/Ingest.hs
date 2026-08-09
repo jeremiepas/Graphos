@@ -14,43 +14,33 @@ module Graphos.UseCase.Ingest
     -- * Single-file ingestion
   , ingestFile
   , FileIngestResult(..)
-
-    -- * Category resolution helpers
-  , resolveEmbedForCategory
-  , resolveGranularityForCategory
   ) where
 
 import Control.Exception (SomeException, catch)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, UTCTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeExtension, (</>))
 import Network.HTTP.Client
-  ( newManager, parseRequest, requestHeaders, responseBody, httpLbs, responseStatus
-  , defaultManagerSettings, managerResponseTimeout, responseTimeoutMicro, responseTimeoutNone
+  ( newManager, parseRequest, responseBody, httpLbs, responseStatus
+  , defaultManagerSettings
   )
 import Network.HTTP.Types (statusCode)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as BS16
-import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
-import qualified Crypto.Hash.SHA256 as SHA256
 
 import Graphos.Domain.Types
-  ( Node(..), Extraction(..), Granularity(..)
+  ( Node(..), Extraction(..)
   , FileCategory(..), Detection(..)
-   , IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex, isFileUpToDate
+  , IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex
   , PipelineConfig(..), EmbeddingConfig(..)
   )
-import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtensionConfig(..), IngestConfig(..), IngestUrlConfig(..), IngestCategories(..), IngestCategoryConfig(..), FileEntry(..))
-import Graphos.Infrastructure.Security (validateUrl)
-import qualified Graphos.Infrastructure.LLM.Embedding as Emb
+import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtensionConfig(..))
+import Graphos.UseCase.AppEnv (AppEnv(..))
+import Graphos.UseCase.Port.LLMPort (LLMPort(..))
+import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import qualified Graphos.UseCase.Extract as Extract
-import Graphos.UseCase.AppEnv (AppEnv)
-import Graphos.UseCase.IngestIndex (loadIndex)
-import Graphos.Infrastructure.Logging (LogEnv, logInfo)
-import qualified Data.Map.Strict as Map
 
 -- ───────────────────────────────────────────────
 -- URL Ingestion (existing)
@@ -85,16 +75,17 @@ detectUrlType url
 
 -- | Ingest a URL - fetch content and save as annotated markdown
 -- For PDFs, downloads the actual content instead of creating a stub.
-ingest :: IngestUrlConfig -> Text -> FilePath -> Maybe Text -> Maybe Text -> IO (Either Text IngestResult)
-ingest urlCfg url rawDir author contributor =
-  case validateUrl url of
+ingest :: LLMPort -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> IO (Either Text IngestResult)
+ingest lp url rawDir author contributor =
+  case lpValidateUrl lp url of
     Left err -> pure (Left err)
     Right validUrl -> do
       let urlType = detectUrlType validUrl
           ext = typeToExt urlType
           filename = generateFilename validUrl ext
-          filepath = rawDir </> filename
-      createDirectoryIfMissing True rawDir
+          dir = maybe "." T.unpack rawDir
+          filepath = dir </> filename
+      createDirectoryIfMissing True dir
 
       now <- getCurrentTime
       let timestamp = T.pack (formatTime defaultTimeLocale "%Y-%m-%m-%dT%H:%M:%SZ" now)
@@ -111,35 +102,17 @@ ingest urlCfg url rawDir author contributor =
                   , irSummary = "File already exists, skipped"
                   })
             else do
-              result <- downloadFileWithConfig urlCfg validUrl filepath
+              result <- downloadFile validUrl filepath
               case result of
                 Left err -> do
-                  -- Retry once if configured
-                  if iucRetry urlCfg > 0
-                    then do
-                      result2 <- downloadFileWithConfig urlCfg { iucRetry = 0 } validUrl filepath
-                      case result2 of
-                        Left err2 -> do
-                          let stubContent = frontmatter <> "\n[PDF content - to be fetched]\n"
-                          writeFile filepath (T.unpack stubContent)
-                          pure (Right IngestResult
-                            { irPath = filepath
-                            , irType = typeToText urlType
-                            , irSummary = "Download failed: " <> err2 <> " - saved stub"
-                            })
-                        Right _ -> pure (Right IngestResult
-                          { irPath = filepath
-                          , irType = typeToText urlType
-                          , irSummary = "Downloaded PDF content (retry)"
-                          })
-                    else do
-                      let stubContent = frontmatter <> "\n[PDF content - to be fetched]\n"
-                      writeFile filepath (T.unpack stubContent)
-                      pure (Right IngestResult
-                        { irPath = filepath
-                        , irType = typeToText urlType
-                        , irSummary = "Download failed: " <> err <> " - saved stub"
-                        })
+                  -- Fallback to stub on download failure
+                  let stubContent = frontmatter <> "\n[PDF content - to be fetched]\n"
+                  writeFile filepath (T.unpack stubContent)
+                  pure (Right IngestResult
+                    { irPath = filepath
+                    , irType = typeToText urlType
+                    , irSummary = "Download failed: " <> err <> " - saved stub"
+                    })
                 Right _ -> pure (Right IngestResult
                   { irPath = filepath
                   , irType = typeToText urlType
@@ -180,133 +153,72 @@ data FileIngestResult = FileIngestResult
   , firIndex      :: IngestIndex        -- ^ Updated ingest index
   } deriving (Show)
 
--- | Resolve effective embed for a file category.
-resolveEmbedForCategory :: Bool -> IngestCategories -> FileCategory -> Bool
-resolveEmbedForCategory topLevel cats category =
-  case categoryConfig of
-    Just cfg -> maybe topLevel id (iccEmbed cfg)
-    Nothing  -> topLevel
-  where
-    categoryConfig = case category of
-      CodeFiles   -> icatCode cats
-      DocFiles    -> icatDoc cats
-      PaperFiles  -> icatPaper cats
-      ImageFiles  -> icatImage cats
-      VideoFiles  -> icatVideo cats
-      OfficeFiles -> icatOffice cats
-
--- | Resolve effective granularity for a file category.
-resolveGranularityForCategory :: Granularity -> IngestCategories -> FileCategory -> Granularity
-resolveGranularityForCategory topLevel cats category =
-  case categoryConfig of
-    Just cfg -> maybe topLevel id (iccGranularity cfg)
-    Nothing  -> topLevel
-  where
-    categoryConfig = case category of
-      CodeFiles   -> icatCode cats
-      DocFiles    -> icatDoc cats
-      PaperFiles  -> icatPaper cats
-      ImageFiles  -> icatImage cats
-      VideoFiles  -> icatVideo cats
-      OfficeFiles -> icatOffice cats
-
--- | Compute a SHA256 hex hash of a file's contents.
-sha256File :: FilePath -> IO Text
-sha256File path = do
-  contents <- BS.readFile path
-  pure $ T.pack $ BS8.unpack $ BS16.encode $ SHA256.hash contents
-
--- | Add or update a file entry in the index.
-idxWithFileEntry :: FilePath -> FileEntry -> IngestIndex -> IngestIndex
-idxWithFileEntry path entry idx = idx { iiFiles = Map.insert path entry (iiFiles idx) }
-
 -- | Ingest a single file: detect category, extract entities, optionally generate embeddings.
 --
 -- This bypasses the full pipeline's directory scan — it processes exactly one file.
 -- The extraction reuses the same extractors (LSP, tree-sitter, stub) configured
 -- in graphos.yaml.
 --
--- Uses the ingest configuration for embed/granularity defaults, deduplication,
--- and category-level overrides.
-ingestFile :: AppEnv -> PipelineConfig -> FilePath -> LogEnv -> IO (Either Text FileIngestResult)
-ingestFile appEnv config filePath env = do
+-- When --embed is enabled, generates an embedding vector for each extracted node
+-- using the configured Ollama model.
+ingestFile :: AppEnv -> PipelineConfig -> FilePath -> IO (Either Text FileIngestResult)
+ingestFile appEnv config filePath = do
   -- Verify file exists
   exists <- doesFileExist filePath
   if not exists
     then pure $ Left $ T.pack $ "File not found: " ++ filePath
     else do
-      let graphosCfg = cfgGraphosConfig config
-          ingestCfg  = cfgIngest config
-          ext        = takeExtension filePath
-          fec        = gcFileExtensions graphosCfg
-          category   = detectFileCategory ext fec
-          effectiveEmbed = resolveEmbedForCategory (icEmbed ingestCfg) (icCategories ingestCfg) category
+      -- Auto-detect file category from extension
+      let ext = takeExtension filePath
+          cfg = cfgGraphosConfig config
+          fec = gcFileExtensions cfg
+          category = detectFileCategory ext fec
 
-      logInfo env $ T.pack $ "  Ingesting file: " ++ filePath ++ " (category: " ++ show category ++ ")"
+      lpLogInfo (loggingPort appEnv) $ T.pack $ "  Ingesting file: " ++ filePath ++ " (category: " ++ show category ++ ")"
 
-      -- Deduplication check: skip if file unchanged
-      existingIdx <- loadIndex (icIndexPath ingestCfg)
-      fileHash <- sha256File filePath
-      let skipDedup = icDeduplicate ingestCfg && isFileUpToDate filePath fileHash existingIdx
-      if skipDedup
+      -- Build a mini-detection for the single file
+      let detection = Detection
+            { detectionTotalFiles = 1
+            , detectionTotalWords  = 0
+            , detectionNeedsGraph = True
+            , detectionWarning     = Nothing
+            , detectionFiles       = Map.singleton category [filePath]
+            }
+
+      -- Extract entities from the single file
+      extraction <- Extract.extractAll appEnv config detection
+
+      let nodes = Map.elems (extractionNodes extraction)
+          nodeCount = length nodes
+          edgeCount = Map.size (extractionEdges extraction)
+
+      lpLogInfo (loggingPort appEnv) $ T.pack $ "  Extracted " ++ show nodeCount ++ " nodes, " ++ show edgeCount ++ " edges"
+
+      -- Generate embeddings if enabled
+      let embCfg = gcEmbedding cfg
+          embedEnabled = cfgEmbed config || embEnabled embCfg
+
+      (embeddings, idx) <- if embedEnabled
         then do
-          logInfo env $ T.pack $ "  Skipping unchanged file (hash match): " ++ filePath
-          pure $ Right FileIngestResult
-            { firPath = filePath
-            , firCategory = category
-            , firExtraction = undefined
-            , firEmbeddings = []
-            , firIndex = existingIdx
-            }
+          lpLogInfo (loggingPort appEnv) $ T.pack $ "  Generating embeddings via " ++ embModel embCfg ++ "..."
+          embs <- generateEmbeddingsForNodes appEnv embCfg nodes
+          let idx' = foldr addToIndex emptyIngestIndex embs
+          lpLogInfo (loggingPort appEnv) $ T.pack $ "  Generated " ++ show (length embs) ++ " embeddings"
+          pure (embs, idx')
         else do
-          -- Build a mini-detection for the single file
-          let detection = Detection
-                { detectionTotalFiles = 1
-                , detectionTotalWords  = 0
-                , detectionNeedsGraph = True
-                , detectionWarning     = Nothing
-                , detectionFiles       = Map.singleton category [filePath]
-                }
+          -- Store metadata-only entries (no vector) for index lookups
+          now <- getCurrentTime
+          let metaEmbs = [emptyIngestEmbedding (nodeId n) (nodeSourceFile n) now | n <- nodes]
+              idx' = foldr addToIndex emptyIngestIndex metaEmbs
+          pure (metaEmbs, idx')
 
-          -- Extract entities from the single file
-          extraction <- Extract.extractAll appEnv config detection
-
-          let nodes = Map.elems (extractionNodes extraction)
-              nodeCount = length nodes
-              edgeCount = Map.size (extractionEdges extraction)
-
-          logInfo env $ T.pack $ "  Extracted " ++ show nodeCount ++ " nodes, " ++ show edgeCount ++ " edges"
-
-          -- Generate embeddings if enabled
-          let embCfg = gcEmbedding graphosCfg
-              embedEnabled = effectiveEmbed || embEnabled embCfg
-
-          (embeddings, idx) <- if embedEnabled
-            then do
-              logInfo env $ T.pack $ "  Generating embeddings via " ++ embModel embCfg ++ "..."
-              embs <- generateEmbeddingsForNodes embCfg nodes env
-              now <- getCurrentTime
-              entryHash <- sha256File filePath
-              let entry = FileEntry { feHash = entryHash, feIngestedAt = T.pack $ show now }
-                  idx' = idxWithFileEntry filePath entry $ foldr addToIndex emptyIngestIndex embs
-              logInfo env $ T.pack $ "  Generated " ++ show (length embs) ++ " embeddings"
-              pure (embs, idx')
-            else do
-              -- Store metadata-only entries (no vector) for index lookups
-              now <- getCurrentTime
-              entryHash <- sha256File filePath
-              let entry = FileEntry { feHash = entryHash, feIngestedAt = T.pack $ show now }
-                  metaEmbs = [emptyIngestEmbedding (nodeId n) (nodeSourceFile n) now | n <- nodes]
-                  idx' = idxWithFileEntry filePath entry $ foldr addToIndex emptyIngestIndex metaEmbs
-              pure (metaEmbs, idx')
-
-          pure $ Right FileIngestResult
-            { firPath = filePath
-            , firCategory = category
-            , firExtraction = extraction
-            , firEmbeddings = embeddings
-            , firIndex = idx
-            }
+      pure $ Right FileIngestResult
+        { firPath = filePath
+        , firCategory = category
+        , firExtraction = extraction
+        , firEmbeddings = embeddings
+        , firIndex = idx
+        }
 
 -- ───────────────────────────────────────────────
 -- Helpers
@@ -326,18 +238,18 @@ detectFileCategory ext fec
 
 -- | Generate embeddings for a list of extracted nodes.
 -- Creates a text representation of each node and calls the embedding API.
-generateEmbeddingsForNodes :: EmbeddingConfig -> [Node] -> LogEnv -> IO [IngestEmbedding]
-generateEmbeddingsForNodes cfg nodes env = do
+generateEmbeddingsForNodes :: AppEnv -> EmbeddingConfig -> [Node] -> IO [IngestEmbedding]
+generateEmbeddingsForNodes appEnv cfg nodes = do
   now <- getCurrentTime
   let model = T.pack (embModel cfg)
   -- Process nodes sequentially to avoid overwhelming local Ollama
-  mapM (embedNode cfg model now env) nodes
+  mapM (embedNode appEnv cfg model now) nodes
 
 -- | Generate embedding for a single node.
-embedNode :: EmbeddingConfig -> Text -> UTCTime -> LogEnv -> Node -> IO IngestEmbedding
-embedNode cfg model ts _env node = do
+embedNode :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> Node -> IO IngestEmbedding
+embedNode appEnv cfg model ts node = do
   let inputText = nodeLabel node <> " " <> nodeSourceFile node
-  result <- Emb.generateEmbedding cfg inputText
+  result <- lpGenerateEmbedding (llmPort appEnv) cfg inputText
   case result of
     Left _err ->
       -- On failure, store a metadata-only entry (no vector)
@@ -407,22 +319,11 @@ typeToText GenericWeb = "webpage"
 
 -- | Download a file from a URL and save it to a local path.
 -- Returns Left with error message on failure, Right () on success.
-downloadFileWithConfig :: IngestUrlConfig -> Text -> FilePath -> IO (Either Text ())
-downloadFileWithConfig urlCfg url destPath = do
+downloadFile :: Text -> FilePath -> IO (Either Text ())
+downloadFile url destPath = do
   result <- catch
-    (do let settings = defaultManagerSettings
-              { managerResponseTimeout =
-                  if iucTimeout urlCfg <= 0
-                    then responseTimeoutNone
-                    else responseTimeoutMicro (iucTimeout urlCfg * 1000000)
-              }
-        manager <- newManager settings
-        request0 <- parseRequest (T.unpack url)
-        let request = request0
-              { requestHeaders =
-                  [("User-Agent", BS8.pack (iucUserAgent urlCfg))]
-                    ++ requestHeaders request0
-              }
+    (do manager <- newManager defaultManagerSettings
+        request <- parseRequest (T.unpack url)
         response <- httpLbs request manager
         let status = statusCode (responseStatus response)
         if status >= 200 && status < 300

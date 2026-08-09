@@ -8,6 +8,8 @@ module Graphos.UseCase.Port.LLMPort
     ImageAnalysis(..)
   , ImageKind(..)
   , Entity(..)
+  , -- * Embedding utilities
+    cosineSimilarity
   ) where
 
 import Data.Map.Strict (Map)
@@ -44,4 +46,14 @@ data LLMPort = LLMPort
   , lpAnalyzeImage         :: VisionConfig -> LabelingConfig -> FilePath -> IO (Either Text ImageAnalysis)
     -- | Validate a URL string
   , lpValidateUrl          :: Text -> Either Text Text
-    }
+  }
+
+-- | Cosine similarity between two vectors (for IngestIndex).
+cosineSimilarity :: [Double] -> [Double] -> Double
+cosineSimilarity a b =
+  let dotProd = sum (zipWith (*) a b)
+      normA = sqrt (sum (zipWith (*) a a))
+      normB = sqrt (sum (zipWith (*) b b))
+  in if normA == 0 || normB == 0
+       then 0.0
+       else dotProd / (normA * normB)
