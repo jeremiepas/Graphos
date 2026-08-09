@@ -10,6 +10,9 @@ module Graphos.Domain.Types.Ingest
   , emptyIngestIndex
   , lookupEmbedding
   , mergeIndex
+  , lookupFileHash
+  , addFileEntry
+  , isFileUpToDate
 
     -- * Legacy embedding types (backward compat)
   , IngestEmbedding(..)
@@ -20,13 +23,14 @@ module Graphos.Domain.Types.Ingest
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Time.Clock (UTCTime)
 import GHC.Generics (Generic)
 
+import Graphos.Domain.Config.Ingest (FileEntry(..))
 import Graphos.Domain.Types.Graph (Extraction)
 import Graphos.Domain.Types.Node (NodeId)
 
@@ -54,18 +58,24 @@ instance FromJSON IngestResult where
     <$> v .: "extraction"
     <*> v .: "embeddings"
 
--- | In-memory index mapping nodeId → embedding vector.
--- Persisted as index.json for fast lookups during query.
+-- | In-memory index mapping nodeId → embedding vector, plus file-level
+-- deduplication metadata. Persisted as index.json for fast lookups during query.
 -- Supports O(1) lookup via Map.
 data IngestIndex = IngestIndex
-  { iiNodes :: !(Map NodeId [Double])
+  { iiVersion :: !Int                    -- ^ Format version (2 for new files)
+  , iiFiles   :: !(Map FilePath FileEntry) -- ^ Source file → hash + timestamp
+  , iiNodes   :: !(Map NodeId [Double])   -- ^ nodeId → embedding vector
   } deriving (Eq, Show, Generic)
 
 instance NFData IngestIndex
 
--- | Empty index
+-- | Empty index (version 2)
 emptyIngestIndex :: IngestIndex
-emptyIngestIndex = IngestIndex { iiNodes = Map.empty }
+emptyIngestIndex = IngestIndex
+  { iiVersion = 2
+  , iiFiles   = Map.empty
+  , iiNodes   = Map.empty
+  }
 
 -- | Look up an embedding by nodeId (O(1) via Map lookup)
 lookupEmbedding :: NodeId -> IngestIndex -> Maybe [Double]
@@ -74,17 +84,46 @@ lookupEmbedding nid idx = Map.lookup nid (iiNodes idx)
 -- | Merge two indices (right-biased: right side wins on key collision)
 mergeIndex :: IngestIndex -> IngestIndex -> IngestIndex
 mergeIndex left right = IngestIndex
-  { iiNodes = Map.union (iiNodes left) (iiNodes right)
+  { iiVersion = max (iiVersion left) (iiVersion right)
+  , iiFiles   = Map.union (iiFiles right) (iiFiles left)
+  , iiNodes   = Map.union (iiNodes right) (iiNodes left)
   }
+
+-- | Look up the stored hash for a file path
+lookupFileHash :: FilePath -> IngestIndex -> Maybe Text
+lookupFileHash path idx = fmap feHash (Map.lookup path (iiFiles idx))
+
+-- | Add a file entry to the index
+addFileEntry :: FilePath -> FileEntry -> IngestIndex -> IngestIndex
+addFileEntry path entry idx = idx
+  { iiFiles = Map.insert path entry (iiFiles idx)
+  }
+
+-- | Check if a file is up-to-date by comparing current hash with stored hash
+isFileUpToDate :: FilePath -> Text -> IngestIndex -> Bool
+isFileUpToDate path currentHash idx = case lookupFileHash path idx of
+  Just storedHash -> storedHash == currentHash
+  Nothing         -> False
 
 instance ToJSON IngestIndex where
   toJSON idx = object
-    [ "nodes" .= iiNodes idx
+    [ "version" .= iiVersion idx
+    , "files"   .= iiFiles idx
+    , "nodes"   .= iiNodes idx
     ]
 
 instance FromJSON IngestIndex where
-  parseJSON = withObject "IngestIndex" $ \v -> IngestIndex
-    <$> v .: "nodes"
+  parseJSON = withObject "IngestIndex" $ \v -> do
+    mVersion <- v .:? "version"
+    case mVersion :: Maybe Int of
+      Nothing ->
+        -- v1 format: no version key, no files map
+        IngestIndex 1 Map.empty <$> v .: "nodes"
+      Just _version ->
+        IngestIndex
+          <$> v .: "version"
+          <*> v .: "files"
+          <*> v .: "nodes"
 
 -- ───────────────────────────────────────────────
 -- Legacy Types (for backward compatibility)
@@ -130,7 +169,9 @@ instance FromJSON IngestEmbedding where
 
 -- | Add an embedding to the index (overwrites if nodeId exists)
 addToIndex :: IngestEmbedding -> IngestIndex -> IngestIndex
-addToIndex emb idx = idx { iiNodes = Map.insert (ieNodeId emb) (ieVector emb) (iiNodes idx) }
+addToIndex emb idx = idx
+  { iiNodes = Map.insert (ieNodeId emb) (ieVector emb) (iiNodes idx)
+  }
 
 -- | Look up an embedding by nodeId
 lookupIndex :: NodeId -> IngestIndex -> Maybe IngestEmbedding

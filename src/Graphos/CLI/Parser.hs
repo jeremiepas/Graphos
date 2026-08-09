@@ -25,7 +25,7 @@ import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
-import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig)
+import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
 
 data Command
@@ -38,7 +38,7 @@ data Command
   | PushCmd FilePath String String String Neo4jPushMode Int
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
-  | IngestCmd FilePath Bool FilePath
+   | IngestCmd FilePath (Maybe Bool) FilePath
   | LServers
   | Serve FilePath Int
   | Init (Maybe String)
@@ -87,8 +87,9 @@ pipelineOpts = PipelineConfig
     <*> switch (long "embed" <> help "Generate embeddings for ingested files via local Ollama")
     <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
     <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
-    <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
-    <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
+     <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
+     <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
+     <*> pure defaultIngestConfig
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
@@ -171,7 +172,8 @@ mergeOpts = MergeCmd
 ingestOpts :: Parser Command
 ingestOpts = IngestCmd
   <$> argument str (metavar "FILE" <> help "Single file to ingest")
-  <*> switch (long "embed" <> help "Generate embeddings via local Ollama (nomic-embed-text)")
+  <*> optional (flag' True (long "embed" <> help "Generate embeddings via local Ollama (nomic-embed-text)")
+          <|> flag' False (long "no-embed" <> help "Disable embeddings for this ingest"))
   <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
 
 commandOpts :: Parser Command
@@ -228,7 +230,7 @@ renderCommandReference = unlines $
   , "  --json / --label-width N / --edges"
   , ""
   , "graphos ingest FILE             Ingest single file"
-  , "  --embed / --output, -o DIR"
+  , "  --embed / --no-embed / --output, -o DIR"
   , ""
   , "graphos init                    Generate graphos.yaml"
   , ""

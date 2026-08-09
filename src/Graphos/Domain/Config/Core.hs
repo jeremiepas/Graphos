@@ -28,6 +28,7 @@ import Graphos.Domain.Config.Extraction ( PdfExtractionMode(..)
                                         , defaultGranularity
                                         )
 import Graphos.Domain.Config.Export
+import Graphos.Domain.Config.Ingest (IngestConfig(..), defaultIngestConfig, mergeIngestConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import Graphos.Domain.Config.Vision
 
@@ -50,6 +51,7 @@ data GraphosConfig = GraphosConfig
   , gcObservability    :: ObservabilityConfig           -- ^ Tracing, metrics, debug settings
   , gcEmbedding        :: EmbeddingConfig               -- ^ Local embedding settings (Ollama)
   , gcVision           :: VisionConfig                  -- ^ Vision analysis settings
+  , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
   } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -67,6 +69,7 @@ defaultGraphosConfig = GraphosConfig
   , gcObservability    = defaultObservabilityConfig
   , gcEmbedding        = defaultEmbeddingConfig
   , gcVision           = defaultVisionConfig
+  , gcIngest           = defaultIngestConfig
   }
 
 -- ───────────────────────────────────────────────
@@ -109,6 +112,7 @@ mergeGraphosConfig global project = GraphosConfig
                       then gcEmbedding global
                       else gcEmbedding project
   , gcVision = if gcVision project == defaultVisionConfig
-                   then gcVision global
-                   else gcVision project
+                    then gcVision global
+                    else gcVision project
+  , gcIngest = mergeIngestConfig (gcIngest global) (gcIngest project)
   }
