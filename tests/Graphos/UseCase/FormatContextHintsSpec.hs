@@ -103,7 +103,9 @@ spec = describe "FormatContext edges and hints" $ do
 
     it "orders edges by endpoint relevance" $ do
       let ranked = filterAndRankEdges Semantic (scEdges edgesFixture)
-      edgeSource (head ranked) `shouldBe` "Parser"
+      case ranked of
+        (x:_) -> edgeSource x `shouldBe` "Parser"
+        []    -> expectationFailure "expected non-empty ranked edges"
 
   describe "formatKeyEdgesFiltered" $ do
     it "drops trivia-targeting contains edges by default" $ do

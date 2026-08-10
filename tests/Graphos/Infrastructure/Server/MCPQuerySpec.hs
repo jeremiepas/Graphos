@@ -1,7 +1,7 @@
 module Graphos.Infrastructure.Server.MCPQuerySpec where
 
 import Test.Hspec
-import Data.Aeson (Value(..), Object, ToJSON(toJSON))
+import Data.Aeson (Value(..), Object)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
