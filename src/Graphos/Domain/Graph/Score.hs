@@ -132,7 +132,7 @@ instance NFData QueryResponse
 instance ToJSON QueryResponse where
   toJSON r = object
     [ "verdict"      .= qrespVerdict r
-    , "bestScore"    .= qrespBestScore r
+    , "best_score"   .= qrespBestScore r
     , "hash"         .= qrespHash r
     , "nodes"        .= qrespNodes r
     , "edges"        .= qrespEdges r

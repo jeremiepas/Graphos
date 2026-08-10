@@ -5,6 +5,9 @@
 module Graphos.Infrastructure.Server.MCP
   ( startMCPServer
   , startMCPServerFromFile
+  -- * Handlers (exported for testing)
+  , handleQueryGraph
+  , handleSelectContext
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:), (.:?), (.!=), withObject, encode, eitherDecode)
@@ -27,11 +30,14 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articul
 import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
                               , chatCommunityId, enrichWithChatHistory)
-import Graphos.UseCase.Query (queryGraph, pathQuery, QueryResult(..))
+import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQuery, QueryResponse(..))
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion)
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
-import Graphos.UseCase.FormatContext (formatContextForLLM)
+import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextTokens
+                                     , EdgeMode(..), filterAndRankEdges
+                                     , formatExpansionHintsBudgeted)
 import Graphos.UseCase.Conversation (queryConversationsFromCommunity, summarizeConversation)
+import Graphos.Domain.Graph.Index (buildIndex)
 import Graphos.Infrastructure.FileSystem.Conversation (saveConversationToFile, loadConversationsFromDir)
 
 -- | Start MCP server from a graph file
@@ -126,11 +132,27 @@ handleQueryGraph g args = do
       budget = fromMaybe 2000 (intArgMaybe args "budget")
   if T.null question
     then pure (Left "Missing required argument: question")
-    else pure $ Right $ object
-      [ "nodes" .= qrNodes (queryGraph g question mode budget)
-      , "edges" .= qrEdges (queryGraph g question mode budget)
-      , "traverse" .= qrTraverse (queryGraph g question mode budget)
-      ]
+    else do
+      let idx = buildIndex g Map.empty
+          resp = queryGraphWithIndexScored g idx question mode budget
+          allNodes = qrespNodes resp
+          allEdges = qrespEdges resp
+          -- Apply a simple budget cap to the scored result set (the formatter is not
+          -- used for the JSON path; we just count what would be dropped).
+          nodesOut = take budget allNodes
+          edgesOut = take budget allEdges
+          omittedNodes = length allNodes - length nodesOut
+          omittedEdges = length allEdges - length edgesOut
+      pure $ Right $ object
+        [ "verdict"      .= qrespVerdict resp
+        , "best_score"   .= qrespBestScore resp
+        , "hash"         .= qrespHash resp
+        , "nodes"        .= nodesOut
+        , "edges"        .= edgesOut
+        , "omitted"      .= object [ "nodes" .= omittedNodes
+                                   , "edges" .= omittedEdges
+                                   ]
+        ]
 
 handleGetNode :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
 handleGetNode g args = do
@@ -224,21 +246,36 @@ handleSelectContext g commMap analysis args = do
       budget = fromMaybe 3000 (intArgMaybe args "budget")
       includeHistory = fromMaybe False (boolArgMaybe args "include_history")
       verbose = fromMaybe False (boolArgMaybe args "verbose")
+      edgesMode = fromMaybe Semantic (edgeModeArg args)
+      maxHintCommSize = fromMaybe 50 (intArgMaybe args "max_hint_community_size")
   if T.null question
     then pure (Left "Missing required argument: question")
     else do
       let complexity = classifyComplexity question g
           ctxBudget = budgetForComplexity complexity budget
           selectedCtx = selectContextWithHistory includeHistory g commMap analysis question ctxBudget
-          formatted = formatContextForLLM selectedCtx
+          -- Build a context with filtered/ranked edges and bounded hints for the budgeted formatter
+          filteredCtx = selectedCtx
+            { scEdges = filterAndRankEdges edgesMode (scEdges selectedCtx)
+            }
+          (formatted, _tokenEstimate, omittedCount, _) = formatContextForLLMBudgeted budget filteredCtx
+          finalCtx = if edgesMode == Semantic
+                     then filteredCtx
+                     else selectedCtx
           nodeCommMap = buildNodeCommunityMap commMap
-          bridgeSet = Set.fromList (scBridgeNodes selectedCtx)
-          nodeMetadata = buildNodeMetadata g nodeCommMap bridgeSet (scNodes selectedCtx)
-          baseResult = [ "context" .= formatted
+          bridgeSet = Set.fromList (scBridgeNodes finalCtx)
+          nodeMetadata = buildNodeMetadata g nodeCommMap bridgeSet (scNodes finalCtx)
+          hints = formatExpansionHintsBudgeted 8 maxHintCommSize finalCtx
+          fullFormatted = if T.null hints
+                          then formatted
+                          else formatted <> "\n" <> hints
+          fullTokenEstimate = countContextTokens fullFormatted
+          baseResult = [ "context" .= fullFormatted
                        , "complexity" .= showComplexity complexity
-                       , "nodes_selected" .= length (scNodes selectedCtx)
-                       , "edges_selected" .= length (scEdges selectedCtx)
-                       , "token_estimate" .= T.length formatted
+                       , "nodes_selected" .= length (scNodes finalCtx)
+                       , "edges_selected" .= length (scEdges finalCtx)
+                       , "token_estimate" .= fullTokenEstimate
+                       , "omitted" .= omittedCount
                        , "include_history" .= includeHistory
                        ]
           fullResult = if verbose
@@ -365,7 +402,7 @@ toolsListResponse reqId = object
 
 allTools :: [(Text, Text, [(Text, Text, Bool)])]
 allTools =
-  [ ("query_graph", "Query the knowledge graph using BFS or DFS traversal", [("question", "The search question", True), ("mode", "bfs or dfs", False), ("budget", "Token budget", False)])
+  [ ("query_graph", "Query the knowledge graph using BFS or DFS traversal. Returns verdict, best_score, hash, ranked nodes/edges, and omitted counts. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything.", [("question", "The search question", True), ("mode", "bfs or dfs", False), ("budget", "Token budget", False), ("edges", "semantic or all", False)])
   , ("get_node", "Get details of a specific node", [("node_id", "Node ID to look up", True)])
   , ("get_neighbors", "Get all neighbors of a node", [("node_id", "Node ID", True)])
   , ("get_community", "Get community membership for a node", [("node_id", "Node ID", True)])
@@ -373,7 +410,7 @@ allTools =
   , ("graph_stats", "Get graph statistics (nodes, edges, avg degree)", [])
   , ("shortest_path", "Find shortest path between two nodes", [("from", "Source concept", True), ("to", "Target concept", True)])
   , ("bridge_nodes", "Find articulation points (bridge nodes) whose removal disconnects the graph", [])
-  , ("select_context", "Select relevant context from the graph for an LLM query. Returns compact markdown with key nodes, edges, communities, and bridge nodes. Set include_history=true to include past conversation history. Set verbose=true for per-node metadata (kind, signature, line range, community_id, degree, is_bridge).", [("question", "The query to select context for", True), ("budget", "Token budget (default: 3000)", False), ("include_history", "Include chat history in context (default: false)", False), ("verbose", "Include per-node metadata (default: false)", False)])
+  , ("select_context", "Select relevant context from the graph for an LLM query. Returns compact markdown with key nodes, edges, communities, and bridge nodes, capped to the requested budget. Set include_history=true to include past conversation history. Set verbose=true for per-node metadata. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything. Set max_hint_community_size to hide mega-communities (default 50).", [("question", "The query to select context for", True), ("budget", "Token budget (default: 3000)", False), ("include_history", "Include chat history in context (default: false)", False), ("verbose", "Include per-node metadata (default: false)", False), ("edges", "semantic or all", False), ("max_hint_community_size", "Max community size to suggest (default: 50)", False)])
   , ("add_conversation", "Store a conversation exchange in the graph for persistent cross-session memory. Saves to graphos-out/memory/", [("question", "The user's question", True), ("answer_summary", "Short summary of the answer", False), ("source_nodes", "List of code node IDs referenced", False)])
   , ("conversation_history", "Search past conversation exchanges matching a query", [("query", "Search terms", True), ("limit", "Max results (default: 10)", False)])
   ]
@@ -419,6 +456,13 @@ boolArgMaybe :: KM.KeyMap Value -> Text -> Maybe Bool
 boolArgMaybe args key = case KM.lookup (Key.fromText key) args of
   Just (Bool b) -> Just b
   _ -> Nothing
+
+-- | Extract an edge mode from an argument (semantic or all).
+edgeModeArg :: KM.KeyMap Value -> Maybe EdgeMode
+edgeModeArg args = case textArgMaybe args "edges" of
+  Just "all"      -> Just All
+  Just "semantic" -> Just Semantic
+  _               -> Nothing
 
 -- | Convert QueryComplexity to a text label
 showComplexity :: QueryComplexity -> Text

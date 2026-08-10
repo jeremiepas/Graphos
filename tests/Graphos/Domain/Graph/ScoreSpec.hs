@@ -1,6 +1,8 @@
 module Graphos.Domain.Graph.ScoreSpec where
 
 import Test.Hspec
+import Data.Aeson (Value(..), ToJSON(toJSON))
+import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -79,6 +81,29 @@ spec = do
       let hash1 = resultHash ["node-a"]
           hash2 = resultHash []
       hash1 `shouldNotBe` hash2
+
+  describe "QueryResponse JSON shape" $ do
+    it "emits verdict, best_score, hash, nodes, edges" $ do
+      let ext = extractionFromLists [ testNode "AuthModule" ] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          r = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+          Object obj = toJSON r
+      KM.member "verdict" obj `shouldBe` True
+      KM.member "best_score" obj `shouldBe` True
+      KM.member "hash" obj `shouldBe` True
+      KM.member "nodes" obj `shouldBe` True
+      KM.member "edges" obj `shouldBe` True
+
+    it "none-verdict response has empty nodes and edges" $ do
+      let ext = extractionFromLists [ testNode "AuthModule" ] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          r = queryGraphWithIndexScored g idx "zzzznonexistent" "bfs" 2000
+          Object obj = toJSON r
+      qrespVerdict r `shouldBe` NoMatch
+      qrespNodes r `shouldBe` []
+      qrespEdges r `shouldBe` []
 
   describe "queryGraphWithIndexScored (hash determinism)" $ do
     it "identical query on same graph yields identical hash" $ do

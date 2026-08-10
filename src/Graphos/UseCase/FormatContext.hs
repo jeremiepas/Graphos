@@ -12,6 +12,7 @@ module Graphos.UseCase.FormatContext
   , countContextTokens
   , omittedFooter
   , EdgeMode(..)
+  , filterAndRankEdges
   , formatKeyEdgesFiltered
   , formatExpansionHintsBudgeted
   ) where
@@ -24,7 +25,7 @@ import qualified Data.Text as T
 
 import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Confidence(..)
                             , FileType(..), relationToText, CommunityId)
-import Graphos.Domain.Context (SelectedContext(..), SelectionStrategy(..))
+import Graphos.Domain.Context (SelectedContext(..), SelectionStrategy(..), chatCommunityId)
 
 -- ───────────────────────────────────────────────
 -- Main formatter
@@ -225,6 +226,7 @@ formatExpansionHintsBudgeted maxHints maxCommSize sc =
       ranked = take maxHints $ sortOn (Down . (\(_, _, _, s) -> s :: Double))
                        [(cid, label, commSize, score :: Double)
                        | (cid, label) <- Map.toList (scCommunityLabels sc)
+                       , cid /= chatCommunityId
                        , let commSize = length $ Map.findWithDefault [] cid (scCommunities sc)
                        , commSize <= maxCommSize
                        , let score = sum [relevanceScore' nid n | (nid, n) <- scNodes sc
