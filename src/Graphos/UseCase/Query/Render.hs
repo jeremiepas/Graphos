@@ -11,17 +11,22 @@ module Graphos.UseCase.Query.Render
   , renderSymbolResultJSON
   , renderNeighborsResultText
   , renderNeighborsResultJSON
+  , renderPathResultJSON
+  , renderExplainResultJSON
 
     -- * Truncation
   , truncateOutput
   , estimateTokens
   ) where
 
-import Data.Aeson (toJSON)
+import Data.Aeson (toJSON, object, (.=), Value(..), encode)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TL (decodeUtf8)
 
 import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict)
+import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 
@@ -139,3 +144,27 @@ takeLinesFromTop _ [] = []
 takeLinesFromTop remaining (l:ls)
   | estimateTokens l > remaining = []
   | otherwise = l : takeLinesFromTop (remaining - estimateTokens l) ls
+
+-- | Encode a JSON value to Text (compact, no spaces).
+encodeText :: Value -> Text
+encodeText = TL.toStrict . TL.decodeUtf8 . encode
+
+-- | Render a path result as JSON.
+-- Nothing yields {"path":null}; Just ids yields {"path":[...],"hops":n} where hops = length ids - 1.
+renderPathResultJSON :: Maybe [NodeId] -> Text
+renderPathResultJSON Nothing = encodeText (object ["path" .= (Null :: Value)])
+renderPathResultJSON (Just ids) =
+  let hops = if null ids then 0 else length ids - 1
+  in encodeText (object ["path" .= ids, "hops" .= hops])
+
+-- | Render an explain result as JSON.
+-- Nothing yields null; Just node yields the node's id/label/source_file/community.
+renderExplainResultJSON :: Maybe Node -> Text
+renderExplainResultJSON Nothing = encodeText (Null :: Value)
+renderExplainResultJSON (Just node) =
+  encodeText (object
+    [ "id"          .= nodeId node
+    , "label"       .= nodeLabel node
+    , "source_file" .= nodeSourceFile node
+    , "community"   .= nodeCommunityId node
+    ])

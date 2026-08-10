@@ -37,9 +37,16 @@ knownExtensions = Map.fromList
   , (".hs",   LanguageInfo "haskell" "haskell" CodeFile)
   , (".lhs",  LanguageInfo "haskell" "haskell" CodeFile)
   , (".json", LanguageInfo "json" "json" CodeFile)
-  , (".c",    LanguageInfo "c" "c" CodeFile)
-  , (".cpp",  LanguageInfo "cpp" "cpp" CodeFile)
-  , (".java", LanguageInfo "java" "java" CodeFile)
+  , (".c",     LanguageInfo "c" "c" CodeFile)
+  , (".cpp",   LanguageInfo "cpp" "cpp" CodeFile)
+  , (".hpp",   LanguageInfo "cpp" "cpp" CodeFile)
+  , (".h",     LanguageInfo "cpp" "cpp" CodeFile)
+  , (".java",  LanguageInfo "java" "java" CodeFile)
+  , (".rb",    LanguageInfo "ruby" "ruby" CodeFile)
+  , (".ruby",  LanguageInfo "ruby" "ruby" CodeFile)
+  , (".nix",   LanguageInfo "nix" "nix" CodeFile)
+  , (".md",    LanguageInfo "markdown" "markdown" CodeFile)
+  , (".markdown", LanguageInfo "markdown" "markdown" CodeFile)
   ]
 
 -- | Look up a language by file extension.

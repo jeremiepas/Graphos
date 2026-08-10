@@ -5,19 +5,25 @@
 -- Target: ~50 tokens/node, ~20 tokens/edge, ~100 tokens/community.
 module Graphos.UseCase.FormatContext
   ( formatContextForLLM
+  , formatContextForLLMBudgeted
   , formatNodeCompact
   , formatEdgeCompact
   , formatCommunityHeader
   , countContextTokens
+  , omittedFooter
+  , EdgeMode(..)
+  , formatKeyEdgesFiltered
+  , formatExpansionHintsBudgeted
   ) where
 
 import Data.List (sortOn)
+import Data.Ord (Down(..))
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Graphos.Domain.Types (Node(..), Edge(..), Confidence(..)
-                            , FileType(..), relationToText)
+import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Confidence(..)
+                            , FileType(..), relationToText, CommunityId)
 import Graphos.Domain.Context (SelectedContext(..), SelectionStrategy(..))
 
 -- ───────────────────────────────────────────────
@@ -36,6 +42,117 @@ formatContextForLLM sc =
     , if null (scGodNodes sc) then [] else [formatGodNodesSection sc]
     , [formatExpansionHints sc]
     ]
+
+-- | Budget-aware variant of formatContextForLLM.
+-- Renders greedily in relevance-rank order, stopping when the next item would
+-- exceed the budget (measured in tokens via countContextTokens).
+-- Always preserves the highest-ranked node.  Emits an omitted footer.
+formatContextForLLMBudgeted :: Int -> SelectedContext -> (Text, Int, Int, Int)
+formatContextForLLMBudgeted budget sc =
+  let header = formatCommunityHeader sc
+      headerToks = countContextTokens header
+      -- Nodes sorted by descending relevance score (first element of tuple)
+      sortedNodes = sortOn (\(score, _, _) -> Down score)
+                       [(relevanceScore' nid n, nid, n) | (nid, n) <- scNodes sc]
+      -- Edges sorted by descending endpoint relevance
+      sortedEdges = sortOn (\(score, _) -> Down score)
+                       [(edgeRelevanceScore e, e) | e <- scEdges sc]
+      -- Greedy node rendering
+      goNodes acc toksSoFar [] = (acc, toksSoFar, 0, 0)
+      goNodes acc toksSoFar ((_score, nid, n):rest) =
+        let line = "- " <> formatNodeCompact nid n
+            lineToks = countContextTokens line
+            newToks = toksSoFar + lineToks
+        in if newToks > budget && not (T.null acc)
+            then (acc, toksSoFar, length rest + 1, length sortedEdges)
+            else goNodes (acc <> line <> "\n") newToks rest
+      (nodeBody, nodeToks, omittedNodes, _) = goNodes "" headerToks sortedNodes
+      -- Greedy edge rendering
+      goEdges acc toksSoFar [] = (acc, toksSoFar, 0)
+      goEdges acc toksSoFar ((_score, e):rest) =
+        let line = formatEdgeCompact e
+            lineToks = countContextTokens line
+            newToks = toksSoFar + lineToks
+        in if newToks > budget && not (T.null acc)
+            then (acc, toksSoFar, length rest)
+            else goEdges (acc <> line <> "\n") newToks rest
+      (edgeBody, edgeToks, omittedEdges) = goEdges "" nodeToks sortedEdges
+      -- Bridge section
+      bridgeSection = if null (scBridgeNodes sc)
+                      then (mempty, edgeToks, 0)
+                      else let txt = formatBridgeNodes sc
+                               toks = countContextTokens txt
+                           in if edgeToks + toks > budget && not (T.null edgeBody)
+                                then (mempty, edgeToks, length (scBridgeNodes sc))
+                                else (txt <> "\n", edgeToks + toks, 0)
+      (bridgeTxt, afterBridgeToks, omittedBridges) = bridgeSection
+      -- Hub section
+      hubSection = if null (scGodNodes sc)
+                   then (mempty, afterBridgeToks, 0)
+                   else let txt = formatGodNodesSection sc
+                            toks = countContextTokens txt
+                        in if afterBridgeToks + toks > budget && not (T.null (T.strip edgeBody))
+                             then (mempty, afterBridgeToks, length (scGodNodes sc))
+                             else (txt <> "\n", afterBridgeToks + toks, 0)
+      (hubTxt, afterHubToks, omittedHubs) = hubSection
+      -- Hints section
+      hintsSection = if T.null (formatExpansionHints sc)
+                     then (mempty, afterHubToks)
+                     else let txt = formatExpansionHints sc
+                              toks = countContextTokens txt
+                          in if afterHubToks + toks > budget && not (T.null (T.strip edgeBody))
+                               then (mempty, afterHubToks)
+                               else (txt, afterHubToks + toks)
+      (hintsTxt, _) = hintsSection
+      -- Build output
+      body = T.stripEnd $ T.unlines
+               $ filter (not . T.null)
+               $ [header
+                 , "### Key Nodes"
+                 , T.stripEnd nodeBody
+                 , "### Key Edges"
+                 , T.stripEnd edgeBody
+                 , if T.null (T.strip edgeBody) then "" else T.stripEnd bridgeTxt
+                 , if T.null (T.strip edgeBody) then "" else T.stripEnd hubTxt
+                 , hintsTxt
+                 ]
+      totalOmitted = omittedNodes + omittedEdges + omittedBridges + omittedHubs
+      footerTxt = if totalOmitted > 0
+                  then "- _omitted: " <> T.pack (show omittedNodes) <> " nodes, "
+                       <> T.pack (show omittedEdges) <> " edges_"
+                  else ""
+      final = if T.null footerTxt then body else body <> "\n" <> footerTxt
+  in (final, countContextTokens final, totalOmitted, 0)
+
+-- | Relevance score for a node (used for truncation ordering).
+relevanceScore' :: NodeId -> Node -> Double
+relevanceScore' _ n = fromIntegral (matchScoreNode n)
+  where
+    matchScoreNode :: Node -> Int
+    matchScoreNode node =
+      let lower = T.toLower (nodeLabel node)
+      in length (filter (`T.isInfixOf` lower) (T.words lower))
+
+-- | Edge relevance score: sum of endpoint relevance scores.
+edgeRelevanceScore :: Edge -> Double
+edgeRelevanceScore e =
+  fromIntegral (matchScoreText (edgeSource e) + matchScoreText (edgeTarget e))
+  where
+    matchScoreText :: Text -> Int
+    matchScoreText t = length (T.words (T.toLower t))
+
+-- | Omitted footer text for a given count.
+omittedFooter :: Int -> Int -> Text
+omittedFooter nodes edges =
+  "- _omitted: " <> T.pack (show nodes) <> " nodes, "
+    <> T.pack (show edges) <> " edges_"
+
+-- | Approximate token count for a text.
+-- Uses a simple heuristic: ~0.75 tokens per word (subword tokenizers average).
+countContextTokens :: Text -> Int
+countContextTokens txt =
+  let wordCount = length (T.words txt)
+  in ceiling (fromIntegral wordCount * 1.33 :: Double)
 
 -- ───────────────────────────────────────────────
 -- Section formatters
@@ -60,6 +177,71 @@ formatCommunityHeader sc =
     , " communities)"
     ]
 
+-- | Trivia tokens: bare types and values that add no semantic signal to edges.
+triviaTokens :: [Text]
+triviaTokens = ["undefined", "unknown", "null", "void", "nil"
+               ,"promise", "result", "option", "either"
+               ,"string", "number", "boolean", "integer", "float", "double"
+               ,"true", "false"
+               ]
+
+-- | Edge mode: semantic (drop trivia/AMBIGUOUS) or all (preserve everything).
+data EdgeMode = Semantic | All
+  deriving (Eq, Show)
+
+-- | Check if an edge is trivia-targeting in semantic mode.
+isTriviaEdge :: Edge -> Bool
+isTriviaEdge e =
+  let tgt = T.toLower (edgeTarget e)
+  in any (\t -> T.isInfixOf t tgt) triviaTokens
+
+-- | Check if an edge has ambiguous confidence.
+isAmbiguousEdge :: Edge -> Bool
+isAmbiguousEdge e = case edgeConfidence e of
+  Confidence c -> c < 0.7
+
+-- | Filter and rank edges by mode.
+filterAndRankEdges :: EdgeMode -> [Edge] -> [Edge]
+filterAndRankEdges mode edges = sorted
+  where
+    filtered = case mode of
+      Semantic -> filter (\e -> not (isTriviaEdge e) && not (isAmbiguousEdge e)) edges
+      All -> edges
+    sorted = sortOn (Down . edgeRelevanceScore) filtered
+
+-- | Key edges section with optional semantic filtering and relevance ranking.
+formatKeyEdgesFiltered :: EdgeMode -> SelectedContext -> Text
+formatKeyEdgesFiltered mode sc =
+  let ranked = filterAndRankEdges mode (scEdges sc)
+      edgeLines = map formatEdgeCompact (take 50 ranked)
+  in T.unlines ("### Key Edges" : edgeLines)
+
+-- | Expansion hints with bounded count, community size filter, and chat filter.
+formatExpansionHintsBudgeted :: Int -> Int -> SelectedContext -> Text
+formatExpansionHintsBudgeted maxHints maxCommSize sc =
+  let nodeCommMap :: Map.Map NodeId CommunityId
+      nodeCommMap = Map.fromList [(nid, cid) | (cid, nids) <- Map.toList (scCommunities sc), nid <- nids]
+      -- Score communities by aggregate relevance of their members in scNodes
+      ranked = take maxHints $ sortOn (Down . (\(_, _, _, s) -> s :: Double))
+                       [(cid, label, commSize, score :: Double)
+                       | (cid, label) <- Map.toList (scCommunityLabels sc)
+                       , let commSize = length $ Map.findWithDefault [] cid (scCommunities sc)
+                       , commSize <= maxCommSize
+                       , let score = sum [relevanceScore' nid n | (nid, n) <- scNodes sc
+                                                              , Map.lookup nid nodeCommMap == Just cid]
+                       , score > 0]
+      lines' = map (\(cid, label, size, _) ->
+                       "- If reasoning about " <> label <> ": include community "
+                          <> T.pack (show cid) <> " (" <> T.pack (show size) <> " nodes)")
+                   ranked
+   in if null lines'
+      then ""
+      else T.unlines ("### Suggested Context Expansion" : lines')
+
+-- ───────────────────────────────────────────────
+-- Original section formatters (kept for legacy callers)
+-- ───────────────────────────────────────────────
+
 -- | Key nodes section — compact: label + type + source location
 formatKeyNodes :: SelectedContext -> Text
 formatKeyNodes sc =
@@ -67,7 +249,7 @@ formatKeyNodes sc =
       nodeLines = map (\(nid, n) -> "- " <> formatNodeCompact nid n) sorted
   in T.unlines ("### Key Nodes" : nodeLines)
 
--- | Key edges section — compact: source → target [relation, confidence]
+-- | Key edges section (unfiltered, legacy).
 formatKeyEdges :: SelectedContext -> Text
 formatKeyEdges sc =
   let edgeLines = map formatEdgeCompact (take 50 (scEdges sc))
@@ -86,7 +268,7 @@ formatGodNodesSection sc =
                    (scGodNodes sc)
   in T.unlines ("### Hub Nodes" : lines')
 
--- | Expansion hints — suggest which communities could be included
+-- | Expansion hints (unbounded, legacy).
 formatExpansionHints :: SelectedContext -> Text
 formatExpansionHints sc =
   let hints = Map.toList (scCommunityLabels sc)
@@ -94,17 +276,12 @@ formatExpansionHints sc =
                        let size = length $ Map.findWithDefault [] cid (scCommunities sc)
                        in "- If reasoning about " <> label <> ": include community "
                           <> T.pack (show cid) <> " (" <> T.pack (show size) <> " nodes)")
-                   hints
+                  hints
   in if null lines'
      then ""
      else T.unlines ("### Suggested Context Expansion" : lines')
 
--- ───────────────────────────────────────────────
--- Individual formatters
--- ───────────────────────────────────────────────
-
 -- | Compact node representation: label [kind] — source:file:start-end | signature
---   Target: ~50-60 tokens
 formatNodeCompact :: Text -> Node -> Text
 formatNodeCompact _nid n =
   let kind = maybe "" (\k -> "[" <> k <> "] ") (nodeKind n)
@@ -119,7 +296,6 @@ formatNodeCompact _nid n =
   in base <> src <> sig
 
 -- | Compact edge representation: source → target [relation, confidence]
---   Target: ~20 tokens
 formatEdgeCompact :: Edge -> Text
 formatEdgeCompact e =
   T.concat
@@ -135,17 +311,6 @@ formatEdgeCompact e =
 
 -- ───────────────────────────────────────────────
 -- Token counting
--- ───────────────────────────────────────────────
-
--- | Approximate token count for a text.
--- Uses a simple heuristic: ~0.75 tokens per word (subword tokenizers average).
-countContextTokens :: Text -> Int
-countContextTokens txt =
-  let wordCount = length (T.words txt)
-  -- Approximate: 1 word ≈ 1.33 tokens (GPT-style tokenization average)
-  -- We use ceiling to be conservative
-  in ceiling (fromIntegral wordCount * 1.33 :: Double)
-
 -- ───────────────────────────────────────────────
 -- Helpers
 -- ───────────────────────────────────────────────

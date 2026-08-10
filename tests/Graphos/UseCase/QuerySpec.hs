@@ -9,6 +9,7 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Graph.Index (buildIndexWithLabels)
 import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..))
+import Graphos.UseCase.Query.Render (renderPathResultJSON, renderExplainResultJSON)
 import Graphos.Domain.Graph.Score (MatchVerdict(..))
 
 -- Helper: create a test node
@@ -227,3 +228,32 @@ spec = do
           result = neighborhoodExpansion "nonexistent" 2 g idx
       nrCenterNode result `shouldBe` Nothing
       nrNodes result `shouldBe` []
+
+  describe "renderPathResultJSON" $ do
+    it "renders Nothing as {\"path\":null}" $ do
+      let result = renderPathResultJSON Nothing
+      result `shouldSatisfy` (T.pack "\"path\":null" `T.isInfixOf`)
+
+    it "renders Just ids with hops count" $ do
+      let result = renderPathResultJSON (Just ["a", "b", "c"])
+      result `shouldSatisfy` (T.pack "\"hops\":2" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"a\"" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"b\"" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"c\"" `T.isInfixOf`)
+
+    it "renders empty list as {\"path\":[],\"hops\":0}" $ do
+      let result = renderPathResultJSON (Just [])
+      result `shouldSatisfy` (T.pack "\"path\":[]" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"hops\":0" `T.isInfixOf`)
+
+  describe "renderExplainResultJSON" $ do
+    it "renders Nothing as null" $ do
+      renderExplainResultJSON Nothing `shouldBe` "null"
+
+    it "renders node with id/label/source_file/community" $ do
+      let node = testNode "MyModule"
+          result = renderExplainResultJSON (Just node)
+      result `shouldSatisfy` (T.pack "\"id\"" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"label\"" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"source_file\"" `T.isInfixOf`)
+      result `shouldSatisfy` (T.pack "\"community\"" `T.isInfixOf`)

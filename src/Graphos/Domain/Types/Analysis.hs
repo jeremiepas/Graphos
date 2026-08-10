@@ -90,8 +90,8 @@ data CommunityAggregate = CommunityAggregate
   , caColor                  :: !Text
   , caLabel                  :: !Text
   , caRepresentativeLabels   :: ![Text]
-  , caInterCommunityEdges    :: !Int
-  } deriving (Eq, Show, Generic)
+  , caInterCommunityEdges    :: ![(Int, Int)]
+   } deriving (Eq, Show, Generic)
 
 instance ToJSON CommunityAggregate where
   toJSON ca = object

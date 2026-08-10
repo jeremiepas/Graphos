@@ -15,16 +15,20 @@ module Graphos.CLI.Parser
   , ingestOpts
   , commandOpts
   , granularityReader
+    -- * Install-skill target
+  , InstallSkillTarget(..)
     -- * Command reference rendering
   , renderCommandReference
   ) where
 
 import Options.Applicative
 import Data.Text (Text)
+import GHC.Conc (numCapabilities)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
+import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
 
@@ -42,6 +46,7 @@ data Command
   | LServers
   | Serve FilePath Int
   | Init (Maybe String)
+  | InstallSkill InstallSkillTarget
 
 pipelineOpts :: Parser PipelineConfig
 pipelineOpts = PipelineConfig
@@ -71,7 +76,7 @@ pipelineOpts = PipelineConfig
   <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0, try 0.3-0.5 for 100k+ nodes)")
    <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3, try 10-20 for 100k+ nodes)")
    <*> option auto (long "max-leiden-iterations" <> value 50 <> help "Max Leiden iterations (default: 50, try 10-20 for 100k+ nodes)")
-   <*> option auto (long "threads" <> short 'j' <> value 1 <> help "Number of parallel extraction threads (default: 1)")
+    <*> option auto (long "threads" <> short 'j' <> value (fromIntegral numCapabilities) <> help "Number of parallel extraction threads (default: numCapabilities)")
    <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
     <*> pure defaultGraphosConfig
     <*> pure Nothing
@@ -88,8 +93,9 @@ pipelineOpts = PipelineConfig
     <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
     <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
      <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
-     <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
-     <*> pure defaultIngestConfig
+      <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
+      <*> pure defaultIngestConfig
+      <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
@@ -189,12 +195,34 @@ commandOpts = subparser
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
-  <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
-  )
+   <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
+   <> command "install-skill" (info installSkillOpts (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
+   )
   <|> Run <$> pipelineOpts
 
 initOpts :: Parser Command
 initOpts = Init <$> optional (strOption (long "agents" <> metavar "TARGETS" <> help "Scaffold agent integration files. Comma-separated targets: opencode,claude,generic. Use 'auto' to auto-detect from .opencode/ and .claude/ dirs."))
+
+installSkillOpts :: Parser Command
+installSkillOpts = InstallSkill
+  <$> option (eitherReader parseInstallSkillTarget)
+       ( long "target"
+      <> metavar "TARGET"
+      <> help "Assistant target to install skills for. Supported: opencode."
+       )
+
+parseInstallSkillTarget :: String -> Either String InstallSkillTarget
+parseInstallSkillTarget s = case map lowerChar s of
+  "opencode" -> Right OpencodeTarget
+  other      -> Left $ "Unknown install-skill target: " ++ other
+                         ++ ". Supported targets: " ++ showInstallSkillTargets
+  where
+    lowerChar c
+      | 'A' <= c && c <= 'Z' = toEnum (fromEnum c + 32)
+      | otherwise = c
+
+showInstallSkillTargets :: String
+showInstallSkillTargets = "opencode"
 
 -- | Render a compact command/flag reference from the parser.
 -- Produces a fenced code block suitable for embedding in generated docs.

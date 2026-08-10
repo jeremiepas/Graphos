@@ -10,7 +10,7 @@ module Graphos.UseCase.Port.ExportPort
 
 import Data.Map.Strict (Map)
 import Data.Text (Text)
-import Graphos.Domain.Types (Analysis, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, CommunityAggregate)
+import Graphos.Domain.Types (Analysis, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, CommunityAggregate, IncrementalWriter)
 import Graphos.Domain.Graph (Graph)
 
 
@@ -43,16 +43,16 @@ data ExportPort = ExportPort
   , epPushToMemgraphSubgraph    :: Graph -> CommunityMap -> CohesionMap -> Int -> [NodeId] -> Text -> Text -> Text -> IO (Text, Int, Int)
   , epPushToMemgraphCommunity   :: Graph -> CommunityMap -> CohesionMap -> Text -> Text -> Text -> IO (Text, Int, Int)
     -- | Incremental JSON writer
-  , epOpenIncrementalWriter   :: FilePath -> IO ()
-  , epWriteNodes              :: () -> [Node] -> IO ()
-  , epWriteEdges              :: () -> [Edge] -> IO ()
-  , epWriteCommunities        :: () -> CommunityMap -> IO ()
-  , epWriteCohesion           :: () -> CohesionMap -> IO ()
-  , epWriteGodNodes           :: () -> [GodNode] -> IO ()
-  , epWriteAnalysisTail       :: () -> Maybe (Map CommunityId Text) -> IO ()
-  , epWriteCommunityAggregates :: () -> [CommunityAggregate] -> IO ()
-  , epFlushWriter             :: () -> IO ()
-  , epCloseWriter             :: () -> IO ()
+  , epOpenIncrementalWriter   :: FilePath -> IO IncrementalWriter
+  , epWriteNodes              :: IncrementalWriter -> [Node] -> IO ()
+  , epWriteEdges              :: IncrementalWriter -> [Edge] -> IO ()
+  , epWriteCommunities        :: IncrementalWriter -> CommunityMap -> IO ()
+  , epWriteCohesion           :: IncrementalWriter -> CohesionMap -> IO ()
+  , epWriteGodNodes           :: IncrementalWriter -> [GodNode] -> IO ()
+  , epWriteAnalysisTail       :: IncrementalWriter -> Maybe (Map CommunityId Text) -> IO ()
+  , epWriteCommunityAggregates :: IncrementalWriter -> [CommunityAggregate] -> IO ()
+  , epFlushWriter             :: IncrementalWriter -> IO ()
+  , epCloseWriter             :: IncrementalWriter -> IO ()
     -- | Community graph export
   , epExportCommunityGraph    :: Graph -> CommunityMap -> FilePath -> IO ()
     -- | Checkpoint save

@@ -19,15 +19,17 @@ import System.Directory (doesFileExist)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph)
 import Graphos.Domain.Graph.Index (GraphIndex, buildIndexWithLabels)
+import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
 
 -- | Result of loading a graph from disk
 data LoadResult = LoadResult
   { lrGraph            :: Graph
+  , lrIndex            :: GraphIndex
+  , lrCachedFGL        :: CachedFGL
   , lrCommunities      :: CommunityMap
   , lrCohesion         :: CohesionMap
   , lrGodNodes         :: [GodNode]
   , lrCommunityLabels  :: Map Int Text
-  , lrIndex            :: GraphIndex
   } deriving (Eq, Show)
 
 -- | Load a graph from a JSON file produced by the export pipeline.
@@ -52,13 +54,17 @@ loadGraphFromFile path = do
               -- Build index at load time: O(N) one-time cost,
               -- amortized across all future queries.
               idx = buildIndexWithLabels graph (gfCommunities gf) (gfCommunityLabels gf)
+              -- Build FGL cache once: O(N + E) one-time cost,
+              -- shared across all FGL-backed algorithms.
+              cachedFGL = toCachedFGL graph
           pure $ Right LoadResult
             { lrGraph           = graph
+            , lrIndex           = idx
+            , lrCachedFGL       = cachedFGL
             , lrCommunities     = gfCommunities gf
             , lrCohesion        = gfCohesion gf
             , lrGodNodes        = gfGodNodes gf
             , lrCommunityLabels = gfCommunityLabels gf
-            , lrIndex           = idx
             }
 
 -- ───────────────────────────────────────────────

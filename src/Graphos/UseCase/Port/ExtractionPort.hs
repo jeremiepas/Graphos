@@ -62,4 +62,7 @@ data ExtractionPort = ExtractionPort
   , epPushExtractionStreaming :: PipelineConfig -> Extraction -> IO ()
     -- Config lookups
   , epLanguageServerCommands :: Map String (String, [String])
+    -- | Check whether a tree-sitter grammar is available for the given language.
+    -- Returns True if the port can parse this language via tree-sitter.
+  , epHasTreeSitterGrammar :: String -> Bool
   }

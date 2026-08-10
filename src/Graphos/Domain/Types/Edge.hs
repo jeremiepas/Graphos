@@ -92,7 +92,7 @@ data Edge = Edge
   , edgeRelation  :: !Relation
   , edgeWeight    :: !Double
   , edgeConfidence :: !Confidence
-  } deriving (Eq, Show, Generic)
+  } deriving (Eq, Ord, Show, Generic)
 
 instance NFData Edge
 
