@@ -17,10 +17,12 @@ result
 result-*
 .tmp/
 .worktrees/
-# .opencode local dev config (agent files tracked separately)
+# .opencode local dev config (agent + skills tracked, rest ignored)
 .opencode/*
 !.opencode/agent/
 !.opencode/agent/**
+!.opencode/skills/
+!.opencode/skills/**
 node_modules/
 traces/
 monitoring/prometheus/data/
