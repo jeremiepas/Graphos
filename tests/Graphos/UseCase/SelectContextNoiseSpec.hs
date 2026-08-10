@@ -7,7 +7,8 @@ import qualified Data.Text as T
 
 import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..)
                             , Relation(..), Confidence(..), Analysis(..)
-                            , GodNode(..), emptyExtraction, extractionFromLists)
+                             , GodNode(..), extractionFromLists)
+
 import Graphos.Domain.Graph (Graph, buildGraph)
 import Graphos.Domain.Context (QueryComplexity(..), ContextBudget(..)
                               , budgetForComplexity, SelectedContext(..), scNodes

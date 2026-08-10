@@ -88,19 +88,23 @@ spec = do
           g = buildGraph False ext
           idx = buildIndexWithLabels g Map.empty Map.empty
           r = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
-          Object obj = toJSON r
-      KM.member "verdict" obj `shouldBe` True
-      KM.member "best_score" obj `shouldBe` True
-      KM.member "hash" obj `shouldBe` True
-      KM.member "nodes" obj `shouldBe` True
-      KM.member "edges" obj `shouldBe` True
+      case toJSON r of
+        Object obj -> do
+          KM.member "verdict" obj `shouldBe` True
+          KM.member "best_score" obj `shouldBe` True
+          KM.member "hash" obj `shouldBe` True
+          KM.member "nodes" obj `shouldBe` True
+          KM.member "edges" obj `shouldBe` True
+        _ -> expectationFailure "expected JSON Object"
 
     it "none-verdict response has empty nodes and edges" $ do
       let ext = extractionFromLists [ testNode "AuthModule" ] []
           g = buildGraph False ext
           idx = buildIndexWithLabels g Map.empty Map.empty
           r = queryGraphWithIndexScored g idx "zzzznonexistent" "bfs" 2000
-          Object obj = toJSON r
+      case toJSON r of
+        Object _ -> pure ()
+        _ -> expectationFailure "expected JSON Object"
       qrespVerdict r `shouldBe` NoMatch
       qrespNodes r `shouldBe` []
       qrespEdges r `shouldBe` []
