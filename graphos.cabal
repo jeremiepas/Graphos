@@ -277,37 +277,42 @@ test-suite graphos-test
   build-tool-depends:
       hspec-discover:hspec-discover >= 2.10
   other-modules:
-                    Graphos.Domain.TypesSpec
-                    Graphos.Domain.ConfigSpec
-                    Graphos.Domain.Config.IngestSpec
-                    Graphos.Domain.Types.IngestSpec
-                    Graphos.Domain.GraphSpec
-                    Graphos.Domain.CommunitySpec
-                    Graphos.Domain.Community.LabelSpec
-                    Graphos.Domain.AnalysisSpec
-                    Graphos.Domain.ContextSpec
-                    Graphos.UseCase.PipelineSpec
-                    Graphos.UseCase.ExtractSpec
-                    Graphos.UseCase.InferSpec
-                    Graphos.UseCase.Extract.HaskellSpec
-                    Graphos.UseCase.Extract.ImageSpec
-                    Graphos.UseCase.QuerySpec
-                    Graphos.UseCase.Query.RefineSpec
-                    Graphos.UseCase.SelectContextSpec
-                    Graphos.UseCase.FormatContextSpec
-                    Graphos.UseCase.ConversationSpec
-                    Graphos.Domain.Graph.ScoreSpec
-                    Graphos.Domain.Graph.IndexSpec
-                    Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
-                    Graphos.Infrastructure.LSP.ClientSpec
-                    Graphos.Infrastructure.LSP.TransportSpec
-                    Graphos.Infrastructure.Observability.SDKSpec
-                     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
-                     Graphos.Infrastructure.FileSystem.IgnoreSpec
-                     Graphos.Infrastructure.Scaffold.WriterSpec
-                     Graphos.Domain.ScaffoldSpec
-                     Graphos.UseCase.ScaffoldSpec
-                     Graphos.CLI.ParserSpec
+    Graphos.Domain.TypesSpec
+    Graphos.Domain.ConfigSpec
+    Graphos.Domain.Config.IngestSpec
+    Graphos.Domain.Types.IngestSpec
+    Graphos.Domain.GraphSpec
+    Graphos.Domain.CommunitySpec
+    Graphos.Domain.Community.LabelSpec
+    Graphos.Domain.AnalysisSpec
+    Graphos.Domain.ContextSpec
+    Graphos.UseCase.PipelineSpec
+    Graphos.UseCase.ExtractSpec
+    Graphos.UseCase.InferSpec
+    Graphos.UseCase.Extract.HaskellSpec
+    Graphos.UseCase.Extract.ImageSpec
+    Graphos.UseCase.QuerySpec
+    Graphos.UseCase.Query.RefineSpec
+    Graphos.UseCase.SelectContextSpec
+    Graphos.UseCase.SelectContextNoiseSpec
+    Graphos.UseCase.FormatContextSpec
+    Graphos.UseCase.FormatContextBudgetSpec
+    Graphos.UseCase.FormatContextHintsSpec
+    Graphos.UseCase.ConversationSpec
+    Graphos.Domain.Graph.ScoreSpec
+    Graphos.Domain.Graph.IndexSpec
+    Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
+    Graphos.Infrastructure.LSP.ClientSpec
+    Graphos.Infrastructure.LSP.TransportSpec
+    Graphos.Infrastructure.Observability.SDKSpec
+    Graphos.Infrastructure.Server.MCPQuerySpec
+    Graphos.Infrastructure.FileSystem.OfficeConvertSpec
+    Graphos.Infrastructure.FileSystem.IgnoreSpec
+    Graphos.Infrastructure.Scaffold.WriterSpec
+    Graphos.Domain.ScaffoldSpec
+    Graphos.UseCase.ScaffoldSpec
+    Graphos.CLI.ParserSpec
+    Graphos.Regression.ContextNoiseRegressionSpec
 
   build-depends:
       base

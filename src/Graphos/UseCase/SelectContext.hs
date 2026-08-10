@@ -16,6 +16,7 @@ module Graphos.UseCase.SelectContext
   , selectCommunityAware
   , selectRelevanceWeighted
   , selectPathBased
+  , selectArchitectural
   , getNodeData
   , filterChatCommunity
   ) where
@@ -139,29 +140,29 @@ selectCommunityAware g commMap analysis query budget =
        [] -> emptySelectedContext budget
        (best:_) ->
          let -- Find which community this node belongs to
-             commIds = [cid | (cid, members) <- Map.toList commMap
-                            , best `elem` members]
-             -- Get members of those communities
-             commMembers = nub $ concat [Map.findWithDefault [] cid commMap | cid <- commIds]
-             -- Get bridge/articulation points
-             bridges = articulationPoints g
-             -- Filter bridges that connect to relevant communities
-             relevantBridges = filter (\b -> b `elem` commMembers || any (`elem` commIds)
-                           [cid | (cid, members) <- Map.toList commMap, b `elem` members]) bridges
-             -- Collect all nodes in budget
-             allCandidateNodes = Set.fromList commMembers
-                                `Set.union` Set.fromList relevantBridges
-                                 `Set.union` Set.fromList (map gnId (take 5 (analysisGodNodes analysis)))
-             -- Apply node budget
-             nodesInBudget = take (cbMaxNodes budget)
-                           $ sortOn (\nid -> Down $ relevanceScore nid g terms) 
-                           $ Set.toList allCandidateNodes
-             -- Get edges between selected nodes
-             selectedEdges = [e | ((s, t), e) <- Map.toList (gEdges g)
-                                , s `Set.member` Set.fromList nodesInBudget
-                                , t `Set.member` Set.fromList nodesInBudget]
-             edgesInBudget = take (cbMaxEdges budget) selectedEdges
-         in SelectedContext
+              commIds = [cid | (cid, members) <- Map.toList commMap
+                             , best `elem` members]
+              -- Get members of those communities
+              commMembers = nub $ concat [Map.findWithDefault [] cid commMap | cid <- commIds]
+              -- Get bridge/articulation points
+              bridges = articulationPoints g
+              -- Filter bridges that connect to relevant communities
+              relevantBridges = filter (\b -> b `elem` commMembers || any (`elem` commIds)
+                            [cid | (cid, members) <- Map.toList commMap, b `elem` members]) bridges
+              -- Collect all nodes in budget (no unconditional god-node force-inclusion)
+              allCandidateNodes = Set.fromList commMembers
+                                 `Set.union` Set.fromList relevantBridges
+              -- Apply node budget
+              nodesInBudget = take (cbMaxNodes budget)
+                            $ sortOn (\nid -> Down $ relevanceScore nid g terms)
+                            $ Set.toList allCandidateNodes
+              selectedSet = Set.fromList nodesInBudget
+              -- Get edges between selected nodes
+              selectedEdges = [e | ((s, t), e) <- Map.toList (gEdges g)
+                                 , s `Set.member` selectedSet
+                                 , t `Set.member` selectedSet]
+              edgesInBudget = take (cbMaxEdges budget) selectedEdges
+          in SelectedContext
             { scNodes           = [(nid, n) | nid <- nodesInBudget
                                             , Just n <- [Map.lookup nid (gNodes g)]]
             , scEdges           = edgesInBudget
@@ -169,7 +170,8 @@ selectCommunityAware g commMap analysis query budget =
             , scCommunityLabels = Map.fromList [ (cid, T.pack ("Community " ++ show cid))
                                               | cid <- commIds]
             , scBridgeNodes     = relevantBridges
-            , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 5 (analysisGodNodes analysis)]
+            , scGodNodes        = [(gnId gn, gnEdges gn) | gn <- analysisGodNodes analysis
+                                                         , gnId gn `Set.member` selectedSet]
             , scStrategy        = CommunityAware
             , scBudget          = budget
             , scMatchScore      = fromIntegral $ sum [s | (_, s) <- take 3 scored]
@@ -201,22 +203,24 @@ selectRelevanceWeighted g commMap analysis query budget =
                      [(nid, relevanceScore nid g terms) | nid <- Set.toList visitedNodes]
       -- Take top-N within node budget
       nodesInBudget = take (cbMaxNodes budget) [nid | (nid, _) <- scoredNodes]
+      selectedSet = Set.fromList nodesInBudget
       -- Get edges between selected nodes
       edgesInBudget = take (cbMaxEdges budget) [e | ((s,t), e) <- Map.toList (gEdges g)
-                                                  , s `elem` nodesInBudget
-                                                  , t `elem` nodesInBudget]
+                                                  , s `Set.member` selectedSet
+                                                  , t `Set.member` selectedSet]
       -- Find relevant communities
       nodeCommMap = nodeCommunityMap commMap
       relCommIds = nub [cid | nid <- nodesInBudget
                             , Just cid <- [Map.lookup nid nodeCommMap]]
   in SelectedContext
      { scNodes           = [(nid, n) | nid <- nodesInBudget
-                                      , Just n <- [Map.lookup nid (gNodes g)]]
+                                       , Just n <- [Map.lookup nid (gNodes g)]]
      , scEdges           = edgesInBudget
      , scCommunities     = Map.filterWithKey (\cid _ -> cid `elem` relCommIds) commMap
      , scCommunityLabels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- relCommIds]
      , scBridgeNodes     = filter (`elem` articulationPoints g) nodesInBudget
-     , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 5 (analysisGodNodes analysis)]
+     , scGodNodes        = [(gnId gn, gnEdges gn) | gn <- analysisGodNodes analysis
+                                                    , gnId gn `Set.member` selectedSet]
      , scStrategy        = RelevanceWeightedBFS
      , scBudget          = budget
      , scMatchScore      = sum [s | (_, s) <- take 3 scoredNodes]
@@ -240,37 +244,39 @@ selectPathBased g commMap analysis query budget =
        [_] -> -- Only one match, fall back to community-aware
          selectCommunityAware g commMap analysis query budget
        (from:to:_) -> -- Path between top 2 matches
-         case shortestPath g from to of
-           Nothing -> selectCommunityAware g commMap analysis query budget
-           Just path ->
-             let pathSet = Set.fromList path
-                 -- Include immediate neighbors of path nodes
-                 neighborSets = [neighbors g nid | nid <- path]
-                 allNeighbors = Set.unions neighborSets `Set.union` pathSet
-                 -- Score by relevance and take within budget
-                 scoredNodes = sortOn (\nid -> Down $ relevanceScore nid g terms)
-                              (Set.toList allNeighbors)
-                 nodesInBudget = take (cbMaxNodes budget) scoredNodes
-                 -- Get edges between selected nodes
-                 edgesInBudget = take (cbMaxEdges budget) [e | ((s,t), e) <- Map.toList (gEdges g)
-                                                            , s `elem` nodesInBudget
-                                                            , t `elem` nodesInBudget]
-                 -- Find relevant communities
-                 nodeCommMap' = nodeCommunityMap commMap
-                 relCommIds = nub [cid | nid <- nodesInBudget
-                                      , Just cid <- [Map.lookup nid nodeCommMap']]
-             in SelectedContext
-                { scNodes           = [(nid, n) | nid <- nodesInBudget
-                                                 , Just n <- [Map.lookup nid (gNodes g)]]
-                , scEdges           = edgesInBudget
-                , scCommunities     = Map.filterWithKey (\cid _ -> cid `elem` relCommIds) commMap
-                , scCommunityLabels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- relCommIds]
-                , scBridgeNodes     = filter (`elem` articulationPoints g) path
-            , scGodNodes         = [(gnId gn, gnEdges gn) | gn <- take 5 (analysisGodNodes analysis)]
-                , scStrategy        = PathBased
-                , scBudget          = budget
-                , scMatchScore      = fromIntegral $ sum [s | (_, s) <- take 3 scored]
-                }
+          case shortestPath g from to of
+            Nothing -> selectCommunityAware g commMap analysis query budget
+            Just path ->
+              let pathSet = Set.fromList path
+                  -- Include immediate neighbors of path nodes
+                  neighborSets = [neighbors g nid | nid <- path]
+                  allNeighbors = Set.unions neighborSets `Set.union` pathSet
+                  -- Score by relevance and take within budget
+                  scoredNodes = sortOn (\nid -> Down $ relevanceScore nid g terms)
+                                (Set.toList allNeighbors)
+                  nodesInBudget = take (cbMaxNodes budget) scoredNodes
+                  selectedSet = Set.fromList nodesInBudget
+                  -- Get edges between selected nodes
+                  edgesInBudget = take (cbMaxEdges budget) [e | ((s,t), e) <- Map.toList (gEdges g)
+                                                             , s `Set.member` selectedSet
+                                                             , t `Set.member` selectedSet]
+                  -- Find relevant communities
+                  nodeCommMap' = nodeCommunityMap commMap
+                  relCommIds = nub [cid | nid <- nodesInBudget
+                                       , Just cid <- [Map.lookup nid nodeCommMap']]
+              in SelectedContext
+                 { scNodes           = [(nid, n) | nid <- nodesInBudget
+                                                  , Just n <- [Map.lookup nid (gNodes g)]]
+                 , scEdges           = edgesInBudget
+                 , scCommunities     = Map.filterWithKey (\cid _ -> cid `elem` relCommIds) commMap
+                 , scCommunityLabels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- relCommIds]
+                 , scBridgeNodes     = filter (`elem` articulationPoints g) path
+                 , scGodNodes        = [(gnId gn, gnEdges gn) | gn <- analysisGodNodes analysis
+                                                                , gnId gn `Set.member` selectedSet]
+                 , scStrategy        = PathBased
+                 , scBudget          = budget
+                 , scMatchScore      = fromIntegral $ sum [s | (_, s) <- take 3 scored]
+                 }
 
 -- ───────────────────────────────────────────────
 -- Strategy 4: Architectural overview
