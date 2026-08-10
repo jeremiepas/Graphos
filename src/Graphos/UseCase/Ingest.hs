@@ -11,6 +11,10 @@ module Graphos.UseCase.Ingest
   , IngestResult(..)
   , detectUrlType
 
+    -- * Category resolution
+  , resolveEmbedForCategory
+  , resolveGranularityForCategory
+
     -- * Single-file ingestion
   , ingestFile
   , FileIngestResult(..)
@@ -37,6 +41,8 @@ import Graphos.Domain.Types
   , PipelineConfig(..), EmbeddingConfig(..)
   )
 import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtensionConfig(..))
+import Graphos.Domain.Config.Extraction (Granularity(..))
+import Graphos.Domain.Config.Ingest (IngestCategories(..), IngestCategoryConfig(..))
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -268,6 +274,42 @@ embedNode appEnv cfg model ts node = do
         , ieTimestamp  = ts
         , ieModel      = model
         }
+
+-- ───────────────────────────────────────────────
+-- Category resolution helpers
+-- ───────────────────────────────────────────────
+
+-- | Resolve embed setting for a file category.
+-- Uses per-category override if present, otherwise falls back to the top-level default.
+resolveEmbedForCategory :: Bool -> IngestCategories -> FileCategory -> Bool
+resolveEmbedForCategory topLevel cats cat =
+  let catCfg = categoryConfig cats cat
+   in case catCfg of
+        Just c -> case iccEmbed c of
+          Just val  -> val
+          Nothing   -> topLevel
+        Nothing -> topLevel
+
+-- | Resolve granularity for a file category.
+-- Uses per-category override if present, otherwise falls back to the top-level default.
+resolveGranularityForCategory :: Granularity -> IngestCategories -> FileCategory -> Granularity
+resolveGranularityForCategory topLevel cats cat =
+  let catCfg = categoryConfig cats cat
+   in case catCfg of
+        Just c -> case iccGranularity c of
+          Just val  -> val
+          Nothing   -> topLevel
+        Nothing -> topLevel
+
+-- | Internal: get the Maybe IngestCategoryConfig for a FileCategory.
+categoryConfig :: IngestCategories -> FileCategory -> Maybe IngestCategoryConfig
+categoryConfig cats = \case
+  CodeFiles   -> icatCode cats
+  DocFiles    -> icatDoc cats
+  PaperFiles  -> icatPaper cats
+  ImageFiles  -> icatImage cats
+  VideoFiles  -> icatVideo cats
+  OfficeFiles -> icatOffice cats
 
 -- ───────────────────────────────────────────────
 -- URL helpers (existing)

@@ -10,13 +10,17 @@ module Graphos.Infrastructure.Wiring
   , productionExtractionPort
   , productionExportPort
   , productionLLMPort
+    -- * Tree-sitter grammar bindings
+  , getGrammarPtr
   ) where
 
 import Control.Monad (when)
 import Data.Dynamic (toDyn)
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Foreign.Ptr (Ptr)
 import Unsafe.Coerce (unsafeCoerce)
+
 
 import Graphos.Domain.Types (Extraction(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
@@ -65,6 +69,8 @@ import qualified TreeSitter.JSON as TSJSON
 import qualified TreeSitter.Go as TSGo
 import qualified TreeSitter.Rust as TSRust
 import qualified TreeSitter.Haskell as TSHaskell
+import qualified TreeSitter.Ruby as TSRuby
+import qualified TreeSitter.Java as TSJava
 import qualified TreeSitter.Language as TS_LANG
 
 -- UseCase imports (for delegation to sub-modules)
@@ -192,6 +198,7 @@ productionExtractionPort logEnv = ExtractionPort
               (neo4jsUri n4cfg) (neo4jsUser n4cfg) (neo4jsPassword n4cfg)
             pure ()
   , epLanguageServerCommands = LSP.languageServerCommands
+  , epHasTreeSitterGrammar = isJust . getGrammarPtr
   }
 
 -- | Production export port — delegates to Infrastructure.Export.* modules.
@@ -210,16 +217,16 @@ productionExportPort _logEnv _obsEnv =
         , UEP.epPushToMemgraphSubgraph = ExportMemgraph.pushSubgraphToMemgraph
         , UEP.epPushToMemgraphCommunity = ExportMemgraph.pushCommunityGraphToMemgraph
         , UEP.epPushEdgeRepair = Neo4j.pushEdgeRepair
-        , UEP.epOpenIncrementalWriter = \fp -> pure (unsafeCoerce (Inc.openWriter fp))
-        , UEP.epWriteNodes = \_ nodes -> Inc.writeNodes (unsafeCoerce ()) nodes
-        , UEP.epWriteEdges = \_ edges -> Inc.writeEdges (unsafeCoerce ()) edges
-        , UEP.epWriteCommunities = \_ cmap -> Inc.writeCommunities (unsafeCoerce ()) cmap
-        , UEP.epWriteCohesion = \_ cmap -> Inc.writeCohesion (unsafeCoerce ()) cmap
-        , UEP.epWriteGodNodes = \_ gnodes -> Inc.writeGodNodes (unsafeCoerce ()) gnodes
-        , UEP.epWriteAnalysisTail = \_ mbLabels -> Inc.writeAnalysisTail (unsafeCoerce ()) mbLabels
-        , UEP.epWriteCommunityAggregates = \_ aggregates -> Inc.writeCommunityAggregates (unsafeCoerce ()) aggregates
-        , UEP.epFlushWriter = \_ -> Inc.flushWriter (unsafeCoerce ())
-        , UEP.epCloseWriter = \_ -> Inc.closeWriter (unsafeCoerce ())
+        , UEP.epOpenIncrementalWriter = Inc.openWriter
+        , UEP.epWriteNodes = Inc.writeNodes
+        , UEP.epWriteEdges = Inc.writeEdges
+        , UEP.epWriteCommunities = Inc.writeCommunities
+        , UEP.epWriteCohesion = Inc.writeCohesion
+        , UEP.epWriteGodNodes = Inc.writeGodNodes
+        , UEP.epWriteAnalysisTail = Inc.writeAnalysisTail
+        , UEP.epWriteCommunityAggregates = Inc.writeCommunityAggregates
+        , UEP.epFlushWriter = Inc.flushWriter
+        , UEP.epCloseWriter = Inc.closeWriter
         , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
         , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
         , UEP.epExportAll = \g _outputDir analysis config detection mLabels ->
@@ -271,4 +278,6 @@ getGrammarPtr "json"         = Just TSJSON.tree_sitter_json
 getGrammarPtr "go"           = Just TSGo.tree_sitter_go
 getGrammarPtr "rust"         = Just TSRust.tree_sitter_rust
 getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
+getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
+getGrammarPtr "java"         = Just TSJava.tree_sitter_java
 getGrammarPtr _              = Nothing

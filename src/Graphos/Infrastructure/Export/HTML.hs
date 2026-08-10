@@ -508,7 +508,7 @@ htmlBody =
     , "    document.getElementById('selectedFile').textContent = node.source_file || node.title || '';"
     , "    const cid = node.community_id || -1;"
     , "    const agg = communityAggregates.find(c => c.id === cid);"
-    , "    document.getElementById('selectedCommunity').textContent = 'Community ' + cid + (agg ? ' (' + agg.label + ')' : '');'"
+    , "    document.getElementById('selectedCommunity').textContent = 'Community ' + cid + (agg ? ' (' + agg.label + ')' : '');"
     , "    // Count neighbors"
     , "    const neighborEdges = (drilldownEdgesDataset ? drilldownEdgesDataset.get() : allEdges).filter(e => e.from === nodeId || e.to === nodeId);"
     , "    const neighborIds = new Set();"

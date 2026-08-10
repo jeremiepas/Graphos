@@ -30,6 +30,7 @@ import Data.Map.Strict (Map)
 import Control.DeepSeq (NFData(..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Conc (numCapabilities)
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
@@ -62,7 +63,7 @@ data PipelineConfig = PipelineConfig
   , cfgResolution   :: Double       -- ^ community resolution: higher = fewer larger communities (default: 1.0)
   , cfgMinCommSize  :: Int          -- ^ minimum community size; smaller ones get merged (default: 3)
   , cfgMaxLeidenIterations :: Int   -- ^ max Leiden iterations before stopping (default: 50, lower for large graphs)
-  , cfgThreads      :: Int          -- ^ number of parallel extraction threads (default: 1)
+  , cfgThreads      :: Int          -- ^ number of parallel extraction threads (default: numCapabilities)
   , cfgCommunityGraph :: Bool      -- ^ export community-level graph JSON for LLM navigation
   , cfgGraphosConfig :: GraphosConfig  -- ^ LSP servers, language IDs, file extensions (config-driven)
   , cfgNeo4jStreaming :: Maybe Neo4jStreamingConfig  -- ^ Push nodes to Neo4j during extraction (streaming)
@@ -80,6 +81,7 @@ data PipelineConfig = PipelineConfig
   , cfgNoObservability :: Bool                         -- ^ Disable all observability (--no-observability)
   , cfgGranularity    :: Maybe Granularity             -- ^ CLI granularity override (--granularity)
   , cfgIngest         :: IngestConfig                  -- ^ Single-file ingest configuration
+  , cfgTimeout        :: Maybe Int                     -- ^ Pipeline timeout in seconds (Nothing = unlimited)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -137,7 +139,7 @@ defaultConfig = PipelineConfig
   , cfgResolution   = 1.0
   , cfgMinCommSize  = 3
   , cfgMaxLeidenIterations = 50
-  , cfgThreads      = 1
+  , cfgThreads      = numCapabilities
   , cfgCommunityGraph = False
   , cfgGraphosConfig = defaultGraphosConfig
   , cfgNeo4jStreaming = Nothing
@@ -155,6 +157,7 @@ defaultConfig = PipelineConfig
   , cfgNoObservability = False
   , cfgGranularity    = Nothing
   , cfgIngest         = defaultIngestConfig
+  , cfgTimeout        = Nothing
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

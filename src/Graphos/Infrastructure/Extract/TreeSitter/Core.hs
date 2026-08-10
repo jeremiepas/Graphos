@@ -2,26 +2,32 @@
 -- Clean approach: parse → root node → cursor walk → collect named nodes.
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE InterruptibleFFI #-}
+{-# LANGUAGE NumericUnderscores #-}
 module Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..)
   , parseWithGrammar
   ) where
 
-import Control.Exception (catch, SomeException(..))
+import Control.Exception (catch, SomeException(..), bracket)
+import Control.Monad (unless, void)
 import Data.ByteString (ByteString)
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Data.Word (Word64)
 import Foreign.Ptr (Ptr, nullPtr, castPtr, plusPtr)
-import Foreign.C.String (peekCString)
+import Foreign.C.String (CString, peekCString)
 import Foreign.Marshal.Alloc (alloca, mallocBytes, free)
 import Foreign.Storable (peek, poke)
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
+import System.Timeout (timeout)
 
-import TreeSitter.Parser (withParser, withParseTree)
-import TreeSitter.Tree (withRootNode, Tree)
+import TreeSitter.Parser (Parser, withParser, ts_parser_set_timeout_micros)
+import TreeSitter.Tree (withRootNode, Tree, ts_tree_delete)
 import TreeSitter.Node (Node(..), TSPoint(..), nodeChildCount, nodeIsNamed, nodeType, nodeStartByte, nodeEndByte, nodeStartPoint, nodeEndPoint, ts_node_copy_child_nodes)
 import TreeSitter.Language (Language)
 
@@ -37,53 +43,74 @@ data TSNodeInfo = TSNodeInfo
   , tsnChildren  :: [TSNodeInfo]
   } deriving (Eq, Show)
 
+-- | Interruptible FFI binding to tree-sitter's parse function so that
+-- Haskell async exceptions can abort a pathological parse.
+foreign import ccall interruptible "ts_parser_parse_string"
+  ts_parser_parse_string_interruptible :: Ptr Parser -> Ptr Tree -> CString -> Int -> IO (Ptr Tree)
+
 -- | Parse file content with a tree-sitter grammar.
 -- Returns Nothing on failure, Just root children on success.
 parseWithGrammar :: Ptr Language -> ByteString -> IO (Maybe [TSNodeInfo])
 parseWithGrammar lang content = catch (do
   withParser lang $ \parser -> do
-    withParseTree parser content $ \tree ->
-      if tree == nullPtr
-        then pure Nothing
-        else Just <$> collectNodes tree content
+    ts_parser_set_timeout_micros parser (5000000 :: Word64)
+    result <- timeout 6000000 $ unsafeUseAsCStringLen content $ \(source, len) ->
+      bracket
+        (ts_parser_parse_string_interruptible parser nullPtr source len)
+        (\tree -> unless (tree == nullPtr) $ void $ ts_tree_delete tree)
+        $ \tree ->
+          if tree == nullPtr
+            then pure Nothing
+            else Just <$> collectNodes tree content
+    case result of
+      Nothing -> do
+        hPutStrLn stderr "[tree-sitter] Parse timed out"
+        pure Nothing
+      Just r  -> pure r
   ) $ \(e :: SomeException) -> do
     hPutStrLn stderr $ "[tree-sitter] Parse error: " ++ show e
     pure Nothing
+
+-- | Maximum recursion depth for AST walk.
+maxDepth :: Int
+maxDepth = 256
 
 -- | Collect all named nodes from a parse tree using child buffer copying.
 collectNodes :: Ptr Tree -> ByteString -> IO [TSNodeInfo]
 collectNodes tree content =
   withRootNode tree $ \rootNodePtr -> do
     root <- peek rootNodePtr
-    readNodeTree root content
+    readNodeTree 0 root content
 
 -- | Read a node and all its named children recursively.
 -- Uses child buffer copying (the idiomatic tree-sitter approach).
-readNodeTree :: Node -> ByteString -> IO [TSNodeInfo]
-readNodeTree node content = do
-  childInfos <- readChildren node content
+readNodeTree :: Int -> Node -> ByteString -> IO [TSNodeInfo]
+readNodeTree depth node content = do
+  childInfos <- readChildren depth node content
   pure [toNodeInfo node content childInfos]
 
 -- | Read all children of a node (named and unnamed).
-readChildren :: Node -> ByteString -> IO [TSNodeInfo]
-readChildren node content = do
-  let count = fromIntegral (nodeChildCount node) :: Int
-  if count == 0
-    then pure []
-    else do
-      -- Allocate buffer and copy all children into it
-      buf <- mallocBytes (count * 80)  -- sizeof(Node) = 80
-      alloca $ \tsNodeBuf -> do
-        -- Copy the parent's TSNode to a buffer so we can pass Ptr TSNode
-        poke tsNodeBuf (nodeTSNode node)
-        ts_node_copy_child_nodes tsNodeBuf buf
-      childNodes <- mapM (\i -> peek (buf `plusPtr` (i * 80) :: Ptr Node)) [0..count-1]
-      free buf
-      -- Recursively build info for each child
-      mapM (\child -> do
-        grandChildren <- readChildren child content
-        pure (toNodeInfo child content grandChildren)
-        ) childNodes
+readChildren :: Int -> Node -> ByteString -> IO [TSNodeInfo]
+readChildren depth node content
+  | depth >= maxDepth = pure []
+  | otherwise = do
+      let count = fromIntegral (nodeChildCount node) :: Int
+      if count == 0
+        then pure []
+        else do
+          -- Allocate buffer and copy all children into it
+          buf <- mallocBytes (count * 80)  -- sizeof(Node) = 80
+          alloca $ \tsNodeBuf -> do
+            -- Copy the parent's TSNode to a buffer so we can pass Ptr TSNode
+            poke tsNodeBuf (nodeTSNode node)
+            ts_node_copy_child_nodes tsNodeBuf buf
+          childNodes <- mapM (\i -> peek (buf `plusPtr` (i * 80) :: Ptr Node)) [0..count-1]
+          free buf
+          -- Recursively build info for each child
+          mapM (\child -> do
+            grandChildren <- readChildren (depth + 1) child content
+            pure (toNodeInfo child content grandChildren)
+            ) childNodes
 
 -- | Convert a tree-sitter Node to our TSNodeInfo.
 toNodeInfo :: Node -> ByteString -> [TSNodeInfo] -> TSNodeInfo

@@ -50,6 +50,7 @@ library
                     Graphos.Domain.Types.Pipeline
                     Graphos.Domain.Types.Analysis
                     Graphos.Domain.Types.Ingest
+                    Graphos.Domain.Types.Writer
                     -- Domain - Graph
                     Graphos.Domain.Graph
                     Graphos.Domain.Graph.Core
@@ -155,9 +156,10 @@ library
                       Graphos.Infrastructure.Export.SVG
                      Graphos.Infrastructure.Export.Report
                       Graphos.Infrastructure.Export.IncrementalJSON
-                     -- Infrastructure - Server
-                     Graphos.Infrastructure.Server.MCP
-                     Graphos.Infrastructure.Server.Static
+                      -- Infrastructure - Server
+                      Graphos.Infrastructure.Server.MCP
+                      Graphos.Infrastructure.Server.Static
+                      Graphos.Infrastructure.Server.QueryAPI
                      -- Infrastructure - Tracking
                       Graphos.Infrastructure.Tracking.Cost
                       -- Infrastructure - Observability
@@ -222,6 +224,8 @@ library
     , tree-sitter-go        >= 0.5
     , tree-sitter-haskell   >= 0.3
     , tree-sitter-json      >= 0.7
+    , tree-sitter-ruby      >= 0.5
+    , tree-sitter-java      >= 0.7
     , unordered-containers >= 0.2
     , vector               >= 0.12
     , yaml                 >= 0.11

@@ -1,0 +1,274 @@
+# ───────────────────────────────────────────────
+# Graphos Configuration
+# ───────────────────────────────────────────────
+# This file configures extraction, LLM, embedding, vision, and observability.
+# Any field left out will fall back to built-in defaults.
+# User values override defaults (for LSP/language_ids maps).
+#
+# Config resolution (later wins):
+#   1. Built-in defaults
+#   2. Global config: ~/.config/graphos/graphos.yaml
+#   3. This file (project graphos.yaml)
+#   4. CLI flags (--otel, --metrics, --embed, --no-embed, etc.)
+
+# ──── Ingest (single-file) ───────────────────
+# Settings for `graphos ingest <file>`. Optimized for codebase analysis.
+ingest:
+  embed: true # generate embeddings by default (override with --no-embed)
+  merge: true # merge into existing graph.json
+  deduplicate: true # skip unchanged files via SHA256
+  resolution: 0.8 # smaller communities for single-file graphs
+  min_comm_size: 2 # minimum community size for ingest
+  max_leiden_iter: 20 # converge quickly on small graphs
+  index_path: graphos-out/index.json
+  url:
+    timeout: 30 # seconds to wait for URL response
+    user_agent: graphos/0.1.0
+    retry: 1 # retries on download failure
+  categories: # per-category overrides (Nothing = inherit top-level)
+    image:
+      embed: false # images: don't embed by default
+    video:
+      embed: false # videos: don't embed by default
+
+# ──── Extraction granularity ──────────────────
+# fine     — statement-level nodes (verbose, ~100+ nodes/file)
+# function — functions/types/classes + module-level constants (default)
+# file     — one node per file
+# Per-extension override: add `granularity: file` under an extractors entry.
+# CLI flag --granularity overrides both.
+granularity: function
+
+# ──── Extractors ─────────────────────────────
+# How to extract symbols from each file type.
+#   tree-sitter — fast AST parsing, no server needed (default for all)
+#   lsp         — Language Server Protocol (richer semantic info, requires server)
+#   stub        — single node per file (no parsing)
+#
+# All languages default to tree-sitter. Uncomment `mode: lsp` to switch.
+extractors:
+  # TypeScript (default: tree-sitter)
+  ".ts":
+    mode: tree-sitter
+    grammar: typescript
+    language_id: typescript
+  ".tsx":
+    mode: tree-sitter
+    grammar: tsx
+    language_id: typescriptreact
+  ".js":
+    mode: tree-sitter
+    grammar: javascript
+    language_id: javascript
+  ".jsx":
+    mode: tree-sitter
+    grammar: javascript
+    language_id: javascriptreact
+  # Haskell (default: tree-sitter; uncomment for LSP)
+  ".hs":
+    mode: tree-sitter
+    grammar: haskell
+    language_id: haskell
+    # mode: lsp
+    # language_id: haskell
+  ".lhs":
+    mode: tree-sitter
+    grammar: haskell
+    language_id: haskell
+  # Go (default: tree-sitter; uncomment for LSP)
+  ".go":
+    mode: tree-sitter
+    grammar: go
+    language_id: go
+    # mode: lsp
+    # language_id: go
+  # Rust (default: tree-sitter; uncomment for LSP)
+  ".rs":
+    mode: tree-sitter
+    grammar: rust
+    language_id: rust
+    # mode: lsp
+    # language_id: rust
+  # Python (default: tree-sitter; uncomment for LSP)
+  ".py":
+    mode: tree-sitter
+    grammar: python
+    language_id: python
+    # mode: lsp
+    # language_id: python
+  ".pyw":
+    mode: tree-sitter
+    grammar: python
+    language_id: python
+  # C/C++ (default: tree-sitter; uncomment for LSP)
+  ".c":
+    mode: tree-sitter
+    grammar: c
+    language_id: c
+    # mode: lsp
+    # language_id: c
+  ".cpp":
+    mode: tree-sitter
+    grammar: cpp
+    language_id: cpp
+  ".h":
+    mode: tree-sitter
+    grammar: c
+    language_id: c
+  ".hpp":
+    mode: tree-sitter
+    grammar: cpp
+    language_id: cpp
+  # Nix (default: tree-sitter; uncomment for LSP)
+  ".nix":
+    mode: tree-sitter
+    grammar: nix
+    language_id: nix
+    # mode: lsp
+    # language_id: nix
+  # Ruby (default: tree-sitter; uncomment for LSP)
+  ".rb":
+    mode: tree-sitter
+    grammar: ruby
+    language_id: ruby
+    # mode: lsp
+    # language_id: ruby
+  # Java (default: tree-sitter; uncomment for LSP)
+  ".java":
+    mode: tree-sitter
+    grammar: java
+    language_id: java
+    # mode: lsp
+    # language_id: java
+  # JSON: tree-sitter with file-level granularity (data files don't inflate the graph)
+  ".json":
+    mode: tree-sitter
+    grammar: json
+    language_id: json
+    granularity: file
+  # Markdown: tree-sitter with built-in parser
+  ".md":
+    mode: tree-sitter
+    grammar: markdown
+    language_id: markdown
+  ".rst":
+    mode: tree-sitter
+    grammar: markdown
+    language_id: rest
+  ".adoc":
+    mode: tree-sitter
+    grammar: markdown
+    language_id: asciidoc
+
+# ──── PDF Extraction ───────────────────────────
+# How aggressively to extract content from PDF files.
+#   small  — file node + title only (minimal graph footprint)
+#   medium — file + titles + sections, no subsections/paragraphs (default)
+#   large  — full hierarchy: all section levels + paragraphs (~max nodes)
+pdf_extraction: medium
+
+# ──── LSP Servers ─────────────────────────────
+# Map file extension → {command, args, language_id}.
+# Set command to "" to explicitly disable an extension's LSP.
+# Unlisted extensions use defaults from Graphos.Domain.Config.
+# lsp:
+#   ".ts":
+#     command: typescript-language-server
+#     args: ["--stdio"]
+#     language_id: typescript
+
+# ──── Language IDs ─────────────────────────────
+# Override or add language IDs for file extensions.
+# language_ids:
+#   ".nix": nix
+
+# ──── File Extension Categories ────────────────
+# Full override for each category (replaces defaults).
+# file_extensions:
+#   code: [".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".hs", ".nix"]
+#   doc: [".md"]
+#   paper: [".pdf"]
+#   image: [".png", ".jpg", ".jpeg", ".webp", ".gif"]
+#   video: [".mp4", ".mov", ".mkv", ".webm"]
+#   office: [".docx", ".pptx", ".xlsx", ".doc", ".ppt"]
+
+# ──── Neo4j ──────────────────────────────────────
+# Used by: graphos . --neo4j --neo4j-push
+# push_mode: full (all nodes), subgraph (communities + representatives), community (communities only)
+# neo4j:
+#   uri: "http://localhost:7474"
+#   user: "neo4j"
+#   password: "graphos_dev"
+#   push_mode: "subgraph"
+#   subgraph_size: 7
+
+# ──── Memgraph ────────────────────────────────────
+# In-memory graph database, Bolt-protocol compatible.
+# Used by: graphos . --memgraph --memgraph-push bolt://localhost:7688
+# No auth by default — leave user/password empty for local dev.
+# memgraph:
+#   uri: "bolt://localhost:7688"
+#   user: ""
+#   password: ""
+#   push_mode: "subgraph"
+#   subgraph_size: 7
+
+# ──── LLM Labeling ────────────────────────────────
+# Community labeling via LLM. Default: local Ollama (zero-config).
+# Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.).
+# Set api_key to env var reference ${VAR} or a literal string.
+# Use headers for custom auth (e.g. X-API-Key for enterprise gateways).
+# For OpenAI: uncomment provider/model/api_key/base_url below.
+labeling:
+  provider: ollama # ollama | openai | litellm (default: ollama)
+  model: llama3.2 # default: llama3.2 (ollama); gpt-4o-mini (openai)
+  base_url: "http://localhost:11434/v1" # default: ollama local
+  batch_size: 20 # communities per LLM call (default: 20)
+  # headers:                    # custom HTTP headers for auth (default: none)
+  #   X-API-Key: "${MY_TOKEN}"
+  #   X-Tenant-ID: "my-tenant"
+  # --- OpenAI example (uncomment to use) ---
+  # provider: openai
+  # model: gpt-4o-mini
+  # api_key: "${OPENAI_API_KEY}"
+  # base_url: "https://api.openai.com/v1"
+
+# ──── Embedding ───────────────────────────────────
+# Local embedding generation via Ollama. Disabled by default.
+# Enable with --embed flag or embedding.enabled: true.
+# Targets small local models (nomic-embed-text, all-minilm).
+embedding:
+  enabled: false # default: false (enable with --embed)
+  provider: ollama # ollama (default, only local for now)
+  model: nomic-embed-text # default: nomic-embed-text
+  base_url: "http://localhost:11434/v1" # default: ollama local
+  dimension: 0 # 0 = auto-detect from model
+  # headers:                    # custom HTTP headers for auth (default: none)
+  #   X-API-Key: "${MY_TOKEN}"
+
+# ──── Vision ──────────────────────────────────────
+# Multimodal LLM for image analysis. Disabled by default.
+# Enable with --vision flag or vision.enabled: true.
+# When apiKey/baseUrl not set, inherits from labeling config.
+vision:
+  enabled: false # default: false (enable with --vision)
+  model: qwen3.6-moe # default: qwen3.6-moe (ollama)
+  api_key: "" # empty: inherits from labeling
+  base_url: "http://localhost:11434/v1" # default: ollama local
+  max_tokens: 1000 # max tokens for vision response
+  batch_size: 5 # images per batch with GC between
+  # headers:                    # custom HTTP headers for auth (default: none)
+  #   X-API-Key: "${MY_TOKEN}"
+
+# ──── Observability ─────────────────────────────────
+# Tracing, metrics, and debug instrumentation.
+# CLI flags (--otel, --metrics, --debug-trace) override these values.
+# Use --no-observability to completely disable all observability.
+observability:
+  enabled: false # default: false (enable with --otel)
+  endpoint: "http://localhost:4318" # OTLP collector endpoint
+  metricsPort: 0 # Prometheus metrics port (0 = disabled)
+  serviceName: graphos
+  serviceVersion: "0.1.0"
+  exportInterval: 15 # metrics export interval in seconds
+  debugTraceDir: "" # directory for debug trace JSONL (empty = disabled)

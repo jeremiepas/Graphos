@@ -87,9 +87,13 @@ module Graphos.Domain.Types
   , defaultEmbeddingConfig
   , VisionConfig(..)
   , defaultVisionConfig
+
+    -- * Incremental writer handle
+  , IncrementalWriter(..)
   ) where
 
 import Graphos.Domain.Types.Node (NodeId, Node(..), FileType(..))
+import Graphos.Domain.Types.Writer (IncrementalWriter(..))
 import Graphos.Domain.Types.Edge (EdgeId(..), Edge(..), Relation(..), relationToText, textToRelation, Confidence(..))
 import Graphos.Domain.Types.Graph (Extraction(..), emptyExtraction, extractionFromLists, extNodes, extEdges, LabeledGraph, CommunityId, CommunityMap, CohesionMap, PushMode(..), GraphDiff(..), Hyperedge(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), FileCategory(..))

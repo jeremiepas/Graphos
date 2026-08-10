@@ -50,7 +50,7 @@ import qualified Graphos.UseCase.Export as Export
 import Graphos.UseCase.Port.ExportPort (ExportResult(..))
 import Graphos.Domain.Scaffold (parseTarget, ScaffoldRequest(..))
 import Graphos.UseCase.Scaffold (selectTargets, planScaffold, CommandReference(..))
-import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFacts)
+import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFacts, runInstallSkill)
 
 
 -- ───────────────────────────────────────────────
@@ -135,7 +135,17 @@ main = do
                 -- Normal mode: run once and exit
                 logInfo env "Starting pipeline..."
                 logDebug env $ "Config: " <> T.pack (show config')
-                result <- runPipeline appEnv config'
+                result <- case cfgTimeout config' of
+                  Nothing -> runPipeline appEnv config'
+                  Just secs -> do
+                    logInfo env $ "[pipeline] Running with " <> T.pack (show secs ++ "s timeout")
+                    let timeoutMicros = fromIntegral (secs * 1000000)
+                    timeoutedResult <- timeout timeoutMicros (runPipeline appEnv config')
+                    case timeoutedResult of
+                      Nothing -> do
+                        logError env $ "[pipeline] TIMEOUT: Pipeline exceeded " <> T.pack (show secs ++ "s limit")
+                        exitWith (ExitFailure 1)
+                      Just res -> return res
                 let shutdownMicros = cfgOtelShutdownTimeout config' * 1000000
                 shutdownResult <- timeout shutdownMicros (shutdownObservability obsEnv)
                 case shutdownResult of
@@ -473,6 +483,10 @@ main = do
                   files = planScaffold req ref
               _ <- writeScaffold files
               pure ()
+
+    InstallSkill target -> do
+      let ref = CommandReference renderCommandReference
+      runInstallSkill target ref
 
   where
     opts = info (commandOpts <**> helper)
