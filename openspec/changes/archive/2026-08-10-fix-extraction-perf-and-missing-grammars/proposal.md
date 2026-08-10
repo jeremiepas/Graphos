@@ -21,7 +21,7 @@ Graphos extraction is slow and has missing tree-sitter grammar coverage. Running
 
 ## Impact
 
-- **Code**: `UseCase/Extract.hs` (parallel default), `Infrastructure/Wiring.hs` (grammar bindings), `Infrastructure/Extract/TreeSitter/Grammar.hs` (known extensions), `Infrastructure/Extract/TreeSitter/Core.hs` (possible timeout per-file), `CLI/Parser.hs` (--timeout flag), `UseCase/Pipeline.hs` (timeout wrapper)
+- **Code**: `UseCase/Extract.hs` (parallel default), `Infrastructure/Wiring.hs` (grammar bindings), `Infrastructure/Extract/TreeSitter/Grammar.hs` (known extensions), `Infrastructure/Extract/TreeSitter/Core.hs` (per-file parse timeout + AST walk depth guard to prevent single-file hangs blocking the pipeline), `CLI/Parser.hs` (--timeout flag), `UseCase/Pipeline.hs` (timeout wrapper)
 - **Dependencies**: New `tree-sitter-ruby`, `tree-sitter-java`, `tree-sitter-cpp`, `tree-sitter-nix`, `tree-sitter-markdown` Haskell packages needed in cabal file
 - **API**: New `--timeout` CLI flag (non-breaking)
 - **Behavior**: Extraction runs faster by default; previously-silent grammar misses now produce startup warnings

@@ -50,7 +50,7 @@ data CachedFGL = CachedFGL
   { cfgGraph   :: !FGLGraph
   , cfgNidMap  :: !(Map Int NodeId)
   , cfgIdxList :: ![(NodeId, Int)]
-  }
+  } deriving (Eq, Show)
 
 -- | Build a cached FGL graph. Forces the result with deepseq to ensure
 -- the FGL structure is fully evaluated before any algorithm runs.

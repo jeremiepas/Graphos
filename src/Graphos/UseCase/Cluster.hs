@@ -121,6 +121,21 @@ computeCommunityAggregates graph commMap cohesionMap artPoints mLabels =
       -- Count bridge nodes (articulation points that are in a community)
       countBridge :: [NodeId] -> Int
       countBridge members = length [m | m <- members, Set.member m artSet]
+      -- Extract a clean label from representative labels
+      cleanLabel :: Int -> [Text] -> Text
+      cleanLabel commId labels =
+        let filtered = filter (\l -> T.length l > 3 && T.length l < 100) labels
+        in case filtered of
+            [] -> T.pack ("Community " ++ show commId)
+            good -> case headMay good of
+              Just clean -> clean
+              Nothing -> T.pack ("Community " ++ show commId)
+          
+      -- Safe head for lists
+      headMay :: [a] -> Maybe a
+      headMay [] = Nothing
+      headMay (x:_) = Just x
+          
       -- Get representative labels (up to 3)
       representativeLabels :: [NodeId] -> [Text]
       representativeLabels nids =
@@ -129,17 +144,19 @@ computeCommunityAggregates graph commMap cohesionMap artPoints mLabels =
                 Nothing -> []) nids
             sorted = sortBy (comparing nodeLabel) nodesInComm
         in take 3 [nodeLabel n | n <- sorted]
-    in [ CommunityAggregate
-         { caId                     = T.pack (show cid)
-         , caMemberCount            = length members
-         , caCohesion               = Map.findWithDefault 0.0 cid cohesionMap
-         , caBridgeCount            = countBridge members
-         , caColor                  = colorForCommunity cid
-         , caLabel                  = case mLabels of
-               Just labels -> Map.findWithDefault (T.pack ("Community " ++ show cid)) cid labels
-               Nothing   -> T.pack ("Community " ++ show cid)
-         , caRepresentativeLabels   = representativeLabels members
-         , caInterCommunityEdges    = Map.size (Map.findWithDefault Map.empty cid interEdgeCounts)
-         }
-       | (cid, members) <- Map.toList commMap
-       ]
+    in map (\(cid, members) ->
+          let repLabels = representativeLabels members
+              lbl = cleanLabel cid repLabels
+          in CommunityAggregate
+          { caId                     = T.pack (show cid)
+          , caMemberCount            = length members
+          , caCohesion               = Map.findWithDefault 0.0 cid cohesionMap
+          , caBridgeCount            = countBridge members
+          , caColor                  = colorForCommunity cid
+          , caLabel                  = case mLabels of
+                Just labels -> Map.findWithDefault lbl cid labels
+                Nothing   -> lbl
+          , caRepresentativeLabels   = repLabels
+           , caInterCommunityEdges    = Map.toList (Map.findWithDefault Map.empty cid interEdgeCounts)
+          }
+        ) (Map.toList commMap)

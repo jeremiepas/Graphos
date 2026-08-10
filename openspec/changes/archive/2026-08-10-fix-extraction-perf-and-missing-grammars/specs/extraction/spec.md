@@ -28,13 +28,19 @@ The default value for `cfgThreads` in `PipelineConfig` SHALL be `numCapabilities
 
 The corresponding Haskell packages SHALL be added to `graphos.cabal` build-depends.
 
+### Known Limitation: cpp and nix bindings unavailable
+
+`getGrammarPtr "cpp"` and `getGrammarPtr "nix"` currently return `Nothing` because no compatible Haskell package exists on Hackage and the upstream C grammar parsers require a newer `tree-sitter` C library (`LANGUAGE_VERSION` 13–15) than the version bundled with the `tree-sitter` Haskell package used by this project (`LANGUAGE_VERSION` 11). Until the base `tree-sitter` package is upgraded or the grammars are vendored with a compatible version, `.cpp`/`.hpp`/`.c` and `.nix` files fall back to stub extraction. A startup warning lists these missing bindings.
+
+`getGrammarPtr "markdown"` also returns `Nothing`; however, `.md`, `.rst`, and `.adoc` files are handled by the existing native markdown extractor and therefore do produce header/tag/wikilink nodes, not stubs.
+
 #### Scenario: Ruby file parsed with tree-sitter
 - **WHEN** a `.rb` file is processed and `grammar: ruby` is configured
 - **THEN** `getGrammarPtr "ruby"` returns `Just` with a valid language pointer, and the file produces function/class/method nodes (not a stub)
 
 #### Scenario: Nix file parsed with tree-sitter
 - **WHEN** `devenv.nix` is processed and `grammar: nix` is configured
-- **THEN** `getGrammarPtr "nix"` returns `Just` with a valid language pointer, and the file produces nodes for its declarations (not a stub and not a warning)
+- **THEN** the startup warning mentions nix as missing, and the file is stub-extracted (pending upstream grammar compatibility)
 
 #### Scenario: Java file parsed with tree-sitter
 - **WHEN** a `.java` file is processed and `grammar: java` is configured
@@ -42,8 +48,8 @@ The corresponding Haskell packages SHALL be added to `graphos.cabal` build-depen
 
 #### Scenario: C++ header parsed with tree-sitter
 - **WHEN** a `.hpp` file is processed and `grammar: cpp` is configured
-- **THEN** `getGrammarPtr "cpp"` returns `Just` and the file produces class/function/namespace nodes
+- **THEN** the startup warning mentions cpp as missing, and the file is stub-extracted (pending upstream grammar compatibility)
 
 #### Scenario: Markdown file parsed with tree-sitter
 - **WHEN** a `.md` file is processed and `grammar: markdown` is configured
-- **THEN** `getGrammarPtr "markdown"` returns `Just` and the file produces heading/section nodes
+- **THEN** the native markdown extractor handles the file and produces file/header/tag/wikilink nodes
