@@ -12,7 +12,7 @@ module Graphos.Infrastructure.Scaffold.Writer
 import System.Directory (doesDirectoryExist, createDirectoryIfMissing, doesFileExist, getHomeDirectory)
 import System.FilePath (takeDirectory, (</>))
 import qualified Data.Text.IO as TIO
-import Data.List.NonEmpty (NonEmpty(..))
+import Data.Text (Text)
 
 import Graphos.Domain.Scaffold
 import Graphos.UseCase.Scaffold
@@ -55,9 +55,9 @@ writeScaffold files = do
 -- Install-skill writer
 -- ───────────────────────────────────────────────
 
-runInstallSkillWithRoot :: FilePath -> InstallSkillRequest -> IO ScaffoldResult
-runInstallSkillWithRoot rootDir req = do
-  let files = installSkillPlan req (srVersion $ dummyReq) $ CommandReference ""
+runInstallSkillWithRoot :: FilePath -> Text -> InstallSkillRequest -> CommandReference -> IO ScaffoldResult
+runInstallSkillWithRoot rootDir ver req ref = do
+  let files = installSkillPlan req ver ref
       targetDir = rootDir </> ".agents" </> "skills"
   createDirectoryIfMissing True targetDir
   (created, skipped) <- go targetDir [] [] files
@@ -78,14 +78,13 @@ runInstallSkillWithRoot rootDir req = do
           TIO.writeFile filePath (sfContent f)
           putStrLn $ "[install-skill] Created " ++ filePath
           go td (filePath : cr) sk fs
-    dummyReq = ScaffoldRequest { srTargets = Opencode :| [], srVersion = "0.1.0.0" }
 
-runInstallSkill :: InstallSkillTarget -> CommandReference -> IO ()
-runInstallSkill target _ = do
+runInstallSkill :: Text -> InstallSkillTarget -> CommandReference -> IO ()
+runInstallSkill ver target ref = do
   home <- getHomeDirectory
-  result <- runInstallSkillWithRoot home (InstallSkillRequest { isrTarget = target })
+  result <- runInstallSkillWithRoot home ver (InstallSkillRequest { isrTarget = target }) ref
   let msg = case (srCreated result, srSkipped result) of
         ([], []) -> "No skills installed (empty plan)"
         (c, []) -> "Installed " ++ show (length c) ++ " skill(s)"
-        (c, s) -> "Installed " ++ show (length c) ++ " skill(s), skipped " ++ show s ++ " existing"
+        (c, s) -> "Installed " ++ show (length c) ++ " skill(s), skipped " ++ show (length s) ++ " existing"
   putStrLn $ "[install-skill] " ++ msg
