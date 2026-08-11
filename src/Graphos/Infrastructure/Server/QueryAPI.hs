@@ -68,9 +68,10 @@ handleQuery lr req respond = do
   let params = queryString req
       q = paramValue "q" params
       mode = paramValueWithDefault "mode" "bfs" params
+      budget = readIntParam 2000 "budget" params
       g = lrGraph lr
       idx = lrIndex lr
-      resp = queryGraphWithIndexScored g idx q mode 2000
+      resp = queryGraphWithIndexScored g idx q mode budget
       refined = refineResponse defaultRefineConfig (gNodes g) resp
       body = renderQueryResponseJSON refined
   respond $ jsonResponse body

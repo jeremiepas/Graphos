@@ -22,16 +22,23 @@ module Graphos.Domain.Community
 
   , CommunityStats(..)
   , computeCommunityStats
+
+  , CommunityComposition(..)
+  , computeCompositions
   ) where
 
 import Control.DeepSeq (deepseq, NFData(..))
 import Control.Monad.ST (ST, runST)
+import Data.Aeson (ToJSON(..), FromJSON(..), withObject, object, (.=), (.:), (.:?))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
+import Data.Text (Text)
+import GHC.Generics (Generic)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import qualified Data.Vector as V
@@ -440,3 +447,95 @@ filterEdgesByNodeSet
   -> Map (NodeId, NodeId) Edge
 filterEdgesByNodeSet nodeSet edges =
   Map.filterWithKey (\(src, tgt) _ -> src `Set.member` nodeSet && tgt `Set.member` nodeSet) edges
+
+-- ───────────────────────────────────────────────
+-- Community composition metadata
+-- ───────────────────────────────────────────────
+
+-- | Per-community composition metadata for labeling and viewer badges.
+data CommunityComposition = CommunityComposition
+  { ccCodeCount    :: !Int
+  , ccDocCount     :: !Int
+  , ccOtherCount   :: !Int
+  , ccDominantKind :: !(Maybe Text)
+  , ccMixedRatio   :: !Double
+  , ccCodeDocEdges :: !Int
+  } deriving (Eq, Show, Generic)
+
+instance NFData CommunityComposition
+
+instance ToJSON CommunityComposition where
+  toJSON (CommunityComposition ccCode ccDoc ccOther ccDominant ccMixed ccCodeDoc) = object
+    [ "code"          .= ccCode
+    , "doc"           .= ccDoc
+    , "other"         .= ccOther
+    , "dominant_kind" .= ccDominant
+    , "mixed_ratio"   .= ccMixed
+    , "code_doc_edges" .= ccCodeDoc
+    ]
+
+instance FromJSON CommunityComposition where
+  parseJSON = withObject "CommunityComposition" $ \v -> CommunityComposition
+    <$> v .: "code"
+    <*> v .: "doc"
+    <*> v .: "other"
+    <*> v .:? "dominant_kind"  -- absent on legacy graphs
+    <*> v .: "mixed_ratio"
+    <*> v .: "code_doc_edges"
+
+-- | Compute composition metadata for every community in the graph.
+-- O(N+E) aggregation: one pass over members + one pass over local edges.
+computeCompositions :: Graph -> CommunityMap -> Map CommunityId CommunityComposition
+computeCompositions graph commMap =
+  let nodeMap = gNodes graph
+      fileTypeMap = Map.map nodeFileType nodeMap
+      kindMap = Map.map nodeKind nodeMap
+      dominant members =
+        let kinds = mapMaybe (>>= id) [Map.lookup nid kindMap | nid <- members]
+        in if null kinds then Nothing else Just $ mostFrequent kinds
+      compPerComm = Map.mapWithKey (\_ members ->
+        let memberSet' = Set.fromList members
+            codeCount   = length [() | nid <- members, Map.lookup nid fileTypeMap == Just CodeFile]
+            docCount    = length [() | nid <- members, let ft = Map.lookup nid fileTypeMap
+                                   , ft == Just DocFile || ft == Just PaperFile || ft == Just OfficeFile]
+            otherCount  = length [() | nid <- members, let ft = Map.lookup nid fileTypeMap
+                                   , ft == Just ImageFile || ft == Just VideoFile || ft == Just AudioFile]
+            dom = dominant members
+            mixedRatio = case max codeCount docCount of
+              0 -> 0.0
+              mx -> fromIntegral (min codeCount docCount) / fromIntegral mx
+            codeDocEdges = countCodeDocRefEdges graph fileTypeMap memberSet'
+            in CommunityComposition
+                 { ccCodeCount    = codeCount
+                 , ccDocCount     = docCount
+                 , ccOtherCount   = otherCount
+                 , ccDominantKind = dom
+                 , ccMixedRatio   = mixedRatio
+                 , ccCodeDocEdges = codeDocEdges
+                 }
+        ) commMap
+  in compPerComm
+
+mostFrequent :: Ord a => [a] -> a
+mostFrequent xs = case sortOn (negate . snd) freq of
+  ((k, _):_) -> k
+  []         -> error "mostFrequent: empty list"
+  where freq = Map.toList $ Map.fromListWith (\_ _ -> 1 :: Int) [(x, 1 :: Int) | x <- xs]
+
+countCodeDocRefEdges :: Graph -> Map NodeId FileType -> Set.Set NodeId -> Int
+countCodeDocRefEdges graph fileTypeMap memberSet =
+  let isCode ft = ft == CodeFile
+      isDoc ft = ft == DocFile || ft == PaperFile || ft == OfficeFile
+      inCommunity nid = Set.member nid memberSet
+      isRefEdge e = edgeRelation e == References
+      crossType src tgt =
+        let ftSrc = Map.lookup src fileTypeMap
+            ftTgt = Map.lookup tgt fileTypeMap
+        in case (ftSrc, ftTgt) of
+             (Just fs, Just ft) -> (isCode fs && isDoc ft) || (isDoc fs && isCode ft)
+             _ -> False
+      edgeFilter e =
+        let src = edgeSource e
+            tgt = edgeTarget e
+        in inCommunity src && inCommunity tgt && isRefEdge e && crossType src tgt
+  in length [() | e <- Map.elems (gEdges graph), edgeFilter e]

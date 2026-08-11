@@ -48,6 +48,7 @@ data Command
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
+  deriving (Show, Eq)
 
 pipelineOpts :: Parser PipelineConfig
 pipelineOpts = PipelineConfig
@@ -270,7 +271,9 @@ renderCommandReference = unlines $
   , "graphos push [opts]             Push to Neo4j"
   , "graphos push-memgraph [opts]    Push to Memgraph"
   , "graphos merge A B               Merge graph files"
-  , "graphos serve [opts]            Serve HTML output"
+  , "graphos serve [opts]            Serve HTML + query API"
+  , "  --dir DIR / --graph FILE / --port N"
+  , "  --api-only / --no-api"
   , "graphos lservers                List LSP servers"
   , "```"
   ]

@@ -8,6 +8,7 @@ module Graphos.UseCase.Port.ExportPort
   , ExportPort(..)
   ) where
 
+import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Graphos.Domain.Types (Analysis, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, CommunityAggregate, IncrementalWriter)
@@ -51,6 +52,7 @@ data ExportPort = ExportPort
   , epWriteGodNodes           :: IncrementalWriter -> [GodNode] -> IO ()
   , epWriteAnalysisTail       :: IncrementalWriter -> Maybe (Map CommunityId Text) -> IO ()
   , epWriteCommunityAggregates :: IncrementalWriter -> [CommunityAggregate] -> IO ()
+  , epWriteCompositions       :: IncrementalWriter -> Maybe Value -> IO ()
   , epFlushWriter             :: IncrementalWriter -> IO ()
   , epCloseWriter             :: IncrementalWriter -> IO ()
     -- | Community graph export

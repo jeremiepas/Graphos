@@ -11,9 +11,10 @@ module Graphos.Infrastructure.Export.IncrementalJSON
   , writeGodNodes
   , writeAnalysisTail
   , writeCommunityAggregates
+  , writeCompositions
   ) where
 
-import Data.Aeson (encode)
+import Data.Aeson (Value, encode)
 import qualified Data.ByteString.Lazy as BSL
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
@@ -104,3 +105,10 @@ writeCommunityAggregates :: W.IncrementalWriter -> [CommunityAggregate] -> IO ()
 writeCommunityAggregates iw aggregates = do
   writeKey iw "\"community_aggregates\""
   BSL.hPut (W.iwHandle iw) (encode aggregates)
+
+writeCompositions :: W.IncrementalWriter -> Maybe Value -> IO ()
+writeCompositions iw mCompositions = case mCompositions of
+  Just comps -> do
+    writeKey iw "\"compositions\""
+    BSL.hPut (W.iwHandle iw) (encode comps)
+  Nothing -> pure ()
