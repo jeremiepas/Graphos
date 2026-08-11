@@ -10,6 +10,7 @@ import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when)
 import qualified Data.Map.Strict as Map
+import Data.Aeson (toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
@@ -19,7 +20,8 @@ import System.Mem (performGC)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Config (FileExtensionConfig(..))
-import Graphos.Domain.Graph (gNodes, gEdges)
+import Graphos.Domain.Graph (gNodes, gEdges, gCompositions)
+import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -31,7 +33,6 @@ import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
 import Graphos.UseCase.Extract (extractAll)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
-import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferEdges)
 import Graphos.UseCase.Report (generateReport)
@@ -230,7 +231,9 @@ runPipeline appEnv config = catch (do
             opDebugTraceSpan op "cluster_step5" (StartTime step5Start) (EndTime step5End) (Map.fromList [("communities", T.pack $ show $ Map.size finalComm)])
             lpLogInfo lp $ T.pack $ "  Re-cluster: " ++ show (Map.size finalComm) ++ " communities"
 
-            let joinedGraph = joinCommunitiesToNodes enrichedGraph' finalComm
+            let compMap = computeCompositions enrichedGraph' finalComm
+                graphWithComps = enrichedGraph' { gCompositions = Just (toJSON compMap) }
+                joinedGraph = joinCommunitiesToNodes enrichedGraph' finalComm
 
             epWriteNodes ep iw (Map.elems (gNodes joinedGraph))
             epWriteEdges ep iw (Map.elems (gEdges joinedGraph))
@@ -259,11 +262,12 @@ runPipeline appEnv config = catch (do
             _ <- evaluate (length aggregates)
             epWriteCommunityAggregates ep iw aggregates
 
+            epWriteCompositions ep iw (gCompositions graphWithComps)
             epWriteAnalysisTail ep iw llmLabels
             epFlushWriter ep iw
             epCloseWriter ep iw
             lpLogDebug lp "  Final graph, communities, and cohesion written incrementally"
-            pure (enrichedGraph', finalComm, finalCohes, anal, llmLabels)
+            pure (graphWithComps, finalComm, finalCohes, anal, llmLabels)
 
       lpLogInfo lp "  graph.json written incrementally"
 

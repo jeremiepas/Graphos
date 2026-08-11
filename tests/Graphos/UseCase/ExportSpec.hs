@@ -41,6 +41,7 @@ spec = describe "exportAll" $ do
             , epWriteGodNodes = \_ _ -> pure ()
             , epWriteAnalysisTail = \_ _ -> pure ()
             , epWriteCommunityAggregates = \_ _ -> pure ()
+            , epWriteCompositions = \_ _ -> pure ()
             , epFlushWriter = \_ -> pure ()
             , epCloseWriter = \_ -> pure ()
             , epExportCommunityGraph = \_ _ _ -> pure ()

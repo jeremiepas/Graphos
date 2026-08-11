@@ -7,7 +7,7 @@
 {-# LANGUAGE StrictData #-}
 module Graphos.Domain.Graph.Core
   ( -- * Types
-    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected )
+    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions )
 
     -- * Construction
   , buildGraph
@@ -21,6 +21,7 @@ module Graphos.Domain.Graph.Core
   ) where
 
 import Control.DeepSeq (NFData(..))
+import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -35,11 +36,12 @@ import Graphos.Domain.Types
 
 -- | Adjacency-list graph with node and edge attributes
 data Graph = Graph
-  { gNodes    :: Map NodeId Node
-  , gEdges    :: Map (NodeId, NodeId) Edge
-  , gAdjFwd   :: Map NodeId (Set NodeId)   -- forward adjacency
-  , gAdjBack  :: Map NodeId (Set NodeId)   -- backward adjacency (for undirected queries)
-  , gDirected :: Bool
+  { gNodes         :: Map NodeId Node
+  , gEdges         :: Map (NodeId, NodeId) Edge
+  , gAdjFwd        :: Map NodeId (Set NodeId)   -- forward adjacency
+  , gAdjBack       :: Map NodeId (Set NodeId)   -- backward adjacency (for undirected queries)
+  , gDirected      :: Bool
+  , gCompositions  :: Maybe Value               -- per-community composition metadata
   } deriving (Eq, Show)
 
 -- | Force full evaluation of a Graph to WHNF + all nested structures.
@@ -70,11 +72,12 @@ buildGraph directed extraction =
             [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
               <> fwdAdj
   in Graph
-    { gNodes    = nodes
-    , gEdges    = edgeMap
-    , gAdjFwd   = fwdAdj
-    , gAdjBack  = bwdAdj
-    , gDirected = directed
+    { gNodes         = nodes
+    , gEdges         = edgeMap
+    , gAdjFwd        = fwdAdj
+    , gAdjBack       = bwdAdj
+    , gDirected      = directed
+    , gCompositions  = Nothing
     }
 
 -- | Merge two extractions (dedup nodes by id, combine edges)
@@ -100,12 +103,13 @@ mergeGraphs old new =
                      (gEdges old <> gEdges new)
       mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
       mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
-  in Graph
-    { gNodes    = mergedNodes
-    , gEdges    = mergedEdges
-    , gAdjFwd   = mergedFwd
-    , gAdjBack  = mergedBwd
-    , gDirected = gDirected old
+   in Graph
+    { gNodes         = mergedNodes
+    , gEdges         = mergedEdges
+    , gAdjFwd        = mergedFwd
+    , gAdjBack       = mergedBwd
+    , gDirected      = gDirected old
+    , gCompositions  = Nothing
     }
 
 -- ───────────────────────────────────────────────

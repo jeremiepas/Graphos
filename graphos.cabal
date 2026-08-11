@@ -284,6 +284,7 @@ test-suite graphos-test
     Graphos.Domain.GraphSpec
     Graphos.Domain.CommunitySpec
     Graphos.Domain.Community.LabelSpec
+    Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
     Graphos.UseCase.PipelineSpec
@@ -306,6 +307,7 @@ test-suite graphos-test
     Graphos.Infrastructure.LSP.TransportSpec
     Graphos.Infrastructure.Observability.SDKSpec
     Graphos.Infrastructure.Server.MCPQuerySpec
+    Graphos.Infrastructure.Server.QueryAPISpec
     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
     Graphos.Infrastructure.FileSystem.IgnoreSpec
     Graphos.Infrastructure.Scaffold.WriterSpec
@@ -329,7 +331,10 @@ test-suite graphos-test
     , directory            >= 1.3
     , filepath             >= 1.4
     , fgl-arbitrary        >= 0.2
+    , optparse-applicative >= 0.17
     , process              >= 1.6
     , text
     , temporary            >= 1.3
+    , wai                  >= 3.2
+    , http-types           >= 0.12
     , yaml                 >= 0.11
