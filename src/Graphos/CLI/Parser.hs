@@ -44,7 +44,8 @@ data Command
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | LServers
-  | Serve FilePath Int
+   | Serve FilePath FilePath Int Bool Bool
+
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
 
@@ -143,7 +144,10 @@ pathOpts = PathCmd
 serveOpts :: Parser Command
 serveOpts = Serve
   <$> strOption (long "dir" <> value "graphos-out" <> help "Directory to serve (default: graphos-out)")
+  <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json (default: graphos-out/graph.json)")
   <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
+  <*> switch (long "api-only" <> help "Serve only the query API, not static files")
+  <*> switch (long "no-api" <> help "Serve only static files, not the query API")
 
 pushOpts :: Parser Command
 pushOpts = PushCmd

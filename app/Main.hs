@@ -37,7 +37,7 @@ import Graphos.Infrastructure.Observability.SDK
   )
 import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed)
 import Graphos.Infrastructure.Config (loadConfig)
-import Graphos.Infrastructure.Server.Static (startStaticServer)
+import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
 import qualified Data.Map.Strict as Map
@@ -449,9 +449,9 @@ main = do
           putStrLn $ "  Found " ++ show (length servers) ++ " LSP server(s):"
           mapM_ (\s -> putStrLn $ "    " ++ T.unpack (lsiName s) ++ " (" ++ lsiCommand s ++ ") - " ++ show (lsiExtensions s)) servers
 
-    Serve dir port -> do
+    Serve dir graphPath port apiOnly noApi -> do
       putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
-      startStaticServer dir port
+      startServeServer dir graphPath port apiOnly noApi
 
     Init agentsOpt -> do
       initConfigFile

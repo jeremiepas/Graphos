@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.Infrastructure.Server.Static
   ( startStaticServer
+  , startServeServer
   ) where
 
 import Network.Wai
@@ -11,10 +12,15 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import System.Directory (doesFileExist, canonicalizePath)
 import System.FilePath ((</>), takeExtension, normalise, makeRelative)
+import System.IO (hPutStrLn, stderr)
+import System.Exit (exitWith, ExitCode(..))
 import qualified Data.Map.Strict as Map
 import Control.Exception (catch, SomeException(..))
+import Data.IORef (IORef, newIORef, readIORef)
 
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo)
+import Graphos.UseCase.Load (loadGraphFromFile, LoadResult)
+import Graphos.Infrastructure.Server.QueryAPI (apiApp)
 
 mimeTypes :: Map.Map String BS8.ByteString
 mimeTypes = Map.fromList
@@ -69,3 +75,35 @@ startStaticServer dir port = do
                    $ setBeforeMainLoop (logInfo env $ T.pack $ "Serving " ++ dir ++ " at http://localhost:" ++ show port ++ "/graph.html")
                    $ defaultSettings
   runSettings warpSettings app
+
+-- | Combined static + query API server.
+startServeServer :: FilePath -> FilePath -> Int -> Bool -> Bool -> IO ()
+startServeServer dir graphPath port apiOnly noApi = do
+  env <- defaultLogEnv LogInfo
+  loadResult <- loadGraphFromFile graphPath
+  case loadResult of
+    Left err -> do
+      hPutStrLn stderr $ "[serve] Error loading graph: " ++ T.unpack err
+      exitWith (ExitFailure 1)
+    Right lr -> do
+      ref <- newIORef lr
+      let app = serveApp dir ref apiOnly noApi
+          warpSettings = setPort port
+                       $ setHost "0.0.0.0"
+                       $ setBeforeMainLoop (logInfo env $ T.pack $ "Serving " ++ dir ++ " + API on http://localhost:" ++ show port)
+                       $ defaultSettings
+      runSettings warpSettings app
+
+serveApp :: FilePath -> IORef LoadResult -> Bool -> Bool -> Application
+serveApp dir ref apiOnly noApi req respond
+  | apiOnly   = apiAppHandler ref req respond
+  | noApi     = staticApp dir req respond
+  | otherwise =
+      case pathInfo req of
+        ("api":_) -> apiAppHandler ref req respond
+        _         -> staticApp dir req respond
+
+apiAppHandler :: IORef LoadResult -> Application
+apiAppHandler ref req respond = do
+  lr <- readIORef ref
+  apiApp lr req respond
