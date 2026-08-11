@@ -8,7 +8,7 @@ module Graphos.UseCase.Load
   , LoadResult(..)
   ) where
 
-import Data.Aeson (FromJSON(..), withObject, (.:), (.:?), (.!=), eitherDecode)
+import Data.Aeson (FromJSON(..), Value, withObject, (.:), (.:?), (.!=), eitherDecode)
 import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -17,7 +17,7 @@ import qualified Data.Text as T
 import System.Directory (doesFileExist)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, buildGraph)
+import Graphos.Domain.Graph (Graph, buildGraph, gCompositions)
 import Graphos.Domain.Graph.Index (GraphIndex, buildIndexWithLabels)
 import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
 
@@ -30,6 +30,7 @@ data LoadResult = LoadResult
   , lrCohesion         :: CohesionMap
   , lrGodNodes         :: [GodNode]
   , lrCommunityLabels  :: Map Int Text
+  , lrCompositions     :: Maybe Value
   } deriving (Eq, Show)
 
 -- | Load a graph from a JSON file produced by the export pipeline.
@@ -51,20 +52,22 @@ loadGraphFromFile path = do
         Right gf -> do
           let extraction = extractionFromLists (gfNodes gf) (gfEdges gf)
               graph = buildGraph False extraction
+              graphWithComps = graph { gCompositions = gfCompositions gf }
               -- Build index at load time: O(N) one-time cost,
               -- amortized across all future queries.
-              idx = buildIndexWithLabels graph (gfCommunities gf) (gfCommunityLabels gf)
+              idx = buildIndexWithLabels graphWithComps (gfCommunities gf) (gfCommunityLabels gf)
               -- Build FGL cache once: O(N + E) one-time cost,
               -- shared across all FGL-backed algorithms.
-              cachedFGL = toCachedFGL graph
+              cachedFGL = toCachedFGL graphWithComps
           pure $ Right LoadResult
-            { lrGraph           = graph
+            { lrGraph           = graphWithComps
             , lrIndex           = idx
             , lrCachedFGL       = cachedFGL
             , lrCommunities     = gfCommunities gf
             , lrCohesion        = gfCohesion gf
             , lrGodNodes        = gfGodNodes gf
             , lrCommunityLabels = gfCommunityLabels gf
+            , lrCompositions    = gfCompositions gf
             }
 
 -- ───────────────────────────────────────────────
@@ -78,6 +81,7 @@ data GraphFile = GraphFile
   , gfCohesion        :: CohesionMap
   , gfGodNodes        :: [GodNode]
   , gfCommunityLabels :: Map Int Text
+  , gfCompositions    :: Maybe Value
   } deriving (Eq, Show)
 
 -- We use manual FromJSON because the export format uses keys
@@ -90,3 +94,4 @@ instance FromJSON GraphFile where
     <*> v .:  "cohesion"
     <*> v .:  "god_nodes"
     <*> v .:? "community_labels" .!= Map.empty
+    <*> v .:? "compositions"

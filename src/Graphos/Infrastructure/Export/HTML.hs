@@ -9,7 +9,7 @@ module Graphos.Infrastructure.Export.HTML
   , VisCommunityAggregate(..)
   ) where
 
-import Data.Aeson (ToJSON(..), object, (.=), encode)
+import Data.Aeson (ToJSON(..), object, (.=), encode, eitherDecode)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -17,8 +17,8 @@ import qualified Data.Text as T
 import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints)
-import Graphos.Domain.Community (cohesionScore)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints, gCompositions)
+import Graphos.Domain.Community (cohesionScore, CommunityComposition(..))
 import qualified Data.Set as Set
 
 -- | Community color palette (distinct, accessible colors)
@@ -189,6 +189,8 @@ htmlBody =
     , "  let currentPhase = 'overview';"
     , "  let expandedCommunity = null;"
     , "  let nodeCommMap = {};"
+    , "  let apiAvailable = true;"
+    , "  let currentHighlightedNodes = null;"
     , ""
     , "  // Build lookup: nodeId -> communityId"
     , "  allNodes.forEach(n => {"
@@ -531,9 +533,70 @@ htmlBody =
     , "      el.classList.remove('active');"
     , "      list.innerHTML = '';"
     , "      countEl.textContent = '';"
+    , "      resetHighlight();"
     , "      return;"
     , "    }"
     , ""
+    , "    // Try API first if available"
+    , "    if (apiAvailable) {"
+    , "      fetch('/api/query?q=' + encodeURIComponent(query) + '&mode=bfs')"
+    , "        .then(r => r.json())"
+    , "        .then(data => renderApiResults(data, el, list, countEl))"
+    , "        .catch(() => {"
+    , "          apiAvailable = false;"
+    , "          renderSubstringResults(query, el, list, countEl);"
+    , "        });"
+    , "    } else {"
+    , "      renderSubstringResults(query, el, list, countEl);"
+    , "    }"
+    , "  }"
+    , ""
+    , "  // Render API query results"
+    , "  function renderApiResults(data, el, list, countEl) {"
+    , "    const verdict = data.verdict || '';"
+    , "    const hash = data.hash || '';"
+    , "    const suggestions = data.suggestions || [];"
+    , "    const nodes = (data.nodes || []).sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 20);"
+    , ""
+    , "    countEl.textContent = verdict + (hash ? ' [hash: ' + hash.substring(0, 8) + ']' : ''); "
+    , ""
+    , "    let html = '';"
+    , "    if (verdict) {"
+    , "      html += '<div class=\"search-verdict\">' + escHtml(verdict) + '</div>';"
+    , "    }"
+    , "    if (suggestions.length > 0) {"
+    , "      html += '<div class=\"search-suggestions\">Did you mean: ' + suggestions.map(s => '<a href=\"#\" onclick=\"document.getElementById(\\'searchInput\\').value=' + JSON.stringify(s) + '; doSearch(); return false;\">' + escHtml(s) + '</a>').join(', ') + '</div>';"
+    , "    }"
+    , "    html += '<div class=\"search-results\">';"
+    , "    nodes.forEach(n => {"
+    , "      html += '<div class=\"result-item scored\" data-nodeid=\"' + n.id + '\" data-score=\"' + (n.score || 0) + '\">'"
+    , "        + '<div class=\"rlabel\">' + escHtml(n.label || n.id) + '</div>'"
+    , "        + '<div class=\"rfile\">' + escHtml(shortPath(n.source_file || n.sourceFile || '')) + '</div>'"
+    , "        + '<div class=\"rcommunity\">Community ' + (n.community_id || '?') + ' — score: ' + (n.score || 0).toFixed(4) + '</div>'"
+    , "        + '</div>';"
+    , "    });"
+    , "    html += '</div>';"
+    , ""
+    , "    list.innerHTML = html;"
+    , "    el.classList.add('active');"
+    , ""
+    , "    // Bind click to focus node"
+    , "    list.querySelectorAll('.result-item[data-nodeid]').forEach(item => {"
+    , "      item.addEventListener('click', function() {"
+    , "        const nid = this.getAttribute('data-nodeid');"
+    , "        focusNode(nid);"
+    , "        highlightSubgraph([nid]);"
+    , "      });"
+    , "    });"
+    , "    // Also highlight all result nodes"
+    , "    if (nodes.length > 0) {"
+    , "      const ids = nodes.map(n => n.id);"
+    , "      highlightSubgraph(ids);"
+    , "    }"
+    , "  }"
+    , ""
+    , "  // Fallback: client-side substring filter"
+    , "  function renderSubstringResults(query, el, list, countEl) {"
     , "    const q = query.toLowerCase();"
     , "    const matches = allNodes.filter(n =>"
     , "      n.label.toLowerCase().includes(q) ||"
@@ -575,6 +638,42 @@ htmlBody =
     , "        focusNode(nid);"
     , "      });"
     , "    });"
+    , "  }"
+    , ""
+    , "  // Highlight a subgraph: matched nodes bright, others dimmed"
+    , "  function highlightSubgraph(nodeIds) {"
+    , "    const idSet = new Set(nodeIds);"
+    , "    const activeDataset = (currentPhase === 'drilldown' && drilldownNodesDataset) || overviewNodesDataset;"
+    , "    if (!activeDataset) return;"
+    , "    const nodes = activeDataset.get();"
+    , "    const colors = {};"
+    , "    nodes.forEach(n => {"
+    , "      if (n.color && n.color.background) colors[n.id] = n.color.background;"
+    , "    });"
+    , "    const highlighted = nodes.map(n => {"
+    , "      if (idSet.has(n.id)) {"
+    , "        return { ...n, color: { background: '#fbbf24', opacity: 1 }, size: (n.size || 10) * 1.5, borderWidth: 3 };"
+    , "      } else {"
+    , "        return { ...n, color: { background: n.color && n.color.background ? n.color.background : '#888', opacity: 0.2 }, borderWidth: 1 };"
+    , "      }"
+    , "    });"
+    , "    activeDataset.update(highlighted);"
+    , "    currentHighlightedNodes = { dataset: activeDataset, colors: colors, ids: nodeIds };"
+    , "  }"
+    , ""
+    , "  function resetHighlight() {"
+    , "    if (!currentHighlightedNodes) return;"
+    , "    const { dataset, colors, ids } = currentHighlightedNodes;"
+    , "    const nodes = dataset.get();"
+    , "    const restored = nodes.map(n => {"
+    , "      if (colors[n.id]) {"
+    , "        return { ...n, color: { background: colors[n.id], opacity: 1 }, borderWidth: 1 };"
+    , "      } else {"
+    , "        return { ...n, color: { background: '#888', opacity: 1 }, borderWidth: 1 };"
+    , "      }"
+    , "    });"
+    , "    dataset.update(restored);"
+    , "    currentHighlightedNodes = null;"
     , "  }"
     , ""
     , "  // Debounce helper"
@@ -693,6 +792,7 @@ htmlBody =
     , "      showSearchResults('');"
     , "      btn.style.display = 'none';"
     , "      document.getElementById('searchCount').textContent = '';"
+    , "      resetHighlight();"
     , "    });"
     , "    btnBack.addEventListener('click', function() {"
     , "      backToOverview();"
@@ -765,6 +865,9 @@ data VisCommunityAggregate = VisCommunityAggregate
   , vcaLabel                  :: Text
   , vcaRepresentativeLabels   :: [Text]
   , vcaInterCommunityEdges    :: Int
+  , vcaDominantKind           :: Maybe Text
+  , vcaMixedRatio             :: Double
+  , vcaCodeDocEdges           :: Int
   } deriving (Show)
 
 instance ToJSON VisCommunityAggregate where
@@ -777,6 +880,9 @@ instance ToJSON VisCommunityAggregate where
     , "label"                    .= vcaLabel ca
     , "representative_labels"    .= vcaRepresentativeLabels ca
     , "inter_community_edges"    .= vcaInterCommunityEdges ca
+    , "dominant_kind"            .= vcaDominantKind ca
+    , "mixed_ratio"              .= vcaMixedRatio ca
+    , "code_doc_edges"           .= vcaCodeDocEdges ca
     ]
 
 -- | Convert graph nodes to JSON (via Aeson, no manual string building)
@@ -836,18 +942,42 @@ communityAggregatesToJSON g commMap mLabels =
       isBridge m = case Map.lookup m nodeMap of
         Just n -> sanitize (nodeId n) `Set.member` artSet
         Nothing -> False
+      compMap = case gCompositions g of
+        Just cv -> case eitherDecode (encode cv) of
+          Right comps -> Map.fromList [(cid, comp) | (cid, comp) <- Map.toList comps]
+          Left _ -> Map.empty
+        Nothing -> Map.empty
    in [ VisCommunityAggregate
-         { vcaId                     = T.pack (show cid)
-         , vcaMemberCount            = length members
-         , vcaCohesion               = cohesionScore g members
-         , vcaBridgeCount            = length [m | m <- members, isBridge m]
-          , vcaColor                  = colorForCommunity cid
-          , vcaLabel                  = case mLabels of
-                                        Just m  -> maybe (T.pack ("Community " ++ show cid)) id (Map.lookup cid m >>= \t -> if T.null t then Nothing else Just t)
-                                        Nothing -> T.pack ("Community " ++ show cid)
-          , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
-
-         , vcaInterCommunityEdges    = 0 -- Placeholder: computed inter-community edge count
-         }
-       | (cid, members) <- Map.toList commMap
-       ]
+          { vcaId                     = T.pack (show cid)
+          , vcaMemberCount            = length members
+          , vcaCohesion               = cohesionScore g members
+          , vcaBridgeCount            = length [m | m <- members, isBridge m]
+           , vcaColor                  = colorForCommunity cid
+           , vcaLabel                  = case mLabels of
+                                         Just m  -> maybe (T.pack ("Community " ++ show cid)) id (Map.lookup cid m >>= \t -> if T.null t then Nothing else Just t)
+                                         Nothing -> T.pack ("Community " ++ show cid)
+           , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
+           , vcaInterCommunityEdges    = 0
+           , vcaDominantKind           = compDominantKind comp
+           , vcaMixedRatio             = compMixedRatio comp
+           , vcaCodeDocEdges           = compCodeDocEdges comp
+          }
+        | (cid, members) <- Map.toList commMap
+        , let comp = Map.findWithDefault emptyComp cid compMap
+        ]
+  where
+    emptyComp :: CommunityComposition
+    emptyComp = CommunityComposition
+      { ccCodeCount    = 0
+      , ccDocCount     = 0
+      , ccOtherCount   = 0
+      , ccDominantKind = Nothing
+      , ccMixedRatio   = 0.0
+      , ccCodeDocEdges = 0
+      }
+    compDominantKind :: CommunityComposition -> Maybe Text
+    compDominantKind c = ccDominantKind c
+    compMixedRatio :: CommunityComposition -> Double
+    compMixedRatio c = ccMixedRatio c
+    compCodeDocEdges :: CommunityComposition -> Int
+    compCodeDocEdges c = ccCodeDocEdges c
