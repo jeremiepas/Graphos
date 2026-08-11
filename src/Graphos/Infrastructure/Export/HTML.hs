@@ -5,6 +5,8 @@
 -- Streams to handle to reduce peak memory (avoids building full HTML Text in memory).
 module Graphos.Infrastructure.Export.HTML
   ( exportHTML
+  , communityAggregatesToJSON
+  , VisCommunityAggregate(..)
   ) where
 
 import Data.Aeson (ToJSON(..), object, (.=), encode)
@@ -32,8 +34,8 @@ colorForCommunity :: Int -> Text
 colorForCommunity cid = communityColors !! (cid `mod` length communityColors)
 
 -- | Export graph as interactive HTML with two-phase LOD viewer
-exportHTML :: Graph -> Analysis -> FilePath -> IO ()
-exportHTML g analysis htmlPath = do
+exportHTML :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> FilePath -> IO ()
+exportHTML g analysis mLabels htmlPath = do
   h <- openFile htmlPath WriteMode
   -- Write HTML header + CSS + sidebar (static content)
   hPutStr h $ T.unpack (htmlHeader g analysis)
@@ -47,7 +49,7 @@ exportHTML g analysis htmlPath = do
   hPutStr h ";\n"
   -- Stream community aggregates JSON
   hPutStr h "  const _communityAggregatesData = "
-  BSL.hPut h (encode (communityAggregatesToJSON g (analysisCommunities analysis)))
+  BSL.hPut h (encode (communityAggregatesToJSON g (analysisCommunities analysis) mLabels))
   hPutStr h ";\n"
   -- Write the rest of the HTML (JS + closing tags)
   hPutStr h $ T.unpack htmlBody
@@ -824,8 +826,8 @@ edgesToJSON g =
     ]
 
 -- | Convert community aggregates to JSON
-communityAggregatesToJSON :: Graph -> CommunityMap -> [VisCommunityAggregate]
-communityAggregatesToJSON g commMap =
+communityAggregatesToJSON :: Graph -> CommunityMap -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate]
+communityAggregatesToJSON g commMap mLabels =
   let sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
       truncateLabel t = if T.length t > 80 then T.take 80 t <> "…" else t
       artPoints = articulationPoints g
@@ -839,9 +841,12 @@ communityAggregatesToJSON g commMap =
          , vcaMemberCount            = length members
          , vcaCohesion               = cohesionScore g members
          , vcaBridgeCount            = length [m | m <- members, isBridge m]
-         , vcaColor                  = colorForCommunity cid
-         , vcaLabel                  = T.pack ("Community " ++ show cid)
-         , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
+          , vcaColor                  = colorForCommunity cid
+          , vcaLabel                  = case mLabels of
+                                        Just m  -> maybe (T.pack ("Community " ++ show cid)) id (Map.lookup cid m >>= \t -> if T.null t then Nothing else Just t)
+                                        Nothing -> T.pack ("Community " ++ show cid)
+          , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
+
          , vcaInterCommunityEdges    = 0 -- Placeholder: computed inter-community edge count
          }
        | (cid, members) <- Map.toList commMap
