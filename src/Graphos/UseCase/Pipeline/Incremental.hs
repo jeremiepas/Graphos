@@ -30,6 +30,8 @@ import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferEdges)
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
+import Graphos.UseCase.Label (labelCommunities)
+import Graphos.Domain.Labeling (LabelingResult(..))
 import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
 import Graphos.UseCase.Pipeline.Core (PipelineResult(..))
 
@@ -186,6 +188,13 @@ runSingleFilePipeline appEnv config filePath = catch (do
       saveIndex indexPath mergedIndex
       lpLogInfo lp $ T.pack $ "  Index: " ++ show (Map.size (iiNodes mergedIndex)) ++ " entries → " ++ indexPath
 
+      llmLabels <- if cfgLabel config
+        then do
+          let lblCfg = gcLabeling (cfgGraphosConfig config)
+          result <- labelCommunities appEnv enrichedGraph finalCommMap Map.empty lblCfg
+          pure $ if Map.null (lrLabels result) then Nothing else Just (lrLabels result)
+        else pure Nothing
+
       let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
           detection = Detection
             { detectionTotalFiles = 1
@@ -194,7 +203,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
             , detectionWarning = Nothing
             , detectionFiles = Map.empty
             }
-      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection Nothing
+      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection llmLabels
 
       fspClearCheckpoint fsp (cfgOutputDir config)
       opShutdownObservability op

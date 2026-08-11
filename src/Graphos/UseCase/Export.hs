@@ -34,7 +34,7 @@ exportAll ep g analysis config detection mLabels = do
     then pure Nothing
     else do
       let hPath = cfgOutputDir config ++ "/graph.html"
-      Just hPath <$ epExportHTML ep g analysis hPath
+      Just hPath <$ epExportHTML ep g analysis mLabels hPath
 
   obsidianPath <- if cfgObsidian config
     then do

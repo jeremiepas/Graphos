@@ -42,7 +42,7 @@ data Command
   | PushCmd FilePath String String String Neo4jPushMode Int
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
-   | IngestCmd FilePath (Maybe Bool) FilePath
+   | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | LServers
   | Serve FilePath Int
   | Init (Maybe String)
@@ -181,6 +181,7 @@ ingestOpts = IngestCmd
   <*> optional (flag' True (long "embed" <> help "Generate embeddings via local Ollama (nomic-embed-text)")
           <|> flag' False (long "no-embed" <> help "Disable embeddings for this ingest"))
   <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
+  <*> switch (long "label" <> help "Use LLM to label communities (requires graphos.yaml labeling config)")
 
 commandOpts :: Parser Command
 commandOpts = subparser

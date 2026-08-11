@@ -27,7 +27,7 @@ data ExportResult = ExportResult
 -- | Record-of-functions port for export operations.
 data ExportPort = ExportPort
   { -- | Individual export functions
-    epExportHTML        :: Graph -> Analysis -> FilePath -> IO ()
+    epExportHTML        :: Graph -> Analysis -> Maybe (Map CommunityId Text) -> FilePath -> IO ()
   , epExportObsidian    :: Graph -> Analysis -> FilePath -> IO ()
   , epExportReport      :: Text -> FilePath -> IO ()
   , epExportCypher      :: Graph -> FilePath -> IO ()
