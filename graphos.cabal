@@ -313,6 +313,8 @@ test-suite graphos-test
     Graphos.UseCase.ScaffoldSpec
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
+    Graphos.Infrastructure.Export.HTMLSpec
+    Graphos.UseCase.ExportSpec
 
   build-depends:
       base

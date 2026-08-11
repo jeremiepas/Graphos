@@ -409,7 +409,7 @@ main = do
                 Just html -> logInfo env $ T.pack $ "  HTML: " ++ html
                 Nothing   -> pure ()
 
-    IngestCmd filePath embedOverride outputDir -> do
+    IngestCmd filePath embedOverride outputDir labelFlag -> do
       -- Load graphos.yaml config
       graphosCfg <- loadConfig
       let logLevel = LogInfo
@@ -419,6 +419,7 @@ main = do
                 { cfgOutputDir = outputDir
                 , cfgEmbed = effectiveEmbed
                 , cfgGraphosConfig = graphosCfg
+                , cfgLabel = labelFlag
                 }
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
