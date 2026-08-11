@@ -486,7 +486,7 @@ main = do
 
     InstallSkill target -> do
       let ref = CommandReference renderCommandReference
-      runInstallSkill target ref
+      runInstallSkill "0.1.0.0" target ref
 
   where
     opts = info (commandOpts <**> helper)

@@ -52,6 +52,39 @@ spec = do
         length (srSkipped result) `shouldBe` 1
         length (srCreated result) `shouldBe` 0
 
+  describe "runInstallSkillWithRoot" $ do
+    let ver = "0.1.0.0"
+        ref = CommandReference ""
+
+    it "writes both global skills in a fresh root" $ do
+      withSystemTempDirectory "graphos-install-skill-test" $ \tmpDir -> do
+        result <- runInstallSkillWithRoot tmpDir ver (InstallSkillRequest OpencodeTarget) ref
+        length (srCreated result) `shouldBe` 2
+        length (srSkipped result) `shouldBe` 0
+        skillExists <- doesFileExist (tmpDir </> ".agents" </> "skills" </> "graphos" </> "SKILL.md")
+        queryExists <- doesFileExist (tmpDir </> ".agents" </> "skills" </> "graphos-query" </> "SKILL.md")
+        skillExists `shouldBe` True
+        queryExists `shouldBe` True
+
+    it "skips existing files and writes remaining" $ do
+      withSystemTempDirectory "graphos-install-skill-test" $ \tmpDir -> do
+        let skillDir = tmpDir </> ".agents" </> "skills" </> "graphos"
+        createDirectoryIfMissing True skillDir
+        TIO.writeFile (skillDir </> "SKILL.md") "existing"
+        result <- runInstallSkillWithRoot tmpDir ver (InstallSkillRequest OpencodeTarget) ref
+        length (srCreated result) `shouldBe` 1
+        length (srSkipped result) `shouldBe` 1
+        queryExists <- doesFileExist (tmpDir </> ".agents" </> "skills" </> "graphos-query" </> "SKILL.md")
+        queryExists `shouldBe` True
+
+    it "skips both files on second run" $ do
+      withSystemTempDirectory "graphos-install-skill-test" $ \tmpDir -> do
+        result1 <- runInstallSkillWithRoot tmpDir ver (InstallSkillRequest OpencodeTarget) ref
+        length (srCreated result1) `shouldBe` 2
+        result2 <- runInstallSkillWithRoot tmpDir ver (InstallSkillRequest OpencodeTarget) ref
+        length (srCreated result2) `shouldBe` 0
+        length (srSkipped result2) `shouldBe` 2
+
   describe "gatherDetectionFacts" $ do
     it "detects .opencode directory" $ do
       withSystemTempDirectory "graphos-detect-test" $ \tmpDir -> do

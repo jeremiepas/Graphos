@@ -4,6 +4,8 @@ import Test.Hspec
 import Data.List.NonEmpty (NonEmpty(..))
 import Control.Monad (forM_)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import System.FilePath ((</>))
 import Graphos.Domain.Scaffold
 import Graphos.UseCase.Scaffold
 import Graphos.CLI.Parser (renderCommandReference)
@@ -112,3 +114,40 @@ spec = do
           navFile = files !! 1
       sfContent navFile `shouldSatisfy` T.isInfixOf "--update"
       sfContent navFile `shouldSatisfy` T.isInfixOf "ingest"
+
+  describe "installSkillPlan" $ do
+    let ver = "0.1.0.0"
+        ref = CommandReference renderCommandReference
+        fixtureBase = "tests/fixtures/scaffold"
+
+    it "produces two files for opencode target" $ do
+      let files = installSkillPlan (InstallSkillRequest OpencodeTarget) ver ref
+      length files `shouldBe` 2
+      map sfRelativePath files `shouldBe`
+        [ "graphos/SKILL.md"
+        , "graphos-query/SKILL.md"
+        ]
+
+    it "global full skill matches golden fixture" $ do
+      let files = installSkillPlan (InstallSkillRequest OpencodeTarget) ver ref
+          fullFile = case files of (f:_) -> f; [] -> error "no files"
+      golden <- TIO.readFile (fixtureBase </> "graphos-global-skill.md")
+      sfContent fullFile `shouldBe` golden
+
+    it "global query-only skill matches golden fixture" $ do
+      let files = installSkillPlan (InstallSkillRequest OpencodeTarget) ver ref
+          queryFile = files !! 1
+      golden <- TIO.readFile (fixtureBase </> "graphos-query-global-skill.md")
+      sfContent queryFile `shouldBe` golden
+
+    it "query-only skill forbids build, update, and ingest" $ do
+      let files = installSkillPlan (InstallSkillRequest OpencodeTarget) ver ref
+          queryFile = files !! 1
+      sfContent queryFile `shouldSatisfy` T.isInfixOf "Do NOT run `graphos .`"
+      sfContent queryFile `shouldSatisfy` T.isInfixOf "Do NOT run `graphos . --update`"
+      sfContent queryFile `shouldSatisfy` T.isInfixOf "Do NOT run `graphos ingest"
+
+    it "global full skill includes command reference" $ do
+      let files = installSkillPlan (InstallSkillRequest OpencodeTarget) ver ref
+          fullFile = case files of (f:_) -> f; [] -> error "no files"
+      sfContent fullFile `shouldSatisfy` T.isInfixOf "graphos query"
