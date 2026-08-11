@@ -37,7 +37,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import qualified Data.Vector as V
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, neighbors, gNodes, gEdges)
+import Graphos.Domain.Graph (Graph(..), neighbors, gNodes, gEdges)
 
 data Resolution = Resolution
   { resGamma         :: Double
@@ -104,6 +104,8 @@ computeCommunityStats g assign =
 data LeidenState = LeidenState
   { lsNodeIds   :: !(V.Vector NodeId)
   , lsNeighbors  :: !(V.Vector (VU.Vector Int))
+  , lsAdj        :: !(VU.Vector Int)
+  , lsOffset     :: !(VU.Vector Int)
   , lsDegrees    :: !(VU.Vector Double)
   , lsAssignment :: !(VU.Vector Int)
   , lsSigmaTot   :: !(IntMap Double)
@@ -118,7 +120,8 @@ data LeidenState = LeidenState
 instance NFData LeidenState where
   rnf st =
     rnf (lsNodeIds st) `seq`
-    rnf (lsNeighbors st) `seq`
+    lsAdj st `seq`
+    lsOffset st `seq`
     lsDegrees st `seq`
     lsAssignment st `seq`
     rnf (lsSigmaTot st) `seq`
@@ -135,27 +138,30 @@ buildLeidenState g res =
       degrees = VU.generate n $ \i ->
         fromIntegral (Set.size (neighbors g (nodeIds V.! i)))
       m = VU.sum degrees / 2.0
-      adj = V.generate n $ \i ->
-        let nbs = neighbors g (nodeIds V.! i)
-            -- Skip neighbors not in the index (dangling edges from
-            -- cross-file references). Prevents Map.! crash.
-        in VU.fromList [case Map.lookup nb nidToIdx of
-                          Just idx -> idx
-                          Nothing  -> i  -- self-loop fallback for dangling edge
-                       | nb <- Set.toList nbs]
+      perNodeNbs = [ let nbs = neighbors g (nodeIds V.! i)
+                         idxs = [case Map.lookup nb nidToIdx of
+                                   Just idx -> idx
+                                   Nothing  -> i
+                                | nb <- Set.toList nbs]
+                     in idxs
+                   | i <- [0..n-1] ]
+      adj = VU.fromList (concat perNodeNbs)
+      offset = VU.fromList (scanl (+) 0 (map length perNodeNbs))
       assign0 = VU.generate n id
       sigTot0 = IntMap.fromListWith (+)
         [ (i, degrees VU.! i) | i <- [0..n-1] ]
   in LeidenState
-       { lsNodeIds   = nodeIds
-       , lsNeighbors  = adj
-       , lsDegrees    = degrees
-       , lsAssignment = assign0
-       , lsSigmaTot   = sigTot0
-       , lsM          = m
-       , lsGamma      = resGamma res
-       , lsN          = n
-       }
+        { lsNodeIds   = nodeIds
+        , lsNeighbors  = V.fromList (map VU.fromList perNodeNbs)
+        , lsAdj        = adj
+        , lsOffset     = offset
+        , lsDegrees    = degrees
+        , lsAssignment = assign0
+        , lsSigmaTot   = sigTot0
+        , lsM          = m
+        , lsGamma      = resGamma res
+        , lsN          = n
+        }
 
 -- | One local-moving pass over all nodes.
 -- The assignment vector is thawed once, mutated in place per move (O(1) per
@@ -180,24 +186,27 @@ localMovingLoop massign st0 = loop 0 0 (lsSigmaTot st0)
     loop :: Int -> Int -> IntMap Double -> ST s (Int, IntMap Double)
     loop !i !moved !sigTot
       | i >= n = pure (moved, sigTot)
-      | otherwise = do
-          currentComm <- VUM.unsafeRead massign i
-          let ki  = lsDegrees st0 VU.! i
-              nbs = lsNeighbors st0 V.! i
-          commOfNb <- VU.mapM (VUM.unsafeRead massign) nbs
-          let neighborComms = nubInt (VU.toList commOfNb)
-              bestComm = bestCommunityFor m gamma sigTot ki currentComm commOfNb neighborComms
-          if bestComm /= currentComm
-            then do
-              VUM.unsafeWrite massign i bestComm
-              let edgesToOld = VU.length (VU.filter (== currentComm) commOfNb)
-                  edgesToNew = VU.length (VU.filter (== bestComm) commOfNb)
-                  oldST = IntMap.findWithDefault 0.0 currentComm sigTot
-                  newST = IntMap.findWithDefault 0.0 bestComm sigTot
-                  !sigTot' = IntMap.insert currentComm (oldST - ki + fromIntegral edgesToOld) $
-                             IntMap.insert bestComm (newST + ki - fromIntegral edgesToNew) sigTot
-              loop (i + 1) (moved + 1) sigTot'
-            else loop (i + 1) moved sigTot
+       | otherwise = do
+           currentComm <- VUM.unsafeRead massign i
+           let ki  = lsDegrees st0 VU.! i
+               off = lsOffset st0 VU.! i
+               len = (lsOffset st0 VU.! (i + 1)) - off
+               nbs = VU.slice off len (lsAdj st0)
+           commOfNb <- VU.mapM (VUM.unsafeRead massign) nbs
+           let countMap = VU.foldl' (\acc c -> IntMap.insertWith (+) c 1 acc) IntMap.empty commOfNb
+               neighborComms = nubInt (VU.toList commOfNb)
+               bestComm = bestCommunityFor m gamma sigTot ki currentComm countMap neighborComms
+           if bestComm /= currentComm
+             then do
+               VUM.unsafeWrite massign i bestComm
+               let edgesToOld = IntMap.findWithDefault 0 currentComm countMap
+                   edgesToNew = IntMap.findWithDefault 0 bestComm countMap
+                   oldST = IntMap.findWithDefault 0.0 currentComm sigTot
+                   newST = IntMap.findWithDefault 0.0 bestComm sigTot
+                   !sigTot' = IntMap.insert currentComm (oldST - ki + fromIntegral edgesToOld) $
+                              IntMap.insert bestComm (newST + ki - fromIntegral edgesToNew) sigTot
+               loop (i + 1) (moved + 1) sigTot'
+             else loop (i + 1) moved sigTot
 
 nubInt :: [Int] -> [Int]
 nubInt = go IntMap.empty
@@ -209,22 +218,23 @@ nubInt = go IntMap.empty
 -- precomputed neighbor communities. Identical scoring to the previous
 -- implementation; the assignment vector is no longer consulted directly
 -- because callers precompute @commOfNb@ from the mutable vector.
-bestCommunityFor :: Double -> Double -> IntMap Double -> Double -> Int -> VU.Vector Int -> [Int] -> Int
-bestCommunityFor m gamma sigmaTotMap ki currentComm commOfNb comms =
-  -- Edge case: graph with no edges (m = 0) → stay in current community
+bestCommunityFor :: Double -> Double -> IntMap Double -> Double -> Int -> IntMap Int -> [Int] -> Int
+bestCommunityFor m gamma sigmaTotMap ki currentComm countMap comms =
+  -- Edge case: graph with no edges (m = 0) -> stay in current community
   if m <= 0
   then currentComm
   else
     let twoM2 = 2.0 * m * m
         deltaQ targetComm =
           let sigmaTot = IntMap.findWithDefault 0.0 targetComm sigmaTotMap
-              sigmaIn   = fromIntegral (VU.length (VU.filter (== targetComm) commOfNb))
+              sigmaIn   = fromIntegral (IntMap.findWithDefault 0 targetComm countMap)
           in sigmaIn / m - gamma * (sigmaTot * ki) / twoM2
         scores = [(c, deltaQ c) | c <- comms]
     in case scores of
          [] -> currentComm
          _  -> let (bestC, bestScore) = maximumBySnd scores
                in if bestScore > 0 then bestC else currentComm
+
 
 refineCommunitiesOpt :: LeidenState -> LeidenState
 refineCommunitiesOpt st =
@@ -234,27 +244,28 @@ refineCommunitiesOpt st =
   in if n == 0
      then st
      else
-       let maxCid  = VU.maximum assign
-           commMembers = IntMap.fromListWith (++) [(assign VU.! i, [i]) | i <- [0..n-1]]
-           -- Reassignments for one community are applied in a single batched
-           -- update (one vector copy per split community) instead of one full
-           -- copy per reassigned node. Decision order and results are
-           -- unchanged: each node belongs to exactly one community, and the
-           -- accumulator still reflects all earlier communities' splits.
-           (assign', _nextCid) = IntMap.foldlWithKey' (\(acc, cid) _ members ->
-             let wellConnected = [i | i <- members
-                                    , cohesionToCommunityIdx st acc i (acc VU.! i) > 0.5]
-             in if length wellConnected < length members `div` 2
-                then (VU.unsafeUpd acc [(i, cid) | i <- wellConnected], cid + 1)
-                else (acc, cid)
-             ) (assign, maxCid + 1) commMembers
-       in st { lsAssignment = assign' }
+        let maxCid  = VU.maximum assign
+            commMembers = IntMap.fromListWith (++) [(assign VU.! i, [i]) | i <- [0..n-1]]
+            -- Reassignments for one community are applied in a single batched
+            -- update (one vector copy per split community) instead of one full
+            -- copy per reassigned node. Decision order and results are
+            -- unchanged: each node belongs to exactly one community, and the
+            -- accumulator still reflects all earlier communities' splits.
+            (assign', _nextCid) = IntMap.foldlWithKey' (\(acc, cid) _ members ->
+              let wellConnected = [i | i <- members
+                                     , cohesionToCommunityIdx st acc i (acc VU.! i) > 0.5]
+              in if length wellConnected < length members `div` 2
+                 then (VU.unsafeUpd acc [(i, cid) | i <- wellConnected], cid + 1)
+                 else (acc, cid)
+              ) (assign, maxCid + 1) commMembers
+        in st { lsAssignment = assign' }
 
 cohesionToCommunityIdx :: LeidenState -> VU.Vector Int -> Int -> Int -> Double
 cohesionToCommunityIdx st assign i cid =
-  let nbs = lsNeighbors st V.! i
-      commOfNb = VU.map (assign VU.!) nbs
-      sameCommunity = VU.length (VU.filter (== cid) commOfNb)
+  let off = lsOffset st VU.! i
+      len = (lsOffset st VU.! (i + 1)) - off
+      nbs = VU.slice off len (lsAdj st)
+      sameCommunity = VU.foldl' (\acc nb -> if (assign VU.! nb) == cid then acc + 1 else acc) (0 :: Int) nbs
       totalNbs = max 1 (VU.length nbs)
   in fromIntegral sameCommunity / fromIntegral totalNbs
 
@@ -368,8 +379,16 @@ cohesionScore g members
   | length members <= 1 = 1.0  -- singleton is trivially cohesive
   | otherwise =
       let memberSet = Set.fromList members
+          adjFwd = gAdjFwd g
+          adjBwd = gAdjBack g
+          directed = gDirected g
           internalEdges = length [1 :: Int | nid <- members
-                                  , n <- Set.toList (neighbors g nid)
+                                  , let nbs = if directed
+                                              then Map.findWithDefault Set.empty nid adjFwd
+                                              else Set.union
+                                                     (Map.findWithDefault Set.empty nid adjFwd)
+                                                     (Map.findWithDefault Set.empty nid adjBwd)
+                                  , n <- Set.toList nbs
                                   , n `Set.member` memberSet
                                   , nid < n]
           totalPossible = max 1 (length members * (length members - 1) `div` 2)

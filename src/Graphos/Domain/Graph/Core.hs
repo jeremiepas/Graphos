@@ -7,7 +7,7 @@
 {-# LANGUAGE StrictData #-}
 module Graphos.Domain.Graph.Core
   ( -- * Types
-    Graph(..)
+    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected )
 
     -- * Construction
   , buildGraph
