@@ -6,16 +6,15 @@ import System.Exit (exitWith, ExitCode(..))
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust)
 import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy as BL
-import Data.Time (defaultTimeLocale)
-import System.IO (hPutStrLn, stdout, BufferMode(..), hSetBuffering)
+import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn)
 import qualified Data.Text.IO as TIO
-import System.IO (hPutStrLn, stderr)
+import System.IO (stderr)
 
 import Graphos.CLI.Parser
-import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeRelation, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), defaultConfig)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
@@ -23,10 +22,7 @@ import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion)
 import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
-import Graphos.Domain.Query.Research (ResearchView(..))
-import Graphos.Domain.Community (CommunityComposition(..), computeCompositions)
-import Graphos.UseCase.Query.Refine (defaultRefineConfig)
-import Graphos.Domain.Graph.Index (communityOfNode)
+import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import Graphos.Domain.Graph (gNodes, gEdges, neighbors, degree)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
@@ -51,7 +47,6 @@ import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
 import System.Directory (doesFileExist, createDirectoryIfMissing)
@@ -313,11 +308,11 @@ main = do
                   exitWith (ExitFailure 1)
           let terms = termsArg <> termsFileTerms
               dedupedTerms = go mempty terms
-                where
-                  go seen [] = []
-                  go seen (t:rest)
-                    | Map.member t seen = go seen rest
-                    | otherwise = t : go (Map.insert t () seen) rest
+               where
+                 go _ [] = []
+                 go seen (t:rest)
+                   | Map.member t seen = go seen rest
+                   | otherwise = t : go (Map.insert t () seen) rest
           let _expandedUnion = expandWithSeeds g idx Set.empty seedsArg
           rv <- buildResearchViewIO g idx commMap comps dedupedTerms edgeMode
           case labelArg of
@@ -452,7 +447,7 @@ main = do
                         , detectionFiles = Map.empty
                         }
               logInfo env "[merge] Exporting..."
-              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing
+              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing []
               logInfo env "[merge] Merge complete!"
               logInfo env $ T.pack $ "  Nodes: " ++ show (Map.size (gNodes mergedGraph))
               logInfo env $ T.pack $ "  Edges: " ++ show (Map.size (gEdges mergedGraph))

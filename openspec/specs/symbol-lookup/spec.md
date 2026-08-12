@@ -1,11 +1,14 @@
 # symbol-lookup
 
+## Purpose
+
+Exact identifier lookup via a new `graphos symbols <name>` subcommand (extends PRD §13.1 command table; workflow doc 14-symbols). Bypasses fuzzy scoring entirely for the common agent case of "I know the exact name".
+
 Exact identifier lookup via a new `graphos symbols <name>` subcommand (extends PRD §13.1
 command table; workflow doc 14-symbols). Bypasses fuzzy scoring entirely for the common
 agent case of "I know the exact name".
 
-## ADDED Requirements
-
+## Requirements
 ### Requirement: Exact symbol lookup command
 The CLI SHALL provide `graphos symbols <name>` which returns nodes whose indexed
 identifier token or full label equals `<name>`, matching case-sensitively first and

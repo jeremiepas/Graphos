@@ -11,6 +11,7 @@ module Graphos.UseCase.Query
   , queryGraphWithIndexScored
   , pathQuery
   , pathQueryWithIndex
+  , pathQueryWithIndexCached
   , explainNode
   , explainNodeWithIndex
   , saveQueryResult
@@ -42,11 +43,14 @@ import Data.List (sortOn)
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData(..))
 import Data.Aeson (ToJSON(..), object, (.=))
+import Data.Graph.Inductive.Query.BFS ()
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, shortestPath, depthFirstSearch, gNodes, gEdges
                             , articulationPoints, biconnectedComponents, dominators)
 import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet, bfsFrom, giLabelIndex, giAdj)
+import Graphos.Domain.Graph.Analysis (CachedFGL)
+import Graphos.Domain.Graph.Query (shortestPathWithCached)
 import Graphos.Domain.Graph.Score
   ( MatchVerdict(..)
   , ScoredNode(..)
@@ -205,6 +209,15 @@ queryGraphWithIndexScored g idx query mode _budget =
     , qrespEdges       = edges
     , qrespSuggestions = suggestions
     }
+
+-- | Find shortest path between two concepts using pre-built index and FGL cache
+pathQueryWithIndexCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Maybe [NodeId]
+pathQueryWithIndexCached _ idx cfg fromTerm toTerm =
+  let fromNode = findBestNodeWithIndex idx fromTerm
+      toNode   = findBestNodeWithIndex idx toTerm
+  in case (fromNode, toNode) of
+       (Just f, Just t) -> shortestPathWithCached cfg f t
+       _ -> Nothing
 
 -- | Find shortest path between two concepts (using index for fast node lookup)
 pathQueryWithIndex :: Graph -> GraphIndex -> Text -> Text -> Maybe [NodeId]

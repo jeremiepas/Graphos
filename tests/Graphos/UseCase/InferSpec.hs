@@ -25,7 +25,7 @@ codeNode :: Text -> Text -> Node
 codeNode nid lbl = Node nid lbl CodeFile "code.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 testEdge :: Text -> Text -> Edge
-testEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Calls 1.0 (Confidence 1.0)
+testEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Calls 1.0 (Confidence 1.0) Nothing
 
 spec :: Spec
 spec = do

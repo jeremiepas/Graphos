@@ -372,68 +372,73 @@ artifacts:
       - tasks
   - id: do
     generates: tasks/**/do.md
-    description: Per-task Do (D) artifact
+    description: Per-task Do (D) artifact — implementation plan (created BEFORE code)
     template: pdca-step.md
     instruction: >
-      Create `tasks/<task-slug>/do.md` for each task — the **D** of the cycle:
+      Create `tasks/<task-slug>/do.md` for each task — the **D** of the cycle.
 
-      what was implemented for THIS task, key decisions, and the concrete
+      This artifact is the IMPLEMENTATION PLAN, created BEFORE any code is
+      written, alongside plan.md and check.md. It describes what WILL be
+      implemented: the concrete changes, key decisions, and the steps to take.
+      It is NOT a post-hoc record of what was done — it is the specification
+      the implementation follows.
 
-      changes made. Reference the matching `plan.md`. One per task folder.
+      Structure:
+      - Reference the matching `plan.md` for scope and criteria.
+      - List the concrete changes that WILL be made (files, functions, modules).
+      - Describe key implementation decisions and approach.
+      - This file is the blueprint the implementation follows.
+
+      After implementation is complete, update this file to reflect what was
+      actually implemented (any deviations from the plan), but keep the
+      original intent visible.
     requires:
       - plan
   - id: check
     generates: tasks/**/check.md
-    description: Per-task Check (C) artifact — the gate
+    description: Per-task Check (C) artifact — verification plan (created BEFORE code)
     template: pdca-step.md
     instruction: >
-      Create `tasks/<task-slug>/check.md` for each task — the **C** of the cycle:
+      Create `tasks/<task-slug>/check.md` for each task — the **C** of the cycle.
 
-      run tests/quality gates and validate the spec scenario(s) for THIS task;
-
-      record PASS/FAIL with evidence (commands, outputs). Check is the gate: the
-
-      task only proceeds to a passing Act when Check passes.
-
+      This artifact is the VERIFICATION PLAN, created BEFORE any code is
+      written, alongside plan.md and do.md. It specifies how the
+      implementation WILL be verified, based on the Check Criteria defined
+      in plan.md.
 
       **CRITICAL — Check must execute Plan's criteria, not invent its own.**
-
       Check.md MUST:
-
       - Reference the Check Criteria defined in plan.md (the exact criteria,
-
       not paraphrased)
+      - Specify the exact commands, tests, and gates that WILL be run
+      - Define expected PASS/FAIL conditions for each criterion
+      - Be created BEFORE implementation, as part of the plan/do/check trio
 
-      - Execute each criterion listed there and record the result
-
-      - If a criterion from Plan is ambiguous or incomplete, record that as
-
-      a finding — do NOT silently define a new criterion to make things pass
-
-      - Evidence: exact commands run, their full output, exit codes
-
-      - Verdict: PASS or FAIL per criterion, with no post-hoc redefinition
+      After implementation is complete, update this file with the ACTUAL
+      results: exact commands run, their full output, exit codes, and
+      PASS/FAIL verdicts per criterion with evidence. The original
+      verification plan must remain visible.
     requires:
-      - do
+      - plan
   - id: act
     generates: tasks/**/act.md
-    description: Per-task Act (A) artifact, with retry trace
+    description: Per-task Act (A) artifact — final verdict trace (generated AFTER implementation+checking)
     template: pdca-step.md
     instruction: >
       Create `tasks/<task-slug>/act.md` for each task — the **A** of the cycle.
 
+      This artifact is the FINAL VERDICT TRACE, generated AFTER the
+      implementation (do.md) and verification (check.md) are complete. It
+      summarizes the entire PDCA cycle as a trace: what was planned, what was
+      done, what was checked, and the final outcome.
 
       If Check passed and Act is OK → record the standardized outcome; the task
-
       PASSES (same done state as classic SDD) and its `tasks.md` steps are `[x]`.
 
 
       If Act is NOT OK → the task does NOT pass. KEEP THE TRACE: record the
-
       failed attempt here (or under `tasks/<task-slug>/attempt-N/` for a full new
-
       cycle), then start a NEW P → D → C → A attempt for the same task. Never
-
       delete a prior attempt's files. Repeat until an attempt passes.
     requires:
       - check
@@ -443,12 +448,16 @@ apply:
   tracks: tasks.md
   instruction: |
     Read context files, then work tasks ONE AT A TIME as full PDCA micro-cycles.
-    For each task, run its steps in order: N.P Plan → N.D Do → N.C Check → N.A Act.
-    - Mark each step `[x]` as you complete it.
-    - A task PASSES only when its Check passes AND its Act is OK; then it reaches
-      the same done state as in the classic spec-driven workflow.
-    - If Act is NOT OK, the task does NOT pass: record the failed attempt under the
-      task's "Attempt history" (keep the trace — never delete a prior attempt),
-      then start a NEW P → D → C → A attempt for the same task and repeat until an
-      attempt passes.
+    For each task, the PDCA flow is:
+    1. Create plan.md, do.md, and check.md TOGETHER (before any code).
+       - plan.md: scope, check criteria, affected modules, risks.
+       - do.md: implementation plan — what WILL be done (concrete changes).
+       - check.md: verification plan — how criteria WILL be checked (commands, expected results).
+    2. IMPLEMENT the code changes following do.md.
+    3. RUN the checks following check.md criteria — update check.md with actual results.
+    4. Update do.md to reflect what was actually implemented (deviations from plan).
+    5. Generate act.md as the final verdict trace from the whole cycle.
+    - Mark each step `[x]` in tasks.md as you complete it.
+    - A task PASSES only when its Check passes AND its Act is OK.
+    - If Act is NOT OK: record the failed attempt, then start a NEW P→D→C→A attempt.
     Pause if you hit blockers or need clarification.

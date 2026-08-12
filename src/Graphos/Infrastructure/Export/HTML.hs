@@ -1,60 +1,142 @@
 -- | HTML export - two-phase LOD (level-of-detail) graph visualization
--- Phase 1: Overview showing one dot per community (forceAtlas2Based physics)
--- Phase 2: Drill-down expanding a single community into member nodes
--- Embeds JSON data inline for self-contained HTML that works from file://
+-- Embeds an interned, style-free JSON payload inline for self-contained HTML.
 -- Streams to handle to reduce peak memory (avoids building full HTML Text in memory).
+--
+-- Community aggregates are NOT computed here. They are produced once by
+-- 'Graphos.UseCase.Cluster.computeCommunityAggregates' and passed in via the
+-- 'VisCommunityAggregate' list. This module only projects them into the HTML
+-- payload format and converts the canonical text community id to the numeric id
+-- used by the viewer.
 module Graphos.Infrastructure.Export.HTML
   ( exportHTML
   , communityAggregatesToJSON
+  , computePayload
+  , convertAggregate
   , VisCommunityAggregate(..)
+  , VisPayload(..)
   ) where
 
 import Data.Aeson (ToJSON(..), object, (.=), encode, eitherDecode)
+import GHC.Generics (Generic)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
+import qualified Data.Set as Set
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints, gCompositions)
 import Graphos.Domain.Community (cohesionScore, CommunityComposition(..))
-import qualified Data.Set as Set
+import Graphos.UseCase.Cluster (colorForCommunity)
 
--- | Community color palette (distinct, accessible colors)
-communityColors :: [Text]
-communityColors =
-  [ "#7dd3fc", "#f472b6", "#34d399", "#fbbf24", "#a78bfa"
-  , "#fb923c", "#2dd4bf", "#f87171", "#818cf8", "#4ade80"
-  , "#e879f9", "#38bdf8", "#facc15", "#fb7185", "#22d3ee"
-  , "#c084fc"
-  ]
-
-colorForCommunity :: Int -> Text
-colorForCommunity cid = communityColors !! (cid `mod` length communityColors)
+-- | Convert the canonical 'CommunityAggregate' (used in graph.json) into the
+-- HTML-specific view record. This keeps the single computation site in
+-- 'Graphos.UseCase.Cluster.computeCommunityAggregates' while allowing the HTML
+-- payload to use a numeric community id and carry composition fields.
+convertAggregate :: CommunityAggregate -> VisCommunityAggregate
+convertAggregate ca = VisCommunityAggregate
+  { vcaId                     = read (T.unpack (caId ca))
+  , vcaMemberCount            = caMemberCount ca
+  , vcaCohesion               = caCohesion ca
+  , vcaBridgeCount            = caBridgeCount ca
+  , vcaColor                  = caColor ca
+  , vcaLabel                  = caLabel ca
+  , vcaRepresentativeLabels   = caRepresentativeLabels ca
+  , vcaInterCommunityEdges    = sum [count | (_, count) <- caInterCommunityEdges ca]
+  , vcaDominantKind           = caDominantKind ca
+  , vcaMixedRatio             = caMixedRatio ca
+  , vcaCodeDocEdges           = caCodeDocEdges ca
+  }
 
 -- | Export graph as interactive HTML with two-phase LOD viewer
-exportHTML :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> FilePath -> IO ()
-exportHTML g analysis mLabels htmlPath = do
+exportHTML :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate] -> FilePath -> IO ()
+exportHTML g analysis mLabels aggregates htmlPath = do
+  let payload = computePayload g analysis mLabels aggregates
   h <- openFile htmlPath WriteMode
   -- Write HTML header + CSS + sidebar (static content)
   hPutStr h $ T.unpack (htmlHeader g analysis)
-  -- Stream nodes JSON directly to handle
-  hPutStr h "  const _nodesData = "
-  BSL.hPut h (encode (nodesToJSON g (analysisCommunities analysis) (articulationPoints g)))
-  hPutStr h ";\n"
-  -- Stream edges JSON directly to handle
-  hPutStr h "  const _edgesData = "
-  BSL.hPut h (encode (edgesToJSON g))
-  hPutStr h ";\n"
-  -- Stream community aggregates JSON
-  hPutStr h "  const _communityAggregatesData = "
-  BSL.hPut h (encode (communityAggregatesToJSON g (analysisCommunities analysis) mLabels))
+  -- Stream payload JSON directly to handle
+  hPutStr h "  const _payloadData = "
+  BSL.hPut h (encode payload)
   hPutStr h ";\n"
   -- Write the rest of the HTML (JS + closing tags)
   hPutStr h $ T.unpack htmlBody
   hFlush h
   hClose h
+
+-- | Compute the interned, style-free payload for the viewer.
+computePayload :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate] -> VisPayload
+computePayload g analysis mLabels aggregates =
+  let
+    commMap = analysisCommunities analysis
+    nodeMap = gNodes g
+    edgeMap = gEdges g
+
+    -- 1. Collect strings for interning (deterministic order)
+    allNodeIds = [nid | nid <- Map.keys nodeMap]
+    allSourceFiles = [nodeSourceFile n | n <- Map.elems nodeMap]
+    allKinds = [k | n <- Map.elems nodeMap, Just k <- [nodeKind n]]
+    allRelations = [relationToText (edgeRelation e) | e <- Map.elems edgeMap]
+
+    uniqueNodeIds = Set.toAscList (Set.fromList allNodeIds)
+    uniqueFiles   = Set.toAscList (Set.fromList allSourceFiles)
+    uniqueKinds   = Set.toAscList (Set.fromList allKinds)
+    uniqueRels    = Set.toAscList (Set.fromList allRelations)
+
+    nodeIdToIdx = Map.fromList (zip uniqueNodeIds [0::Int ..])
+    fileToIdx   = Map.fromList (zip uniqueFiles   [0::Int ..])
+    kindToIdx   = Map.fromList (zip uniqueKinds   [0::Int ..])
+    relToIdx    = Map.fromList (zip uniqueRels    [0::Int ..])
+
+    -- 2. Build Nodes
+    nodes = [ VisNode
+              { vnLabel      = truncateLabel (sanitize (nodeLabel n))
+              , vnFileIdx    = Map.findWithDefault 0 (nodeSourceFile n) fileToIdx
+              , vnLine       = maybe 0 id (nodeLineStart n)
+              , vnCommId     = maybe (-1) id (nodeCommunityId n)
+              , vnDegree     = maybe 0 id (nodeDegree n)
+              , vnIsBridge   = maybe False id (nodeIsBridge n)
+              , vnKindIdx    = maybe 0 (\k -> Map.findWithDefault 0 k kindToIdx) (nodeKind n)
+              , vnFileType   = fileTypeToIdx (nodeFileType n)
+              }
+            | n <- Map.elems nodeMap
+            ]
+
+    -- 3. Build Edges
+    edges = [ VisEdge
+              { veFromIdx = Map.findWithDefault 0 (edgeSource e) nodeIdToIdx
+              , veToIdx   = Map.findWithDefault 0 (edgeTarget e) nodeIdToIdx
+              , veRelIdx  = Map.findWithDefault 0 (relationToText (edgeRelation e)) relToIdx
+              }
+            | e <- Map.elems edgeMap
+            ]
+
+    -- 4. Build Aggregates from the pre-computed list
+    aggregates' = case aggregates of
+      [] -> communityAggregatesToJSON g commMap mLabels
+      _  -> aggregates
+
+  in VisPayload
+       { vpNodes      = nodes
+       , vpEdges      = edges
+       , vpStrings    = uniqueNodeIds
+       , vpFiles      = uniqueFiles
+       , vpKinds      = uniqueKinds
+       , vpRelations  = uniqueRels
+       , vpAggregates = aggregates'
+       }
+  where
+    sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
+    truncateLabel t = if T.length t > 80 then T.take 80 t <> "…" else t
+    fileTypeToIdx ft = case ft of
+      CodeFile  -> 0
+      DocFile   -> 1
+      PaperFile -> 2
+      ImageFile -> 3
+      VideoFile -> 4
+      AudioFile -> 5
+      OfficeFile -> 6
 
 -- | HTML header: everything before the embedded JSON data.
 htmlHeader :: Graph -> Analysis -> Text
@@ -113,7 +195,7 @@ htmlHeader g analysis =
     , "  .no-results { color: #888; font-size: 12px; text-align: center; padding: 20px; }"
     , "  .btn-reset { background: #252540; border: 1px solid #3a3a5e; color: #7dd3fc; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }"
     , "  .btn-reset:hover { background: #2a2a50; }"
-    , "  .btn-back { background: #252540; border: 1px solid #3a3a5e; color: #7dd3fc; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 8px; display: none; }"
+    , "  .btn-back { background: #252540; border: 1px solid #3a3a5e; color: #7dd3fc; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; display: none; }"
     , "  .btn-back:hover { background: #2a2a50; }"
     , "  .sidebar-scroll { flex: 1; overflow-y: auto; }"
     , "  .overview-hint { color: #888; font-size: 11px; text-align: center; padding: 10px; }"
@@ -121,7 +203,7 @@ htmlHeader g analysis =
     , "</head><body>"
     , "<header>"
     , "  <div>"
-    , "    <h1>Graphos Knowledge Graph</h1>"
+    , "    <h1 id='headerTitle'>Graphos Knowledge Graph</h1>"
     , "    <div class='stats'>" <> statsText <> "</div>"
     , "  </div>"
     , "  <div class='search-box'>"
@@ -165,7 +247,7 @@ htmlHeader g analysis =
     , "  </div>"
     , "</div>"
     , "<script>"
-    , "  // Embedded graph data (self-contained HTML, no fetch needed)"
+    , "  // Embedded payload data (self-contained HTML, no fetch needed)"
     ]
   where
     statsText = T.pack $ show (Map.size $ gNodes g) ++ " nodes, "
@@ -176,10 +258,39 @@ htmlHeader g analysis =
 htmlBody :: Text
 htmlBody =
   T.unlines
-    [ ""
-    , "  let allNodes = _nodesData;"
-    , "  let allEdges = _edgesData;"
-    , "  let communityAggregates = _communityAggregatesData;"
+    [ "  // Expand interned payload into the legacy shape used below"
+    , "  const nodeIdStrings = _payloadData.strings;"
+    , "  const fileStrings = _payloadData.files;"
+    , "  const kindStrings = _payloadData.kinds;"
+    , "  const relationStrings = _payloadData.relations;"
+    , "  const rawNodes = _payloadData.nodes;"
+    , "  const rawEdges = _payloadData.edges;"
+    , "  let allNodes = rawNodes.map(function(n, i) {"
+    , "    return {"
+    , "      id: nodeIdStrings[i],"
+    , "      label: n.label,"
+    , "      source_file: fileStrings[n.file_idx],"
+    , "      line: n.line,"
+    , "      community_id: n.community_id,"
+    , "      degree: n.degree,"
+    , "      is_bridge: n.is_bridge,"
+    , "      kind: kindStrings[n.kind_idx],"
+    , "      file_type: n.file_type"
+    , "    };"
+    , "  });"
+    , "  let allEdges = rawEdges.map(function(e) {"
+    , "    const rel = relationStrings[e[2]];"
+    , "    return {"
+    , "      from: nodeIdStrings[e[0]],"
+    , "      to: nodeIdStrings[e[1]],"
+    , "      relation: rel,"
+    , "      title: rel,"
+    , "      label: rel,"
+    , "      dashes: rel === 'Inferred',"
+    , "      width: rel === 'Inferred' ? 1 : 2"
+    , "    };"
+    , "  });"
+    , "  let communityAggregates = _payloadData.aggregates;"
     , "  let overviewNetwork = null;"
     , "  let drilldownNetwork = null;"
     , "  let overviewNodesDataset = null;"
@@ -242,9 +353,9 @@ htmlBody =
     , "  // Render community list in sidebar"
     , "  function renderCommunityList() {"
     , "    const container = document.getElementById('communityList');"
-    , "    const items = communityAggregates.sort((a, b) => b.member_count - a.member_count).slice(0, 50);"
-    , "    container.innerHTML = items.map(c =>"
-    , "      '<div class=\"comm-item\" data-community=\"' + c.id + '\">'"
+    , "    const sorted = Array.from(communityAggregates).sort((a, b) => b.member_count - a.member_count).slice(0, 50);"
+    , "    container.innerHTML = sorted.map(c =>"
+    , "      '<div class=\"comm-item\" data-community=\"' + c.id + '\"'"
     , "      + '<strong style=\"color:' + c.color + '\">'"
     , "      + 'Community ' + c.id + '</strong>'"
     , "      + ' <span class=\"members\">'"
@@ -260,7 +371,7 @@ htmlBody =
     , "    // Bind click to expand community"
     , "    container.querySelectorAll('.comm-item[data-community]').forEach(item => {"
     , "      item.addEventListener('click', function() {"
-    , "        const cid = this.getAttribute('data-community');"
+    , "        const cid = parseInt(this.getAttribute('data-community'), 10);"
     , "        expandCommunity(cid);"
     , "      });"
     , "    });"
@@ -273,13 +384,13 @@ htmlBody =
     , "      return {"
     , "        id: 'comm_' + c.id,"
     , "        label: '',"
-    , "        title: 'Community ' + c.id + ': ' + c.member_count + ' members, cohesion: ' + c.cohesion.toFixed(3),"
+    , "        title: c.label + ' — ' + c.member_count + ' members, cohesion: ' + c.cohesion.toFixed(3),"
     , "        color: { background: c.color, border: '#1a1a2e', highlight: c.color, hover: c.color },"
     , "        size: size,"
     , "        shape: 'dot',"
     , "        font: { size: 0 },"
     , "        borderWidth: 1,"
-    , "        group: parseInt(c.id)"
+    , "        group: c.id"
     , "      };"
     , "    });"
     , "    return dots;"
@@ -328,6 +439,7 @@ htmlBody =
     , "    const { nodes, edges } = buildDrilldownData(cid);"
     , "    const agg = communityAggregates.find(c => c.id === cid);"
     , "    const color = agg ? agg.color : '#7dd3fc';"
+    , "    const label = agg ? agg.label : ('Community ' + cid);"
     , ""
     , "    // Update nodes with community color"
     , "    nodes.forEach(n => {"
@@ -391,7 +503,7 @@ htmlBody =
     , ""
     , "    // Show back button"
     , "    document.getElementById('btnBack').style.display = 'inline-block';"
-    , "    document.getElementById('phaseHint').textContent = 'Exploring Community ' + cid + ' — ' + nodes.length + ' nodes';"
+    , "    document.getElementById('phaseHint').textContent = 'Exploring ' + label + ' — ' + nodes.length + ' nodes';"
     , ""
     , "    // Click node to show details"
     , "    drilldownNetwork.on('click', function(params) {"
@@ -454,9 +566,7 @@ htmlBody =
     , "          damping: 0.4"
     , "        },"
     , "        maxVelocity: 50,"
-    , "        solver: 'forceAtlas2Based',"
-    , "        hideEdgesOnDrag: true,"
-    , "        hideEdgesOnZoom: true"
+    , "        solver: 'forceAtlas2Based'"
     , "      },"
     , "      interaction: {"
     , "        hover: true,"
@@ -465,7 +575,9 @@ htmlBody =
     , "        keyboard: false,"
     , "        zoomView: true,"
     , "        dragView: true,"
-    , "        dragCanvas: true"
+    , "        dragCanvas: true,"
+    , "        hideEdgesOnDrag: true,"
+    , "        hideEdgesOnZoom: true"
     , "      }"
     , "    };"
     , ""
@@ -479,7 +591,7 @@ htmlBody =
     , "      if (params.nodes.length > 0) {"
     , "        const nodeId = params.nodes[0];"
     , "        if (nodeId.startsWith('comm_')) {"
-    , "          const cid = nodeId.substring(5);"
+    , "          const cid = parseInt(nodeId.substring(5), 10);"
     , "          expandCommunity(cid);"
     , "        }"
     , "      }"
@@ -509,10 +621,10 @@ htmlBody =
     , "    const info = document.getElementById('selectedInfo');"
     , "    info.style.display = 'block';"
     , "    document.getElementById('selectedLabel').textContent = node.label;"
-    , "    document.getElementById('selectedFile').textContent = node.source_file || node.title || '';"
+    , "    document.getElementById('selectedFile').textContent = node.source_file || '';"
     , "    const cid = node.community_id || -1;"
     , "    const agg = communityAggregates.find(c => c.id === cid);"
-    , "    document.getElementById('selectedCommunity').textContent = 'Community ' + cid + (agg ? ' (' + agg.label + ')' : '');"
+    , "    document.getElementById('selectedCommunity').textContent = (agg ? agg.label : ('Community ' + cid));"
     , "    // Count neighbors"
     , "    const neighborEdges = (drilldownEdgesDataset ? drilldownEdgesDataset.get() : allEdges).filter(e => e.from === nodeId || e.to === nodeId);"
     , "    const neighborIds = new Set();"
@@ -738,9 +850,7 @@ htmlBody =
     , "          damping: 0.4"
     , "        },"
     , "        maxVelocity: 50,"
-    , "        solver: 'forceAtlas2Based',"
-    , "        hideEdgesOnDrag: true,"
-    , "        hideEdgesOnZoom: true"
+    , "        solver: 'forceAtlas2Based'"
     , "      },"
     , "      interaction: {"
     , "        hover: true,"
@@ -749,7 +859,9 @@ htmlBody =
     , "        keyboard: false,"
     , "        zoomView: true,"
     , "        dragView: true,"
-    , "        dragCanvas: true"
+    , "        dragCanvas: true,"
+    , "        hideEdgesOnDrag: true,"
+    , "        hideEdgesOnZoom: true"
     , "      }"
     , "    };"
     , ""
@@ -763,7 +875,7 @@ htmlBody =
     , "      if (params.nodes.length > 0) {"
     , "        const nodeId = params.nodes[0];"
     , "        if (nodeId.startsWith('comm_')) {"
-    , "          const cid = nodeId.substring(5);"
+    , "          const cid = parseInt(nodeId.substring(5), 10);"
     , "          expandCommunity(cid);"
     , "        }"
     , "      }"
@@ -803,61 +915,43 @@ htmlBody =
     , "</body></html>"
     ]
 
--- ───────────────────────────────────────────────
--- JSON data generation (using Aeson, NOT manual string building)
--- ───────────────────────────────────────────────
-
 -- | Node data for JSON export
 data VisNode = VisNode
-  { vnId         :: Text
-  , vnLabel      :: Text
-  , vnTitle      :: Text
-  , vnSourceFile :: Text
-  , vnBgColor    :: Text
-  , vnBorder     :: Text
-  , vnBw         :: Int
-  , vnGroup      :: Int
-  , vnCommId     :: Maybe Int
-  } deriving (Show)
+  { vnLabel      :: Text
+  , vnFileIdx    :: Int
+  , vnLine       :: Int
+  , vnCommId     :: Int
+  , vnDegree     :: Int
+  , vnIsBridge   :: Bool
+  , vnKindIdx    :: Int
+  , vnFileType   :: Int
+  } deriving (Show, Generic)
 
 instance ToJSON VisNode where
   toJSON n = object
-    [ "id"             .= vnId n
-    , "label"          .= vnLabel n
-    , "title"          .= vnTitle n
-    , "source_file"    .= vnSourceFile n
-    , "color"          .= object ["background" .= vnBgColor n, "border" .= vnBorder n]
-    , "borderWidth"    .= vnBw n
-    , "group"          .= vnGroup n
-     , "community_id" .= vnCommId n
+    [ "label"        .= vnLabel n
+    , "file_idx"     .= vnFileIdx n
+    , "line"         .= vnLine n
+    , "community_id" .= vnCommId n
+    , "degree"       .= vnDegree n
+    , "is_bridge"    .= vnIsBridge n
+    , "kind_idx"     .= vnKindIdx n
+    , "file_type"    .= vnFileType n
     ]
 
 -- | Edge data for JSON export
 data VisEdge = VisEdge
-  { veFrom   :: Text
-  , veTo     :: Text
-  , veTitle  :: Text
-  , veLabel  :: Text
-  , veDashes :: Bool
-  , veWidth  :: Int
-  , veColor  :: Text
-  } deriving (Show)
+  { veFromIdx    :: Int
+  , veToIdx      :: Int
+  , veRelIdx     :: Int
+  } deriving (Show, Generic)
 
 instance ToJSON VisEdge where
-  toJSON e = object
-    [ "from"   .= veFrom e
-    , "to"     .= veTo e
-    , "title"  .= veTitle e
-    , "label"  .= veLabel e
-    , "dashes" .= veDashes e
-    , "width"  .= veWidth e
-    , "color"  .= object ["color" .= veColor e, "highlight" .= ("#7dd3fc" :: Text), "hover" .= ("#a0a0cc" :: Text)]
-    , "arrows" .= object ["to" .= object ["enabled" .= True, "scaleFactor" .= (0.5 :: Double)]]
-    ]
+  toJSON e = toJSON [veFromIdx e, veToIdx e, veRelIdx e]
 
 -- | Community aggregate data for JSON export
 data VisCommunityAggregate = VisCommunityAggregate
-  { vcaId                     :: Text
+  { vcaId                     :: Int
   , vcaMemberCount            :: Int
   , vcaCohesion               :: Double
   , vcaBridgeCount            :: Int
@@ -868,7 +962,7 @@ data VisCommunityAggregate = VisCommunityAggregate
   , vcaDominantKind           :: Maybe Text
   , vcaMixedRatio             :: Double
   , vcaCodeDocEdges           :: Int
-  } deriving (Show)
+  } deriving (Show, Generic)
 
 instance ToJSON VisCommunityAggregate where
   toJSON ca = object
@@ -885,53 +979,29 @@ instance ToJSON VisCommunityAggregate where
     , "code_doc_edges"           .= vcaCodeDocEdges ca
     ]
 
--- | Convert graph nodes to JSON (via Aeson, no manual string building)
-nodesToJSON :: Graph -> CommunityMap -> [NodeId] -> [VisNode]
-nodesToJSON g commMap artPoints =
-  let nodeCommMap = Map.fromList [(nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids]
-      artSet = Set.fromList artPoints
-      sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
-      truncateLabel t = if T.length t > 80 then T.take 80 t <> "…" else t
-   in [ VisNode
-         { vnId         = sanitize (nodeId n)
-         , vnLabel      = truncateLabel (sanitize (nodeLabel n))
-         , vnTitle      = sanitize (nodeSourceFile n) <> " [" <> T.pack (show cid) <> "]"
-         , vnSourceFile = nodeSourceFile n
-         , vnBgColor    = if nid `Set.member` artSet then "#f87171" else colorForCommunity cid
-         , vnBorder     = if nid `Set.member` artSet then "#f87171" else "#333"
-         , vnBw         = if nid `Set.member` artSet then 3 else 1
-         , vnGroup      = cid
-         , vnCommId     = Just cid
-         }
-       | n <- Map.elems (gNodes g)
-       , let nid = sanitize (nodeId n)
-       , let cid = Map.findWithDefault (-1) nid nodeCommMap
-       ]
+-- | Full interned payload for the viewer
+data VisPayload = VisPayload
+  { vpNodes      :: [VisNode]
+  , vpEdges      :: [VisEdge]
+  , vpStrings    :: [Text]
+  , vpFiles      :: [Text]
+  , vpKinds      :: [Text]
+  , vpRelations  :: [Text]
+  , vpAggregates :: [VisCommunityAggregate]
+  } deriving (Show, Generic)
 
--- | Convert graph edges to JSON (via Aeson, no manual string building)
-edgesToJSON :: Graph -> [VisEdge]
-edgesToJSON g =
-  let sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
-      nodeSet = Set.fromList [sanitize (nodeId n) | n <- Map.elems (gNodes g)]
-  in [ VisEdge
-      { veFrom   = sanitize (edgeSource e)
-      , veTo     = sanitize (edgeTarget e)
-      , veTitle  = relLabel
-      , veLabel  = relLabel
-      , veDashes = isInferred
-      , veWidth  = if isInferred then 1 else 2
-      , veColor  = if isInferred then "#6a6a8a" else "#8b8baa"
-      }
-    | ((_, _), e) <- Map.toList (gEdges g)
-     , let src = sanitize (edgeSource e)
-           tgt = sanitize (edgeTarget e)
-           isInferred = case edgeConfidence e of Confidence c -> c < 1.0
-           relLabel = relationToText (edgeRelation e)
-    , src `Set.member` nodeSet
-    , tgt `Set.member` nodeSet
+instance ToJSON VisPayload where
+  toJSON p = object
+    [ "nodes"      .= vpNodes p
+    , "edges"      .= vpEdges p
+    , "strings"    .= vpStrings p
+    , "files"      .= vpFiles p
+    , "kinds"      .= vpKinds p
+    , "relations"  .= vpRelations p
+    , "aggregates" .= vpAggregates p
     ]
 
--- | Convert community aggregates to JSON
+-- | Convert community aggregates to JSON.
 communityAggregatesToJSON :: Graph -> CommunityMap -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate]
 communityAggregatesToJSON g commMap mLabels =
   let sanitize t = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') t
@@ -948,19 +1018,19 @@ communityAggregatesToJSON g commMap mLabels =
           Left _ -> Map.empty
         Nothing -> Map.empty
    in [ VisCommunityAggregate
-          { vcaId                     = T.pack (show cid)
+          { vcaId                     = cid
           , vcaMemberCount            = length members
           , vcaCohesion               = cohesionScore g members
           , vcaBridgeCount            = length [m | m <- members, isBridge m]
-           , vcaColor                  = colorForCommunity cid
-           , vcaLabel                  = case mLabels of
-                                         Just m  -> maybe (T.pack ("Community " ++ show cid)) id (Map.lookup cid m >>= \t -> if T.null t then Nothing else Just t)
-                                         Nothing -> T.pack ("Community " ++ show cid)
-           , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
-           , vcaInterCommunityEdges    = 0
-           , vcaDominantKind           = compDominantKind comp
-           , vcaMixedRatio             = compMixedRatio comp
-           , vcaCodeDocEdges           = compCodeDocEdges comp
+          , vcaColor                  = colorForCommunity cid
+          , vcaLabel                  = case mLabels of
+                                        Just m  -> maybe (T.pack ("Community " ++ show cid)) id (Map.lookup cid m >>= \t -> if T.null t then Nothing else Just t)
+                                        Nothing -> T.pack ("Community " ++ show cid)
+          , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
+          , vcaInterCommunityEdges    = 0
+          , vcaDominantKind           = compDominantKind comp
+          , vcaMixedRatio             = compMixedRatio comp
+          , vcaCodeDocEdges           = compCodeDocEdges comp
           }
         | (cid, members) <- Map.toList commMap
         , let comp = Map.findWithDefault emptyComp cid compMap
@@ -981,3 +1051,4 @@ communityAggregatesToJSON g commMap mLabels =
     compMixedRatio c = ccMixedRatio c
     compCodeDocEdges :: CommunityComposition -> Int
     compCodeDocEdges c = ccCodeDocEdges c
+

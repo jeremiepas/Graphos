@@ -158,5 +158,8 @@ computeCommunityAggregates graph commMap cohesionMap artPoints mLabels =
                 Nothing   -> lbl
           , caRepresentativeLabels   = repLabels
            , caInterCommunityEdges    = Map.toList (Map.findWithDefault Map.empty cid interEdgeCounts)
+          , caDominantKind           = Nothing
+          , caMixedRatio             = 0.0
+          , caCodeDocEdges           = 0
           }
         ) (Map.toList commMap)

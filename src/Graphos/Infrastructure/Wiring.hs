@@ -205,7 +205,8 @@ productionExtractionPort logEnv = ExtractionPort
 productionExportPort :: LogEnv -> ObservabilityEnv -> UEP.ExportPort
 productionExportPort _logEnv _obsEnv =
   let ep = UEP.ExportPort
-        { UEP.epExportHTML = ExportHTML.exportHTML
+        { UEP.epExportHTML = \g analysis mLabels aggregates hPath ->
+            ExportHTML.exportHTML g analysis mLabels (map ExportHTML.convertAggregate aggregates) hPath
         , UEP.epExportObsidian = ExportObsidian.exportObsidian
         , UEP.epExportReport = ExportReport.exportReport
         , UEP.epExportCypher = Neo4j.exportCypher
@@ -230,8 +231,8 @@ productionExportPort _logEnv _obsEnv =
         , UEP.epCloseWriter = Inc.closeWriter
         , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
         , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
-        , UEP.epExportAll = \g _outputDir analysis config detection mLabels ->
-            UE.exportAll ep g analysis config detection mLabels
+        , UEP.epExportAll = \g _outputDir analysis config detection mLabels aggregates ->
+            UE.exportAll ep g analysis config detection mLabels aggregates
         }
   in ep
 

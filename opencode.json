@@ -13,9 +13,27 @@
         "qwen3.6-35b-a3b": {
           "name": "qwen3.6-35b-a3b",
           "limit": {
-            "context": 100768,
+            "context": 131172,
             "output": 8192
           },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "tool_call": true,
+          "reasoning": true
+        }
+      }
+    },
+    "gemma": {
+      "name": "Local llama.cpp server (Gemma 4 MoE)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://montech:8081/v1"
+      },
+      "models": {
+        "gemma4-moe": {
+          "name": "gemma4-moe",
           "modalities": {
             "input": ["text", "image"],
             "output": ["text"]

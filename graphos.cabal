@@ -69,8 +69,9 @@ library
                     -- Use Cases
                     Graphos.UseCase.Pipeline
                     Graphos.UseCase.Pipeline.Core
-                    Graphos.UseCase.Pipeline.Incremental
-                    Graphos.UseCase.Detect
+                     Graphos.UseCase.Pipeline.Incremental
+                     Graphos.UseCase.Subgraph
+                     Graphos.UseCase.Detect
                       Graphos.UseCase.Extract
                       Graphos.UseCase.Extract.Haskell
                       Graphos.UseCase.Extract.Core
@@ -192,6 +193,7 @@ library
                      Graphos.CLI.Parser
 
   other-modules:
+                    Graphos.Domain.HexColor
                     Paths_graphos
 
   build-depends:
@@ -317,6 +319,9 @@ test-suite graphos-test
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
+    Graphos.UseCase.SubgraphSpec
+    Graphos.Fidelity.ImportEdgesSpec
+    Graphos.Fidelity.GraphCoverageSpec
     Graphos.UseCase.ExportSpec
 
   build-depends:

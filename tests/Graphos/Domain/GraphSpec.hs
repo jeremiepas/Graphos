@@ -59,6 +59,7 @@ testEdge src tgt = Edge
   , edgeRelation  = Calls
   , edgeConfidence = Confidence 1.0
   , edgeWeight    = 1.0
+  , edgeExtra     = Nothing
   }
 
 testEdgeWithConfidence :: Text -> Text -> Confidence -> Edge
@@ -69,6 +70,7 @@ testEdgeWithConfidence src tgt conf = Edge
   , edgeRelation  = References
   , edgeConfidence = conf
   , edgeWeight    = 1.0
+  , edgeExtra     = Nothing
   }
 
 -- Helper: create a test node with file type

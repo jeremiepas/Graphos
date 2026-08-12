@@ -92,6 +92,48 @@ in
     };
   };
 
+  # gemma4 process: llama.cpp server hosting Gemma 4 26B A4B (long-running).
+  # Requires $LLAMA_MODELS_DIR/gemma-4-26B-A4B-it-<QUANT>.gguf.
+  # Run:  devenv up  (process starts automatically with ready-check)
+  processes.gemma4 = {
+    exec = ''
+      QUANT=''${GEMMA_QUANT:-UD-IQ4_XS}
+      MODEL="$LLAMA_MODELS_DIR/gemma-4-26B-A4B-it-$QUANT.gguf"
+      if [ ! -f "$MODEL" ]; then
+        echo "Model $MODEL not found - run: devenv tasks run download-gemma4" >&2
+        exit 1
+      fi
+      MMPROJ_ARGS=()
+      if [ "''${GEMMA_MMPROJ:-0}" = "1" ]; then
+        MMPROJ_ARGS=(--mmproj "$LLAMA_MODELS_DIR/mmproj-F16.gguf")
+      fi
+      exec llama-server \
+        -m "$MODEL" \
+        "''${MMPROJ_ARGS[@]}" \
+        --host "''${LLAMA_HOST:-0.0.0.0}" \
+        --port "''${GEMMA_PORT:-8081}" \
+        --n-gpu-layers 99 \
+        --n-cpu-moe "''${GEMMA_N_CPU_MOE:-0}" \
+        --flash-attn on \
+        --jinja \
+        --tools all \
+        --ctx-size "''${LLAMA_CTX_SIZE:-65536}" \
+        --batch-size "''${LLAMA_BATCH_SIZE:-1024}" \
+        --ubatch-size "''${LLAMA_UBATCH_SIZE:-512}" \
+        --cache-type-k "''${LLAMA_CACHE_TYPE_K:-q8_0}" \
+        --cache-type-v "''${LLAMA_CACHE_TYPE_V:-q8_0}" \
+        --metrics
+    '';
+
+    ready = {
+      exec = ''
+        bash -c 'HOST="''${LLAMA_HOST:-100.120.26.64}"; PORT="''${GEMMA_PORT:-8081}"; curl -fsS "http://$HOST:$PORT/health" > /dev/null'
+      '';
+      initial_delay = 15;
+      failure_threshold = 24; # ~2 min total with 5s interval
+    };
+  };
+
   # mgconsole script: remap host port 7688 -> container port 7687
   scripts.mgconsole.exec = ''
     # Remap host port 7688 → container port 7687 since docker-compose

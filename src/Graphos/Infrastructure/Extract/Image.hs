@@ -116,6 +116,7 @@ makeContainsEdge filePath entityNode = Edge
   , edgeRelation = Contains
   , edgeWeight = 0.8
   , edgeConfidence = Confidence 0.8
+  , edgeExtra = Nothing
   }
 
 -- | Create a stub node for an image file when vision is disabled or fails.
