@@ -57,14 +57,25 @@ in
       exec = "cabal test all";
     };
 
-    # OpenSpec PDCA orchestrator — drive every active change once.
-    # Run:  devenv tasks run orchestrator:run
-    # Override args via ORCHESTRATOR_ARGS (default: "--all --no-health-check").
-    "orchestrator:run" = {
+
+
+    # Apply an OpenSpec change headlessly via opencode + Gemma 4.
+    # Run:  OPENSPEC_CHANGE=<change-name> devenv tasks run openspec:apply
+    # Requires the gemma4 process to be up: `devenv up` (or LLAMA_HOST/PORT).
+    "openspec:apply" = {
       exec = ''
-        export ORCHESTRATOR_REPO_ROOT="''${PWD}"
-        python3 ${./orchestrator/orchestrate.py} \
-          ''${ORCHESTRATOR_ARGS:---all --no-health-check}
+        CHANGE="''${OPENSPEC_CHANGE:-}"
+        if [ -z "$CHANGE" ]; then
+          echo "openspec:apply: set OPENSPEC_CHANGE=<change-name> before starting." >&2
+          echo "Available changes:" >&2
+          openspec list >&2
+          exit 1
+        fi
+        exec opencode run \
+          --model "gemma/gemma4-moe" \
+          --agent "OpenCoder" \
+          --dangerously-skip-permissions \
+          "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Start with: openspec status --change \"$CHANGE\" --json and openspec instructions apply --change \"$CHANGE\" --json, then implement each pending task following the skill workflow."
       '';
     };
 
@@ -158,14 +169,7 @@ in
     exec docker exec -i graphos-memgraph mgconsole "$${ARGS[@]}"
   '';
 
-  # OpenSpec PDCA orchestrator (opencode + Qwen 3.6 / llama.cpp)
-  # Drive one change end-to-end:
-  #   orchestrator <change-name>
-  # Drive every active (non-archived) change serially:
-  #   orchestrator --all
-  scripts.orchestrator.exec = ''
-    exec python3 ${./orchestrator/orchestrate.py} "$@"
-  '';
+
 
   # Environment variables
   env.EXTRA_LIBRARY_PATH = lib.makeLibraryPath systemDeps;
