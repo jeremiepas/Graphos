@@ -16,6 +16,7 @@ let
     nixd
     vscode-langservers-extracted
     openspec
+    llama-cpp
   ];
 in
 {
@@ -55,6 +56,40 @@ in
     "ci:release-test" = {
       exec = "cabal test all";
     };
+
+    # OpenSpec PDCA orchestrator — drive every active change once.
+    # Run:  devenv tasks run orchestrator:run
+    # Override args via ORCHESTRATOR_ARGS (default: "--all --no-health-check").
+    "orchestrator:run" = {
+      exec = ''
+        export ORCHESTRATOR_REPO_ROOT="''${PWD}"
+        python3 ${./orchestrator/orchestrate.py} \
+          ''${ORCHESTRATOR_ARGS:---all --no-health-check}
+      '';
+    };
+
+    # Start the local llama.cpp server hosting Qwen 3.6 (long-running).
+    # Run:  devenv tasks run llama:server
+    # Requires LLAMA_MODEL=/path/to/qwen3.6.gguf.
+    "llama:server" = {
+      exec = ''
+        MODEL="''${LLAMA_MODEL:-}"
+        PORT="''${LLAMA_PORT:-8080}"
+        HOST="''${LLAMA_HOST:-0.0.0.0}"
+        if [ -z "$MODEL" ]; then
+          echo "llama:server: set LLAMA_MODEL=/path/to/qwen3.6.gguf before starting." >&2
+          exit 1
+        fi
+        exec llama-server \
+          --model "$MODEL" \
+          --host "$HOST" \
+          --port "$PORT" \
+          --ctx-size 100768 \
+          --n-gpu-layers 99 \
+          --parallel 1 \
+          --metrics
+      '';
+    };
   };
 
   # mgconsole script: remap host port 7688 -> container port 7687
@@ -81,9 +116,20 @@ in
     exec docker exec -i graphos-memgraph mgconsole "$${ARGS[@]}"
   '';
 
+  # OpenSpec PDCA orchestrator (opencode + Qwen 3.6 / llama.cpp)
+  # Drive one change end-to-end:
+  #   orchestrator <change-name>
+  # Drive every active (non-archived) change serially:
+  #   orchestrator --all
+  scripts.orchestrator.exec = ''
+    exec python3 ${./orchestrator/orchestrate.py} "$@"
+  '';
+
   # Environment variables
   env.EXTRA_LIBRARY_PATH = lib.makeLibraryPath systemDeps;
   env.OPENCODE_EXPERIMENTAL_LSP_TOOL = "true";
+  env.LLAMA_BASEURL = "http://100.120.26.64:8080/v1";
+  env.ORCHESTRATOR_POLL_INTERVAL = "300";
 
   # Shell activation greeting, clean stale PATH entries
   enterShell = ''

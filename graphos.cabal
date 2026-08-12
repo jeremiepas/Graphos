@@ -60,6 +60,7 @@ library
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
                     Graphos.Domain.Graph.Score
+                    Graphos.Domain.Query.Research
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
@@ -90,10 +91,11 @@ library
                       Graphos.UseCase.Benchmark
                       -- UseCase - Scaffold
                       Graphos.UseCase.Scaffold
-                     -- UseCase - Query submodules
-                     Graphos.UseCase.Query.Normalize
-                     Graphos.UseCase.Query.Refine
-                      Graphos.UseCase.Query.Render
+                      -- UseCase - Query submodules
+                      Graphos.UseCase.Query.Normalize
+                      Graphos.UseCase.Query.Refine
+                      Graphos.UseCase.Query.Research
+                       Graphos.UseCase.Query.Render
                       -- UseCase - Detect submodules
                       Graphos.UseCase.Detect.Paper
                       -- UseCase - Context optimization
@@ -262,8 +264,7 @@ executable graphos
     , aeson
     , bytestring
     , directory
-    , yaml
-    , directory
+    , time
     , yaml
 
 -- ───────────────────────────────────────────────

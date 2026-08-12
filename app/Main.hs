@@ -6,7 +6,12 @@ import System.Exit (exitWith, ExitCode(..))
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, mapMaybe)
+import Data.Aeson (encode)
+import qualified Data.ByteString.Lazy as BL
+import Data.Time (defaultTimeLocale)
+import System.IO (hPutStrLn, stdout, BufferMode(..), hSetBuffering)
+import qualified Data.Text.IO as TIO
 import System.IO (hPutStrLn, stderr)
 
 import Graphos.CLI.Parser
@@ -17,6 +22,11 @@ import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion)
+import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
+import Graphos.Domain.Query.Research (ResearchView(..))
+import Graphos.Domain.Community (CommunityComposition(..), computeCompositions)
+import Graphos.UseCase.Query.Refine (defaultRefineConfig)
+import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import Graphos.Domain.Graph (gNodes, gEdges, neighbors, degree)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
@@ -41,6 +51,7 @@ import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
 import System.Directory (doesFileExist, createDirectoryIfMissing)
@@ -277,6 +288,49 @@ main = do
           if cqoJson nbrOpts
             then putStrLn $ T.unpack $ renderNeighborsResultJSON result
             else putStrLn $ T.unpack $ renderNeighborsResultText (cqoBudget nbrOpts) result
+
+    ResearchCmd termsArg seedsArg graphPath doHtml doJson termsFileArg labelArg researchMode commonOpts -> do
+      hSetBuffering stdout NoBuffering
+      loadResult <- loadGraphFromFile graphPath
+      case loadResult of
+        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Right loaded -> do
+          let g = lrGraph loaded
+              idx = lrIndex loaded
+              commMap = lrCommunities loaded
+              comps = computeCompositions g commMap
+              edgeMode = Just (cqoEdges commonOpts)
+          termsFileTerms <- case termsFileArg of
+            Nothing -> pure []
+            Just path -> do
+              exists <- doesFileExist path
+              if exists
+                then do
+                  content <- TIO.readFile path
+                  pure $ filter (not . T.null) (T.lines content)
+                else do
+                  putStrLn $ "Error: terms file not found: " ++ path
+                  exitWith (ExitFailure 1)
+          let terms = termsArg <> termsFileTerms
+              dedupedTerms = go mempty terms
+                where
+                  go seen [] = []
+                  go seen (t:rest)
+                    | Map.member t seen = go seen rest
+                    | otherwise = t : go (Map.insert t () seen) rest
+          let _expandedUnion = expandWithSeeds g idx Set.empty seedsArg
+          rv <- buildResearchViewIO g idx commMap comps dedupedTerms edgeMode
+          case labelArg of
+            Just lbl -> putStrLn $ "Output label: " ++ lbl
+            Nothing  -> putStrLn "No label provided"
+          putStrLn $ "Research mode: " ++ case researchMode of
+            Just m  -> T.unpack m
+            Nothing -> "default"
+          putStrLn $ "Seeds for expansion: " ++ show (length seedsArg)
+          when doJson $ do
+            BL.putStr (encode rv)
+          when doHtml $ do
+            putStrLn "HTML export not yet implemented"
 
     PushCmd graphPath uri user password pushMode topN -> do
       putStrLn $ "[graphos] Push: loading " ++ graphPath
