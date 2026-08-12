@@ -12,6 +12,7 @@ module Graphos.Domain.Graph
   , gAdjBack
   , gDirected
   , gCompositions
+  , gHash
   
     -- * Construction
   , buildGraph
@@ -42,7 +43,7 @@ module Graphos.Domain.Graph
   , graphDiff
   ) where
 
-import Graphos.Domain.Graph.Core (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions, buildGraph, mergeExtractions, mergeGraphs, isFileNode, isConceptNode, makeStubNode)
+import Graphos.Domain.Graph.Core (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions, gHash, buildGraph, mergeExtractions, mergeGraphs, isFileNode, isConceptNode, makeStubNode)
 import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, breadthFirstSearch, depthFirstSearch, subgraph)
 import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness)
 import Graphos.Domain.Graph.Diff (graphDiff)
