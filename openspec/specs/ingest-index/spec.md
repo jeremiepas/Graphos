@@ -1,6 +1,9 @@
 # Spec: ingest-index
 
-Purpose: Versioned ingest index with file-level SHA256 deduplication for incremental pipeline.
+
+## Purpose
+
+Versioned ingest index with file-level SHA256 deduplication for incremental pipeline.
 
 ## Requirements
 

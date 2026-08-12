@@ -189,6 +189,7 @@ docEdges filePath content nodes =
         , edgeRelation  = Contains
         , edgeConfidence = Confidence 1.0
         , edgeWeight    = 1.0
+        , edgeExtra     = Nothing
         }
         | n <- nodes
         , "_h" `T.isInfixOf` nodeId n
@@ -200,6 +201,7 @@ docEdges filePath content nodes =
         , edgeRelation  = References
         , edgeConfidence = Confidence 1.0
         , edgeWeight    = 1.0
+        , edgeExtra     = Nothing
         }
         | n <- nodes
         , "_tag_" `T.isInfixOf` nodeId n
@@ -211,6 +213,7 @@ docEdges filePath content nodes =
         , edgeRelation  = References
         , edgeConfidence = Confidence 0.8
         , edgeWeight    = 0.8
+        , edgeExtra     = Nothing
         }
         | target <- parseWikiLinks content
         ]

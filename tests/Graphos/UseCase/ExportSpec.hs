@@ -21,7 +21,7 @@ spec = describe "exportAll" $ do
           detection = Detection 0 0 True Nothing Map.empty
           labels = Just (Map.fromList [(1 :: Int, T.pack "Auth")])
           port = ExportPort
-            { epExportHTML = \_g _analysis mLbl _path -> modifyIORef ref (const (Just mLbl))
+            { epExportHTML = \_g _analysis mLbl _aggregates _path -> modifyIORef ref (const (Just mLbl))
             , epExportObsidian = \_ _ _ -> pure ()
             , epExportReport = \_ _ -> pure ()
             , epExportCypher = \_ _ -> pure ()
@@ -49,6 +49,6 @@ spec = describe "exportAll" $ do
             , epExportAll = undefined
             }
           config = defaultConfig { cfgOutputDir = tmpDir, cfgNoViz = False }
-      _ <- exportAll port g analysis config detection labels
+      _ <- exportAll port g analysis config detection labels []
       recorded <- readIORef ref
       recorded `shouldBe` Just labels

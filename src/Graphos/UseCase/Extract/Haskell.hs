@@ -121,6 +121,7 @@ haskellStubEdges _filePath nodes =
               , edgeRelation  = rel
               , edgeConfidence = Confidence 0.7
               , edgeWeight    = 0.7
+              , edgeExtra     = Nothing
               }
       in map (mkEdge Imports) importNodes ++ map (mkEdge Contains) declNodes
     Nothing -> []

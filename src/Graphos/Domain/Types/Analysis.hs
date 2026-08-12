@@ -91,6 +91,9 @@ data CommunityAggregate = CommunityAggregate
   , caLabel                  :: !Text
   , caRepresentativeLabels   :: ![Text]
   , caInterCommunityEdges    :: ![(Int, Int)]
+  , caDominantKind           :: !(Maybe Text)
+  , caMixedRatio             :: !Double
+  , caCodeDocEdges           :: !Int
    } deriving (Eq, Show, Generic)
 
 instance ToJSON CommunityAggregate where
@@ -103,6 +106,9 @@ instance ToJSON CommunityAggregate where
     , "label"                   .= caLabel ca
     , "representative_labels"   .= caRepresentativeLabels ca
     , "inter_community_edges"   .= caInterCommunityEdges ca
+    , "dominant_kind"           .= caDominantKind ca
+    , "mixed_ratio"             .= caMixedRatio ca
+    , "code_doc_edges"          .= caCodeDocEdges ca
     ]
 
 instance FromJSON CommunityAggregate where
@@ -115,3 +121,6 @@ instance FromJSON CommunityAggregate where
     <*> v .: "label"
     <*> v .: "representative_labels"
     <*> v .: "inter_community_edges"
+    <*> v .: "dominant_kind"
+    <*> v .: "mixed_ratio"
+    <*> v .: "code_doc_edges"

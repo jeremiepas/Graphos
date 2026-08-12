@@ -7,8 +7,9 @@ module Graphos.Domain.Types.Graph
   , extNodes
   , extEdges
 
-    -- * Graph types
-  , LabeledGraph
+     -- * Graph types
+   , LabeledGraph(..)
+
 
     -- * Community types
   , CommunityId

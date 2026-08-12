@@ -466,6 +466,7 @@ makeContainsEdge parent child =
     , edgeRelation  = Contains
     , edgeConfidence = Confidence 1.0
     , edgeWeight    = 1.0
+    , edgeExtra     = Nothing
     }
 
 -- ───────────────────────────────────────────────

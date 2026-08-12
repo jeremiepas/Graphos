@@ -119,7 +119,17 @@ rustup component add rust-analyzer                      # Rust
 cabal install haskell-language-server                    # Haskell
 ```
 
-## Usage
+## Extraction Fidelity Harness
+
+These Haskell modules validate the fidelity of the tree-sitter extraction against ground truth
+from the source files. They are part of the acceptance gate for extraction fixes and compile as
+part of the standard `cabal build` / `cabal test` — no external interpreter required.
+
+| Component | Description | Invocation |
+|-----------|-------------|------------|
+| `ImportEdgesSpec` | Validates `imports` edges (precision/recall) | `cabal test --match "/Fidelity/ImportEdges/"` |
+| `GraphCoverageSpec` | Reports file coverage in the graph | `cabal test --match "/Fidelity/GraphCoverage/"` |
+| `graphos subgraph` | Extracts a pattern-selected subgraph | `graphos subgraph --graph <g.json> --config <cfg.json> --out <out.json> [--boundary-hops N] [--no-derive]` |
 
 ```bash
 # Full pipeline on current directory

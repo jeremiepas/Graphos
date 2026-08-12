@@ -67,6 +67,7 @@ testEdge src tgt = Edge
   , edgeRelation   = Imports
   , edgeConfidence = Confidence 1.0
   , edgeWeight     = 1.0
+  , edgeExtra      = Nothing
   }
 
 fixtureGraph :: Graph

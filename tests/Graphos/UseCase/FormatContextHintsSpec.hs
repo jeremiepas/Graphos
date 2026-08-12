@@ -35,6 +35,7 @@ mkEdge i src tgt rel conf = Edge
   , edgeRelation  = rel
   , edgeWeight    = 1.0
   , edgeConfidence = Confidence conf
+  , edgeExtra       = Nothing
   }
 
 -- | A context with ambiguous edges, a trivia edge, and several normal edges.

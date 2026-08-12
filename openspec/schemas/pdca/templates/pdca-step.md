@@ -22,12 +22,15 @@
   PLAN  : scope of this task, Check Criteria (defined BEFORE code: what tests,
           what spec scenarios, what PASS/FAIL boundaries), affected modules,
           prerequisites, risks. No code.
-  DO    : what was implemented, key decisions, concrete changes.
-  CHECK : execute Check Criteria from plan.md verbatim; PASS/FAIL per criterion
-          with evidence (commands, outputs). Do NOT invent new criteria. If a
-          Plan criterion is unclear, record that — do not redefine to pass.
-  ACT   : standardized outcome if OK; if NOT OK, the reason + link to the new
-          attempt folder (attempt-N/).
+  DO    : implementation plan (created BEFORE code): what WILL be implemented,
+          concrete changes, key decisions, approach. Updated after code to
+          reflect what was actually done (deviations from plan).
+  CHECK : verification plan (created BEFORE code): how the implementation WILL
+          be verified, based on plan.md criteria. Updated after code with
+          actual results: commands run, outputs, PASS/FAIL per criterion.
+  ACT   : final verdict trace (generated AFTER implementation+checking):
+          summarizes the whole cycle outcome. If OK → PASS. If NOT OK → FAIL,
+          reason + link to attempt-N/ for a new cycle.
 -->
 
 ## Result

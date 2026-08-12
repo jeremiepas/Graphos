@@ -179,4 +179,4 @@ edgeIdFrom :: Text -> Text -> EdgeId
 edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
 
 testEdge :: Text -> Text -> Edge
-testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0)
+testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0) Nothing

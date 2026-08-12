@@ -1,6 +1,9 @@
 # Vision Analysis
 
-Purpose: Analyze images using LLM vision capabilities with configurable provider and model.
+
+## Purpose
+
+Analyze images using LLM vision capabilities with configurable provider and model.
 
 ## Requirements
 

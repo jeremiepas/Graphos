@@ -1,6 +1,9 @@
 # Custom LLM Headers
 
-Purpose: Support custom HTTP headers on LLM API calls for authentication, multi-tenant routing, and custom gateway integration.
+
+## Purpose
+
+Support custom HTTP headers on LLM API calls for authentication, multi-tenant routing, and custom gateway integration.
 
 ## Requirements
 

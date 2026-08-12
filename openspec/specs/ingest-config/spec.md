@@ -1,6 +1,9 @@
 # Spec: ingest-config
 
-Purpose: Pure domain types for ingest configuration with backward-compatible defaults and config merging.
+
+## Purpose
+
+Pure domain types for ingest configuration with backward-compatible defaults and config merging.
 
 ## Requirements
 

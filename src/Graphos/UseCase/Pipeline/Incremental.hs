@@ -96,7 +96,7 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
 
   createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
   let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
-  exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty) Nothing
+  exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty) Nothing []
 
   when (cfgNeo4j configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
     let n4cfg = gcNeo4j (cfgGraphosConfig configWithStreaming)
@@ -203,7 +203,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
             , detectionWarning = Nothing
             , detectionFiles = Map.empty
             }
-      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection llmLabels
+      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection llmLabels []
 
       fspClearCheckpoint fsp (cfgOutputDir config)
       opShutdownObservability op

@@ -81,7 +81,7 @@ spec = do
 
     it "returns False for a single node with edges" $ do
       let single = extractionFromLists [makeStubNode "test.hs"]
-              [Edge (EdgeId "e1") "n1" "n2" Contains 1.0 (Graphos.Domain.Types.Confidence 1.0)]
+              [Edge (EdgeId "e1") "n1" "n2" Contains 1.0 (Graphos.Domain.Types.Confidence 1.0) Nothing]
       isStubExtraction single `shouldBe` False
 
     it "returns False for a non-File single node with no edges" $ do

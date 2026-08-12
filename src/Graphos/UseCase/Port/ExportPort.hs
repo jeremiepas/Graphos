@@ -11,7 +11,7 @@ module Graphos.UseCase.Port.ExportPort
 import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
-import Graphos.Domain.Types (Analysis, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, CommunityAggregate, IncrementalWriter)
+import Graphos.Domain.Types (Analysis, CommunityAggregate, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, IncrementalWriter)
 import Graphos.Domain.Graph (Graph)
 
 
@@ -28,7 +28,7 @@ data ExportResult = ExportResult
 -- | Record-of-functions port for export operations.
 data ExportPort = ExportPort
   { -- | Individual export functions
-    epExportHTML        :: Graph -> Analysis -> Maybe (Map CommunityId Text) -> FilePath -> IO ()
+    epExportHTML        :: Graph -> Analysis -> Maybe (Map CommunityId Text) -> [CommunityAggregate] -> FilePath -> IO ()
   , epExportObsidian    :: Graph -> Analysis -> FilePath -> IO ()
   , epExportReport      :: Text -> FilePath -> IO ()
   , epExportCypher      :: Graph -> FilePath -> IO ()
@@ -60,5 +60,5 @@ data ExportPort = ExportPort
     -- | Checkpoint save
   , epSaveCheckpoint          :: Graph -> FilePath -> IO ()
     -- | Full export orchestration
-  , epExportAll :: Graph -> FilePath -> Analysis -> PipelineConfig -> Detection -> Maybe (Map CommunityId Text) -> IO ExportResult
+    , epExportAll :: Graph -> FilePath -> Analysis -> PipelineConfig -> Detection -> Maybe (Map CommunityId Text) -> [CommunityAggregate] -> IO ExportResult
   }

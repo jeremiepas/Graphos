@@ -36,6 +36,7 @@ conversationEdges conv =
     , edgeRelation  = References
     , edgeConfidence = Confidence 0.8
     , edgeWeight    = 1.0
+    , edgeExtra     = Nothing
     }
   | codeNodeId <- convRelevantNodes conv
   ]

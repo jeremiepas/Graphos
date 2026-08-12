@@ -5,11 +5,13 @@ import Data.Aeson (Value(..), Object)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
+import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..)
                             , Relation(..), Confidence(..)
                             , extractionFromLists)
 import Graphos.Domain.Graph (Graph, buildGraph)
+import Graphos.Domain.Graph.Index (buildIndex)
 import Graphos.Infrastructure.Server.MCP
 
 mkNode :: Int -> T.Text -> Node
@@ -36,6 +38,7 @@ mkEdge i src tgt rel = Edge
   , edgeRelation  = rel
   , edgeWeight    = 1.0
   , edgeConfidence = Confidence 0.9
+  , edgeExtra     = Nothing
   }
 
 queryGraph :: Graph
@@ -58,10 +61,11 @@ keyLookup k obj = KM.member (Key.fromText k) obj
 
 spec :: Spec
 spec = describe "MCP query handler JSON shape" $ do
+  let idx = buildIndex queryGraph Map.empty
   describe "handleQueryGraph" $ do
     it "returns verdict, best_score, hash, nodes, edges, omitted" $ do
       let args = mkArgs [("question", String "Auth")]
-      result <- handleQueryGraph queryGraph args
+      result <- handleQueryGraph queryGraph idx args
       case result of
         Left err -> expectationFailure (T.unpack err)
         Right (Object obj) -> do
@@ -75,7 +79,7 @@ spec = describe "MCP query handler JSON shape" $ do
 
     it "returns none verdict and empty nodes/edges for unmatched query" $ do
       let args = mkArgs [("question", String "zzzznonexistent")]
-      result <- handleQueryGraph queryGraph args
+      result <- handleQueryGraph queryGraph idx args
       case result of
         Left err -> expectationFailure (T.unpack err)
         Right (Object obj) -> do

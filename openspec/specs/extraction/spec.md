@@ -1,6 +1,9 @@
 # Extraction
 
-Purpose: Extract code/structure from files into graph nodes using tree-sitter parsers with configurable granularity.
+
+## Purpose
+
+Extract code/structure from files into graph nodes using tree-sitter parsers with configurable granularity.
 
 ## Requirements
 

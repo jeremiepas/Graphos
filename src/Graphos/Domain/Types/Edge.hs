@@ -11,7 +11,7 @@ module Graphos.Domain.Types.Edge
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), ToJSONKey, FromJSONKey, object, (.=), (.:), withObject, withText, withScientific)
+import Data.Aeson (ToJSON(..), FromJSON(..), ToJSONKey, FromJSONKey, Value, object, (.=), (.:), (.:?), withObject, withText, withScientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -92,6 +92,7 @@ data Edge = Edge
   , edgeRelation  :: !Relation
   , edgeWeight    :: !Double
   , edgeConfidence :: !Confidence
+  , edgeExtra       :: !(Maybe Value)
   } deriving (Eq, Ord, Show, Generic)
 
 instance NFData Edge
@@ -104,6 +105,7 @@ instance ToJSON Edge where
     , "relation"   .= edgeRelation e
     , "weight"     .= edgeWeight e
     , "confidence" .= edgeConfidence e
+    , "extra"      .= edgeExtra e
     ]
 
 instance FromJSON Edge where
@@ -114,3 +116,4 @@ instance FromJSON Edge where
     <*> v .:  "relation"
     <*> v .:  "weight"
     <*> v .:  "confidence"
+    <*> v .:? "extra"

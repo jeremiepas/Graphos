@@ -222,4 +222,5 @@ makeInferredEdge src tgt rel w = Edge
   , edgeRelation  = rel
   , edgeWeight    = w
   , edgeConfidence = Confidence w
+  , edgeExtra     = Nothing
   }

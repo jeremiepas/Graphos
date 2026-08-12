@@ -1,6 +1,9 @@
 # Spec: cli-embed-resolution
 
-Purpose: Three-state embed CLI flags with category-level resolution.
+
+## Purpose
+
+Three-state embed CLI flags with category-level resolution.
 
 ## Requirements
 

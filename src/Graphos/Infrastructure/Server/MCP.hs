@@ -24,21 +24,23 @@ import qualified Data.Text.Encoding as TE
 import Data.Vector (toList)
 import System.IO (hFlush, stdout, isEOF)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
-
+ 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articulationPoints, degree)
 import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
-                              , chatCommunityId, enrichWithChatHistory)
-import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQuery, QueryResponse(..))
-import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion)
+                               , chatCommunityId, enrichWithChatHistory)
+import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndexCached, QueryResponse(..))
+import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL)
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
 import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextTokens
-                                     , EdgeMode(..), filterAndRankEdges
-                                     , formatExpansionHintsBudgeted)
+                                      , EdgeMode(..), filterAndRankEdges
+                                      , formatExpansionHintsBudgeted)
 import Graphos.UseCase.Conversation (queryConversationsFromCommunity, summarizeConversation)
-import Graphos.Domain.Graph.Index (buildIndex)
+import Graphos.Domain.Graph.Index (GraphIndex)
+import Graphos.Domain.Graph.Analysis (CachedFGL, articulationPointsWithCached)
 import Graphos.Infrastructure.FileSystem.Conversation (saveConversationToFile, loadConversationsFromDir)
+
 
 -- | Start MCP server from a graph file
 startMCPServerFromFile :: FilePath -> IO ()
@@ -50,23 +52,25 @@ startMCPServerFromFile path = do
       let g = lrGraph loaded
           commMap = lrCommunities loaded
           cohesion = lrCohesion loaded
+          idx = lrIndex loaded
+          cfg = lrCachedFGL loaded
       -- Load chat history from disk and enrich community map
       diskConvs <- loadConversationsFromDir "graphos-out/memory"
       let enrichedCommMap = enrichWithChatHistory commMap diskConvs
           analysis = analyze g enrichedCommMap cohesion
-      startMCPServer g enrichedCommMap analysis
+      startMCPServer g idx cfg enrichedCommMap analysis
 
 -- | Start an MCP stdio server with a pre-loaded graph, community data, and analysis
-startMCPServer :: Graph -> CommunityMap -> Analysis -> IO ()
-startMCPServer g commMap analysis = do
-  requestLoop g commMap analysis
+startMCPServer :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
+startMCPServer g idx cfg commMap analysis = do
+  requestLoop g idx cfg commMap analysis
 
 -- ───────────────────────────────────────────────
 -- Request loop
 -- ───────────────────────────────────────────────
 
-requestLoop :: Graph -> CommunityMap -> Analysis -> IO ()
-requestLoop g commMap analysis = do
+requestLoop :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
+requestLoop g idx cfg commMap analysis = do
   eof <- isEOF
   if eof
     then pure ()
@@ -75,29 +79,29 @@ requestLoop g commMap analysis = do
       case eitherDecode (BSL.fromStrict (TE.encodeUtf8 (T.pack line))) of
         Left err -> do
           sendError (-32700) ("Parse error: " <> T.pack err) Nothing
-          requestLoop g commMap analysis
+          requestLoop g idx cfg commMap analysis
         Right req -> do
-          handleRequest g commMap analysis req
-          requestLoop g commMap analysis
+          handleRequest g idx cfg commMap analysis req
+          requestLoop g idx cfg commMap analysis
 
 -- ───────────────────────────────────────────────
 -- Request handling
 -- ───────────────────────────────────────────────
 
-handleRequest :: Graph -> CommunityMap -> Analysis -> MCPRequest -> IO ()
-handleRequest g commMap analysis req =
+handleRequest :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> MCPRequest -> IO ()
+handleRequest g idx cfg commMap analysis req =
   case rqpMethod req of
     "initialize" -> sendBSL (encode (initializeResponse (rqpId req)))
     "tools/list" -> sendBSL (encode (toolsListResponse (rqpId req)))
-    "tools/call" -> handleToolCall g commMap analysis (rqpId req) (rqpParams req)
+    "tools/call" -> handleToolCall g idx cfg commMap analysis (rqpId req) (rqpParams req)
     _ -> sendError (-32601) ("Method not found: " <> rqpMethod req) (Just (rqpId req))
 
 -- ───────────────────────────────────────────────
 -- Tool dispatch
 -- ───────────────────────────────────────────────
 
-handleToolCall :: Graph -> CommunityMap -> Analysis -> Value -> KM.KeyMap Value -> IO ()
-handleToolCall g commMap analysis reqId params = do
+handleToolCall :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> Value -> KM.KeyMap Value -> IO ()
+handleToolCall g idx cfg commMap analysis reqId params = do
   let toolName = case KM.lookup (Key.fromText "name") params of
                    Just (String s) -> s
                    _ -> "unknown"
@@ -105,14 +109,14 @@ handleToolCall g commMap analysis reqId params = do
                Just (Object o) -> o
                _ -> KM.empty
   result <- case toolName of
-    "query_graph"        -> handleQueryGraph g args
+    "query_graph"        -> handleQueryGraph g idx args
     "get_node"           -> handleGetNode g args
     "get_neighbors"      -> handleGetNeighbors g args
     "get_community"      -> handleGetCommunity g commMap args
     "god_nodes"          -> handleGodNodes g args
     "graph_stats"        -> handleGraphStats g args
-    "shortest_path"      -> handleShortestPath g args
-    "bridge_nodes"       -> handleBridgeNodes g
+    "shortest_path"      -> handleShortestPath g idx cfg args
+    "bridge_nodes"       -> handleBridgeNodes g cfg
     "select_context"     -> handleSelectContext g commMap analysis args
     "add_conversation"   -> handleAddConversation g commMap args
     "conversation_history" -> handleConversationHistory g commMap args
@@ -125,16 +129,15 @@ handleToolCall g commMap analysis reqId params = do
 -- Tool handlers
 -- ───────────────────────────────────────────────
 
-handleQueryGraph :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
-handleQueryGraph g args = do
+handleQueryGraph :: Graph -> GraphIndex -> KM.KeyMap Value -> IO (Either Text Value)
+handleQueryGraph g idx args = do
   let question = textArg args "question"
       mode = fromMaybe "bfs" (textArgMaybe args "mode")
       budget = fromMaybe 2000 (intArgMaybe args "budget")
   if T.null question
     then pure (Left "Missing required argument: question")
     else do
-      let idx = buildIndex g Map.empty
-          resp = queryGraphWithIndexScored g idx question mode budget
+      let resp = queryGraphWithIndexScored g idx question mode budget
           allNodes = qrespNodes resp
           allEdges = qrespEdges resp
           -- Apply a simple budget cap to the scored result set (the formatter is not
@@ -152,6 +155,8 @@ handleQueryGraph g args = do
         , "omitted"      .= object [ "nodes" .= omittedNodes
                                    , "edges" .= omittedEdges
                                    ]
+        , "suggestions"  .= qrespSuggestions resp
+        , "traverse"     .= mode
         ]
 
 handleGetNode :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
@@ -214,22 +219,22 @@ handleGraphStats g _args = do
     , "avg_degree"   .= avgDegree
     ]))
 
-handleShortestPath :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
-handleShortestPath g args = do
+handleShortestPath :: Graph -> GraphIndex -> CachedFGL -> KM.KeyMap Value -> IO (Either Text Value)
+handleShortestPath g idx cfg args = do
   let from = textArg args "from"
       to = textArg args "to"
   if T.null from || T.null to
     then pure (Left "Missing required arguments: from, to")
-    else case pathQuery g from to of
+    else case pathQueryWithIndexCached g idx cfg from to of
            Nothing  -> pure (Right (object ["found" .= False]))
            Just path -> pure (Right (object ["found" .= True, "path" .= path, "hops" .= (length path - 1)]))
 
-handleBridgeNodes :: Graph -> IO (Either Text Value)
-handleBridgeNodes g = do
-  let bridges = articulationPoints g
+handleBridgeNodes :: Graph -> CachedFGL -> IO (Either Text Value)
+handleBridgeNodes _ cfg = do
+  let bridgesWithCached = articulationPointsWithCached cfg
   pure (Right (object
-    [ "bridge_count" .= length bridges
-    , "bridge_nodes" .= take 50 bridges
+    [ "bridge_count" .= length bridgesWithCached
+    , "bridge_nodes" .= take 50 bridgesWithCached
     ]))
 
 -- ───────────────────────────────────────────────
