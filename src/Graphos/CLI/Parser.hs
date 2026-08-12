@@ -5,6 +5,7 @@ module Graphos.CLI.Parser
     -- * Parsers
   , pipelineOpts
   , queryOpts
+  , researchOpts
   , symbolsOpts
   , neighborsOpts
   , pathOpts
@@ -35,6 +36,7 @@ import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConf
 data Command
   = Run PipelineConfig
   | QueryCmd Text Text Int FilePath
+  | ResearchCmd [Text] [Text] FilePath Bool Bool (Maybe FilePath) (Maybe FilePath) (Maybe Text) CommonQueryOpts
   | PathCmd Text Text FilePath
   | ExplainCmd Text FilePath
   | SymbolsCmd Text CommonQueryOpts
@@ -112,6 +114,26 @@ queryOpts = QueryCmd
   <*> flag "bfs" "dfs" (long "dfs" <> help "Use DFS traversal instead of BFS")
   <*> option auto (long "budget" <> value 2000 <> help "Token budget for query")
   <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
+
+researchOpts :: Parser Command
+researchOpts = do
+  let graphPath = "graphos-out/graph.json"
+  ResearchCmd
+    <$> some (argument str (metavar "TERM"))
+    <*> many (strOption (long "subgraph" <> metavar "TERM" <> help "Seed terms for 1-hop BFS expansion (added to union before inducing edges)"))
+    <*> strOption (long "graph" <> value graphPath <> help "Path to graph.json file")
+    <*> switch (long "html" <> help "Render interactive HTML research view")
+    <*> switch (long "json" <> help "Output ResearchView as JSON")
+    <*> optional (strOption (long "terms-file" <> metavar "PATH" <> help "File with newline-delimited query terms (appended to positional terms)"))
+    <*> optional (strOption (long "label" <> metavar "TEXT" <> help "Label for output file (default: timestamp)"))
+    <*> optional (strOption (long "mode" <> value "default" <> metavar "MODE" <> help "Research mode (default, deep, etc.)"))
+    <*> pure (CommonQueryOpts
+          { cqoGraphPath  = graphPath
+          , cqoBudget     = 2000
+          , cqoJson       = False
+          , cqoLabelWidth = 120
+          , cqoEdges      = Semantic
+          })
 
 symbolsOpts :: Parser Command
 symbolsOpts = SymbolsCmd
@@ -201,9 +223,10 @@ commandOpts = subparser
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
-   <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
-   <> command "install-skill" (info installSkillOpts (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
-   )
+    <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
+    <> command "install-skill" (info installSkillOpts (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
+    <> command "research" (info (researchOpts <**> helper) (progDesc "Multi-query knowledge research with subgraph extraction"))
+    )
   <|> Run <$> pipelineOpts
 
 initOpts :: Parser Command

@@ -20,7 +20,7 @@ import Data.Graph.Inductive.Query.BFS (bfs, esp)
 import Data.Graph.Inductive.Query.DFS (dfs)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph.Core (Graph(..))
+import Graphos.Domain.Graph.Core (Graph(..), computeGraphHash)
 import Graphos.Domain.Graph.Analysis (CachedFGL(..), toCachedFGL, cachedFindIdx)
 
 -- ───────────────────────────────────────────────
@@ -83,4 +83,4 @@ subgraph g nodeSet =
       edges' = Map.filterWithKey (\(s, t) _ -> s `Set.member` nodeSet && t `Set.member` nodeSet) (gEdges g)
       fwd' = Map.map (`Set.intersection` nodeSet) $ Map.filterWithKey (\k _ -> k `Set.member` nodeSet) (gAdjFwd g)
       bwd' = Map.map (`Set.intersection` nodeSet) $ Map.filterWithKey (\k _ -> k `Set.member` nodeSet) (gAdjBack g)
-  in Graph { gNodes = nodes', gEdges = edges', gAdjFwd = fwd', gAdjBack = bwd', gDirected = gDirected g, gCompositions = Nothing }
+   in Graph { gNodes = nodes', gEdges = edges', gAdjFwd = fwd', gAdjBack = bwd', gDirected = gDirected g, gCompositions = Nothing, gHash = computeGraphHash nodes' edges' }

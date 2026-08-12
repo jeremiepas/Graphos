@@ -7,12 +7,15 @@
 {-# LANGUAGE StrictData #-}
 module Graphos.Domain.Graph.Core
   ( -- * Types
-    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions )
+    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions, gHash )
 
     -- * Construction
   , buildGraph
   , mergeExtractions
   , mergeGraphs
+
+    -- * Hashing
+  , computeGraphHash
 
     -- * Analysis helpers
   , isFileNode
@@ -22,11 +25,15 @@ module Graphos.Domain.Graph.Core
 
 import Control.DeepSeq (NFData(..))
 import Data.Aeson (Value)
+import Data.Bits (xor, shiftR, (.&.))
+import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Word (Word32)
 
 import Graphos.Domain.Types
 
@@ -42,6 +49,7 @@ data Graph = Graph
   , gAdjBack       :: Map NodeId (Set NodeId)   -- backward adjacency (for undirected queries)
   , gDirected      :: Bool
   , gCompositions  :: Maybe Value               -- per-community composition metadata
+  , gHash          :: !Text                     -- deterministic hash over graph structure
   } deriving (Eq, Show)
 
 -- | Force full evaluation of a Graph to WHNF + all nested structures.
@@ -78,6 +86,7 @@ buildGraph directed extraction =
     , gAdjBack       = bwdAdj
     , gDirected      = directed
     , gCompositions  = Nothing
+    , gHash          = computeGraphHash nodes edgeMap
     }
 
 -- | Merge two extractions (dedup nodes by id, combine edges)
@@ -110,6 +119,7 @@ mergeGraphs old new =
     , gAdjBack       = mergedBwd
     , gDirected      = gDirected old
     , gCompositions  = Nothing
+    , gHash          = computeGraphHash mergedNodes mergedEdges
     }
 
 -- ───────────────────────────────────────────────
@@ -165,3 +175,39 @@ isConceptNode :: Node -> Bool
 isConceptNode n =
   let src = nodeSourceFile n
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
+
+-- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
+-- Uses FNV-1a 32-bit, returned as 8-char hex — same scheme as resultHash in Score.hs.
+computeGraphHash :: Map NodeId Node -> Map (NodeId, NodeId) Edge -> Text
+computeGraphHash nodes edges =
+  let ids = Map.keysSet nodes
+      edgeTuples = Map.keys edges
+      sortedIds = Set.toList ids
+      sortedEdges = sort edgeTuples
+      raw = foldl' fnv1a32ByteWord (fromIntegral fnvOffset32)
+            (map show sortedIds <> map (\(a,b) -> show a <> "," <> show b) sortedEdges)
+      hex = printf32 raw
+  in T.pack hex
+  where
+    fnvOffset32 :: Word32
+    fnvOffset32 = 2166136261
+
+    fnv1a32ByteWord :: Word32 -> String -> Word32
+    fnv1a32ByteWord h = foldl' fnv1a32Byte h
+      where
+        fnv1a32Byte :: Word32 -> Char -> Word32
+        fnv1a32Byte h' c = (h' `xor` fromIntegral (fromEnum c)) * 16777619
+
+    printf32 :: Word32 -> String
+    printf32 w =
+      let hexDigits = "0123456789abcdef"
+          toHex d = hexDigits !! d
+          d0 = fromIntegral ((w `shiftR` 28) .&. 0xF)
+          d1 = fromIntegral ((w `shiftR` 24) .&. 0xF)
+          d2 = fromIntegral ((w `shiftR` 20) .&. 0xF)
+          d3 = fromIntegral ((w `shiftR` 16) .&. 0xF)
+          d4 = fromIntegral ((w `shiftR` 12) .&. 0xF)
+          d5 = fromIntegral ((w `shiftR`  8) .&. 0xF)
+          d6 = fromIntegral ((w `shiftR`  4) .&. 0xF)
+          d7 = fromIntegral ( w         .&. 0xF)
+      in [toHex d0, toHex d1, toHex d2, toHex d3, toHex d4, toHex d5, toHex d6, toHex d7]
