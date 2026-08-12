@@ -180,7 +180,7 @@ runPipeline appEnv config = catch (do
 
       performGC
 
-      (enrichedGraph, finalCommMap, _finalCohesion, analysis, llmLabelsResult) <-
+      (enrichedGraph, finalCommMap, _finalCohesion, analysis, llmLabelsResult, aggregatesResult) <-
         if cfgNoCluster configWithStreaming
           then do
             lpLogInfo lp "Step 4: Skipping clustering (--no-cluster)"
@@ -192,7 +192,7 @@ runPipeline appEnv config = catch (do
             epWriteGodNodes ep iw (analysisGodNodes noAnalysis)
             epWriteAnalysisTail ep iw Nothing
             epCloseWriter ep iw
-            pure (graph, emptyCommMap, emptyCohesion, noAnalysis, Nothing :: Maybe (Map.Map CommunityId Text))
+            pure (graph, emptyCommMap, emptyCohesion, noAnalysis, Nothing :: Maybe (Map.Map CommunityId Text), [])
           else do
             lpLogInfo lp "Step 4: Detecting communities..."
             clusterStart <- getCurrentTime
@@ -267,7 +267,7 @@ runPipeline appEnv config = catch (do
             epFlushWriter ep iw
             epCloseWriter ep iw
             lpLogDebug lp "  Final graph, communities, and cohesion written incrementally"
-            pure (graphWithComps, finalComm, finalCohes, anal, llmLabels)
+            pure (graphWithComps, finalComm, finalCohes, anal, llmLabels, aggregates)
 
       lpLogInfo lp "  graph.json written incrementally"
 
@@ -279,7 +279,7 @@ runPipeline appEnv config = catch (do
       lpLogInfo lp "Step 7: Exporting outputs..."
       exportStart <- getCurrentTime
       createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
-      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming detection llmLabelsResult
+      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming detection llmLabelsResult aggregatesResult
       exportEnd <- getCurrentTime
       opRecordHistogram op "graphos_export_duration_seconds" (realToFrac (diffUTCTime exportEnd exportStart) :: Double)
       opIncCounter op "graphos_pipeline_steps_total" 1

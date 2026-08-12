@@ -40,6 +40,7 @@ mkEdge i src tgt rel = Edge
   , edgeRelation  = rel
   , edgeWeight    = 1.0
   , edgeConfidence = Confidence 0.9
+  , edgeExtra       = Nothing
   }
 
 parserGraph :: Graph

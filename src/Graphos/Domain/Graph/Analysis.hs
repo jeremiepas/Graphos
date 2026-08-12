@@ -17,8 +17,11 @@ module Graphos.Domain.Graph.Analysis
     -- * Analysis algorithms
   , godNodes
   , articulationPoints
+  , articulationPointsWithCached
   , biconnectedComponents
+  , biconnectedComponentsWithCached
   , dominators
+  , dominatorsWithCached
   , edgeBetweenness
   ) where
 
@@ -27,7 +30,7 @@ import Data.List (sortOn, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import qualified Data.Text as T
+import qualified Data.Vector as V
 import Data.Graph.Inductive.Graph (labNodes)
 import qualified Data.Graph.Inductive.Graph as FGL
 import Data.Graph.Inductive.Query.ArtPoint (ap)
@@ -35,9 +38,10 @@ import Data.Graph.Inductive.Query.BCC (bcc)
 import Data.Graph.Inductive.Query.Dominators (dom)
 import Data.Graph.Inductive.Query.BFS (esp)
 
+
 import Graphos.Domain.Types
 import Graphos.Domain.Graph.Core (Graph(..), isFileNode, isConceptNode)
-import Graphos.Domain.Graph.FGL (toFGL, FGLGraph)
+import Graphos.Domain.Graph.FGL (FGLGraph, FGLNodeLabel, FGLEdgeLabel)
 
 -- ───────────────────────────────────────────────
 -- Cached FGL computation (memory optimization)
@@ -46,24 +50,39 @@ import Graphos.Domain.Graph.FGL (toFGL, FGLGraph)
 -- | Cached FGL graph + lookup tables.
 -- Computed once from a Graphos Graph, then shared across all algorithm calls.
 -- Saves ~600MB on 100k-node graphs by avoiding redundant FGL conversions.
+-- Uses bijective sequential indices (0..N-1) to avoid hash collisions.
 data CachedFGL = CachedFGL
   { cfgGraph   :: !FGLGraph
-  , cfgNidMap  :: !(Map Int NodeId)
-  , cfgIdxList :: ![(NodeId, Int)]
+  , cfgNidMap  :: !(V.Vector NodeId)
+  , cfgIdxMap  :: !(Map NodeId Int)
   } deriving (Eq, Show)
 
--- | Build a cached FGL graph. Forces the result with deepseq to ensure
--- the FGL structure is fully evaluated before any algorithm runs.
+-- | Build a cached FGL graph with bijective sequential indices.
+-- Assigns each NodeId a distinct Int in 0..N-1, eliminating hash collisions.
+-- Forces the result with deepseq to ensure the FGL structure is fully evaluated.
 toCachedFGL :: Graph -> CachedFGL
 toCachedFGL g =
-  let gr = toFGL (gNodes g) (gEdges g)
-      nidMap = Map.fromList [(idx, nid) | (idx, (nid, _)) <- labNodes gr]
-      idxList = [(nid, idx) | (idx, (nid, _)) <- labNodes gr]
-  in CachedFGL { cfgGraph = gr, cfgNidMap = nidMap, cfgIdxList = idxList }
+  let nodeList = Map.toList (gNodes g)
+      n = length nodeList
+      -- Bijective mapping: NodeId -> sequential Int (0..N-1)
+      idxMap = Map.fromList (zip (fst <$> nodeList) [0..n-1 :: Int])
+      nidMap = V.fromList (fst <$> nodeList)
+      -- Build FGL nodes with sequential indices
+      fglNodes :: [FGL.LNode FGLNodeLabel]
+      fglNodes = [(idx, (nid, node)) | (nid, node) <- nodeList, let idx = idxMap Map.! nid]
+      -- Build FGL edges with sequential indices
+      fglEdges :: [FGL.LEdge FGLEdgeLabel]
+      fglEdges =
+        [ (srcIdx, tgtIdx, (edgeRelation e, edgeConfidence e, e))
+        | e <- Map.elems (gEdges g)
+        , let srcIdx = idxMap Map.! (edgeSource e)
+        , let tgtIdx = idxMap Map.! (edgeTarget e)
+        ]
+  in CachedFGL { cfgGraph = FGL.mkGraph fglNodes fglEdges, cfgNidMap = nidMap, cfgIdxMap = idxMap }
 
--- | Find the fgl Int index for a Graphos NodeId
+-- | Find the fgl Int index for a Graphos NodeId — O(log N) via Map lookup.
 cachedFindIdx :: CachedFGL -> NodeId -> Maybe Int
-cachedFindIdx cfg nid = lookup nid (cfgIdxList cfg)
+cachedFindIdx cfg nid = Map.lookup nid (cfgIdxMap cfg)
 
 -- ───────────────────────────────────────────────
 -- Analysis queries (all use shared CachedFGL)
@@ -85,45 +104,58 @@ godNodes g topN =
 
 -- | Find articulation points (bridge nodes) whose removal would disconnect the graph.
 articulationPoints :: Graph -> [NodeId]
-articulationPoints g =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+articulationPoints g = articulationPointsWithCached (toCachedFGL g)
+
+-- | Find articulation points using a pre-built CachedFGL
+articulationPointsWithCached :: CachedFGL -> [NodeId]
+articulationPointsWithCached cfg =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
       artPointIdxs = ap gr
-  in artPointIdxs `deepseq` [Map.findWithDefault (T.pack "???") idx nidMap | idx <- artPointIdxs]
+  in artPointIdxs `deepseq` [nidMap V.! idx | idx <- artPointIdxs]
 
 -- | Find biconnected components of the graph.
 biconnectedComponents :: Graph -> [[NodeId]]
-biconnectedComponents g =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+biconnectedComponents g = biconnectedComponentsWithCached (toCachedFGL g)
+
+-- | Find biconnected components using a pre-built CachedFGL
+biconnectedComponentsWithCached :: CachedFGL -> [[NodeId]]
+biconnectedComponentsWithCached cfg =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
       components = bcc gr
-  in components `deepseq` [nub [Map.findWithDefault (T.pack "???") idx nidMap | idx <- FGL.nodes comp] | comp <- components]
+  in components `deepseq` [nub [nidMap V.! idx | idx <- FGL.nodes comp] | comp <- components]
 
 -- | Compute the dominator tree for a given start node.
 dominators :: Graph -> NodeId -> Map NodeId (Maybe NodeId)
-dominators g start =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+dominators g start = dominatorsWithCached (toCachedFGL g) start
+
+-- | Compute the dominator tree using a pre-built CachedFGL
+dominatorsWithCached :: CachedFGL -> NodeId -> Map NodeId (Maybe NodeId)
+dominatorsWithCached cfg start =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
   in case cachedFindIdx cfg start of
        Just startIdx ->
          let domList = dom gr startIdx
-          in domList `deepseq` Map.fromList [(Map.findWithDefault start idx nidMap
-                           , case Map.lookup idom nidMap of
-                               Just d -> Just d
-                               Nothing -> Nothing)
-                           | (idx, idomList) <- domList
-                           , idom <- idomList]
+         in domList `deepseq` Map.fromList [(nidMap V.! idx
+                          , case nidMap V.!? idom of
+                              Just d -> Just d
+                              Nothing -> Nothing)
+                          | (idx, idomList) <- domList
+                          , idom <- idomList]
        Nothing -> Map.empty
 
 -- | Compute edge betweenness centrality using fgl shortest paths.
 -- For large graphs (N > 500), samples a subset of source nodes to keep cost manageable.
 edgeBetweenness :: Graph -> Map (NodeId, NodeId) Double
-edgeBetweenness g =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+edgeBetweenness g = edgeBetweennessWithCached (toCachedFGL g)
+
+-- | Compute edge betweenness centrality using a pre-built CachedFGL.
+-- For large graphs (N > 500), samples a subset of source nodes to keep cost manageable.
+edgeBetweennessWithCached :: CachedFGL -> Map (NodeId, NodeId) Double
+edgeBetweennessWithCached cfg =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
       allNodeIndices = [(idx, nid) | (idx, (nid, _)) <- labNodes gr]
       n = length allNodeIndices
@@ -139,8 +171,7 @@ edgeBetweenness g =
                   , not (null path)
                   , edge <- zip path (drop 1 path)]
       edgeCounts = Map.fromListWith (+) [
-        ((Map.findWithDefault (T.pack "???") s nidMap,
-          Map.findWithDefault (T.pack "???") t nidMap), 1.0)
+        ((nidMap V.! s, nidMap V.! t), 1.0)
         | (s, t) <- pathEdges]
       normalization = if n > 1 then 2.0 / (fromIntegral n * fromIntegral (n - 1)) else 1.0
       sampledNormalization = if n <= maxSamples

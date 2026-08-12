@@ -1,5 +1,10 @@
-## ADDED Requirements
+# Gitignore Parsing
 
+## Purpose
+
+gitignore-parsing capability.
+
+## Requirements
 ### Requirement: Wildcard Pattern Parsing
 The `parsePattern` function SHALL correctly handle `*` wildcards in any position within a `.gitignore` pattern line, producing a `WildcardPattern` that matches zero or more characters within a single path segment.
 

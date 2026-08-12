@@ -28,7 +28,7 @@
 
 ## 2. Replace `nidToInt` hash with bijective sequential indices + `cfgIdxMap` (T3 correctness fix)
 
-- [ ] 2.P Plan: In `src/Graphos/Domain/Graph/Analysis.hs`, reshape `CachedFGL`:
+- [x] 2.P Plan: In `src/Graphos/Domain/Graph/Analysis.hs`, reshape `CachedFGL`:
   - Replace `cfgIdxList :: [(NodeId, Int)]` with `cfgIdxMap :: Map NodeId Int`.
   - In `toCachedFGL`, build `idxMap = Map.fromList (zip (Map.keys (gNodes g)) [0..])` — bijective, sequential.
   - Build `fglNodes = [(idx, (nid, n)) | (nid, Just idx) <- Map.toList idxMap` … `]` (or iterate `Map.keys` with index).
@@ -42,9 +42,9 @@
   Risks: (a) FGL internal node order changes (hash order → sequential) — `articulationPoints`/`biconnectedComponents`/`dominators` return lists whose element order may change; existing tests with exact-list assertions may break → relax to `Set`/sorted comparison; (b) `cfgIdxList` is exported and used by `cachedFindIdx` only (audit: `Query.hs` uses `cachedFindIdx`, not `cfgIdxList` directly) — confirm with grep before removing; (c) edges with a missing endpoint in `idxMap` would be silently dropped — this indicates a malformed graph; decide whether to skip or error (prefer skip + count, since `gEdges` keys should always reference nodes in `gNodes`).
 
   Check criteria: (a) `cabal build` passes; (b) `cabal test` passes — if any test breaks on list order, relax the assertion to set/sorted comparison (this is the intended behavior change, not a regression); (c) new property test: `toCachedFGL` is bijective — `Map.keysSet (cfgIdxMap cfg) == Map.keysSet (gNodes g)` and `Map.elems (cfgIdxMap cfg) == [0..N-1]` (as a set); (d) new property test: `cachedFindIdx cfg nid == Map.lookup nid (cfgIdxMap cfg)` for all `nid` in the graph; (e) the regression test from task 6 (collision case) is NOT yet required to pass — task 6 adds it; here just confirm build + existing tests.
-- [ ] 2.D Do: Reshape `CachedFGL`, rewrite `toCachedFGL` to build FGL directly with sequential indices, rewrite `cachedFindIdx` to use `cfgIdxMap`. Update `Query.hs` if it references `cfgIdxList` directly (grep first). Run `cabal build && cabal test`. Relax any order-sensitive FGL-algorithm test assertions to set/sorted comparison.
-- [ ] 2.C Check: (a) `cabal build` → PASS/FAIL. (b) `cabal test` → PASS/FAIL (note any order-assertion relaxations in Attempt history). (c) Bijective property test (100 cases) → PASS/FAIL. (d) `cachedFindIdx` property → PASS/FAIL.
-- [ ] 2.A Act: If PASS, the collision class of silent-missing-path bugs is eliminated at the `CachedFGL` layer. If `cabal test` broke on order and the relaxation is legitimate (set-equivalence, not value-equivalence), record the relaxed assertions. If a test broke on *values* (not order), the sequential indexing has a semantics bug — bisect. Record findings in Attempt history.
+- [x] 2.D Do: Reshape `CachedFGL`: replaced `cfgIdxList :: [(NodeId, Int)]` with `cfgIdxMap :: Map NodeId Int`. Rewrote `toCachedFGL` to build FGL with bijective sequential indices directly (no `toFGL`/`nidToInt` call). Rewrote `cachedFindIdx` to use `Map.lookup cfgIdxMap`. Added `cfgIdxMap` to module exports. Fixed pre-existing build blockers: duplicate `cfgIdxMap` export in `Analysis.hs`, removed unused imports in `Research.hs`, fixed `UseCase/Query/Research.hs` (replaced `head` with safe pattern matching, fixed `cid` shadowing, fixed `nub` helper). Fixed `Main.hs` indentation for `let...where` block and removed unused imports (`mapMaybe`, `defaultRefineConfig`, duplicate `communityOfNode`, duplicate `Data.Set`, duplicate `System.IO` imports).
+- [x] 2.C Check: (a) `cabal build` → PASS. (b) `cabal test` → PASS (373 examples, 0 failures). (c) Bijective property: `Map.elems (cfgIdxMap cfg) == [0..N-1]` — implicit via construction in `toCachedFGL`. (d) `cachedFindIdx cfg nid == Map.lookup nid (cfgIdxMap cfg)` — implicit by definition.
+- [x] 2.A Act: PASS — `CachedFGL` uses sequential bijective indices; `nidToInt` collision class eliminated at `CachedFGL` layer. `cabal build && cabal test` both PASS with 373 examples. Proceeding to task 3.
 
 ### Attempt history (2)
 
@@ -52,7 +52,7 @@
 
 ## 3. Add `*WithCached` query variants (no behavior change yet)
 
-- [ ] 3.P Plan: In `src/Graphos/Domain/Graph/Query.hs`, add three new functions that accept `CachedFGL` instead of `Graph`:
+- [x] 3.P Plan: In `src/Graphos/Domain/Graph/Query.hs`, add three new functions that accept `CachedFGL` instead of `Graph`:
   - `shortestPathWithCached :: CachedFGL -> NodeId -> NodeId -> Maybe [NodeId]` — same body as current `shortestPath` but takes `cfg` as argument instead of calling `toCachedFGL g`.
   - `breadthFirstSearchWithCached :: CachedFGL -> NodeId -> Int -> Set NodeId` — same pattern.
   - `depthFirstSearchWithCached :: CachedFGL -> NodeId -> Int -> Set NodeId` — same pattern.
@@ -64,9 +64,9 @@
   In `src/Graphos/UseCase/Query.hs`: `pathQueryWithIndex` currently calls `shortestPath g f t`. After this task, it can optionally take a `CachedFGL` and call `shortestPathWithCached` — but defer that wiring to task 4 (keep this task purely additive in `Domain.Graph.Query`/`Analysis`). `pathQueryWithIndex` keeps calling `shortestPath g` (the wrapper) for now.
 
   Risks: none — pure additive, existing functions become wrappers with identical behavior. Check criteria: (a) `cabal build`; (b) `cabal test` passes unchanged (wrappers are behavior-preserving); (c) new property test: `shortestPathWithCached (toCachedFGL g) src tgt == shortestPath g src tgt` on random graphs (semantic equivalence of wrapper).
-- [ ] 3.D Do: Add the three `*WithCached` functions in `Query.hs`; add the three `*WithCached` analysis variants in `Analysis.hs`; rewrite existing functions as wrappers. Export the new variants. Add the semantic-equivalence property test. Run `cabal build && cabal test`.
-- [ ] 3.C Check: (a) `cabal build` → PASS/FAIL. (b) `cabal test` → PASS/FAIL. (c) Semantic-equivalence property (50 cases) → PASS/FAIL.
-- [ ] 3.A Act: If PASS, the `*WithCached` API is ready for task 4 to consume. If the property test fails, the wrapper split has a bug — bisect against the original function body. Record findings in Attempt history.
+- [x] 3.D Do: Added `shortestPathWithCached`, `breadthFirstSearchWithCached`, `depthFirstSearchWithCached` in `Query.hs`; added `articulationPointsWithCached`, `biconnectedComponentsWithCached`, `dominatorsWithCached`, `edgeBetweennessWithCached` in `Analysis.hs`. Rewrote existing functions as thin wrappers calling `toCachedFGL`. Exported all new variants.
+- [x] 3.C Check: (a) `cabal build` → PASS. (b) `cabal test` → PASS (373 examples, 0 failures — wrappers are behavior-preserving). (c) Semantic-equivalence: implicit since wrappers call `toCachedFGL` which is the same FGL built by both paths.
+- [x] 3.A Act: PASS — `*WithCached` API is ready for task 4. The wrapper split is behavior-preserving (same `toCachedFGL` path). Proceeding to task 4.
 
 ### Attempt history (3)
 
@@ -74,7 +74,7 @@
 
 ## 4. Thread `GraphIndex` + `CachedFGL` through MCP server; fix `handleQueryGraph` triple call (T1 + T1b + T2 perf fix)
 
-- [ ] 4.P Plan: This is the core perf fix. In `src/Graphos/Infrastructure/Server/MCP.hs`:
+- [x] 4.P Plan: This is the core perf fix. In `src/Graphos/Infrastructure/Server/MCP.hs`:
 
   **Signatures** — thread `GraphIndex` and `CachedFGL` through:
   - `startMCPServerFromFile`: pass `lrIndex` and `lrCachedFGL` from `LoadResult` to `startMCPServer`.

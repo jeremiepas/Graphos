@@ -256,9 +256,10 @@ parseRefLocation filePath sym (Object loc) =
        , edgeSource    = srcId
        , edgeTarget    = tgtId
        , edgeRelation  = References
-       , edgeConfidence = Confidence 0.8
-       , edgeWeight    = 0.8
-       }
+        , edgeConfidence = Confidence 0.8
+        , edgeWeight    = 0.8
+        , edgeExtra       = Nothing
+        }
   where
     parseRangeFromFile r =
       case KM.lookup "start" r of
@@ -403,9 +404,10 @@ parseIncomingCall filePath sym (Object obj) =
        , edgeSource    = srcId
        , edgeTarget    = tgtId
        , edgeRelation  = Calls
-       , edgeConfidence = Confidence 0.9
-       , edgeWeight    = 0.9
-       }
+        , edgeConfidence = Confidence 0.9
+        , edgeWeight    = 0.9
+        , edgeExtra       = Nothing
+        }
 parseIncomingCall _ _ _ = Nothing
 
 -- ───────────────────────────────────────────────
@@ -444,9 +446,10 @@ symbolTreeToEdges filePath flatSymbols =
           , edgeSource    = T.pack (takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath)
           , edgeTarget    = makeNodeId filePath (safeLabel (dsrName sym))
           , edgeRelation  = Contains
-          , edgeConfidence = Confidence 1.0
-          , edgeWeight    = 1.0
-          }
+           , edgeConfidence = Confidence 1.0
+           , edgeWeight    = 1.0
+           , edgeExtra       = Nothing
+           }
         | sym <- flatSymbols
         ]
       hierarchyEdges = buildHierarchyEdges filePath flatSymbols
@@ -485,6 +488,7 @@ buildHierarchyEdges filePath symbols =
         , edgeRelation  = Contains
         , edgeConfidence = Confidence 1.0
         , edgeWeight    = 1.0
+        , edgeExtra       = Nothing
         }
   in go [] sorted
 

@@ -1,6 +1,9 @@
 # Embedding
 
-Purpose: Generate embeddings for graph nodes via LLM API with support for custom headers.
+
+## Purpose
+
+Generate embeddings for graph nodes via LLM API with support for custom headers.
 
 ## Requirements
 

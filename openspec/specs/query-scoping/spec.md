@@ -1,11 +1,14 @@
 # query-scoping
 
+## Purpose
+
+Source-path scoping for `graphos query` (PRD §13.1). Makes file paths first-class, searchable query inputs so agents can restrict results to production code or a specific subtree.
+
 Source-path scoping for `graphos query` (PRD §13.1). Makes file paths first-class,
 searchable query inputs so agents can restrict results to production code or a specific
 subtree.
 
-## ADDED Requirements
-
+## Requirements
 ### Requirement: Path glob filter
 `graphos query` SHALL accept `--path <glob>` and MUST restrict candidate matches to
 nodes whose `nodeSourceFile` matches the glob before traversal, so the token budget is

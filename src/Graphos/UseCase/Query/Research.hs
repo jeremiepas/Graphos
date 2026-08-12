@@ -18,7 +18,6 @@ import qualified Data.Set as Set
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.DeepSeq (NFData(..))
 
 import Graphos.Domain.Types
   ( NodeId, Node(..)
@@ -27,7 +26,7 @@ import Graphos.Domain.Types
   , EdgeId(..), CommunityId, CommunityMap
   , FileType(..)
   )
-import Graphos.Domain.Community (CommunityComposition(..), computeCompositions)
+import Graphos.Domain.Community (CommunityComposition(..))
 import Graphos.Domain.Query.Research
 import Graphos.Domain.Graph.Core (Graph(..), gHash)
 import Graphos.Domain.Graph.Index (GraphIndex(..), bfsFromSet, communityMembers)
@@ -40,7 +39,6 @@ import Graphos.UseCase.Query.Refine
   ( EdgeMode(..)
   , refineEdges
   )
-import Graphos.Domain.HexColor
 
 -- | Build the research view for a set of query terms.
 --
@@ -86,12 +84,11 @@ buildResearchView g idx commMap comps terms mbMode = do
       -- Collect communities for nodes in the union
       commIds :: [CommunityId]
       commIds =
-        [ cid
+        [ cid'
         | n <- Map.elems nodeMap
         , let cid = nodeCommunityId (rnNode n)
         , Just cid' <- [cid]
         , cid' /= 0
-        , let cid = cid'
         ]
 
       commMapOut :: Map CommunityId ResearchCommunity
@@ -129,13 +126,14 @@ buildResearchView g idx commMap comps terms mbMode = do
           rel' = case textToRelation rel of
             Just r -> r
             Nothing -> Inferred
-      in Edge { edgeId = eid
-              , edgeSource = src
-              , edgeTarget = tgt
-              , edgeRelation = rel'
-              , edgeWeight = conf
-              , edgeConfidence = Confidence conf
-              }
+       in Edge { edgeId = eid
+               , edgeSource = src
+               , edgeTarget = tgt
+               , edgeRelation = rel'
+               , edgeWeight = conf
+               , edgeConfidence = Confidence conf
+               , edgeExtra = Nothing
+               }
 
 utctEpoch :: UTCTime
 utctEpoch = UTCTime (ModifiedJulianDay (25568 :: Integer)) 0
@@ -162,13 +160,17 @@ foldQueryResponses entries =
            }
       mergeNode :: ResearchNode -> ResearchNode -> ResearchNode
       mergeNode existing newRn =
-        let term = head (rnDiscoveredBy newRn)
-            (term', snScore') = head (rnScores newRn)
-            n = rnNode newRn
-            newDisc = term : rnDiscoveredBy existing
-            newScores = (term, snScore') : rnScores existing
-            newBest = max (rnBestScore existing) snScore'
-        in existing { rnNode = n, rnDiscoveredBy = newDisc, rnScores = newScores, rnBestScore = newBest }
+        case rnDiscoveredBy newRn of
+          term:otherTerms ->
+            case rnScores newRn of
+              (term', snScore'):_ ->
+                let n = rnNode newRn
+                    newDisc = term : otherTerms ++ rnDiscoveredBy existing
+                    newScores = (term', snScore') : rnScores existing
+                    newBest = max (rnBestScore existing) snScore'
+                in existing { rnNode = n, rnDiscoveredBy = newDisc, rnScores = newScores, rnBestScore = newBest }
+              [] -> existing
+          [] -> existing
       createNode :: Text -> ScoredNode -> ResearchNode
       createNode term sn =
         let n = scoredNodeToNode sn
@@ -227,8 +229,8 @@ expandWithSeeds g idx union seeds =
 nub :: (Ord a) => [a] -> [a]
 nub = go Map.empty
   where
-    go seen [] = []
-    go seen (x:xs) =
-      if Map.member x seen
-      then go seen xs
-      else x : go (Map.insert x () seen) xs
+    go _seen [] = []
+    go _seen (x:xs) =
+      if Map.member x _seen
+      then go _seen xs
+      else x : go (Map.insert x () _seen) xs

@@ -1,11 +1,14 @@
 # query-legibility
 
+## Purpose
+
+Match-quality self-reporting for `graphos query` (PRD §13.1 `graphos query`, §16.1 query latency budget). Ensures an agent can always distinguish a genuine hit from a weak or empty match, and detect when repeated queries yield no new information.
+
 Match-quality self-reporting for `graphos query` (PRD §13.1 `graphos query`, §16.1
 query latency budget). Ensures an agent can always distinguish a genuine hit from a
 weak or empty match, and detect when repeated queries yield no new information.
 
-## ADDED Requirements
-
+## Requirements
 ### Requirement: Match verdict header
 `graphos query` SHALL classify every response as `strong`, `weak`, or `none` based on a
 normalized best-match score, and SHALL print the verdict and the best score in a header

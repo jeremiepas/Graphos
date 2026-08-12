@@ -1,12 +1,15 @@
 # neighbor-expansion
 
+## Purpose
+
+Cheap foothold expansion via a new `graphos neighbors <node-id>` subcommand (extends PRD §13.1 command table; workflow doc 15-neighbors). Lets an agent grow context from a known-good node (e.g. one returned by `explain` or `symbols`) without re-entering fuzzy search.
+
 Cheap foothold expansion via a new `graphos neighbors <node-id>` subcommand (extends
 PRD §13.1 command table; workflow doc 15-neighbors). Lets an agent grow context from a
 known-good node (e.g. one returned by `explain` or `symbols`) without re-entering fuzzy
 search.
 
-## ADDED Requirements
-
+## Requirements
 ### Requirement: Depth-bounded neighborhood expansion
 The CLI SHALL provide `graphos neighbors <node-id> [--depth N]` (default depth 2) which
 performs breadth-first expansion from the exact node id over the graph adjacency and

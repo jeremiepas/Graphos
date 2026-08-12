@@ -8,14 +8,18 @@ module Graphos.Domain.Graph.Query
   ( neighbors
   , degree
   , shortestPath
+  , shortestPathWithCached
   , breadthFirstSearch
+  , breadthFirstSearchWithCached
   , depthFirstSearch
+  , depthFirstSearchWithCached
   , subgraph
   ) where
 
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import qualified Data.Vector as V
 import Data.Graph.Inductive.Query.BFS (bfs, esp)
 import Data.Graph.Inductive.Query.DFS (dfs)
 
@@ -43,37 +47,46 @@ degree g nid = Set.size $ neighbors g nid
 -- | Breadth-first search from a start node, returns visited node IDs
 -- Uses fgl's BFS algorithm internally
 breadthFirstSearch :: Graph -> NodeId -> Int -> Set NodeId
-breadthFirstSearch g start _maxDepth =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+breadthFirstSearch g start maxDepth = breadthFirstSearchWithCached (toCachedFGL g) start maxDepth
+
+-- | Breadth-first search using a pre-built CachedFGL
+breadthFirstSearchWithCached :: CachedFGL -> NodeId -> Int -> Set NodeId
+breadthFirstSearchWithCached cfg start _maxDepth =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
   in case cachedFindIdx cfg start of
-       Just startIdx -> Set.fromList [Map.findWithDefault start idx nidMap | idx <- bfs startIdx gr]
+       Just startIdx -> Set.fromList [nidMap V.! idx | idx <- bfs startIdx gr]
        Nothing -> Set.empty
 
 -- | Depth-first search from a start node, returns visited node IDs
 -- Uses fgl's DFS algorithm internally
 depthFirstSearch :: Graph -> NodeId -> Int -> Set NodeId
-depthFirstSearch g start _maxDepth =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+depthFirstSearch g start maxDepth = depthFirstSearchWithCached (toCachedFGL g) start maxDepth
+
+-- | Depth-first search using a pre-built CachedFGL
+depthFirstSearchWithCached :: CachedFGL -> NodeId -> Int -> Set NodeId
+depthFirstSearchWithCached cfg start _maxDepth =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
   in case cachedFindIdx cfg start of
-       Just startIdx -> Set.fromList [Map.findWithDefault start idx nidMap | idx <- dfs [startIdx] gr]
+       Just startIdx -> Set.fromList [nidMap V.! idx | idx <- dfs [startIdx] gr]
        Nothing -> Set.empty
 
 -- | Shortest path between two nodes (BFS)
 -- Uses fgl's ESP (shortest path by edge count) algorithm internally
 shortestPath :: Graph -> NodeId -> NodeId -> Maybe [NodeId]
-shortestPath g src tgt =
-  let cfg = toCachedFGL g
-      gr = cfgGraph cfg
+shortestPath g src tgt = shortestPathWithCached (toCachedFGL g) src tgt
+
+-- | Shortest path using a pre-built CachedFGL
+shortestPathWithCached :: CachedFGL -> NodeId -> NodeId -> Maybe [NodeId]
+shortestPathWithCached cfg src tgt =
+  let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
   in case (cachedFindIdx cfg src, cachedFindIdx cfg tgt) of
        (Just srcIdx, Just tgtIdx) ->
          let path = esp srcIdx tgtIdx gr
          in if null path then Nothing
-            else Just [Map.findWithDefault src idx nidMap | idx <- path]
+            else Just [nidMap V.! idx | idx <- path]
        _ -> Nothing
 
 -- | Extract a subgraph around given nodes

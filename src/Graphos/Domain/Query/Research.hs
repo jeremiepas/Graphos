@@ -21,7 +21,7 @@ module Graphos.Domain.Query.Research
   , lookupResearchNode
   ) where
 
-import Data.Aeson (Value, ToJSON(..), object, (.=))
+import Data.Aeson (ToJSON(..), object, (.=))
 import qualified Data.Aeson.Key as Key
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -33,11 +33,10 @@ import Control.DeepSeq (NFData(..))
 
 import Graphos.Domain.Types
   ( NodeId, Node(..)
-  , Edge(..), edgeRelation, edgeConfidence
+  , Edge(..)
   , CommunityId
   )
 import Graphos.Domain.Community (CommunityComposition(..))
-import Graphos.Domain.Graph.Core (Graph(..), gHash)
 
 -- ---------------------------------------------------------------------------
 -- ResearchView

@@ -20,8 +20,8 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..), ExportResult(..))
 -- Note: graph.json is written incrementally by the Pipeline's IncrementalJSON writer,
 --       so we don't rewrite it here. This avoids holding the full graph in memory
 --       as a JSON AST during export, reducing peak memory by ~1x graph size.
-exportAll :: ExportPort -> Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId T.Text) -> IO ExportResult
-exportAll ep g analysis config detection mLabels = do
+exportAll :: ExportPort -> Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId T.Text) -> [CommunityAggregate] -> IO ExportResult
+exportAll ep g analysis config detection mLabels aggregates = do
   -- graph.json is already written incrementally by the Pipeline's IncrementalJSON writer.
   -- No need to rewrite it here — that would double memory usage during export.
   let jsonPath = cfgOutputDir config ++ "/graph.json"
@@ -34,7 +34,7 @@ exportAll ep g analysis config detection mLabels = do
     then pure Nothing
     else do
       let hPath = cfgOutputDir config ++ "/graph.html"
-      Just hPath <$ epExportHTML ep g analysis mLabels hPath
+      Just hPath <$ epExportHTML ep g analysis mLabels aggregates hPath
 
   obsidianPath <- if cfgObsidian config
     then do

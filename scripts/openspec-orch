@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ORCH_DIR="graphos-out/orchestrator"
+PID_FILE="$ORCH_DIR/orchestrator.pid"
+LOG_FILE="$ORCH_DIR/orchestrator.log"
+
+case "$1" in
+  start)
+    shift
+    mkdir -p "$ORCH_DIR"
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo "Already running (PID $(cat "$PID_FILE"))"
+      exit 0
+    fi
+    echo "Starting orchestrator with args: $*"
+    nohup python3 orchestrate.py "$@" >> "$LOG_FILE" 2>&1 &
+    PID=$!
+    echo "$PID" > "$PID_FILE"
+    echo "Started (PID $PID)"
+    ;;
+  stop)
+    if [ -f "$PID_FILE" ]; then
+      PID=$(cat "$PID_FILE")
+      if kill -0 "$PID" 2>/dev/null; then
+        echo "Stopping orchestrator (PID $PID)..."
+        kill "$PID"
+        sleep 2
+        if kill -0 "$PID" 2>/dev/null; then
+          echo "Force killing..."
+          kill -9 "$PID"
+        fi
+      fi
+      rm -f "$PID_FILE"
+      echo "Stopped"
+    else
+      echo "No PID file found"
+    fi
+    ;;
+  status)
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo "running (PID $(cat "$PID_FILE"))"
+    else
+      echo "stopped"
+    fi
+    if [ -d questions ] && ls questions/*.md 2>/dev/null | grep -q .; then
+      echo "paused: waiting on question files"
+    fi
+    ;;
+  *)
+    echo "Usage: openspec-orch {start|stop|status}"
+    exit 1
+    ;;
+esac

@@ -33,6 +33,7 @@ mkEdge i src tgt rel conf = Edge
   , edgeRelation  = rel
   , edgeWeight    = 1.0
   , edgeConfidence = Confidence conf
+  , edgeExtra       = Nothing
   }
 
 -- | A top-ranked node should survive truncation and produce a footer.
