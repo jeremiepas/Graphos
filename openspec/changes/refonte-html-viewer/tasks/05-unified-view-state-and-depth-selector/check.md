@@ -1,36 +1,41 @@
-# Verification Plan: Unified View State and Depth Selector (Task 5)
+# Check: Unified View State and Depth Selector (Task 5)
 
-## Manual Browser Checks
+## Verification Plan
 
-### 1. Depth Selector & Default State
-- [ ] Open `graph.html` (generated from a test graph).
-- [ ] Verify that the depth selector is present.
-- [ ] Verify that the default depth is set to `Overview`.
-- [ ] Verify that the graph renders the `Overview` level correctly.
+### 1. Manual Browser Verification
+- **Depth Levels**: Open `graph.html` and verify that:
+  - `Overview` is the default.
+  - Four levels (`Overview`, `Community`, `Full`, `Custom`) are selectable.
+  - Switching between them works.
+- **Renderer Integrity**: During depth switching, inspect the DOM to ensure:
+  - The old `<div class="vis-network">` (or equivalent) is removed/cleaned up.
+  - Only one canvas exists at a time.
+- **Custom Depth (BFS)**:
+  - Select `Custom` and set `N=2`.
+  - Compare the visible nodes with the output of `graphos neighbors <id> --depth 2`.
+  - Verify N is clamped to 1–6.
+  - Verify warning for > 2,000 nodes.
+- **Persistence**:
+  - Set a depth and a selection.
+  - Reload the page.
+  - Verify the depth and selection are restored.
+  - Manually corrupt `sessionStorage` (e.g., `sessionStorage.setItem('viewer_state', 'invalid')`) and verify it falls back to `Overview`.
+- **Cleanup**:
+  - Verify no `btnBack` element is present in the HTML.
 
-### 2. Renderer Lifecycle
-- [ ] Click through all four depth levels (`Overview` -> `Community` -> `Full` -> `Custom`).
-- [ ] Verify that only one `<canvas>` element exists in the DOM at any time.
-- [ ] Verify that there are no visual artifacts or overlapping canvases after switching.
+### 2. Automated Verification
+- **JS Syntax**: Run `node --check` on the extracted/emitted JS.
+- **Build**: `cabal build --flag dev` to ensure no Haskell errors.
+- **Tests**: (If applicable) Run existing tests to ensure no regressions.
 
-### 3. Custom Depth (N-hop BFS)
-- [ ] Select `Custom` depth.
-- [ ] Set N = 2.
-- [ ] Verify the nodes rendered match the expected 2-hop neighborhood of the center node.
-- [ ] Compare the rendered node set against the CLI command: `graphos neighbors <id> --depth 2`.
-- [ ] Test N = 1 and N = 6 (clamping/limit check).
-- [ ] Verify a warning appears if an N-hop expansion would exceed 2,000 nodes.
+## Results
+(To be filled during verification)
+- **Four depth levels offered**: [ ]
+- **One renderer instance/canvas**: [ ]
+- **Custom depth N=2 matches CLI**: [ ]
+- **N clamped to 1–6 / Warning for >2k**: [ ]
+- **State survives reload**: [ ]
+- **No btnBack remains**: [ ]
 
-### 4. Persistence
-- [ ] Set depth to `Community` and select a node.
-- [ ] Refresh the page.
-- [ ] Verify that the depth remains `Community` and the selection is preserved.
-- [ ] Manually corrupt `sessionStorage` (e.g., `sessionStorage.setItem('graphos_viewer_state', 'invalid')`) and refresh.
-- [ ] Verify the viewer falls back to `Overview` without error.
-
-### 5. Cleanup
-- [ ] Verify that the `btnBack` button is no longer visible or present in the DOM.
-
-## Automated/Semi-Automated Checks
-- [ ] Run `node --check` on the emitted HTML to ensure valid JS syntax.
-- [ ] (Optional) If a headless browser test is available, run a script to verify the canvas count.
+### Verification Log
+(Record findings here)
