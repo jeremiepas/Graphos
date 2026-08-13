@@ -14,6 +14,10 @@ maintainer:    graphos@dev
 build-type:    Simple
 extra-doc-files: README.md
                  CHANGELOG.md
+extra-source-files: assets/viewer/viewer.css
+                    assets/viewer/viewer.js
+                    assets/viewer/vis-network.min.js
+                    assets/viewer/VIS-NETWORK-LICENSE
 
 source-repository head
   type:     git
@@ -248,6 +252,7 @@ library
      , base16-bytestring     >= 1.0
     , base64-bytestring     >= 1.0
     , cryptohash-sha256     >= 0.11
+    , file-embed            >= 0.0.15
 
 -- ───────────────────────────────────────────────
 -- Executable
