@@ -168,23 +168,11 @@ assumptions about how the viewer is assembled. Task 9 archives it as superseded.
   flag (`Parser.hs:73`, `cfgSVG` never read, `exportSVG` never called) and `graphos serve`
   gzip/ETag/streaming (`Static.hs:60–65` buffers the whole file per GET).
 
-## PDCA Cycle
+## Success Criteria
 
-- **Plan**: Make `graph.html` an artifact whose size is proportional to its information content,
-  and whose viewer is editable, testable and offline. Success is measured on the 104,101-node /
-  122,347-edge reference corpus: total size ≤ 30 MB (from 101.2 MB), ≤ 200 B/node (from 409),
-  ≤ 24 B/edge (from 441), zero network requests when opened from `file://` (today: one CDN
-  script), overview load < 3 s and drill-down < 500 ms per the retained latency targets, and a
-  non-empty test suite over the generated document (today: zero).
-- **Do**: Land the payload contract and interning first (it is the whole size win and is
-  independent of the viewer rewrite), then extract the assets, then the facets/panel/legend, then
-  the depth selector, then the absorbed defect fixes.
-- **Check**: Golden-file and property tests on the emitted payload (interning round-trips, no
-  per-item styling keys, budget assertions computed from the emitted bytes), a JS syntax check of
-  the generated document, and a recorded manual browser pass on the reference corpus for the
-  latency and interaction criteria — the evidence the archived change left empty.
-- **Act**: If the budget is met and the browser pass is green, close the spec/design contradiction
-  by recording in `html-lod-viewer` that inline data remains the architecture at this scale, and
-  open the sidecar/WebGL follow-up scoped to the measured residual. If the browser still stalls at
-  158K nodes after a 4× payload reduction, that measurement is the trigger to revive the archived
-  architecture — with evidence this time.
+- Make `graph.html` an artifact whose size is proportional to its information content, and whose
+  viewer is editable, testable and offline. Success is measured on the 104,101-node / 122,347-edge
+  reference corpus: total size ≤ 30 MB (from 101.2 MB), ≤ 200 B/node (from 409), ≤ 24 B/edge
+  (from 441), zero network requests when opened from `file://` (today: one CDN script), overview
+  load < 3 s and drill-down < 500 ms per the retained latency targets, and a non-empty test suite
+  over the generated document (today: zero).
