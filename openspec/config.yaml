@@ -1,4 +1,4 @@
-schema: pdca
+schema: spec-driven
 
 # Project context — shown to AI when creating every artifact.
 # This is the SINGLE SOURCE OF TRUTH for project identity, constraints, and conventions.
@@ -83,7 +83,6 @@ rules:
     - Reference PRD.md section numbers for every capability
     - Capabilities MUST map 1:1 to workflow docs (01-full-pipeline through 16-lsp-discovery)
     - Keep the proposal under 2 pages — focus on why not how
-    - PDCA cycle MUST reference measurable success criteria from PRD section 16
   specs:
     - Every requirement MUST use SHALL/MUST (not should/may)
     - Every requirement MUST have at least one Scenario with WHEN/THEN format using exactly 4 hashtags (####)
@@ -95,9 +94,7 @@ rules:
     - No code examples — use schema diagrams and structured tables per PRD style
     - Verification strategy MUST reference cabal build/test commands
   tasks:
-    - Each task is ONE PDCA micro-cycle (N.P → N.D → N.C → N.A)
     - Tasks should be completable in 1-4 hours each
-    - Plan (N.P) MUST define Check criteria BEFORE code — this is the anti-bias guard
-    - Check (N.C) MUST execute Plan's criteria verbatim — never invent new criteria
+    - Define check criteria before code — this is the anti-bias guard
     - Order tasks by dependency (foundation tasks first, integration tasks last)
     - Group parallel-safe tasks when possible (no dependencies between them)

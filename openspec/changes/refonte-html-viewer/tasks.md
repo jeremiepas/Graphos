@@ -1,22 +1,12 @@
 <!--
-  PDCA-PER-TASK workflow.
-  Each top-level `## N. <task>` is ONE task = ONE complete PDCA micro-cycle.
-  Within a task, run the steps in order and keep checkbox format so progress
-  can be tracked: `- [ ] N.P …`, `- [ ] N.D …`, `- [ ] N.C …`, `- [ ] N.A …`.
-
-  PASS rule:  a task PASSES only when its Check passes AND its Act is OK.
-              A passed task reaches the same done state as in classic SDD.
-  RETRY rule: if Act is NOT OK, the task does NOT pass — record the failed
-              attempt under "### Attempt history (N)" (KEEP THE TRACE, never
-              delete it), then start a NEW P → D → C → A attempt for the same
-              task. Repeat until an attempt passes.
-
-  Everything else matches the official spec-driven workflow.
+  Standard spec-driven task tracking.
+  Each `## N. <task>` group holds its sub-steps as checkboxes `- [ ] N.X …`.
+  A task group is DONE when all its checkboxes are `[x]`.
 -->
 
 ## 1. Baseline measurement harness
 
-- [x] 1.P Plan: Nothing in this change is claimable without before/after bytes. Scope: a
+- [x] 1.1 Plan: Nothing in this change is claimable without before/after bytes. Scope: a
   reproducible measurement of an emitted `graph.html` — total size, per-section sizes
   (`_nodesData`, `_edgesData`, aggregates, document), per-node and per-edge averages — recorded
   for the reference corpus (104,101 nodes / 122,347 edges) and for a small corpus (the Graphos
@@ -29,17 +19,14 @@
     (441 B/edge); aggregates 4,545,244 B; document 175,855 B.
   - The same script runs on the Graphos self-graph and records its baseline.
   - Corpus identity (node/edge counts, extraction settings) is written down alongside the numbers.
-- [x] 1.D Do: Add the measurement script, run it on both corpora, fill in the results table at the
-   bottom of this file.
-- [x] 1.C Check: Re-run and confirm identical numbers on an unchanged input.
-- [x] 1.A Act: Freeze these as the "before" column for tasks 2, 3 and 10.
-
-### Attempt history (1)
-<!-- empty unless a retry is needed -->
+- [x] 1.2 Do: Add the measurement script, run it on both corpora, fill in the results table at the
+  bottom of this file.
+- [x] 1.3 Check: Re-run and confirm identical numbers on an unchanged input.
+- [x] 1.4 Act: Freeze these as the "before" column for tasks 2, 3 and 10.
 
 ## 2. Interned, style-free view model
 
-- [x] 2.P Plan: Land the entire size win before touching the viewer. Scope:
+- [x] 2.1 Plan: Land the entire size win before touching the viewer. Scope:
   `Infrastructure/Export/HTML.hs:806–983` — replace `VisNode`/`VisEdge` with view-model records;
   build string tables for node ids, `source_file`, `kind`, `relation`; emit edges as
   `[srcIdx, tgtIdx, relIdx]`; drop `color`, `group`, `title` from nodes and `color`, `arrows`,
@@ -56,23 +43,20 @@
   - Determinism: two exports of the same graph produce byte-identical payload sections.
   - Reference corpus: ≤ 200 B/node, ≤ 24 B/edge, total ≤ 30 MB.
   - `cabal build --flag dev` and `cabal test` green with `-Werror`.
-- [x] 2.D Do: Implement the view model, the string tables and the projection; adapt the existing
-   viewer JS to the new shape; add the tests above.
-- [x] 2.C Check: Run the tests, re-run the task-1 measurement, fill in the "after" column, and
-   open the emitted file in a browser to confirm the graph still renders.
-   - `cabal build --flag dev` and `cabal test` green.
-   - Graphos self-graph measurement: 2,771,213 B total; nodes 135.4 B/node; edges 15.3 B/edge.
-   - Viewer JS extracted from emitted file and passes `node --check` syntax validation.
-- [x] 2.A Act: If the budget is met, proceed. If nodes still exceed 200 B/node, evaluate interning
-   labels (design Open Question 1) using the measured table sizes before adding any other mechanism.
-   - Budget met on self-graph (135.4 B/node, 15.3 B/edge); proceed to task 3.
-
-### Attempt history (2)
-<!-- empty unless a retry is needed -->
+- [x] 2.2 Do: Implement the view model, the string tables and the projection; adapt the existing
+  viewer JS to the new shape; add the tests above.
+- [x] 2.3 Check: Run the tests, re-run the task-1 measurement, fill in the "after" column, and
+  open the emitted file in a browser to confirm the graph still renders.
+  - `cabal build --flag dev` and `cabal test` green.
+  - Graphos self-graph measurement: 2,771,213 B total; nodes 135.4 B/node; edges 15.3 B/edge.
+  - Viewer JS extracted from emitted file and passes `node --check` syntax validation.
+- [x] 2.4 Act: If the budget is met, proceed. If nodes still exceed 200 B/node, evaluate interning
+  labels (design Open Question 1) using the measured table sizes before adding any other mechanism.
+  - Budget met on self-graph (135.4 B/node, 15.3 B/edge); proceed to task 3.
 
 ## 3. Single-source aggregates and community id typing
 
-- [x] 3.P Plan: Delete the duplicate aggregate computation. Scope: thread the aggregates already
+- [x] 3.1 Plan: Delete the duplicate aggregate computation. Scope: thread the aggregates already
   computed by `UseCase/Cluster.hs:96–160` (called at `Pipeline/Core.hs:261`) into the export port
   (`Port/ExportPort.hs:31`, `UseCase/Export.hs:33–37`, `Wiring.hs:208`); delete
   `HTML.hs:935–983`; stop recomputing `articulationPoints` (`HTML.hs:44` and `:939`) and
@@ -87,22 +71,19 @@
   - Community ids have the same JSON type in node records and aggregate records; a test asserts it.
   - `articulationPoints` is computed once per export.
   - `cabal test` green.
-- [x] 3.D Do: Extend the port signature, thread the values, delete the duplicate, unify the id
-   type, add the agreement tests.
-- [x] 3.C Check: Export a clustered graph and diff the aggregate values between `graph.json` and
-   the embedded payload; confirm zero differences.
-   - Ran `cabal run graphos -- /home/jeremie/Documents/perso/Graphos` and compared the first 50
-     communities: all `member_count`/`cohesion`/`bridge_count` values match.
-   - `inter_community_edges` is now non-zero for 184/654 communities (was hardcoded 0).
-- [x] 3.A Act: Record in the module Haddock that aggregates have exactly one computation site, so
-   the duplication cannot be reintroduced by a future exporter.
-
-### Attempt history (3)
-<!-- empty unless a retry is needed -->
+- [x] 3.2 Do: Extend the port signature, thread the values, delete the duplicate, unify the id
+  type, add the agreement tests.
+- [x] 3.3 Check: Export a clustered graph and diff the aggregate values between `graph.json` and
+  the embedded payload; confirm zero differences.
+  - Ran `cabal run graphos -- /home/jeremie/Documents/perso/Graphos` and compared the first 50
+    communities: all `member_count`/`cohesion`/`bridge_count` values match.
+  - `inter_community_edges` is now non-zero for 184/654 communities (was hardcoded 0).
+- [x] 3.4 Act: Record in the module Haddock that aggregates have exactly one computation site, so
+  the duplication cannot be reintroduced by a future exporter.
 
 ## 4. Extract viewer assets and vendor the renderer
 
-- [x] 4.P Plan: Make the viewer editable. Scope: move `HTML.hs:69–120` (CSS) and
+- [x] 4.1 Plan: Make the viewer editable. Scope: move `HTML.hs:69–120` (CSS) and
   `HTML.hs:176–804` (JS) into `assets/viewer/viewer.css` and `assets/viewer/viewer.js`; vendor a
   pinned renderer bundle at `assets/viewer/vis-network.min.js` with its license file; embed all
   three with `file-embed`; delete the CDN `<script>` (`HTML.hs:68`) and the `_visLoadFailed` path
@@ -122,17 +103,14 @@
   - Every class name used by the viewer JS has a matching stylesheet rule (automated cross-check).
   - Vendored renderer version and license are recorded; the document reports the version.
   - `cabal build --flag dev` green; build-time delta recorded.
-- [x] 4.D Do: Move the assets, vendor the bundle, wire `file-embed`, apply the six fixes above.
-- [x] 4.C Check: Run the checks; verify offline rendering with networking disabled.
-- [x] 4.A Act: If the build-time delta is material, split the embedding so only the viewer bundle
+- [x] 4.2 Do: Move the assets, vendor the bundle, wire `file-embed`, apply the six fixes above.
+- [x] 4.3 Check: Run the checks; verify offline rendering with networking disabled.
+- [x] 4.4 Act: If the build-time delta is material, split the embedding so only the viewer bundle
   is embedded and re-measure before accepting.
-
-### Attempt history (4)
-<!-- empty unless a retry is needed -->
 
 ## 5. Unified view state and depth selector
 
-- [x] 5.P Plan: One state object, one dispatcher — the refactor the superseded change planned,
+- [ ] 5.1 Plan: One state object, one dispatcher — the refactor the superseded change planned,
   done once. Scope: replace `currentPhase`/`expandedCommunity` (`HTML.hs:189–190`) with a state
   object holding depth, selection, hop count, facets and search results; add the depth control
   (`Overview | Community | Full | Custom`) defaulting to `Overview`; destroy the previous renderer
@@ -146,18 +124,15 @@
   - N is clamped to 1–6; expansions over 2,000 nodes warn first.
   - Depth, selection, hops and facets survive reload; stale references fall back cleanly.
   - No back-button element or handler remains.
-- [ ] 5.D Do: Implement the state object, dispatcher, depth control, BFS and persistence.
-- [ ] 5.C Check: Run the criteria manually in a browser on both corpora; record the CLI-vs-viewer
+- [ ] 5.2 Do: Implement the state object, dispatcher, depth control, BFS and persistence.
+- [ ] 5.3 Check: Run the criteria manually in a browser on both corpora; record the CLI-vs-viewer
   node-set comparison verbatim.
-- [ ] 5.A Act: If `Full` depth stalls, apply a confirmation prompt with the node count (design
+- [ ] 5.4 Act: If `Full` depth stalls, apply a confirmation prompt with the node count (design
   Open Question 3) rather than removing the level; record the threshold observed.
-
-### Attempt history (5)
-<!-- empty unless a retry is needed -->
 
 ## 6. Facet filtering
 
-- [ ] 6.P Plan: Add the control surface modelled on the reference subgraph viewer. Scope: build
+- [ ] 6.1 Plan: Add the control surface modelled on the reference subgraph viewer. Scope: build
   facet indices at load over `file_type`, `kind`, `community_id`, `is_bridge` and edge relation;
   add a free-text filter over label and source path; compose facets conjunctively; show per-facet
   match counts; re-render through the task-5 dispatcher with no reload and no refetch.
@@ -167,17 +142,14 @@
   - File type + kind + text filter compose as an intersection.
   - Toggling any facet on a `file://` document issues no network request and no reload.
   - Facet re-render stays within the drill-down latency budget (< 500 ms) on the reference corpus.
-- [ ] 6.D Do: Implement facet indices, controls, counts and the filter path.
-- [ ] 6.C Check: Run the criteria on the reference corpus; record re-render timings.
-- [ ] 6.A Act: If re-render exceeds the budget, precompute facet index sets at export time and
+- [ ] 6.2 Do: Implement facet indices, controls, counts and the filter path.
+- [ ] 6.3 Check: Run the criteria on the reference corpus; record re-render timings.
+- [ ] 6.4 Act: If re-render exceeds the budget, precompute facet index sets at export time and
   record the byte cost against the task-2 budget (design D7).
-
-### Attempt history (6)
-<!-- empty unless a retry is needed -->
 
 ## 7. Detail panel, legend and relation styling
 
-- [ ] 7.P Plan: Make selection informative. Scope: detail panel with label, kind,
+- [ ] 7.1 Plan: Make selection informative. Scope: detail panel with label, kind,
   `source_file:line`, community label, degree, bridge status and in/out neighbours grouped by
   relation, with clickable neighbours and a bounded list plus "and N more"; signature fetched from
   `/api/explain` when served and omitted on `file://`; legend from the aggregates (color, label,
@@ -193,17 +165,14 @@
     order is unchanged after rendering.
   - Overview tooltip and depth hint read the label, not `Community 4`.
   - `contains`, `imports` and `depends_on` are visually distinct and documented in the legend.
-- [ ] 7.D Do: Implement panel, legend, relation styles and the label fixes.
-- [ ] 7.C Check: Verify each criterion in a browser; capture the panel and legend states.
-- [ ] 7.A Act: If the API fetch adds perceptible latency to selection, prefetch on hover or cache
+- [ ] 7.2 Do: Implement panel, legend, relation styles and the label fixes.
+- [ ] 7.3 Check: Verify each criterion in a browser; capture the panel and legend states.
+- [ ] 7.4 Act: If the API fetch adds perceptible latency to selection, prefetch on hover or cache
   per node; record which.
-
-### Attempt history (7)
-<!-- empty unless a retry is needed -->
 
 ## 8. Preserve and re-verify the search surface
 
-- [ ] 8.P Plan: The refonte must not regress `navigator-query-view`. Scope: re-verify debounced
+- [ ] 8.1 Plan: The refonte must not regress `navigator-query-view`. Scope: re-verify debounced
   `/api/query` search, verdict/score/suggestions rendering, ranked result list, click-to-focus,
   matched-subgraph highlight and reset, and the client-side substring fallback on `file://`;
   integrate results with the facet state so filtered-out hits are marked rather than silently
@@ -214,18 +183,15 @@
   - Clicking a result focuses the node at the current depth.
   - Highlight and reset behave as before.
   - Results excluded by an active facet are marked as filtered.
-- [ ] 8.D Do: Re-wire the search surface onto the new state object; add the filtered-result
+- [ ] 8.2 Do: Re-wire the search surface onto the new state object; add the filtered-result
   marking.
-- [ ] 8.C Check: Run every `navigator-query-view` scenario against the refonted viewer.
-- [ ] 8.A Act: Any scenario that cannot be preserved is escalated as a spec conflict before
+- [ ] 8.3 Check: Run every `navigator-query-view` scenario against the refonted viewer.
+- [ ] 8.4 Act: Any scenario that cannot be preserved is escalated as a spec conflict before
   proceeding — not silently dropped.
-
-### Attempt history (8)
-<!-- empty unless a retry is needed -->
 
 ## 9. Supersede `add-profondeur-view-selector`
 
-- [ ] 9.P Plan: Close the overlapping change explicitly. Scope: archive
+- [ ] 9.1 Plan: Close the overlapping change explicitly. Scope: archive
   `openspec/changes/add-profondeur-view-selector` as superseded by this change, with a pointer to
   the `html-depth-selector` delta carried here; confirm no requirement of that change is lost or
   silently dropped.
@@ -234,18 +200,15 @@
     delta, or is listed with an explicit reason for omission.
   - Its `html-lod-viewer` modifications are covered by this change's delta.
   - `openspec list` no longer shows it as an open change.
-- [ ] 9.D Do: Produce the requirement-by-requirement mapping table, then archive it as superseded.
-- [ ] 9.C Check: Review the mapping table for gaps; run `openspec validate --strict` on this
+- [ ] 9.2 Do: Produce the requirement-by-requirement mapping table, then archive it as superseded.
+- [ ] 9.3 Check: Review the mapping table for gaps; run `openspec validate --strict` on this
   change.
-- [ ] 9.A Act: If a requirement has no home here, either add it to this change's delta or record
+- [ ] 9.4 Act: If a requirement has no home here, either add it to this change's delta or record
   why it is intentionally dropped — never leave it unmapped.
-
-### Attempt history (9)
-<!-- empty unless a retry is needed -->
 
 ## 10. Acceptance run and documentation
 
-- [ ] 10.P Plan: Produce the evidence the archived change never produced. Scope: full acceptance on
+- [ ] 10.1 Plan: Produce the evidence the archived change never produced. Scope: full acceptance on
   both corpora — payload sizes and per-item averages, overview load time, drill-down time,
   pan/zoom frame rate, browser heap, offline open with networking disabled; update PRD §12
   (`PRD.md:680–693`) with a viewer subsection and the size budget; remove the `html-lod-viewer`
@@ -258,15 +221,12 @@
   - `cabal test` green, including the golden, budget and JS-syntax tests.
   - PRD updated; no spec cites a non-existent PRD row.
   - Every measurement is recorded with its method — no empty evidence fields.
-- [ ] 10.D Do: Run both corpora, record every figure in the results table, update the docs.
-- [ ] 10.C Check: Compare each figure against its criterion; mark PASS/FAIL per row.
-- [ ] 10.A Act: If the byte budget passes but latency or heap fails, record those numbers as the
+- [ ] 10.2 Do: Run both corpora, record every figure in the results table, update the docs.
+- [ ] 10.3 Check: Compare each figure against its criterion; mark PASS/FAIL per row.
+- [ ] 10.4 Act: If the byte budget passes but latency or heap fails, record those numbers as the
   trigger for the deferred sidecar/WebGL follow-up (design D6) and open it with this evidence
   attached. If both pass, record in `html-lod-viewer` that inline data remains the architecture at
   this scale, closing the standing spec/design contradiction.
-
-### Attempt history (10)
-<!-- empty unless a retry is needed -->
 
 ## Results table
 
@@ -278,9 +238,9 @@
 | Aggregates payload | 4,545,244 B | proportional to communities | _tbd_ |
 | Document (HTML+CSS+JS) | 175,855 B | + vendored renderer (~600 KB) | _tbd_ |
 | Network requests on `file://` | 1 (CDN renderer) | 0 | _tbd_ |
-| Overview load | _record in 1.D_ | < 3 s | _tbd_ |
-| Drill-down | _record in 1.D_ | < 500 ms | _tbd_ |
-| Browser heap | _record in 1.D_ | recorded | _tbd_ |
+| Overview load | _record in 1.2_ | < 3 s | _tbd_ |
+| Drill-down | _record in 1.2_ | < 500 ms | _tbd_ |
+| Browser heap | _record in 1.2_ | recorded | _tbd_ |
 | Tests over generated HTML | 0 | golden + budget + JS syntax | _tbd_ |
 
 ### Graphos Self-Graph (8,594 nodes / 30,934 edges)
@@ -292,7 +252,7 @@
 | Aggregates payload | 207,347 B | proportional to communities | 207,347 B |
 | Document (HTML+CSS+JS) | 519,459 B | + vendored renderer (~600 KB) | 519,459 B |
 | Network requests on `file://` | 1 (CDN renderer) | 0 | 1 (still CDN; task 4) |
-| Overview load | _recorded in 1.D_ | < 3 s | _tbd_ |
-| Drill-down | _recorded in 1.D_ | < 500 ms | _tbd_ |
-| Browser heap | _recorded in 1.D_ | recorded | _tbd_ |
+| Overview load | _recorded in 1.2_ | < 3 s | _tbd_ |
+| Drill-down | _recorded in 1.2_ | < 500 ms | _tbd_ |
+| Browser heap | _recorded in 1.2_ | recorded | _tbd_ |
 | Tests over generated HTML | 0 | golden + budget + JS syntax | _tbd_ |
