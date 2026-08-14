@@ -9,6 +9,8 @@ module Graphos.CLI.Parser
   , symbolsOpts
   , neighborsOpts
   , pathOpts
+  , explainOpts
+  , commonQueryOptsP
   , serveOpts
   , pushOpts
   , pushMemgraphOpts
@@ -36,10 +38,10 @@ import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConf
 
 data Command
   = Run PipelineConfig
-  | QueryCmd Text Text Int FilePath
+  | QueryCmd Text Text CommonQueryOpts
   | ResearchCmd [Text] [Text] FilePath Bool Bool (Maybe FilePath) (Maybe FilePath) (Maybe Text) CommonQueryOpts
-  | PathCmd Text Text FilePath
-  | ExplainCmd Text FilePath
+  | PathCmd Text Text CommonQueryOpts
+  | ExplainCmd Text CommonQueryOpts
   | SymbolsCmd Text CommonQueryOpts
   | NeighborsCmd Text Int CommonQueryOpts
   | PushCmd FilePath String String String Neo4jPushMode Int
@@ -110,12 +112,22 @@ granularityReader = eitherReader $ \s -> case s of
   "file"     -> Right GranularityFile
   other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
 
+-- | Shared query-family flags: --graph, --budget, --json, --label-width, --edges.
+-- Reused by query/path/explain/symbols/neighbors so every command in the family
+-- accepts the same machine-readable flag surface (query-cli-contract).
+commonQueryOptsP :: Parser CommonQueryOpts
+commonQueryOptsP = CommonQueryOpts
+  <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
+  <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
+  <*> switch (long "json" <> help "Output as JSON")
+  <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
+  <*> flag Semantic All (long "edges" <> help "Edge mode: semantic (default) or all")
+
 queryOpts :: Parser Command
 queryOpts = QueryCmd
   <$> argument str (metavar "QUESTION")
   <*> flag "bfs" "dfs" (long "dfs" <> help "Use DFS traversal instead of BFS")
-  <*> option auto (long "budget" <> value 2000 <> help "Token budget for query")
-  <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
+  <*> commonQueryOptsP
 
 researchOpts :: Parser Command
 researchOpts = do
@@ -140,31 +152,24 @@ researchOpts = do
 symbolsOpts :: Parser Command
 symbolsOpts = SymbolsCmd
   <$> argument str (metavar "NAME")
-  <*> (CommonQueryOpts
-       <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
-       <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
-       <*> switch (long "json" <> help "Output as JSON")
-       <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
-       <*> flag Semantic All (long "edges" <> help "Edge mode: semantic (default) or all")
-      )
+  <*> commonQueryOptsP
 
 neighborsOpts :: Parser Command
 neighborsOpts = NeighborsCmd
-  <$> argument str (metavar "NODE_ID")
+  <$> argument str (metavar "NODE")
   <*> option auto (long "depth" <> value 2 <> help "BFS depth (default: 2)")
-  <*> (CommonQueryOpts
-       <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
-       <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
-       <*> switch (long "json" <> help "Output as JSON")
-       <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
-       <*> flag Semantic All (long "edges" <> help "Edge mode: semantic (default) or all")
-      )
+  <*> commonQueryOptsP
 
 pathOpts :: Parser Command
 pathOpts = PathCmd
   <$> argument str (metavar "FROM")
   <*> argument str (metavar "TO")
-  <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
+  <*> commonQueryOptsP
+
+explainOpts :: Parser Command
+explainOpts = ExplainCmd
+  <$> argument str (metavar "NODE")
+  <*> commonQueryOptsP
 
 serveOpts :: Parser Command
 serveOpts = Serve
@@ -224,7 +229,7 @@ commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
   <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
-  <> command "explain" (info (ExplainCmd <$> argument str (metavar "NODE") <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")) (progDesc "Explain a node"))
+  <> command "explain" (info explainOpts (progDesc "Explain a node"))
   <> command "symbols" (info symbolsOpts (progDesc "Look up an exact symbol by name"))
   <> command "neighbors" (info neighborsOpts (progDesc "Expand neighborhood around a node"))
   <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
@@ -282,18 +287,21 @@ renderCommandReference = unlines $
   , ""
   , "graphos query QUESTION          Query the knowledge graph"
   , "  --dfs / --budget N / --graph FILE"
+  , "  --json / --label-width N / --edges"
   , ""
   , "graphos path FROM TO             Find shortest path"
-  , "  --graph FILE"
+  , "  --graph FILE / --budget N / --json"
+  , "  --label-width N / --edges"
   , ""
   , "graphos explain NODE            Explain a node"
-  , "  --graph FILE"
+  , "  --graph FILE / --budget N / --json"
+  , "  --label-width N / --edges"
   , ""
   , "graphos symbols NAME            Look up symbol by name"
   , "  --graph FILE / --budget N / --json"
   , "  --label-width N / --edges"
   , ""
-  , "graphos neighbors NODE_ID       Expand neighborhood"
+  , "graphos neighbors NODE          Expand neighborhood (id or display name)"
   , "  --depth N / --graph FILE / --budget N"
   , "  --json / --label-width N / --edges"
   , ""

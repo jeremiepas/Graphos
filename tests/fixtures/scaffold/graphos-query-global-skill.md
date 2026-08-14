@@ -40,18 +40,21 @@ graphos [PATH]                  Build the knowledge graph (default: .)
 
 graphos query QUESTION          Query the knowledge graph
   --dfs / --budget N / --graph FILE
+  --json / --label-width N / --edges
 
 graphos path FROM TO             Find shortest path
-  --graph FILE
+  --graph FILE / --budget N / --json
+  --label-width N / --edges
 
 graphos explain NODE            Explain a node
-  --graph FILE
+  --graph FILE / --budget N / --json
+  --label-width N / --edges
 
 graphos symbols NAME            Look up symbol by name
   --graph FILE / --budget N / --json
   --label-width N / --edges
 
-graphos neighbors NODE_ID       Expand neighborhood
+graphos neighbors NODE          Expand neighborhood (id or display name)
   --depth N / --graph FILE / --budget N
   --json / --label-width N / --edges
 
