@@ -1,19 +1,3 @@
-<!--
-  PDCA-PER-TASK workflow.
-  Each top-level `## N. <task>` is ONE task = ONE complete PDCA micro-cycle.
-  Within a task, run the steps in order and keep checkbox format so progress
-  can be tracked: `- [ ] N.P …`, `- [ ] N.D …`, `- [ ] N.C …`, `- [ ] N.A …`.
-
-  PASS rule:  a task PASSES only when its Check passes AND its Act is OK.
-              A passed task reaches the same done state as in classic SDD.
-  RETRY rule: if Act is NOT OK, the task does NOT pass — record the failed
-              attempt under "### Attempt history (N)" (KEEP THE TRACE, never
-              delete it), then start a NEW P → D → C → A attempt for the same
-              task. Repeat until an attempt passes.
-
-  Everything else matches the official spec-driven workflow.
--->
-
 ## 1. Port the fidelity harness into the Haskell codebase
 
 - [x] 1.P Plan: Land the oracle first so every later task is measurable. Scope: add
@@ -47,7 +31,6 @@
   proceeding — every later Check depends on it.
 
 ### Attempt history (1)
-<!-- empty unless a retry is needed -->
 
 ## 2. Named truncation budget and specifier-preserving normalization
 
@@ -75,7 +58,6 @@
   emitting a specifier-less node.
 
 ### Attempt history (2)
-<!-- empty unless a retry is needed -->
 
 ## 3. Emit `imports` edges from tree-sitter extraction
 
@@ -109,7 +91,6 @@
   a follow-up rather than widening this change.
 
 ### Attempt history (3)
-<!-- empty unless a retry is needed -->
 
 ## 4. Root-anchor build-output ignore names
 
@@ -137,7 +118,6 @@
   `gitignore-parsing` delta before proceeding.
 
 ### Attempt history (4)
-<!-- empty unless a retry is needed -->
 
 ## 5. Make hardcoded ignore names negatable and report exclusions
 
@@ -159,7 +139,6 @@
   rather than reverting to the short-circuit; record the attempt.
 
 ### Attempt history (5)
-<!-- empty unless a retry is needed -->
 
 ## 6. Version `graph.json` and make the loader tolerant
 
@@ -191,7 +170,6 @@
   to a real enum member instead of leaving it degraded.
 
 ### Attempt history (6)
-<!-- empty unless a retry is needed -->
 
 ## 7. Documentation and PRD alignment
 
@@ -211,7 +189,6 @@
 - [ ] 7.A Act: If any documented invocation fails, fix the doc or the flag before closing.
 
 ### Attempt history (7)
-<!-- empty unless a retry is needed -->
 
 ## 8. Two-corpus acceptance run
 
@@ -235,7 +212,6 @@
   accepting.
 
 ### Attempt history (8)
-<!-- empty unless a retry is needed -->
 
 ## Results table
 
