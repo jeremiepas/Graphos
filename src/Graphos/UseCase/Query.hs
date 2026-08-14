@@ -30,6 +30,8 @@ module Graphos.UseCase.Query
   , symbolLookup
   , NeighborsResult(..)
   , neighborhoodExpansion
+  , NodeResolution(..)
+  , resolveNodeArg
   ) where
 
 import Data.Map.Strict (Map)
@@ -39,7 +41,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing)
-import Data.List (sortOn)
+import Data.List (sortOn, nubBy)
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData(..))
 import Data.Aeson (ToJSON(..), object, (.=))
@@ -397,6 +399,42 @@ neighborhoodExpansion startId depth g idx =
                       , nrEdges      = edges
                       , nrMaxDepth   = depth
                       }
+
+-- | Result of resolving a CLI node argument to a graph node.
+-- Used by node-argument query-family commands (e.g. @neighbors@) so an agent
+-- can pass a display name it just saw instead of the internal id.
+data NodeResolution
+  = ResolvedSingle NodeId    -- ^ exactly one node matched
+  | Ambiguous [ScoredNode]   -- ^ more than one node matched; caller must disambiguate
+  | NotFound                 -- ^ no node id and no label matched
+  deriving (Eq, Show, Generic)
+
+instance NFData NodeResolution
+
+-- | Resolve a node argument without fuzzy traversal.
+--
+-- Resolution order (canonical for all node-argument query-family commands):
+--
+--   1. exact node id     (@Map.lookup arg (gNodes g)@)
+--   2. exact label       (@symbolLookup@ case-sensitive path)
+--   3. case-insensitive label (@symbolLookup@ fallback path)
+--
+-- A single match yields 'ResolvedSingle'; multiple matches yield 'Ambiguous'
+-- (the caller lists candidates and re-runs with an id — no BFS, no fuzzy path);
+-- no match yields 'NotFound'. Pure: the CLI dispatcher wires the resolved id
+-- into 'neighborhoodExpansion'.
+resolveNodeArg :: Text -> Graph -> GraphIndex -> NodeResolution
+resolveNodeArg arg g idx =
+  case Map.lookup arg (gNodes g) of
+    Just _  -> ResolvedSingle arg
+    Nothing ->
+      -- The label index stores each node under both its exact and lowercased
+      -- label, so an already-lowercase label yields the node twice; dedup by
+      -- node id so a single node never reads as ambiguous.
+      case nubBy (\a b -> snNodeId a == snNodeId b) (srFound (symbolLookup arg g idx)) of
+        []      -> NotFound
+        [sn]    -> ResolvedSingle (snNodeId sn)
+        cands   -> Ambiguous cands
 
 -- | Compute proximity score: 1/(1+hops) where hops is the BFS distance.
 proximityScore :: NodeId -> NodeId -> GraphIndex -> Double

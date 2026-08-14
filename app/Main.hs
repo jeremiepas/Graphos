@@ -23,15 +23,15 @@ import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleF
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
-import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion)
+import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
 import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
 import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors, degree)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.Domain.Graph.Index (communityOfNode)
-import Graphos.UseCase.Query.Refine (defaultRefineConfig, refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON)
+import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
@@ -180,31 +180,41 @@ main = do
                      Just cypher -> logInfo env $ T.pack $ "  Neo4j: " ++ cypher
                      Nothing     -> pure ()
 
-    QueryCmd question mode budget graphPath -> do
-      env <- defaultLogEnv LogInfo
+    QueryCmd question mode qopts -> do
+      -- In JSON mode raise the threshold so INFO/DEBUG never reach stdout
+      -- (defaultLogEnv routes non-error levels to stdout), keeping the JSON a
+      -- single clean document; errors still go to stderr.
+      env <- defaultLogEnv (if cqoJson qopts then LogError else LogInfo)
+      let graphPath = cqoGraphPath qopts
+          budget    = cqoBudget qopts
       logInfo env $ "Query: " <> question <> " (" <> mode <> ", budget=" <> T.pack (show budget) <> ")"
       loadResult <- loadGraphFromFile graphPath
       case loadResult of
-        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Left err -> (if cqoJson qopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
               scoredResp = queryGraphWithIndexScored g idx question mode budget
-              refineCfg = defaultRefineConfig
+              refineCfg = RefineConfig { rcEdgeMode = cqoEdges qopts, rcLabelWidth = cqoLabelWidth qopts }
               refinedResp = refineResponse refineCfg (gNodes g) scoredResp
-          putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
+          if cqoJson qopts
+            then putStrLn $ T.unpack $ renderQueryResponseJSON refinedResp
+            else putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
 
-    PathCmd from to graphPath -> do
-      env <- defaultLogEnv LogInfo
+    PathCmd from to popts -> do
+      env <- defaultLogEnv (if cqoJson popts then LogError else LogInfo)
+      let graphPath = cqoGraphPath popts
       logInfo env $ "Path: " <> from <> " -> " <> to
       logDebug env "Loading graph from disk..."
       loadResult <- loadGraphFromFile graphPath
       case loadResult of
-        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Left err -> (if cqoJson popts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-          case pathQueryWithIndex g idx from to of
+              mpath = pathQueryWithIndex g idx from to
+          if cqoJson popts then putStrLn $ T.unpack $ renderPathResultJSON mpath else
+           case mpath of
             Nothing -> putStrLn $ "No path found between '" ++ T.unpack from ++ "' and '" ++ T.unpack to ++ "'"
             Just path -> do
               let hops = length path - 1
@@ -224,15 +234,18 @@ main = do
                     go ns
               go path
 
-    ExplainCmd node graphPath -> do
-      putStrLn $ "[graphos] Explain: " ++ T.unpack node
+    ExplainCmd node eopts -> do
+      let graphPath = cqoGraphPath eopts
+      (if cqoJson eopts then hPutStrLn stderr else putStrLn) $ "[graphos] Explain: " ++ T.unpack node
       loadResult <- loadGraphFromFile graphPath
       case loadResult of
-        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Left err -> (if cqoJson eopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-          case explainNodeWithIndex g idx node of
+              mnode = explainNodeWithIndex g idx node
+          if cqoJson eopts then putStrLn $ T.unpack $ renderExplainResultJSON mnode else
+           case mnode of
             Nothing -> putStrLn $ "Node not found: " ++ T.unpack node
             Just n -> do
               putStrLn $ "NODE: " ++ T.unpack (nodeLabel n)
@@ -275,17 +288,28 @@ main = do
             then putStrLn $ T.unpack $ renderSymbolResultJSON result
             else putStrLn $ T.unpack $ renderSymbolResultText (cqoBudget symOpts) result
 
-    NeighborsCmd nodeIdArg depth nbrOpts -> do
+    NeighborsCmd nodeArg depth nbrOpts -> do
       loadResult <- loadGraphFromFile (cqoGraphPath nbrOpts)
       case loadResult of
-        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Left err -> (if cqoJson nbrOpts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-              result = neighborhoodExpansion nodeIdArg depth g idx
-          if cqoJson nbrOpts
-            then putStrLn $ T.unpack $ renderNeighborsResultJSON result
-            else putStrLn $ T.unpack $ renderNeighborsResultText (cqoBudget nbrOpts) result
+          case resolveNodeArg nodeArg g idx of
+            ResolvedSingle nid -> do
+              let result = neighborhoodExpansion nid depth g idx
+              if cqoJson nbrOpts
+                then putStrLn $ T.unpack $ renderNeighborsResultJSON result
+                else putStrLn $ T.unpack $ renderNeighborsResultText (cqoBudget nbrOpts) result
+            Ambiguous cands ->
+              if cqoJson nbrOpts
+                then putStrLn $ T.unpack $ renderAmbiguousJSON cands
+                else putStrLn $ T.unpack $ renderAmbiguousText cands
+            NotFound -> do
+              if cqoJson nbrOpts
+                then putStrLn $ T.unpack $ renderNotFoundJSON nodeArg
+                else putStrLn $ T.unpack $ renderNotFoundText nodeArg
+              exitWith (ExitFailure 1)
 
     ResearchCmd termsArg seedsArg graphPath doHtml doJson termsFileArg labelArg researchMode commonOpts -> do
       hSetBuffering stdout NoBuffering

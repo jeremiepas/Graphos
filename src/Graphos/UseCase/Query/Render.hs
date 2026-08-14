@@ -13,6 +13,10 @@ module Graphos.UseCase.Query.Render
   , renderNeighborsResultJSON
   , renderPathResultJSON
   , renderExplainResultJSON
+  , renderAmbiguousText
+  , renderAmbiguousJSON
+  , renderNotFoundText
+  , renderNotFoundJSON
 
     -- * Truncation
   , truncateOutput
@@ -71,9 +75,9 @@ renderQueryResponseText budget resp =
       fullText = header <> nodesHeader <> nodesText <> edgesHeader <> edgesText <> suggestionLine
   in truncateOutput budget fullText
 
--- | Render a QueryResponse as JSON via Aeson.
+-- | Render a QueryResponse as a single JSON document via Aeson.
 renderQueryResponseJSON :: QueryResponse -> Text
-renderQueryResponseJSON resp = T.pack (show (toJSON resp))
+renderQueryResponseJSON resp = encodeText (toJSON resp)
 
 -- | Render a SymbolResult as human-readable text.
 renderSymbolResultText :: Int -> SymbolResult -> Text
@@ -84,9 +88,9 @@ renderSymbolResultText budget sr =
              nodeLines = map renderScoredNode (srFound sr)
          in truncateOutput budget (header <> T.unlines nodeLines)
 
--- | Render a SymbolResult as JSON.
+-- | Render a SymbolResult as a single JSON document.
 renderSymbolResultJSON :: SymbolResult -> Text
-renderSymbolResultJSON sr = T.pack (show (toJSON sr))
+renderSymbolResultJSON sr = encodeText (toJSON sr)
 
 -- | Render a NeighborsResult as human-readable text.
 renderNeighborsResultText :: Int -> NeighborsResult -> Text
@@ -102,9 +106,9 @@ renderNeighborsResultText budget nr =
           edgesText = T.unlines edgeLines
       in truncateOutput budget (header <> nodesText <> edgesHeader <> edgesText)
 
--- | Render a NeighborsResult as JSON.
+-- | Render a NeighborsResult as a single JSON document.
 renderNeighborsResultJSON :: NeighborsResult -> Text
-renderNeighborsResultJSON nr = T.pack (show (toJSON nr))
+renderNeighborsResultJSON nr = encodeText (toJSON nr)
 
 -- | Render a scored node as a text line.
 renderScoredNode :: ScoredNode -> Text
@@ -168,3 +172,31 @@ renderExplainResultJSON (Just node) =
     , "source_file" .= nodeSourceFile node
     , "community"   .= nodeCommunityId node
     ])
+
+-- | Render an ambiguous node-argument resolution as text: list every candidate
+-- with its id and source location so the caller can re-run with a node id.
+renderAmbiguousText :: [ScoredNode] -> Text
+renderAmbiguousText candidates =
+  "Ambiguous: " <> T.pack (show (length candidates))
+    <> " nodes match. Re-run with a node id:\n"
+    <> T.unlines
+         [ "  " <> snLabel c <> " [" <> snNodeId c <> "] (" <> snSourceFile c <> ")"
+         | c <- candidates ]
+
+-- | Render an ambiguous node-argument resolution as a single JSON document:
+-- @{"ambiguous":true,"candidates":[{"id":..,"label":..,"source_file":..}]}@.
+renderAmbiguousJSON :: [ScoredNode] -> Text
+renderAmbiguousJSON candidates = encodeText $ object
+  [ "ambiguous"  .= True
+  , "candidates" .=
+      [ object [ "id" .= snNodeId c, "label" .= snLabel c, "source_file" .= snSourceFile c ]
+      | c <- candidates ]
+  ]
+
+-- | Render a not-found node argument as text.
+renderNotFoundText :: Text -> Text
+renderNotFoundText arg = "Not found: no node id or label matches '" <> arg <> "'."
+
+-- | Render a not-found node argument as a single JSON document: @{"not_found":<arg>}@.
+renderNotFoundJSON :: Text -> Text
+renderNotFoundJSON arg = encodeText $ object [ "not_found" .= arg ]
