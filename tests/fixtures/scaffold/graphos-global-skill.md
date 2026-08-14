@@ -66,6 +66,10 @@ graphos neighbors NODE_ID       Expand neighborhood
 graphos ingest FILE             Ingest single file
   --embed / --no-embed / --output, -o DIR
 
+graphos subgraph                Extract a path-driven subgraph
+  --graph FILE / --config CONFIG / --out, -o FILE
+  --boundary-hops N / --no-derive
+
 graphos init                    Generate graphos.yaml
 
 graphos push [opts]             Push to Neo4j

@@ -14,21 +14,35 @@
   - All three components compile under `cabal build --flag dev` with `-Werror`.
   - `ImportEdgesSpec` emits a structured Hspec failure (not an uncaught exception) on a graph
     with zero `imports` edges.
-  - On today's `solario-core` graph `ImportEdgesSpec` reports recall 0.0 with 203 missing pairs
+  - On today's `typescipt-repository` graph `ImportEdgesSpec` reports recall 0.0 with 203 missing pairs
     and the spec fails (baseline captured for later comparison).
   - `GraphCoverageSpec` reports the 86 missing files grouped by class and the spec fails.
   - `graphos subgraph --graph <fixture> --config <fixture> --out <tmp>` produces a JSON file
     loadable by `graphos query --graph <out>` without schema errors.
   - Every flag shown in `README.md` exists in the CLI parser or spec module.
-- [ ] 1.D Do: Implement the pure `Subgraph` module, the two Hspec spec modules, the
+- [x] 1.D Do: Implement the pure `Subgraph` module, the two Hspec spec modules, the
   `graphos subgraph` CLI subcommand; update `graphos.cabal`; remove the Python scripts;
   document in `README.md`; record the baseline numbers in this file.
-- [ ] 1.C Check: Run `cabal test` against a freshly built graph of a TypeScript repository and
+  Done. `src/Graphos/UseCase/Subgraph.hs` (tier/provenance metadata, derived-edge fallback),
+  `ImportEdgesSpec` (3 tests) and `GraphCoverageSpec` (2 tests) as structured Hspec oracles,
+  `graphos subgraph` CLI with `--graph/--config/--out/--boundary-hops/--no-derive`,
+  `renderCommandReference` + scaffold golden fixtures updated, `README.md` harness section
+  rewritten (fixed `--match` patterns). Cabal needed no changes (already wired). Python
+  harness scripts referenced by the plan do not exist in `scripts/` (deviation). Baselines on
+  the Graphos repo: ImportEdges 3/3, GraphCoverage 2/2, Subgraph 7/7, full suite 397/0;
+  sample subgraph = 152 nodes / 2,758 edges, loadable via `--graph`.
+- [x] 1.C Check: Run `cabal test` against a freshly built graph of a TypeScript repository and
   against the Graphos repository. Record PASS/FAIL per criterion, and record the baseline
   metrics table.
+  Done (Graphos repository; typescipt-repository TypeScript repo not available in this workspace —
+  see check.md deviation). Compilation PASS, ImportEdgesSpec PASS (3/3), GraphCoverageSpec
+  PASS (2/2), subgraph CLI PASS (flags recognized, output loadable by query/explain/neighbors),
+  cleanup/docs PASS.
 - [ ] 1.A Act: If baselines are reproducible, freeze them as the "before" row of the results
   table used by tasks 3, 5 and 8. If a spec is non-deterministic, fix determinism before
   proceeding — every later Check depends on it.
+  The Graphos-repo baselines above are deterministic and can be frozen as the "before" row
+  once the typescipt-repository corpus is rebuilt; blocking on the missing TypeScript corpus.
 
 ### Attempt history (1)
 

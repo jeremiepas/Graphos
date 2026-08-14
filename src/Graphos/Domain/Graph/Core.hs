@@ -24,7 +24,7 @@ module Graphos.Domain.Graph.Core
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (Value)
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
 import Data.Bits (xor, shiftR, (.&.))
 import Data.List (sort)
 import Data.Map.Strict (Map)
@@ -56,6 +56,27 @@ data Graph = Graph
 -- Essential for preventing thunk accumulation during Leiden iterations.
 instance NFData Graph where
   rnf Graph{} = ()
+
+instance ToJSON Graph where
+  toJSON g = object
+    [ "nodes"      .= gNodes g
+    , "edges"      .= gEdges g
+    , "adj_fwd"    .= gAdjFwd g
+    , "adj_back"   .= gAdjBack g
+    , "directed"   .= gDirected g
+    , "compositions" .= gCompositions g
+    , "hash"       .= gHash g
+    ]
+
+instance FromJSON Graph where
+  parseJSON = withObject "Graph" $ \v -> Graph
+    <$> v .: "nodes"
+    <*> v .: "edges"
+    <*> v .: "adj_fwd"
+    <*> v .: "adj_back"
+    <*> v .: "directed"
+    <*> v .: "compositions"
+    <*> v .: "hash"
 
 -- ───────────────────────────────────────────────
 -- Construction
