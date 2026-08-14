@@ -2,6 +2,7 @@
 module Graphos.Infrastructure.Export.JSON
   ( exportGraph
   , exportGraphWithLabels
+  , exportSubgraphJSON
   , saveCheckpoint
   ) where
 
@@ -12,6 +13,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 
 import Graphos.Domain.Types
+import qualified Graphos.Domain.Types.Graph as G (LabeledGraph(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 
 -- | Export graph as JSON
@@ -32,6 +34,20 @@ exportGraphWithLabels g analysis mLabels path = do
         Just labels -> base ++ ["community_labels" .= labels]
         Nothing    -> base
   BSL.writeFile path (encode (object withLabels))
+
+-- | Export a subgraph (a 'LabeledGraph') in the standard graph.json format so
+-- it is directly consumable via @--graph@. Community/analysis sections are
+-- written empty: the query family only needs the node/edge payload.
+exportSubgraphJSON :: G.LabeledGraph -> FilePath -> IO ()
+exportSubgraphJSON g path = do
+  let payload = [ "nodes"            .= Map.elems (G.gNodes g)
+                , "edges"            .= Map.elems (G.gEdges g)
+                , "communities"      .= (Map.empty :: CommunityMap)
+                , "cohesion"         .= (Map.empty :: CohesionMap)
+                , "god_nodes"        .= ([] :: [GodNode])
+                , "community_labels" .= (Map.empty :: Map Int Text)
+                ]
+  BSL.writeFile path (encode (object payload))
 
 -- | Save a checkpoint of the graph during pipeline execution.
 -- Writes nodes and edges extracted so far; communities/analysis are empty.

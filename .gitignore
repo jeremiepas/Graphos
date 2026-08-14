@@ -16,6 +16,7 @@ graphos-out/
 result
 result-*
 .tmp/
+tmp/
 .worktrees/
 # .opencode local dev config (agent + skills tracked, rest ignored)
 .opencode/*
@@ -29,3 +30,4 @@ monitoring/prometheus/data/
 monitoring/grafana/data/
 .direnv/
 .devenv/
+.aider*

@@ -6,7 +6,7 @@ license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
-  version: "1.0"
+  version: "1.1"
   generatedBy: "1.7.0"
 ---
 
@@ -109,7 +109,19 @@ Implement tasks from an OpenSpec change.
    b. **Ask for confirmation**: "Next task: N. <task name>. Continue?"
       - If the user declines or wants to change task: pause and ask what to do.
       - If the user agrees: proceed.
-   c. **Load ONLY this task's context**:
+   c. **Compact top-level context**: Now that the task is known, stop carrying
+      proposal/design/specs details in active context. Replace them with a
+      one-line pointer per file (path + role). Do NOT re-read them for this
+      task unless it explicitly references them.
+   d. **Create a per-task todo list** with the todo tool mirroring the PDCA
+      cycle:
+      - Create plan.md, do.md, check.md (before code)
+      - Implement code per do.md
+      - Run checks from check.md; record results
+      - Update do.md with deviations
+      - Generate act.md
+      - Mark N.P/N.D/N.C/N.A done in tasks.md
+   e. **Load ONLY this task's context**:
       - Read the task's entry in `tasks.md` (1-2 paragraphs max).
       - Read the task's per-task files from `contextFiles`:
         - `tasks/<task-slug>/plan.md` (scope, check criteria, affected modules)
@@ -119,22 +131,23 @@ Implement tasks from an OpenSpec change.
       - Do NOT read per-task files from other tasks.
       - Do NOT re-read the full proposal/design/specs unless the task explicitly
         references them.
-   d. **Implement the code changes** required by `do.md`.
-   e. **Run the checks** from `check.md` against the criteria in `plan.md`.
+   f. **Implement the code changes** required by `do.md`.
+   g. **Run the checks** from `check.md` against the criteria in `plan.md`.
       Update `check.md` with actual results.
-   f. **Update `do.md`** to reflect what was actually implemented
+   h. **Update `do.md`** to reflect what was actually implemented
       (deviations from plan).
-   g. **Generate `act.md`** as the final verdict trace for the whole PDCA cycle.
-   h. **Mark the task complete** in `tasks.md`: change `- [ ]` to `- [x]` for
-      `N.P`, `N.D`, `N.C`, and `N.A`.
-   i. **Clear context**: write a 2-line summary of the completed task. Do not
+   i. **Generate `act.md`** as the final verdict trace for the whole PDCA cycle.
+   j. **Mark the task complete** in `tasks.md`: change `- [ ]` to `- [x]` for
+      `N.P`, `N.D`, `N.C`, and `N.A`. Mark the todo list items done as they
+      complete.
+   k. **Clear context**: write a 2-line summary of the completed task. Do not
       carry the detailed task files forward into the next cycle.
 
    **Loop / ask before next task:**
    After completing the task, ask:
    > "Task N complete. Continue to task N+1? (yes/no)"
 
-   - If yes: identify the next pending task and repeat from step 6b.
+   - If yes: identify the next pending task and repeat from step 6a.
    - If no: pause, show overall progress, and wait for direction.
    - If all tasks are complete: proceed to Step 7.
 
@@ -159,6 +172,8 @@ Implement tasks from an OpenSpec change.
 
 Task N/M: <task name>
 
+Compacting top-level context (proposal/design/specs → pointers only).
+Todo created for task N (Plan → Do → Check → Act).
 Loading only this task's context...
 
 [...implementation happening...]
@@ -221,7 +236,8 @@ Task N is complete. To continue, ask me to proceed with the next task or tell me
 - Process ONE task per cycle; ask before loading the next
 - Always read context files before starting (from the apply instructions output)
 - Respect any context-budget directive in the schema's `apply.instruction`
-- Read top-level context once, then only the current task's per-task files + affected source files
+- Read top-level context once, then compact it once the current task is known
+- Create a per-task todo list (Plan → Do → Check → Act) before loading task files
 - Do not accumulate context across tasks; clear it after each act.md
 - Do not read per-task files for tasks that are not currently being worked on
 - If task is ambiguous, pause and ask before implementing

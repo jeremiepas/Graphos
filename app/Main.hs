@@ -7,7 +7,7 @@ import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
 import Data.Maybe (isJust)
-import Data.Aeson (encode)
+import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
 import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn)
 import qualified Data.Text.IO as TIO
@@ -15,6 +15,9 @@ import System.IO (stderr)
 
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), defaultConfig)
+import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
+import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
+import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
@@ -24,7 +27,7 @@ import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, exp
 import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
 import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
-import Graphos.Domain.Graph (gNodes, gEdges, neighbors, degree)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors, degree)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (defaultRefineConfig, refineResponse)
@@ -489,6 +492,32 @@ main = do
           when (sfrEmbeddingCount res > 0) $
             logInfo env $ T.pack $ "  Embeddings: " ++ show (sfrEmbeddingCount res) ++ " vectors"
 
+    SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
+      case mConfigPath of
+        Nothing -> do
+          hPutStrLn stderr "[graphos] subgraph: --config is required (JSON: named subsystems with path patterns)"
+          exitWith (ExitFailure 1)
+        Just configPath -> do
+          putStrLn $ "[graphos] Subgraph: loading " ++ graphPath
+          loadResult <- loadGraphFromFile graphPath
+          case loadResult of
+            Left err -> do
+              putStrLn $ "Error: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right loaded -> do
+              mCfg <- decode <$> BL.readFile configPath
+              case mCfg of
+                Nothing -> do
+                  hPutStrLn stderr $ "[graphos] subgraph: failed to parse config: " ++ configPath
+                  exitWith (ExitFailure 1)
+                Just cfg -> do
+                  let subCfg = cfg { scMaxHops = boundaryHops, scIncludeDerived = not noDerive }
+                      sub = extractSubgraph (toLabeledGraph (lrGraph loaded)) subCfg
+                  putStrLn $ "[graphos] Subgraph: " ++ show (Map.size (LG.gNodes sub))
+                           ++ " nodes, " ++ show (Map.size (LG.gEdges sub)) ++ " edges"
+                  exportSubgraphJSON sub outPath
+                  putStrLn $ "[graphos] Subgraph written to " ++ outPath
+
     LServers -> do
       putStrLn "[graphos] Discovering available LSP servers..."
       servers <- discoverLanguageServers
@@ -548,6 +577,17 @@ main = do
 -- ───────────────────────────────────────────────
 -- Helpers
 -- ───────────────────────────────────────────────
+
+-- | Convert the rich 'Graph' (edges keyed by endpoint pair) into the plain
+-- 'LabeledGraph' used by the pure subgraph module.
+toLabeledGraph :: Graph -> LG.LabeledGraph
+toLabeledGraph gr = LG.LabeledGraph
+  { LG.gNodes   = gNodes gr
+  , LG.gEdges   = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges gr)]
+  , LG.gAdjFwd  = gAdjFwd gr
+  , LG.gAdjBack = gAdjBack gr
+  }
+
 
 -- ───────────────────────────────────────────────
 -- graphos init — generate config file

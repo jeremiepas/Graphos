@@ -2,7 +2,7 @@
 
 ## Why
 
-A field postmortem (2026-08-04, `solario-core`, 78k-node graph) showed that an AI agent
+A field postmortem (2026-08-04, `typescipt-repository`, 78k-node graph) showed that an AI agent
 using `graphos query` burned ~40 tool calls and **never answered** the question it was
 asked. The failure was not graph quality alone — the query-family CLI (`query`, `path`,
 `explain`; PRD §13.1) actively misled the caller:
