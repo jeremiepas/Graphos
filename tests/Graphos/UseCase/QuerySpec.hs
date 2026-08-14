@@ -8,8 +8,8 @@ import qualified Data.Map.Strict as Map
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Graph.Index (buildIndexWithLabels)
-import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..))
-import Graphos.UseCase.Query.Render (renderPathResultJSON, renderExplainResultJSON)
+import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..), resolveNodeArg, NodeResolution(..))
+import Graphos.UseCase.Query.Render (renderPathResultJSON, renderExplainResultJSON, renderQueryResponseJSON)
 import Graphos.Domain.Graph.Score (MatchVerdict(..))
 
 -- Helper: create a test node
@@ -229,6 +229,53 @@ spec = do
           result = neighborhoodExpansion "nonexistent" 2 g idx
       nrCenterNode result `shouldBe` Nothing
       nrNodes result `shouldBe` []
+
+  describe "resolveNodeArg" $ do
+    it "resolves an exact node id to ResolvedSingle" $ do
+      let ext = extractionFromLists [testNode "center", testNode "other"] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+      resolveNodeArg "center" g idx `shouldBe` ResolvedSingle "center"
+
+    it "resolves an exact label to ResolvedSingle (id differs from label)" $ do
+      let ext = extractionFromLists [(testNode "n1") { nodeLabel = "MyLabel" }] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+      resolveNodeArg "MyLabel" g idx `shouldBe` ResolvedSingle "n1"
+
+    it "resolves a case-insensitive label to ResolvedSingle" $ do
+      let ext = extractionFromLists [(testNode "n1") { nodeLabel = "MyLabel" }] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+      resolveNodeArg "mylabel" g idx `shouldBe` ResolvedSingle "n1"
+
+    it "reports Ambiguous with two candidates for a duplicated label" $ do
+      let ext = extractionFromLists
+            [ (testNode "a1") { nodeLabel = "dup", nodeSourceFile = "src/A.hs" }
+            , (testNode "a2") { nodeLabel = "dup", nodeSourceFile = "src/B.hs" }
+            ] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+      case resolveNodeArg "dup" g idx of
+        Ambiguous cands -> length cands `shouldBe` 2
+        other           -> expectationFailure ("expected Ambiguous, got " ++ show other)
+
+    it "reports NotFound for an unknown argument" $ do
+      let ext = extractionFromLists [testNode "exists"] []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+      resolveNodeArg "zzz-no-such-node" g idx `shouldBe` NotFound
+
+  describe "renderQueryResponseJSON" $ do
+    it "emits valid JSON (not Haskell Show) with a verdict field" $ do
+      let ext = extractionFromLists [testNode "AuthModule", testNode "Database"] [testEdge "AuthModule" "Database"]
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          resp = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+          out = renderQueryResponseJSON resp
+      out `shouldSatisfy` (T.pack "\"verdict\"" `T.isInfixOf`)
+      out `shouldSatisfy` (\t -> not (T.pack "fromList" `T.isInfixOf` t))
+      T.take 1 out `shouldBe` T.pack "{"
 
   describe "renderPathResultJSON" $ do
     it "renders Nothing as {\"path\":null}" $ do

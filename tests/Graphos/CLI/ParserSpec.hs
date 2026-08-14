@@ -13,6 +13,17 @@ parseServe args =
     Failure f   -> Left $ fst $ renderFailure f "serve"
     CompletionInvoked _ -> Left "completion"
 
+parseWith :: Parser Command -> [String] -> Either String Command
+parseWith p args =
+  case execParserPure defaultPrefs (info p idm) args of
+    Success cmd -> Right cmd
+    Failure f   -> Left $ fst $ renderFailure f "cmd"
+    CompletionInvoked _ -> Left "completion"
+
+isRight :: Either a b -> Bool
+isRight (Right _) = True
+isRight _         = False
+
 spec :: Spec
 spec = do
   describe "renderCommandReference" $ do
@@ -49,6 +60,22 @@ spec = do
       renderCommandReference `shouldSatisfy` isInfixOf "--edges"
       renderCommandReference `shouldSatisfy` isInfixOf "--api-only"
       renderCommandReference `shouldSatisfy` isInfixOf "--no-api"
+
+    it "lists --json for the query family" $ do
+      renderCommandReference `shouldSatisfy` isInfixOf "--json"
+      renderCommandReference `shouldSatisfy` isInfixOf "--label-width"
+
+  describe "query family uniform flag surface" $ do
+    it "query accepts --json / --label-width / --edges" $ do
+      parseWith queryOpts ["q", "--json", "--label-width", "80", "--edges"] `shouldSatisfy` isRight
+    it "query still accepts --dfs and --budget" $ do
+      parseWith queryOpts ["q", "--dfs", "--budget", "1000"] `shouldSatisfy` isRight
+    it "path accepts --json" $ do
+      parseWith pathOpts ["a", "b", "--json"] `shouldSatisfy` isRight
+    it "explain accepts --json" $ do
+      parseWith explainOpts ["node", "--json"] `shouldSatisfy` isRight
+    it "neighbors accepts a display-name argument (metavar widened)" $ do
+      parseWith neighborsOpts ["Some.Display.Name", "--depth", "1"] `shouldSatisfy` isRight
 
   describe "serveOpts" $ do
     it "parses default serve command" $ do
