@@ -17,6 +17,7 @@ import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TEE
 import Data.Word (Word64)
 import Foreign.Ptr (Ptr, nullPtr, castPtr, plusPtr)
 import Foreign.C.String (CString, peekCString)
@@ -130,8 +131,9 @@ extractText :: Node -> ByteString -> Text
 extractText node content =
   let start = fromIntegral (nodeStartByte node)
       end = fromIntegral (nodeEndByte node)
+      raw = BS.take (end - start) (BS.drop start content)
   in if start >= 0 && end > start && end <= BS.length content
-     then truncateText 200 (TE.decodeUtf8 (BS.take (end - start) (BS.drop start content)))
+     then truncateText 200 (TE.decodeUtf8With TEE.lenientDecode raw)
      else ""
 
 -- | Safe CString peek.
