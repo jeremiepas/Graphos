@@ -118,7 +118,7 @@ The existing `graphos serve --dir <d> --port <p>` command (PRD §13.1) SHALL ser
 
 ### Requirement: Interaction latency targets
 
-The LOD viewer SHALL meet interaction latency targets for graphs up to 100K nodes (PRD §16.1): initial overview load < 3 seconds, drill-down into a community < 500ms, pan/zoom frame rate > 30fps with `hideEdgesOnDrag` enabled.
+The LOD viewer SHALL meet interaction latency targets for graphs up to 100K nodes: initial overview load < 3 seconds, drill-down into a community < 500ms, pan/zoom frame rate > 30fps with `hideEdgesOnDrag` enabled. (The prior citation of PRD §16.1 is removed — `PRD.md` contains no HTML or browser row at that location; see `refonte-html-viewer/specs/html-lod-viewer/spec.md` for the authoritative requirement.)
 
 #### Scenario: Initial load under 3 seconds
 
