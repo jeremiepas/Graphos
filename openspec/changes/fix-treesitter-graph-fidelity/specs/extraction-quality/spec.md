@@ -16,6 +16,8 @@ The maximum length applied to extracted source text SHALL be an exported, docume
 constant rather than a literal at the call site, and SHALL be applied in exactly one place. The
 constant SHALL be referenced by tests so a change of value is a visible, intentional edit.
 
+#### PDCA
+
 - **Plan**: `Core.hs:134` hardcodes `200` and `truncateText` (`Core.hs:145–148`) is generic;
   nothing documents the budget or ties it to the node-ID derivation that consumes it.
 - **Do**: Introduce the named constant, export it, and use it at the single truncation site.
@@ -37,11 +39,14 @@ whitespace are collapsed to single spaces, and when the normalized declaration s
 truncation budget, the retained label SHALL keep both the leading form and the trailing
 specifier clause (eliding the middle) rather than cutting the tail.
 
+#### PDCA
+
 - **Plan**: The specifier is the join key for `imports` edges (see `import-resolution`); a label
   that ends mid-identifier is unusable to any consumer and also poisons `makeNodeId`
   (`Convert.hs:166`, `:286–293`).
 - **Do**: Normalize the declaration text in the label path; elide the middle, never the tail.
-- **Check**: Scenarios below, verifiable by `cabal test`.
+- **Check**: Scenarios below verify normalization, middle elision, and that zero imports lose
+  their specifier, all via `cabal test`.
 - **Act**: If middle-elision harms readability in the HTML export, adjust the display layer
   rather than reintroducing tail truncation.
 
@@ -69,6 +74,15 @@ specifier clause (eliding the middle) rather than cutting the tail.
 The node identity computed for a declaration SHALL be derived from its normalized text, so two
 runs over unchanged source produce identical IDs and an ID never encodes a truncation artifact
 such as a trailing ellipsis.
+
+#### PDCA
+
+- **Plan**: Node IDs currently inherit the truncated label, so an ellipsis becomes part of the
+  identity. Normalized text removes this artifact and makes IDs deterministic across runs.
+- **Do**: Derive `makeNodeId` from the normalized declaration text used for the label.
+- **Check**: The scenario below verifies identical, ellipsis-free IDs across two runs.
+- **Act**: If normalization changes IDs broadly, document the one-time cache invalidation impact
+  in the change notes.
 
 #### Scenario: IDs are stable and artifact-free
 

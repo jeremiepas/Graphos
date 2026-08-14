@@ -19,10 +19,13 @@ loader SHALL accept a file without `schema_version` as the pre-versioning baseli
 refuse a major version it does not implement with a single actionable error naming the file, the
 found version and the supported range.
 
+#### PDCA
+
 - **Plan**: There is no version field anywhere in the writer or reader today, so no migration or
   compatibility decision can be expressed.
 - **Do**: Emit `schema_version` in the incremental writer; parse it optionally in the loader.
-- **Check**: Scenarios below.
+- **Check**: Scenarios below verify version emission, legacy loading, and clear failure on an
+  unsupported major version.
 - **Act**: On the first breaking schema change, bump the major version and add a migration note
   rather than silently changing field semantics.
 
@@ -48,10 +51,13 @@ The loader SHALL map an unknown `relation` to `inferred` and an unknown `file_ty
 each recorded as a counted warning, instead of failing the decode. A `--strict-graph` flag SHALL
 restore fail-fast behaviour for producers that want to validate their output.
 
+#### PDCA
+
 - **Plan**: `Edge.hs:48–52` and `Node.hs:53–62` currently `fail` inside a whole-document
   `eitherDecode`, so one unknown token discards a 130 MB graph.
 - **Do**: Degrade with accounting in the default path; keep a strict opt-in.
-- **Check**: Scenarios below.
+- **Check**: Scenarios below verify default degradation, counted warnings, and strict-mode
+  failure.
 - **Act**: If a degraded value appears frequently for a known producer, promote it to a real
   enum member in a follow-up rather than leaving it degraded.
 
@@ -79,6 +85,17 @@ location). The top-level `communities`, `cohesion` and `god_nodes` sections SHAL
 default to empty when absent, so an un-clustered or partially written graph still loads for
 query purposes.
 
+#### PDCA
+
+- **Plan**: External/package nodes and partial/crashed runs currently produce unloadable graphs
+  because `source_file` and top-level sections are strictly required.
+- **Do**: Make `source_file` optional and give `communities`/`cohesion`/`god_nodes` empty
+  defaults; skip malformed individual nodes/edges.
+- **Check**: Scenarios below verify optional fields, optional top-level sections, and per-item
+  recovery.
+- **Act**: If skipped nodes/edges become common for Graphos-produced graphs, tighten the writer
+  rather than masking a producer bug.
+
 #### Scenario: Node without a source file loads
 
 - **WHEN** a graph contains a node with `"source_file": null` (for example a synthetic external
@@ -102,13 +119,16 @@ Every top-level key written by the exporter SHALL be read back by the loader, an
 loader requires SHALL be written unconditionally by the exporter. `community_aggregates` SHALL
 round-trip.
 
+#### PDCA
+
 - **Plan**: `community_aggregates` is written at `IncrementalJSON.hs:104–107` and never parsed
   (`Load.hs:89–97`); `community_labels` and `compositions` are written only when present, while
   `communities`/`cohesion`/`god_nodes` are required by the reader — a crashed run therefore
   produces an unloadable file.
 - **Do**: Read `community_aggregates`; make required sections optional; keep a single list of
   top-level keys shared by writer and reader.
-- **Check**: Scenario below, asserted as a property over a round-tripped graph.
+- **Check**: Scenarios below verify round-trip symmetry and loadability of externally produced
+  graphs.
 - **Act**: Add any future top-level section to the shared list, so the symmetry test fails when
   a writer-only key is introduced.
 
