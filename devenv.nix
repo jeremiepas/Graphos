@@ -8,6 +8,7 @@ let
     poppler-utils
   ];
   tooling = with pkgs; [
+    aider-chat
     jq
     pyright
     python313Packages.pyyaml

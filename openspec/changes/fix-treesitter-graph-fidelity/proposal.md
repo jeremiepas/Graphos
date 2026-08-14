@@ -1,7 +1,6 @@
 ## Why
 
-A real-world exercise — building a "configuration system" subgraph of the `solario-core`
-TypeScript repository (1,291 `./src` files) from a freshly built `graph.json` (104,101 nodes,
+A real-world exercise — building a "configuration system" subgraph of a TypeScript repository (1,291 `./src` files) from a freshly built `graph.json` (104,101 nodes,
 122,347 edges) — could not be done with the graph Graphos produced. Four defects had to be
 worked around by an external Python harness before any navigable subgraph existed.
 
@@ -13,7 +12,7 @@ worked around by an external Python harness before any navigable subgraph existe
    emits `Imports` (`UseCase/Extract/Haskell.hs:121`, routed at
    `UseCase/Extract/TreeSitter.hs:30`), so `openspec/specs/import-resolution/spec.md`
    "Cross-file connectivity" is satisfied for `.hs` and silently unmet for every other
-   grammar. Consequence: the 43 configuration files selected in `solario-core` induced
+   grammar. Consequence: the 43 configuration files selected in `typescipt-repository` induced
    1,106 nodes / 1,233 edges with exactly **2 edges leaving the selected set** — the code
    graph is a forest of per-file islands, and `makeNodeId` (`Convert.hs:286–293`, directory-
    hash + file-stem scoped) structurally guarantees IDs can never collide across files.
@@ -30,7 +29,7 @@ worked around by an external Python harness before any navigable subgraph existe
    `"build"` in `hardcodedIgnoreDirNames` and `Detect.hs:180` tests it with `elem` on the
    directory *basename* before any pattern logic runs, so no `.graphosignore` negation can
    re-include it; `Infrastructure/FileSystem/Ignore.hs:209` repeats the pattern and
-   `Ignore.hs:73–76` matches `ExactPattern` as a path *segment* anywhere. In `solario-core`,
+   `Ignore.hs:73–76` matches `ExactPattern` as a path *segment* anywhere. In `typescipt-repository`,
    85 legitimate source files under `src/domain/build/`, `src/services/phase/build/` and
    `src/lib/build/` were dropped (86 of 1,291 files missing overall, 6.7%), silently removing
    real consumers from the graph.
@@ -159,7 +158,7 @@ HTML rendering. This change adds a path/taxonomy-driven subgraph CLI subcommand
 
 - **Plan**: Make a tree-sitter-extracted graph *connected and reloadable*, and prove it with an
   on-disk oracle rather than by inspection. Success is measured on two corpora: (a)
-  `solario-core` (TypeScript, 1,291 source files) — `ImportEdgesSpec` reports ≥ 99%
+  `typescipt-repository` (TypeScript, 1,291 source files) — `ImportEdgesSpec` reports ≥ 99%
   precision and ≥ 99% recall of `imports` edges, `GraphCoverageSpec` reports 0 files missing
   for reasons other than an explicit ignore rule (today: 86 missing, 0 import edges); (b) the
   Graphos repository itself — no regression in the Haskell stub path's existing `imports`

@@ -40,7 +40,7 @@ non-conforming.
 #### Scenario: Repository-scale connectivity (TypeScript)
 
 - **WHEN** the full pipeline runs on a TypeScript repository of at least 1,000 source files
-  (e.g. `solario-core`, 1,291 files under `./src`)
+  (e.g. `typescipt-repository`, 1,291 files under `./src`)
 - **THEN** `graph.json` contains `imports` edges whose source and target have different
   `source_file` values, and the number of connected components is strictly less than the
   number of source files

@@ -10,7 +10,7 @@ Remove the Python scripts from `scripts/`. Update `graphos.cabal`.
 - [ ] All three components compile under `cabal build --flag dev` with `-Werror`.
 - [ ] `ImportEdgesSpec` emits a structured Hspec failure (not an uncaught exception) on a graph
   with zero `imports` edges.
-- [ ] On today's `solario-core` graph `ImportEdgesSpec` reports recall 0.0 with 203 missing pairs
+- [ ] On today's `typescipt-repository` graph `ImportEdgesSpec` reports recall 0.0 with 203 missing pairs
   and the spec fails (baseline captured for later comparison).
 - [ ] `GraphCoverageSpec` reports the 86 missing files grouped by class and the spec fails.
 - [ ] `graphos subgraph --graph <fixture> --config <fixture> --out <tmp>` produces a JSON file

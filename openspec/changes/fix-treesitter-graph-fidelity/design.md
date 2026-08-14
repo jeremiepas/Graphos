@@ -2,7 +2,7 @@
 
 ## Context
 
-Evidence corpus: `solario-core`, a TypeScript repository with 1,291 files under `./src`,
+Evidence corpus: `typescipt-repository`, a TypeScript repository with 1,291 files under `./src`,
 extracted with the default tree-sitter configuration into a 104,101-node / 122,347-edge
 `graph.json`. Measurements taken on that graph:
 

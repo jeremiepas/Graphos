@@ -97,6 +97,13 @@ instance ToJSON LabeledGraph where
     , "adj_back" .= gAdjBack g
     ]
 
+instance FromJSON LabeledGraph where
+  parseJSON = withObject "LabeledGraph" $ \v -> LabeledGraph
+    <$> v .: "nodes"
+    <*> v .: "edges"
+    <*> v .: "adj_fwd"
+    <*> v .: "adj_back"
+
 data PushMode
   = FullPush
   | SubgraphPush

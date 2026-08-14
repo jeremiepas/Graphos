@@ -97,7 +97,7 @@ detail panel fetches them from `/api/explain` when served, and omits the section
 This mirrors the existing offline-degradation pattern that `navigator-query-view/spec.md:18–20`
 already establishes for search, so the viewer has exactly one story for "richer when served".
 
-The reference subgraph viewer built for `solario-core` embedded signatures and paid 10% of its
+The reference subgraph viewer built for `typescipt-repository` embedded signatures and paid 10% of its
 payload for them at 617 nodes; at 104K nodes that trade is not available.
 
 ### D3 — Styling by group and CSS, never per item

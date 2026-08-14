@@ -3,7 +3,7 @@
 **Author**: graphos-navigator agent (review session)
 **Date**: 2026-08-10
 **Status**: Proposal — awaiting owner decision
-**Scope**: Graphos project (`~/Documents/perso/Graphos`), not solario-core
+**Scope**: Graphos project (`~/Documents/perso/Graphos`), not typescipt-repository
 
 ---
 
@@ -87,7 +87,7 @@ All 19 under `openspec/changes/archive/` are marked complete. Notable ones:
 
 ### 3.4 Live Session Evidence (2026-08-10, this review)
 
-During this review I ran `graphos` against the solario-core repo (a real
+During this review I ran `graphos` against the typescipt-repository repo (a real
 codebase) to verify current behavior:
 
 | Run | Granularity | Nodes | Edges | Communities | Time | Verdict |
@@ -225,7 +225,7 @@ Borrowed from PRD §16.1 and the active changes' PDCA plans:
 | Phase A items block each other | A1 (archive) is pure file moves; A2 (MCP) touches `MCP.hs` + `Domain/Graph/*`; A3 (commit) is separate files — run in parallel branches |
 | HTML rewrite (B6) is large | Design already revised; split into data-join pass (pure, testable) + viewer rewrite (infra, not unit-tested) per the change's own PDCA |
 | Uncommitted refactor (A3) conflicts with B4 | Commit A3 first, then branch B4 from it |
-| Skill deconfusion (C10) touches user-global files | Scope strictly to `~/.claude/skills/` and `.opencode/`; do not modify solario-core |
+| Skill deconfusion (C10) touches user-global files | Scope strictly to `~/.claude/skills/` and `.opencode/`; do not modify typescipt-repository |
 
 ---
 

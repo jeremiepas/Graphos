@@ -14,6 +14,7 @@ module Graphos.CLI.Parser
   , pushMemgraphOpts
   , mergeOpts
   , ingestOpts
+  , subgraphOpts
   , commandOpts
   , granularityReader
     -- * Install-skill target
@@ -45,6 +46,7 @@ data Command
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
+  | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
   | LServers
    | Serve FilePath FilePath Int Bool Bool
 
@@ -210,6 +212,14 @@ ingestOpts = IngestCmd
   <*> strOption (long "output" <> short 'o' <> value "graphos-out" <> help "Output directory")
   <*> switch (long "label" <> help "Use LLM to label communities (requires graphos.yaml labeling config)")
 
+subgraphOpts :: Parser Command
+subgraphOpts = SubgraphCmd
+  <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to source graph.json file")
+  <*> optional (strOption (long "config" <> metavar "CONFIG" <> help "JSON config: named subsystems with path patterns (required)"))
+  <*> strOption (long "out" <> short 'o' <> value "graphos-out/subgraph.json" <> help "Output graph.json path (default: graphos-out/subgraph.json)")
+  <*> option auto (long "boundary-hops" <> value 1 <> help "Boundary expansion hops over imports edges (default: 1)")
+  <*> switch (long "no-derive" <> help "Disable deriving imports edges from Import nodes")
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
@@ -221,6 +231,7 @@ commandOpts = subparser
   <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
+  <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
@@ -288,6 +299,10 @@ renderCommandReference = unlines $
   , ""
   , "graphos ingest FILE             Ingest single file"
   , "  --embed / --no-embed / --output, -o DIR"
+  , ""
+  , "graphos subgraph                Extract a path-driven subgraph"
+  , "  --graph FILE / --config CONFIG / --out, -o FILE"
+  , "  --boundary-hops N / --no-derive"
   , ""
   , "graphos init                    Generate graphos.yaml"
   , ""
