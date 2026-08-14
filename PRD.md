@@ -691,6 +691,38 @@ Every file's SHA256 hash is computed on first extraction and stored in `graphos-
 | SVG | `--svg` | Static graph visualization | Presentations, documentation |
 | GraphML | `--graphml` | XML graph format | Gephi/yEd analysis |
 
+### 12.1 graph.html Viewer Subsection
+
+`graph.html` is a self-contained interactive viewer: all graph data, viewer JavaScript,
+stylesheet and the vendored vis-network 10.1.1 renderer are embedded inline. It opens from
+`file://` with zero network requests.
+
+**Architecture**: The payload is an interned, style-free view model. Node ids, source files,
+kinds and relations are stored once in string tables; nodes and edges reference them by integer
+index. No per-node `color`/`group`/`title` and no per-edge `color`/`arrows`/`dashes`/`width`.
+Styling is applied once from community palette and relation definitions.
+
+**Depth levels**: `Overview` (one dot per community, default) → `Community` (one community
+expanded) → `Full` (all nodes, explicit) → `Custom` (N-hop BFS around a selected node, N 1–6).
+Depth, selection and facet state persist in `sessionStorage` under 4 KB.
+
+**Size budget** (authoritative, asserted by test suite):
+
+| Metric | Budget |
+|---|---|
+| Total `graph.html` (104K nodes / 122K edges) | ≤ 30 MB |
+| Payload per node | ≤ 200 B |
+| Payload per edge | ≤ 24 B |
+| Network requests on `file://` | 0 |
+
+**Measured on Graphos self-graph** (2026-08-12, after payload interning — task 2):
+135.4 B/node, 15.3 B/edge, 2,771,213 B total. Reference corpus (104K/122K): not measured
+in this environment; budget enforced by automated test.
+
+**Interaction latency targets** (measured, not assumed; see `html-lod-viewer` spec):
+overview load < 3 s, drill-down < 500 ms, pan/zoom > 30 fps. Browser-only; not verified
+headlessly.
+
 ---
 
 ## 13. CLI Reference Specification
