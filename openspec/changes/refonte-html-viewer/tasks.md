@@ -110,7 +110,7 @@
 
 ## 5. Unified view state and depth selector
 
-- [ ] 5.1 Plan: One state object, one dispatcher — the refactor the superseded change planned,
+- [x] 5.1 Plan: One state object, one dispatcher — the refactor the superseded change planned,
   done once. Scope: replace `currentPhase`/`expandedCommunity` (`HTML.hs:189–190`) with a state
   object holding depth, selection, hop count, facets and search results; add the depth control
   (`Overview | Community | Full | Custom`) defaulting to `Overview`; destroy the previous renderer
