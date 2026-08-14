@@ -1096,14 +1096,23 @@
     return escHtml(s).replace(/'/g, '&#39;');
   }
 
-  function syncControls() {
-    var sel = document.getElementById('depthSelect');
-    if (sel && sel.value !== viewerState.depth) sel.value = viewerState.depth;
-    var hops = document.getElementById('hopsInput');
-    if (hops && String(hops.value) !== String(viewerState.hops)) hops.value = viewerState.hops;
-    var text = document.getElementById('facetText');
-    if (text && text.value !== (viewerState.facets.text || '')) text.value = viewerState.facets.text || '';
-  }
+   function updateHopsVisibility(depth) {
+     var hops = document.getElementById('neighborhoodHops');
+     if (hops) {
+       if (depth === 'custom') hops.classList.add('active');
+       else hops.classList.remove('active');
+     }
+   }
+
+   function syncControls() {
+     var sel = document.getElementById('depthSelector');
+     if (sel && sel.value !== viewerState.depth) sel.value = viewerState.depth;
+     var hops = document.getElementById('neighborhoodHops');
+     if (hops && String(hops.value) !== String(viewerState.hops)) hops.value = viewerState.hops;
+     updateHopsVisibility(viewerState.depth);
+     var text = document.getElementById('facetText');
+     if (text && text.value !== (viewerState.facets.text || '')) text.value = viewerState.facets.text || '';
+   }
 
   /* ── Init ───────────────────────────────────────────────────────── */
   var debounceTimer = null;
@@ -1144,14 +1153,15 @@
       doSearch('');
     });
 
-    var depthSel = document.getElementById('depthSelect');
-    depthSel.addEventListener('change', function () {
-      dispatch('SET_DEPTH', this.value);
-    });
-    var hops = document.getElementById('hopsInput');
-    hops.addEventListener('change', function () {
-      dispatch('SET_HOPS', this.value);
-    });
+     var depthSel = document.getElementById('depthSelector');
+     depthSel.addEventListener('change', function () {
+       dispatch('SET_DEPTH', this.value);
+       updateHopsVisibility(this.value);
+     });
+     var hops = document.getElementById('neighborhoodHops');
+     hops.addEventListener('change', function () {
+       dispatch('SET_HOPS', this.value);
+     });
 
     var facetText = document.getElementById('facetText');
     var facetTimer = null;
