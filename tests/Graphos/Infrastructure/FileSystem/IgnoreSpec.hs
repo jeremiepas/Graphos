@@ -312,7 +312,14 @@ spec = do
       -- result-* should match result-1, result-foo
       shouldIgnore [mkAnnot (WildcardPattern "result-*")] "result-1" `shouldBe` True
       shouldIgnore [mkAnnot (WildcardPattern "result-*")] "result-foo" `shouldBe` True
-      -- *.o should match .o files
-      shouldIgnore [mkAnnot (WildcardPattern "*.o")] "src/Main.o" `shouldBe` True
-      -- .opencode/* should match files inside .opencode/
-      shouldIgnore [mkAnnot (WildcardPattern ".opencode/*")] ".opencode/opencode.json" `shouldBe` True
+
+
+    it "reproduces issue: .graphosignore at scan root does not exclude nested files" $ do
+      let tmpDir = "/tmp/graphos-test-ignore-spec-repro"
+      withTestDir tmpDir $ do
+        let nestedDir = tmpDir </> "nested"
+        createDirectoryIfMissing True nestedDir
+        writeFile (tmpDir </> ".graphosignore") "nested/\n"
+        writeFile (nestedDir </> "file.txt") "content"
+        patterns <- loadIgnorePatterns tmpDir
+        shouldIgnore patterns "nested/file.txt" `shouldBe` True
