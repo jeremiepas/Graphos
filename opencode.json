@@ -22,6 +22,19 @@
           },
           "tool_call": true,
           "reasoning": true
+        },
+        "qwen3.6-35b-a3b-nothink": {
+          "name": "qwen3.6-35b-a3b-nothink",
+          "limit": {
+            "context": 131172,
+            "output": 8192
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "tool_call": true,
+          "reasoning": false
         }
       }
     },
@@ -35,8 +48,8 @@
         "gemma4-moe": {
           "name": "gemma4-moe",
           "limit": {
-            "context": 65536,
-            "output": 8192
+            "context": 200000,
+            "output": 4096
           },
           "modalities": {
             "input": ["text", "image"],
@@ -44,6 +57,21 @@
           },
           "tool_call": true,
           "reasoning": true
+
+        },
+        "gemma4-moe-nothink": {
+          "name": "gemma4-moe-nothink",
+          "limit": {
+            "context": 200000,
+            "output": 4096
+          },
+          "modalities": {
+            "input": ["text"],
+            "output": ["text"]
+          },
+          "tool_call": true,
+          "reasoning": false
+
         }
       }
     }

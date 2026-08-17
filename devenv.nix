@@ -120,20 +120,21 @@ in
         MMPROJ_ARGS=(--mmproj "$LLAMA_MODELS_DIR/mmproj-F16.gguf")
       fi
       exec llama-server \
-        -m "$MODEL" \
+        -hf "unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S" \
         "''${MMPROJ_ARGS[@]}" \
         --host "''${LLAMA_HOST:-0.0.0.0}" \
         --port "''${GEMMA_PORT:-8081}" \
-        --n-gpu-layers 99 \
+        --n-gpu-layers 20 \
         --n-cpu-moe "''${GEMMA_N_CPU_MOE:-0}" \
-        --flash-attn on \
         --jinja \
         --tools all \
-        --ctx-size "''${LLAMA_CTX_SIZE:-65536}" \
-        --batch-size "''${LLAMA_BATCH_SIZE:-1024}" \
-        --ubatch-size "''${LLAMA_UBATCH_SIZE:-512}" \
+        --fit on --fit-ctx 32768 \
+        --ctx-size "''${LLAMA_CTX_SIZE:-165536}" \
         --cache-type-k "''${LLAMA_CACHE_TYPE_K:-q8_0}" \
         --cache-type-v "''${LLAMA_CACHE_TYPE_V:-q8_0}" \
+        --temperature 0.6 \
+        --reasoning-budget 200 \
+        --top_p 0.80 \
         --metrics
     '';
 
