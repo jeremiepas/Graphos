@@ -1,18 +1,15 @@
 ---
 name: openspec-apply-change
 description: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks.
-allowed-tools: Bash(openspec:*)
 license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
-  version: "1.1"
-  generatedBy: "1.7.0"
+  version: "1.0"
+  generatedBy: "1.3.1"
 ---
 
 Implement tasks from an OpenSpec change.
-
-**Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `view`). Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
 **Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
@@ -23,7 +20,7 @@ Implement tasks from an OpenSpec change.
    If a name is provided, use it. Otherwise:
    - Infer from conversation context if the user mentioned a change
    - Auto-select if only one active change exists
-   - If ambiguous, run `openspec list --json` to get available changes and ask the user to select one
+   - If ambiguous, run `openspec list --json` to get available changes and use the **AskUserQuestion tool** to let the user select
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx-apply <other>`).
 
@@ -33,7 +30,6 @@ Implement tasks from an OpenSpec change.
    ```
    Parse the JSON to understand:
    - `schemaName`: The workflow being used (e.g., "spec-driven")
-   - `planningHome`, `changeRoot`, and `actionContext`: planning scope and edit constraints
    - Which artifact contains the tasks (typically "tasks" for spec-driven, check status for others)
 
 3. **Get apply instructions**
@@ -47,115 +43,41 @@ Implement tasks from an OpenSpec change.
    - Progress (total, complete, remaining)
    - Task list with status
    - Dynamic instruction based on current state
-   - Optional `context`: current required project instruction input from the selected root
-   - Optional `operationGuidance`: current advisory guidance for apply
 
    **Handle states:**
-   - If `state: "blocked"` (missing artifacts): show message, suggest using openspec-continue-change (if it is not installed, run `openspec status --change "<name>" --json` to see the next artifact and `openspec instructions <artifact-id> --change "<name>" --json` for how to create it)
+   - If `state: "blocked"` (missing artifacts): show message, suggest using openspec-continue-change
    - If `state: "all_done"`: congratulate, suggest archive
    - Otherwise: proceed to implementation
 
-   Treat `context` as a required prompt-level input. Read and consider it, and
-   apply relevant project facts, conventions, and constraints while implementing.
-   Treat `operationGuidance` as optional additive advice. Read and consider every
-   entry, and follow entries that are applicable and compatible with the built-in
-   workflow.
+4. **Read context files**
 
-   Keep both fields separate from CLI-returned state, missing artifacts, tasks,
-   progress, `contextFiles`, and the built-in `instruction`. They are not
-   evidence of task completion, do not replace the built-in instruction, and do
-   not permit bypassing a blocked state. If context conflicts with the built-in
-   instruction, an explicit user choice, or a CLI-controlled value, report the
-   conflict and preserve the controlling value. If guidance is inapplicable or
-   conflicts with those controlling inputs, do not follow it and explain why.
-   These are prompt-level behavior contracts, not enforceable checks.
-
-4. **Read minimal top-level context**
-
-   Read ONLY the top-level planning files from `contextFiles`:
-   - **proposal.md** (the "Why" and "What Changes")
-   - **specs** (delta spec files, only if needed for understanding requirements)
-   - **design.md** (architecture and key decisions, only if needed)
-   - **tasks.md** (the tracked task index)
-
-   Do NOT read per-task files (`tasks/**/plan.md`, `tasks/**/do.md`,
-   `tasks/**/check.md`, `tasks/**/act.md`) at this stage. They will be read
-   one-at-a-time in Step 6.
-
-   **Respect schema-specific context budget:**
-   The `instruction` field returned by `openspec instructions apply` may contain
-   a context-budget directive (e.g. PDCA's "read one task at a time"). If present,
-   follow it strictly. The goal is to keep the active context small enough for
-   small models (64k context windows).
-
-   Do not copy `context` or `operationGuidance` verbatim into implementation
-   files or planning artifacts unless the user separately asks for that content.
+   Read every file path listed under `contextFiles` from the apply instructions output.
+   The files depend on the schema being used:
+   - **spec-driven**: proposal, specs, design, tasks
+   - Other schemas: follow the contextFiles from CLI output
 
 5. **Show current progress**
 
    Display:
    - Schema being used
    - Progress: "N/M tasks complete"
-   - Next pending task (do not show full details yet)
+   - Remaining tasks overview
    - Dynamic instruction from CLI
 
-6. **Implement tasks one at a time with context clearing**
+6. **Implement tasks (loop until done or blocked)**
 
-   This skill processes **ONE task per cycle** to stay within small-model
-   context limits. After each task, it asks before loading the next one.
-
-   For the first/next pending task:
-   a. **Identify the task** from `tasks.md` (first unchecked `- [ ] N.P` step).
-   b. **Ask for confirmation**: "Next task: N. <task name>. Continue?"
-      - If the user declines or wants to change task: pause and ask what to do.
-      - If the user agrees: proceed.
-   c. **Compact top-level context**: Now that the task is known, stop carrying
-      proposal/design/specs details in active context. Replace them with a
-      one-line pointer per file (path + role). Do NOT re-read them for this
-      task unless it explicitly references them.
-   d. **Create a per-task todo list** with the todo tool mirroring the PDCA
-      cycle:
-      - Create plan.md, do.md, check.md (before code)
-      - Implement code per do.md
-      - Run checks from check.md; record results
-      - Update do.md with deviations
-      - Generate act.md
-      - Mark N.P/N.D/N.C/N.A done in tasks.md
-   e. **Load ONLY this task's context**:
-      - Read the task's entry in `tasks.md` (1-2 paragraphs max).
-      - Read the task's per-task files from `contextFiles`:
-        - `tasks/<task-slug>/plan.md` (scope, check criteria, affected modules)
-        - `tasks/<task-slug>/do.md` (implementation plan)
-        - `tasks/<task-slug>/check.md` (verification plan)
-      - Read only the source files listed in that `plan.md`.
-      - Do NOT read per-task files from other tasks.
-      - Do NOT re-read the full proposal/design/specs unless the task explicitly
-        references them.
-   f. **Implement the code changes** required by `do.md`.
-   g. **Run the checks** from `check.md` against the criteria in `plan.md`.
-      Update `check.md` with actual results.
-   h. **Update `do.md`** to reflect what was actually implemented
-      (deviations from plan).
-   i. **Generate `act.md`** as the final verdict trace for the whole PDCA cycle.
-   j. **Mark the task complete** in `tasks.md`: change `- [ ]` to `- [x]` for
-      `N.P`, `N.D`, `N.C`, and `N.A`. Mark the todo list items done as they
-      complete.
-   k. **Clear context**: write a 2-line summary of the completed task. Do not
-      carry the detailed task files forward into the next cycle.
-
-   **Loop / ask before next task:**
-   After completing the task, ask:
-   > "Task N complete. Continue to task N+1? (yes/no)"
-
-   - If yes: identify the next pending task and repeat from step 6a.
-   - If no: pause, show overall progress, and wait for direction.
-   - If all tasks are complete: proceed to Step 7.
+   For each pending task:
+   - Show which task is being worked on
+   - Make the code changes required
+   - Keep changes minimal and focused
+   - Mark task complete in the tasks file: `- [ ]` → `- [x]`
+   - Continue to next task
 
    **Pause if:**
    - Task is unclear → ask for clarification
    - Implementation reveals a design issue → suggest updating artifacts
    - Error or blocker encountered → report and wait for guidance
-   - User interrupts or says no to "Continue?"
+   - User interrupts
 
 7. **On completion or pause, show status**
 
@@ -165,32 +87,28 @@ Implement tasks from an OpenSpec change.
    - If all done: suggest archive
    - If paused: explain why and wait for guidance
 
-**Output During Task Implementation**
+**Output During Implementation**
 
 ```
 ## Implementing: <change-name> (schema: <schema-name>)
 
-Task N/M: <task name>
-
-Compacting top-level context (proposal/design/specs → pointers only).
-Todo created for task N (Plan → Do → Check → Act).
-Loading only this task's context...
-
+Working on task 3/7: <task description>
 [...implementation happening...]
+✓ Task complete
 
-✓ Task N complete — act.md generated, tasks.md checkboxes updated.
-
-Continue to task N+1? (yes/no)
+Working on task 4/7: <task description>
+[...implementation happening...]
+✓ Task complete
 ```
 
-**Output On Completion (all tasks done)**
+**Output On Completion**
 
 ```
 ## Implementation Complete
 
 **Change:** <change-name>
 **Schema:** <schema-name>
-**Progress:** N/N tasks complete ✓
+**Progress:** 7/7 tasks complete ✓
 
 ### Completed This Session
 - [x] Task 1
@@ -207,12 +125,12 @@ All tasks complete! Ready to archive this change.
 
 **Change:** <change-name>
 **Schema:** <schema-name>
-**Progress:** N/M tasks complete
+**Progress:** 4/7 tasks complete
 
 ### Issue Encountered
 <description of the issue>
 
-### Options
+**Options:**
 1. <option 1>
 2. <option 2>
 3. Other approach
@@ -220,37 +138,15 @@ All tasks complete! Ready to archive this change.
 What would you like to do?
 ```
 
-**Output On "No" To Continue**
-
-```
-## Implementation Paused — Awaiting Next Task
-
-**Change:** <change-name>
-**Schema:** <schema-name>
-**Progress:** N/M tasks complete
-
-Task N is complete. To continue, ask me to proceed with the next task or tell me which task to work on.
-```
-
 **Guardrails**
-- Process ONE task per cycle; ask before loading the next
+- Keep going through tasks until done or blocked
 - Always read context files before starting (from the apply instructions output)
-- Respect any context-budget directive in the schema's `apply.instruction`
-- Read top-level context once, then compact it once the current task is known
-- Create a per-task todo list (Plan → Do → Check → Act) before loading task files
-- Do not accumulate context across tasks; clear it after each act.md
-- Do not read per-task files for tasks that are not currently being worked on
 - If task is ambiguous, pause and ask before implementing
 - If implementation reveals issues, pause and suggest artifact updates
 - Keep code changes minimal and scoped to each task
-- Update task checkboxes immediately after completing each task
+- Update task checkbox immediately after completing each task
 - Pause on errors, blockers, or unclear requirements - don't guess
 - Use contextFiles from CLI output, don't assume specific file names
-- Do not use context or operation guidance as proof that a task is complete
-- Apply relevant project context; report conflicts with controlling workflow inputs
-- Consider every guidance entry; explain any inapplicable or conflicting advice
-- Do not copy runtime context or operation guidance into implementation files or planning artifacts
-- Preserve CLI-controlled blocked/ready/all-done behavior and completion criteria
 
 **Fluid Workflow Integration**
 
