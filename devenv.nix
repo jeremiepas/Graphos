@@ -41,7 +41,7 @@ in
   # CI tasks - runnable locally and in CI
   tasks = {
     "ci:build" = {
-      exec = ''cabal configure --enable-tests --flag dev -j4 && cabal build all -j4'';
+      exec = ''cabal update && cabal configure --enable-tests --flag dev -j4 && cabal build all -j4'';
     };
     "ci:test" = {
       exec = "cabal test all";
@@ -60,9 +60,18 @@ in
 
 
 
-    # Apply an OpenSpec change headlessly via opencode + Gemma 4.
+    # Apply an OpenSpec change headlessly via opencode + hierarchical agent.
+    # Uses the orchestrator (CPU, 300k ctx) as the main model for planning,
+    # and the executor (GPU, 64k ctx, MTP spec decode) as the small_model for
+    # fast tool calls (edit, bash, grep, read).
+    #
+    # The orchestrator delegates focused subtasks to the executor via HTTP
+    # POST to :8083/v1/chat/completions, aggregates results, and tracks
+    # progress across the full conversation history (300k ctx).
+    #
     # Run:  OPENSPEC_CHANGE=<change-name> devenv tasks run openspec:apply
-    # Requires the gemma4 process to be up: `devenv up` (or LLAMA_HOST/PORT).
+    # Requires both processes to be up on localhost:
+    #   devenv up qwen3-8-orchestrator qwen3-8-executor
     "openspec:apply" = {
       exec = ''
         CHANGE="''${OPENSPEC_CHANGE:-}"
@@ -73,10 +82,10 @@ in
           exit 1
         fi
         exec opencode run \
-          --model "gemma/gemma4-moe" \
-          --agent "OpenCoder" \
+          --model "orchestrator/qwen3.8-orchestrator" \
+          --small-model "executor/qwen3.8-executor" \
           --dangerously-skip-permissions \
-          "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Start with: openspec status --change \"$CHANGE\" --json and openspec instructions apply --change \"$CHANGE\" --json, then implement each pending task following the skill workflow."
+          "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Start with: openspec status --change \"$CHANGE\" --json and openspec instructions apply --change \"$CHANGE\" --json, then implement each pending task following the skill workflow. Delegate tool-heavy work (file reads, edits, bash commands) to the executor model via the small_model. Keep planning and progress tracking in the orchestrator."
       '';
     };
 
