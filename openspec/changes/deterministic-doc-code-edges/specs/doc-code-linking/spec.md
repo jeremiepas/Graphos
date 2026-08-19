@@ -26,10 +26,29 @@ node that defines an identifier when that identifier appears in the doc text.
 - **WHEN** a doc contains a common word that is not a defined identifier
 - **THEN** no symbol-mention edge is created
 
+### Requirement: Path-reference doc-code edges
+
+The system SHALL create a `documents` edge from a documentation node to the code
+nodes of a file when the doc text cites that file's repository-relative path,
+including when the doc and the cited file are in different directory subtrees.
+
+#### Scenario: doc cites a file path in another subtree
+- **WHEN** `docs/adr/0007-task-model.md` contains the path `src/domain/workflow/task-definition.ts` and code nodes exist for that file
+- **THEN** a `documents` edge connects the doc node to nodes of `src/domain/workflow/task-definition.ts`
+
+#### Scenario: unresolved path not linked
+- **WHEN** a doc contains a path-like token that does not match any code node's source file
+- **THEN** no path-reference edge is created
+
+#### Scenario: bare filename without separator skipped
+- **WHEN** a doc mentions a bare filename with no directory separator (e.g. `index.ts`)
+- **THEN** no path-reference edge is created, because it is ambiguous across the tree
+
 ### Requirement: Edge confidence tagging
 
-The system SHALL tag co-location and symbol-mention edges with the `documents`
-relation and high confidence, distinct from similarity-based `inferred` edges.
+The system SHALL tag co-location, symbol-mention, and path-reference edges with
+the `documents` relation and high confidence, distinct from similarity-based
+`inferred` edges.
 
 #### Scenario: documents edges survive semantic filter
 - **WHEN** a query is run with `edges = semantic`

@@ -7,6 +7,10 @@
 module Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..)
   , parseWithGrammar
+  , defaultTruncationBudget
+  , normalizeText
+  , truncateText
+  , truncateWithElision
   ) where
 
 import Control.Exception (catch, SomeException(..), bracket)
@@ -133,7 +137,7 @@ extractText node content =
       end = fromIntegral (nodeEndByte node)
       raw = BS.take (end - start) (BS.drop start content)
   in if start >= 0 && end > start && end <= BS.length content
-     then truncateText 200 (TE.decodeUtf8With TEE.lenientDecode raw)
+     then TE.decodeUtf8With TEE.lenientDecode raw
      else ""
 
 -- | Safe CString peek.
@@ -143,8 +147,26 @@ safeNodeType ptr
   | otherwise = unsafePerformIO $ catch (peekCString (castPtr ptr))
                                          (\(_ :: SomeException) -> pure "unknown")
 
+-- | Default truncation budget for extracted text.
+defaultTruncationBudget :: Int
+defaultTruncationBudget = 200
+
+-- | Normalize text by collapsing whitespace.
+normalizeText :: Text -> Text
+normalizeText = T.unwords . T.words
+
 -- | Truncate text for readability.
 truncateText :: Int -> Text -> Text
 truncateText maxLen t
   | T.length t <= maxLen = t
   | otherwise = T.take maxLen t <> "..."
+
+
+-- | Truncate text with middle-elision for specific patterns.
+-- The second argument is the 'tail' to preserve.
+truncateWithElision :: Int -> Text -> Text -> Text
+truncateWithElision maxLen t tailText
+  | T.length t <= maxLen = t
+  | otherwise = 
+      let headLen = max 0 (maxLen - T.length tailText - 3)
+      in T.take headLen t <> "..." <> tailText

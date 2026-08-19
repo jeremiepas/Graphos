@@ -16,19 +16,28 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , definitionTypes
   , structureTypes
   , apiSurfaceTypes
+  , importExportTypes
   , implementationDetailTypes
   , functionBoundaryTypes
-  ) where
+   , makeNodeId
+    , tsNodeLabel
+    , tsNodeUntruncatedLabel
+   ) where
 
+
+import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Maybe (fromMaybe)
+import Data.Aeson (toJSON)
 
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
   ( Node(..), Edge(..), Extraction(..), extractionFromLists
   , NodeId, FileType(..), Relation(..), Confidence(..), EdgeId(..)
   )
-import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision)
+import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- | Tier 1 — file/module structure. Emitted at every granularity level.
 structureTypes :: [String]
@@ -69,6 +78,12 @@ apiSurfaceTypes =
   , "static_item", "extern_item", "attribute_item"
     -- Haskell
   , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
+  ]
+
+importExportTypes :: [String]
+importExportTypes =
+  [ "import_declaration", "import_statement", "import_from_statement"
+  , "export_statement", "export_default_declaration"
   ]
 
 -- | Tier 3 — implementation detail: statements, parameters, locals, JSON
@@ -117,11 +132,13 @@ descendInto GranularityFunction isDef node =
 -- | Convert a tree of TSNodeInfo into an Extraction at a given granularity.
 tsNodesToExtraction :: Granularity -> FilePath -> [TSNodeInfo] -> Extraction
 tsNodesToExtraction gran filePath nodes =
-  let graphNodes = concatMap (tsNodeToGraphNodes gran filePath) nodes
-      graphEdges = concatMap (tsNodeToGraphEdges gran filePath Nothing) nodes
-  in extractionFromLists graphNodes graphEdges
+  let results = map (\node -> (tsNodeToGraphNodes gran filePath node, tsNodeToGraphEdges gran filePath Nothing node)) nodes
+      graphNodes = concatMap fst results
+      extraNodes = concatMap (snd . snd) results
+      graphEdges = concatMap (fst . snd) results
+  in extractionFromLists (graphNodes ++ extraNodes) graphEdges
 
--- | Convert a TSNodeInfo and its children into Graphos Nodes.
+-- | Convert a TSNodeInfo and its children into Graphos Nodes and Edges.
 tsNodeToGraphNodes :: Granularity -> FilePath -> TSNodeInfo -> [Node]
 tsNodeToGraphNodes gran filePath node =
   let isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
@@ -132,11 +149,13 @@ tsNodeToGraphNodes gran filePath node =
   in self ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
-tsNodeToGraphEdges :: Granularity -> FilePath -> Maybe Text -> TSNodeInfo -> [Edge]
+tsNodeToGraphEdges :: Granularity -> FilePath -> Maybe Text -> TSNodeInfo -> ([Edge], [Node])
 tsNodeToGraphEdges gran filePath parentLabel node =
   let myLabel = tsNodeLabel node
       isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
-      -- Parent → child edge
+      tType = tsnType node
+      
+      -- Parent → child edge (Contains)
       myEdges = case (parentLabel, isDef) of
         (Just p, True) ->
           [ Edge
@@ -150,12 +169,81 @@ tsNodeToGraphEdges gran filePath parentLabel node =
             }
           ]
         _ -> []
-      -- Recurse into children unless the level makes this subtree opaque
-      childEdges
-        | not (descendInto gran isDef node) = []
-        | isDef     = concatMap (tsNodeToGraphEdges gran filePath (Just myLabel)) (tsnChildren node)
-        | otherwise = concatMap (tsNodeToGraphEdges gran filePath parentLabel) (tsnChildren node)
-  in myEdges ++ childEdges
+
+      -- Imports/Exports edges
+      (importEdges, importNodes) = if tType `elem` importExportTypes
+        then case extractSpecifier node of
+               Just (targetPath, targetName) ->
+                 let targetId = if "external:" `isPrefixOf` targetPath
+                                then makeNodeId "external" targetName
+                                else makeNodeId targetPath targetName
+                     edge = Edge
+                       { edgeId        = EdgeId (makeNodeId filePath (fromMaybe "" parentLabel) <> "->" <> targetId <> ":imports")
+                       , edgeSource    = makeNodeId filePath (fromMaybe "" parentLabel)
+                       , edgeTarget    = targetId
+                       , edgeRelation  = Imports
+                       , edgeConfidence = Confidence 1.0
+                       , edgeWeight    = 1.0
+                       , edgeExtra     = if tType /= "import_declaration" && tType /= "import_statement" && tType /= "import_from_statement"
+                                          then Just (toJSON (T.pack "re-export"))
+                                          else Nothing
+                       }
+                     targetNode = Node
+                       { nodeId           = targetId
+                       , nodeLabel        = targetName
+                       , nodeFileType     = CodeFile
+                       , nodeSourceFile   = T.pack targetPath
+                       , nodeLineStart    = Nothing
+                       , nodeCommunityId  = Nothing
+                       , nodeDegree       = Nothing
+                       , nodeIsBridge     = Nothing
+                       , nodeExtra        = Nothing
+                       , nodeLineEnd      = Nothing
+                       , nodeKind         = Just "External"
+                       , nodeSignature    = Nothing
+                       }
+                 in ([edge], [targetNode])
+               Nothing -> ([], [])
+        else ([], [])
+
+      -- Recurse into children
+      (childEdges, childNodes) = 
+        if not (descendInto gran isDef node)
+        then ([], [])
+        else if isDef
+             then foldr (\child (es, ns) -> 
+                    let (e, n) = tsNodeToGraphEdges gran filePath (Just myLabel) child
+                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+             else foldr (\child (es, ns) -> 
+                    let (e, n) = tsNodeToGraphEdges gran filePath parentLabel child
+                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+
+  in (myEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
+
+      where
+        extractSpecifier :: TSNodeInfo -> Maybe (FilePath, Text)
+        extractSpecifier n =
+          let tailText = extractTail (tsnText n)
+          in if T.null tailText
+             then Nothing
+             else let raw = T.strip (T.drop (T.length "from ") tailText)
+                      specifier = stripQuotes raw
+                  in if T.null specifier
+                     then Nothing
+                     else resolveImport filePath (T.unpack specifier)
+
+-- | Strip surrounding single/double quotes/backticks from a specifier.
+stripQuotes :: Text -> Text
+stripQuotes t0
+  | T.null t0 = t0
+  | h `elem` quotes && T.last t0 `elem` quotes && T.length t0 >= 2 = T.init (T.tail t0)
+  | h `elem` quotes = T.tail t0
+  | otherwise = t0
+  where
+    h = T.head t0
+    quotes :: [Char]
+    quotes = "'\"`"
+
 
 -- ───────────────────────────────────────────────
 -- Helpers
@@ -164,7 +252,7 @@ tsNodeToGraphEdges gran filePath parentLabel node =
 -- | Make a Graphos Node from a TSNodeInfo.
 makeNode :: FilePath -> TSNodeInfo -> Node
 makeNode filePath node = Node
-  { nodeId           = makeNodeId filePath (tsNodeLabel node)
+  { nodeId           = makeNodeId filePath (tsNodeUntruncatedLabel node)
   , nodeLabel        = tsNodeLabel node
   , nodeFileType     = CodeFile
   , nodeSourceFile   = T.pack filePath
@@ -178,11 +266,28 @@ makeNode filePath node = Node
   , nodeSignature    = Nothing
   }
 
+-- | Get the untruncated, normalized label for a node.
+tsNodeUntruncatedLabel :: TSNodeInfo -> Text
+tsNodeUntruncatedLabel node =
+  let raw = let t = tsnText node in if T.null t then T.pack (tsnType node) else t
+  in normalizeText raw
+
 -- | Get a display label for a node — use text if available, otherwise type.
+-- For imports/exports, preserves the specifier via middle-elision.
 tsNodeLabel :: TSNodeInfo -> Text
 tsNodeLabel node =
-  let raw = let t = tsnText node in if T.null t then T.pack (tsnType node) else t
-  in T.filter (\c -> c /= '\n' && c /= '\r') raw
+  let untruncated = tsNodeUntruncatedLabel node
+      tType = tsnType node
+  in if tType `elem` importExportTypes && T.length untruncated > defaultTruncationBudget
+     then truncateWithElision defaultTruncationBudget untruncated (extractTail untruncated)
+     else untruncated
+
+-- | Extract the 'from <specifier>' part of a declaration.
+extractTail :: Text -> Text
+extractTail t =
+  case T.breakOnEnd "from " t of
+    (prefix, suffix) | not (T.null prefix) -> "from " <> suffix
+    _ -> ""
 
 -- | Convert tree-sitter type to human-readable kind.
 tsTypeToKind :: String -> String
@@ -286,9 +391,10 @@ tsTypeToKind t = case t of
 -- | Create a node ID from file path and name.
 makeNodeId :: FilePath -> Text -> NodeId
 makeNodeId filePath name =
-  let stem = T.pack $ takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath
+  let normalizedName = normalizeText name
+      stem = T.pack $ takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath
       dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       hashPrefix = T.pack $ show dirHash
-      safeName = T.filter (\c -> c /= '\n' && c /= '\r' && c /= '"' && c /= '\'' && c /= '`') name
+      safeName = T.filter (\c -> c /= '"' && c /= '\'' && c /= '`') normalizedName
   in hashPrefix <> "_" <> stem <> "_" <> safeName
