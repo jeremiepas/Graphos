@@ -83,8 +83,7 @@ in
         fi
         exec opencode run \
           --model "orchestrator/qwen3.8-orchestrator" \
-          --small-model "executor/qwen3.8-executor" \
-          --dangerously-skip-permissions \
+          --auto \
           "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Start with: openspec status --change \"$CHANGE\" --json and openspec instructions apply --change \"$CHANGE\" --json, then implement each pending task following the skill workflow. Delegate tool-heavy work (file reads, edits, bash commands) to the executor model via the small_model. Keep planning and progress tracking in the orchestrator."
       '';
     };
