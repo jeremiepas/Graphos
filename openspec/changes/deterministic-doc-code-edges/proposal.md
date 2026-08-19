@@ -13,6 +13,10 @@ a doc naming a symbol — are not used, so doc↔code matching is effectively us
   directories with a high-confidence `documents` relation.
 - Add **symbol-mention edges**: when doc text references a known identifier, link
   the doc to the node defining that symbol.
+- Add **path-reference edges**: when doc text cites an explicit repository-relative
+  file path (e.g. `src/domain/workflow/task-definition.ts`), link the doc to the
+  code nodes of that file — including across directory subtrees, which co-location
+  cannot reach (an ADR or `CLAUDE.md` citing a file it does not live beside).
 - Tag these edges as `documents` (high confidence) to distinguish them from the
   existing similarity-based `inferred` edges.
 - Keep `documents` edges in the `semantic` (non-ambiguous) edge set so they
@@ -22,7 +26,8 @@ a doc naming a symbol — are not used, so doc↔code matching is effectively us
 
 ### New Capabilities
 - `doc-code-linking`: deterministic documentation-to-code edges via directory
-  co-location and symbol-name mention, distinct from similarity inference.
+  co-location, symbol-name mention, and explicit file-path reference, distinct
+  from similarity inference.
 
 ### Modified Capabilities
 <!-- If an existing 'infer' or 'edges' spec exists, this adds a new edge relation;
@@ -30,7 +35,7 @@ a doc naming a symbol — are not used, so doc↔code matching is effectively us
 
 ## Impact
 
-- **UseCase/Infer** stage: add co-location and symbol-mention passes.
+- **UseCase/Infer** stage: add co-location, symbol-mention, and path-reference passes.
 - **Domain/Graph**: new `documents` edge relation and confidence tagging.
 - **Domain/Context / query**: `documents` edges included in semantic edge set.
 - Improves doc↔code retrieval quality; no user-facing breaking change.
