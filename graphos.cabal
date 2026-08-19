@@ -129,9 +129,10 @@ library
                       -- Infrastructure - Wiring
                       Graphos.Infrastructure.Wiring
                           -- Infrastructure - TreeSitter
-                          Graphos.Infrastructure.Extract.TreeSitter.Core
-                          Graphos.Infrastructure.Extract.TreeSitter.Grammar
-                          Graphos.Infrastructure.Extract.TreeSitter.Convert
+                           Graphos.Infrastructure.Extract.TreeSitter.Core
+                           Graphos.Infrastructure.Extract.TreeSitter.Grammar
+                           Graphos.Infrastructure.Extract.TreeSitter.Convert
+                           Graphos.Infrastructure.Extract.TreeSitter.Resolver
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
                       -- Infrastructure - Image/Office/Markdown extractors
@@ -311,6 +312,7 @@ test-suite graphos-test
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
+    Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
     Graphos.Infrastructure.Observability.SDKSpec
