@@ -69,22 +69,66 @@ in
     # POST to :8083/v1/chat/completions, aggregates results, and tracks
     # progress across the full conversation history (300k ctx).
     #
+    # The loop wrapper keeps relaunching opencode with --continue until:
+    #   - All tasks in the change are complete (openspec reports 0 remaining)
+    #   - OR max iterations reached (default: 50)
+    #   - OR opencode exits with an error
+    #
     # Run:  OPENSPEC_CHANGE=<change-name> devenv tasks run openspec:apply
     # Requires both processes to be up on localhost:
     #   devenv up qwen3-8-orchestrator qwen3-8-executor
     "openspec:apply" = {
       exec = ''
         CHANGE="''${OPENSPEC_CHANGE:-}"
+        MAX_ITER="''${OPENSPEC_MAX_ITER:-50}"
         if [ -z "$CHANGE" ]; then
           echo "openspec:apply: set OPENSPEC_CHANGE=<change-name> before starting." >&2
           echo "Available changes:" >&2
           openspec list >&2
           exit 1
         fi
-        exec opencode run \
-          --model "orchestrator/qwen3.8-orchestrator" \
-          --auto \
-          "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Start with: openspec status --change \"$CHANGE\" --json and openspec instructions apply --change \"$CHANGE\" --json, then implement each pending task following the skill workflow. Delegate tool-heavy work (file reads, edits, bash commands) to the executor model via the small_model. Keep planning and progress tracking in the orchestrator."
+        ITER=0
+        while [ "$ITER" -lt "$MAX_ITER" ]; do
+          ITER=$((ITER + 1))
+          echo "=== Iteration $ITER/$MAX_ITER for change '$CHANGE' ==="
+
+          # Check remaining tasks
+          REMAINING=$(openspec status --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // empty')
+          if [ -z "$REMAINING" ]; then
+            REMAINING=$(openspec instructions apply --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // 0')
+          fi
+          echo "Remaining tasks: $REMAINING"
+          if [ "$REMAINING" = "0" ]; then
+            echo "All tasks complete for '$CHANGE'!"
+            break
+          fi
+
+          # Run opencode — continue previous session if it exists
+          if [ "$ITER" -eq 1 ]; then
+            opencode run \
+              --model "orchestrator/qwen3.8-orchestrator" \
+              --auto \
+              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Continue implementing the next pending task. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task, mark it complete, then move to the next. Do NOT stop until all tasks are done or you hit a real blocker."
+          else
+            opencode run \
+              --model "orchestrator/qwen3.8-orchestrator" \
+              --auto \
+              --continue \
+              "Continue. Pick up the next pending task from '$CHANGE' and implement it. Do NOT stop until all tasks are done or you hit a real blocker."
+          fi
+          EXIT_CODE=$?
+          echo "opencode exited with code $EXIT_CODE"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "opencode error, stopping"
+            break
+          fi
+
+          # Brief pause between iterations to let the model rest
+          sleep 5
+        done
+        echo "=== Finished after $ITER iterations ==="
+        openspec status --change "$CHANGE"
       '';
     };
 
