@@ -50,7 +50,7 @@
         "gemma4-moe": {
           "name": "gemma4-moe",
           "limit": {
-            "context": 200000,
+            "context": 65536,
             "output": 4096
           },
           "modalities": {
