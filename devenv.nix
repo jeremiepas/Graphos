@@ -61,18 +61,11 @@ in
 
 
     # Apply an OpenSpec change headlessly via opencode + hierarchical agent.
-    # Uses the orchestrator (CPU, 300k ctx) as the main model for planning,
-    # and the executor (GPU, 64k ctx, MTP spec decode) as the small_model for
-    # fast tool calls (edit, bash, grep, read).
-    #
-    # The orchestrator delegates focused subtasks to the executor via HTTP
-    # POST to :8083/v1/chat/completions, aggregates results, and tracks
-    # progress across the full conversation history (300k ctx).
-    #
-    # The loop wrapper keeps relaunching opencode with --continue until:
-    #   - All tasks in the change are complete (openspec reports 0 remaining)
-    #   - OR max iterations reached (default: 50)
-    #   - OR opencode exits with an error
+    # The EXECUTOR (GPU, 64k ctx, MTP spec decode) is the main model — it does
+    # ALL tool calls (edit, bash, grep, read), reflection, and implementation.
+    # The ORCHESTRATOR (CPU, 300k ctx) is only for long-context planning — the
+    # executor can call it via curl POST to :8082/v1/chat/completions when it
+    # needs to reason over the full conversation history.
     #
     # Run:  OPENSPEC_CHANGE=<change-name> devenv tasks run openspec:apply
     # Requires both processes to be up on localhost:
@@ -103,18 +96,21 @@ in
             break
           fi
 
-          # Run opencode — continue previous session if it exists
+          # Run opencode with executor as main model (does all tool calls)
+          # The executor can call the orchestrator via curl for long-context planning:
+          #   curl -s http://localhost:8082/v1/chat/completions -H "Content-Type: application/json" \
+          #     -d '{"messages":[{"role":"user","content":"<PLANNING QUESTION>"}]}' | jq -r '.choices[0].message.content'
           if [ "$ITER" -eq 1 ]; then
             opencode run \
-              --model "orchestrator/qwen3.8-orchestrator" \
+              --model "executor/qwen3.8-executor" \
               --auto \
-              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Continue implementing the next pending task. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task, mark it complete, then move to the next. Do NOT stop until all tasks are done or you hit a real blocker."
+              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task using tools (edit, bash, read, grep). Mark it complete in tasks.md, then continue to the next task. For long-context planning across the full conversation, call the orchestrator at http://localhost:8082/v1/chat/completions via curl. Do NOT stop until all tasks are done or you hit a real blocker."
           else
             opencode run \
-              --model "orchestrator/qwen3.8-orchestrator" \
+              --model "executor/qwen3.8-executor" \
               --auto \
               --continue \
-              "Continue. Pick up the next pending task from '$CHANGE' and implement it. Do NOT stop until all tasks are done or you hit a real blocker."
+              "Continue. Pick up the next pending task from '$CHANGE' and implement it using tools. Do NOT stop until all tasks are done or you hit a real blocker."
           fi
           EXIT_CODE=$?
           echo "opencode exited with code $EXIT_CODE"
@@ -124,7 +120,6 @@ in
             break
           fi
 
-          # Brief pause between iterations to let the model rest
           sleep 5
         done
         echo "=== Finished after $ITER iterations ==="
