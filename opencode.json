@@ -110,9 +110,9 @@
       },
       "models": {
         "qwen3.8-executor": {
-          "name": "Qwen3.8-27B Executor (GPU, 64k ctx)",
+          "name": "Qwen3.8-27B Executor (GPU, 131k ctx)",
           "limit": {
-            "context": 65536,
+            "context": 131072,
             "output": 8192
           },
           "tool_call": true,
