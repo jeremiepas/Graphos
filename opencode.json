@@ -101,7 +101,7 @@
       }
     },
     "executor": {
-      "name": "Qwen3.8-27B Executor (GPU, 64k ctx, MTP spec decode)",
+      "name": "Qwen3.8-27B Executor (GPU, 131k ctx)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "http://montech:8083/v1",
