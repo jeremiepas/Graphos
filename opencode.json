@@ -106,7 +106,8 @@
       "options": {
         "baseURL": "http://montech:8083/v1",
         "timeout": 600000,
-        "chunkTimeout": 600000
+        "chunkTimeout": 600000,
+        "contextLength": 131072
       },
       "models": {
         "qwen3.8-executor": {
