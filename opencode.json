@@ -2,6 +2,8 @@
   "$schema": "https://opencode.ai/config.json",
   "model": "gemma/gemma4-moe",
   "small_model": "gemma/gemma4-moe",
+  "compaction": { "auto": true, "tail_turns": 10 },
+  "experimental": { "mcp_timeout": 60000, "primary_tools": ["edit", "bash"], "request_timeout": 300000 },
   "provider": {
     "llama": {
       "name": "Local llama.cpp server (Qwen 3.6)",
