@@ -60,69 +60,70 @@ in
 
 
 
-    # Apply an OpenSpec change headlessly via opencode + hierarchical agent.
-    # The EXECUTOR (GPU, 64k ctx, MTP spec decode) is the main model — it does
-    # ALL tool calls (edit, bash, grep, read), reflection, and implementation.
-    # The ORCHESTRATOR (CPU, 300k ctx) is only for long-context planning — the
-    # executor can call it via curl POST to :8082/v1/chat/completions when it
-    # needs to reason over the full conversation history.
-    #
-    # Run:  OPENSPEC_CHANGE=<change-name> devenv tasks run openspec:apply
-    # Requires both processes to be up on localhost:
-    #   devenv up qwen3-8-orchestrator qwen3-8-executor
+    # Apply OpenSpec changes headlessly — never stops, runs all pending changes.
+    # One opencode run per task (keeps context small, avoids overflow).
+    # Run:  devenv tasks run openspec:apply
+    # Stop: Ctrl-C or kill the process.
     "openspec:apply" = {
       exec = ''
-        CHANGE="''${OPENSPEC_CHANGE:-}"
-        MAX_ITER="''${OPENSPEC_MAX_ITER:-50}"
-        LOGFILE="''${OPENSPEC_LOG:-/tmp/opencode-openspec-apply.log}"
-        if [ -z "$CHANGE" ]; then
-          echo "openspec:apply: set OPENSPEC_CHANGE=<change-name> before starting." >&2
-          echo "Available changes:" >&2
-          openspec list >&2
-          exit 1
-        fi
-        ITER=0
-        while [ "$ITER" -lt "$MAX_ITER" ]; do
-          ITER=$((ITER + 1))
-          echo "=== Iteration $ITER/$MAX_ITER for change '$CHANGE' ===" | tee -a "$LOGFILE"
+        LOGFILE="/tmp/opencode-openspec-apply.log"
+        echo "=== openspec:apply started at $(date) ===" > "$LOGFILE"
 
-          # Check remaining tasks
-          REMAINING=$(openspec status --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // empty' 2>/dev/null)
-          if [ -z "$REMAINING" ]; then
-            REMAINING=$(openspec instructions apply --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // 0' 2>/dev/null)
-          fi
-          echo "Remaining tasks: $REMAINING" | tee -a "$LOGFILE"
-          if [ "$REMAINING" = "0" ]; then
-            echo "All tasks complete for '$CHANGE'!" | tee -a "$LOGFILE"
+        # Find next change with undone tasks
+        find_next_change() {
+          for dir in ~/Documents/Graphos/openspec/changes/*/; do
+            [ -f "$dir/tasks.md" ] || continue
+            if grep -q '^\- \[ \]' "$dir/tasks.md" 2>/dev/null; then
+              basename "$dir"
+              return 0
+            fi
+          done
+          return 1
+        }
+
+        while true; do
+          CHANGE=$(find_next_change)
+          if [ -z "$CHANGE" ]; then
+            echo "=== No more changes with pending tasks. All done! ===" | tee -a "$LOGFILE"
             break
           fi
 
-          # Run opencode with qwen3.8 executor (GPU, 64k ctx, fast prefill)
-          # chunkTimeout set to 600s in opencode.json to survive long prefill
-          if [ "$ITER" -eq 1 ]; then
+          echo "=== Starting change: $CHANGE ===" | tee -a "$LOGFILE"
+          TASKNUM=0
+
+          while true; do
+            # Check if change still has undone tasks
+            if ! grep -q '^\- \[ \]' ~/Documents/Graphos/openspec/changes/"$CHANGE"/tasks.md 2>/dev/null; then
+              echo "=== Change $CHANGE: all tasks complete! ===" | tee -a "$LOGFILE"
+              break
+            fi
+
+            TASKNUM=$((TASKNUM + 1))
+            echo "--- $CHANGE task #$TASKNUM ---" | tee -a "$LOGFILE"
+
+            # One opencode run: find first unchecked task, implement it, mark done
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
-              "You are an autonomous agent. Apply the OpenSpec change '$CHANGE' using the openspec-apply-change skill. Steps: 1) Run openspec instructions apply --change \"$CHANGE\" --json 2) Read all context files 3) For each undone task: implement it using tools (edit, bash, read, grep), then mark it [x] in tasks.md 4) Do NOT ask for clarification — make decisions autonomously 5) Do NOT stop until all tasks are done or you hit a fatal error. Execute now." >> "$LOGFILE" 2>&1
-          else
-            opencode run \
-              --model "executor/qwen3.8-executor" \
-              --auto \
-              --continue \
-              "Continue autonomously. Pick up the next undone task from '$CHANGE' and implement it using tools. Mark it [x] in tasks.md. Do NOT ask for clarification. Do NOT stop until all tasks are done or you hit a fatal error." >> "$LOGFILE" 2>&1
-          fi
-          EXIT_CODE=$?
-          echo "opencode exited with code $EXIT_CODE" | tee -a "$LOGFILE"
+              "Read the file openspec/changes/$CHANGE/tasks.md. Find the first line that starts with '- [ ]' (unchecked task). Read its description. Implement that task using the edit, bash, read, and grep tools. Then edit tasks.md to change that '- [ ]' to '- [x]'. Stop after marking it done. Do NOT read any openspec context files — just tasks.md and the source files you need." \
+              >> "$LOGFILE" 2>&1
 
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "opencode error, stopping" | tee -a "$LOGFILE"
-            break
-          fi
+            EXIT_CODE=$?
+            echo "opencode exit=$EXIT_CODE" >> "$LOGFILE"
 
-          sleep 5
+            # Never stop on errors — sleep and retry
+            if [ $EXIT_CODE -ne 0 ]; then
+              echo "opencode error (code $EXIT_CODE), retrying in 10s..." | tee -a "$LOGFILE"
+              sleep 10
+            else
+              sleep 2
+            fi
+          done
+
+          echo "=== Moving to next change ===" | tee -a "$LOGFILE"
         done
-        echo "=== Finished after $ITER iterations ===" | tee -a "$LOGFILE"
-        openspec status --change "$CHANGE" | tee -a "$LOGFILE"
+
+        echo "=== openspec:apply finished at $(date) ===" | tee -a "$LOGFILE"
       '';
     };
 
