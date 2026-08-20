@@ -102,13 +102,13 @@ in
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
-              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task using tools (edit, bash, read, grep). Mark it complete in tasks.md, then continue to the next task. Do NOT stop until all tasks are done or you hit a real blocker." >> "$LOGFILE" 2>&1
+              "You are an autonomous agent. Apply the OpenSpec change '$CHANGE' using the openspec-apply-change skill. Steps: 1) Run openspec instructions apply --change \"$CHANGE\" --json 2) Read all context files 3) For each undone task: implement it using tools (edit, bash, read, grep), then mark it [x] in tasks.md 4) Do NOT ask for clarification — make decisions autonomously 5) Do NOT stop until all tasks are done or you hit a fatal error. Execute now." >> "$LOGFILE" 2>&1
           else
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
               --continue \
-              "Continue. Pick up the next pending task from '$CHANGE' and implement it using tools. Do NOT stop until all tasks are done or you hit a real blocker." >> "$LOGFILE" 2>&1
+              "Continue autonomously. Pick up the next undone task from '$CHANGE' and implement it using tools. Mark it [x] in tasks.md. Do NOT ask for clarification. Do NOT stop until all tasks are done or you hit a fatal error." >> "$LOGFILE" 2>&1
           fi
           EXIT_CODE=$?
           echo "opencode exited with code $EXIT_CODE" | tee -a "$LOGFILE"
