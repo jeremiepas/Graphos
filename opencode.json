@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "orchestrator/qwen3.8-orchestrator",
+  "model": "executor/qwen3.8-executor",
   "small_model": "executor/qwen3.8-executor",
   "provider": {
     "llama": {
