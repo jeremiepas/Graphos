@@ -3,13 +3,15 @@
   "model": "gemma/gemma4-moe",
   "small_model": "gemma/gemma4-moe",
   "compaction": { "auto": true, "tail_turns": 10 },
-  "experimental": { "mcp_timeout": 60000, "primary_tools": ["edit", "bash"], "request_timeout": 300000 },
+  "experimental": { "mcp_timeout": 60000, "primary_tools": ["edit", "bash"] },
   "provider": {
     "llama": {
       "name": "Local llama.cpp server (Qwen 3.6)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://100.120.26.64:8080/v1"
+        "baseURL": "http://100.120.26.64:8080/v1",
+        "timeout": 600000,
+        "chunkTimeout": 600000
       },
       "models": {
         "qwen3.6-35b-a3b": {
@@ -44,7 +46,9 @@
       "name": "Local llama.cpp server (Gemma 4 MoE)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://montech:8081/v1"
+        "baseURL": "http://montech:8081/v1",
+        "timeout": 600000,
+        "chunkTimeout": 600000
       },
       "models": {
         "gemma4-moe": {
@@ -79,7 +83,9 @@
       "name": "Qwen3.8-27B Orchestrator (CPU, 300k ctx)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://montech:8082/v1"
+        "baseURL": "http://montech:8082/v1",
+        "timeout": 600000,
+        "chunkTimeout": 600000
       },
       "models": {
         "qwen3.8-orchestrator": {
@@ -98,7 +104,9 @@
       "name": "Qwen3.8-27B Executor (GPU, 64k ctx, MTP spec decode)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://montech:8083/v1"
+        "baseURL": "http://montech:8083/v1",
+        "timeout": 600000,
+        "chunkTimeout": 600000
       },
       "models": {
         "qwen3.8-executor": {
