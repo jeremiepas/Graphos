@@ -98,17 +98,11 @@ in
           fi
 
           # Run opencode with executor as main model (does all tool calls)
+          # opencode requires a TTY — use script(1) with a timeout to prevent hangs
           if [ "$ITER" -eq 1 ]; then
-            opencode run \
-              --model "executor/qwen3.8-executor" \
-              --auto \
-              "You are an autonomous agent. Apply the OpenSpec change '$CHANGE' using the openspec-apply-change skill. Steps: 1) Run openspec instructions apply --change \"$CHANGE\" --json 2) Read all context files 3) For each undone task: implement it using tools (edit, bash, read, grep), then mark it [x] in tasks.md 4) Do NOT ask for clarification — make decisions autonomously 5) Do NOT stop until all tasks are done or you hit a fatal error. Execute now." >> "$LOGFILE" 2>&1
+            timeout 600 script -qfc "opencode run --model 'executor/qwen3.8-executor' --auto 'You are an autonomous agent. Apply the OpenSpec change $CHANGE using the openspec-apply-change skill. Run openspec instructions apply --change $CHANGE --json, read context files, then implement the first undone task using tools. Mark it [x] in tasks.md. Do NOT ask for clarification. Execute now.'" /dev/null >> "$LOGFILE" 2>&1
           else
-            opencode run \
-              --model "executor/qwen3.8-executor" \
-              --auto \
-              --continue \
-              "Continue autonomously. Pick up the next undone task from '$CHANGE' and implement it using tools. Mark it [x] in tasks.md. Do NOT ask for clarification. Do NOT stop until all tasks are done or you hit a fatal error." >> "$LOGFILE" 2>&1
+            timeout 600 script -qfc "opencode run --model 'executor/qwen3.8-executor' --auto --continue 'Continue autonomously. Pick up the next undone task from $CHANGE and implement it using tools. Mark it [x] in tasks.md. Do NOT ask for clarification. Execute now.'" /dev/null >> "$LOGFILE" 2>&1
           fi
           EXIT_CODE=$?
           echo "opencode exited with code $EXIT_CODE" | tee -a "$LOGFILE"
