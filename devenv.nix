@@ -102,13 +102,13 @@ in
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
-              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task using tools (edit, bash, read, grep). Mark it complete in tasks.md, then continue to the next task. Do NOT stop until all tasks are done or you hit a real blocker." 2>&1 | tee -a "$LOGFILE"
+              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task using tools (edit, bash, read, grep). Mark it complete in tasks.md, then continue to the next task. Do NOT stop until all tasks are done or you hit a real blocker." >> "$LOGFILE" 2>&1
           else
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
               --continue \
-              "Continue. Pick up the next pending task from '$CHANGE' and implement it using tools. Do NOT stop until all tasks are done or you hit a real blocker." 2>&1 | tee -a "$LOGFILE"
+              "Continue. Pick up the next pending task from '$CHANGE' and implement it using tools. Do NOT stop until all tasks are done or you hit a real blocker." >> "$LOGFILE" 2>&1
           fi
           EXIT_CODE=$?
           echo "opencode exited with code $EXIT_CODE" | tee -a "$LOGFILE"
