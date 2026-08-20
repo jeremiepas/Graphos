@@ -74,6 +74,7 @@ in
       exec = ''
         CHANGE="''${OPENSPEC_CHANGE:-}"
         MAX_ITER="''${OPENSPEC_MAX_ITER:-50}"
+        LOGFILE="''${OPENSPEC_LOG:-/tmp/opencode-openspec-apply.log}"
         if [ -z "$CHANGE" ]; then
           echo "openspec:apply: set OPENSPEC_CHANGE=<change-name> before starting." >&2
           echo "Available changes:" >&2
@@ -83,47 +84,44 @@ in
         ITER=0
         while [ "$ITER" -lt "$MAX_ITER" ]; do
           ITER=$((ITER + 1))
-          echo "=== Iteration $ITER/$MAX_ITER for change '$CHANGE' ==="
+          echo "=== Iteration $ITER/$MAX_ITER for change '$CHANGE' ===" | tee -a "$LOGFILE"
 
           # Check remaining tasks
-          REMAINING=$(openspec status --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // empty')
+          REMAINING=$(openspec status --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // empty' 2>/dev/null)
           if [ -z "$REMAINING" ]; then
-            REMAINING=$(openspec instructions apply --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // 0')
+            REMAINING=$(openspec instructions apply --change "$CHANGE" --json 2>/dev/null | jq '.progress.remaining // 0' 2>/dev/null)
           fi
-          echo "Remaining tasks: $REMAINING"
+          echo "Remaining tasks: $REMAINING" | tee -a "$LOGFILE"
           if [ "$REMAINING" = "0" ]; then
-            echo "All tasks complete for '$CHANGE'!"
+            echo "All tasks complete for '$CHANGE'!" | tee -a "$LOGFILE"
             break
           fi
 
           # Run opencode with executor as main model (does all tool calls)
-          # The executor can call the orchestrator via curl for long-context planning:
-          #   curl -s http://localhost:8082/v1/chat/completions -H "Content-Type: application/json" \
-          #     -d '{"messages":[{"role":"user","content":"<PLANNING QUESTION>"}]}' | jq -r '.choices[0].message.content'
           if [ "$ITER" -eq 1 ]; then
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
-              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task using tools (edit, bash, read, grep). Mark it complete in tasks.md, then continue to the next task. For long-context planning across the full conversation, call the orchestrator at http://localhost:8082/v1/chat/completions via curl. Do NOT stop until all tasks are done or you hit a real blocker."
+              "Apply the OpenSpec change named '$CHANGE' using the openspec-apply-change skill. Check openspec instructions apply --change \"$CHANGE\" --json for the task list. Implement the next undone task using tools (edit, bash, read, grep). Mark it complete in tasks.md, then continue to the next task. Do NOT stop until all tasks are done or you hit a real blocker." 2>&1 | tee -a "$LOGFILE"
           else
             opencode run \
               --model "executor/qwen3.8-executor" \
               --auto \
               --continue \
-              "Continue. Pick up the next pending task from '$CHANGE' and implement it using tools. Do NOT stop until all tasks are done or you hit a real blocker."
+              "Continue. Pick up the next pending task from '$CHANGE' and implement it using tools. Do NOT stop until all tasks are done or you hit a real blocker." 2>&1 | tee -a "$LOGFILE"
           fi
           EXIT_CODE=$?
-          echo "opencode exited with code $EXIT_CODE"
+          echo "opencode exited with code $EXIT_CODE" | tee -a "$LOGFILE"
 
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "opencode error, stopping"
+            echo "opencode error, stopping" | tee -a "$LOGFILE"
             break
           fi
 
           sleep 5
         done
-        echo "=== Finished after $ITER iterations ==="
-        openspec status --change "$CHANGE"
+        echo "=== Finished after $ITER iterations ===" | tee -a "$LOGFILE"
+        openspec status --change "$CHANGE" | tee -a "$LOGFILE"
       '';
     };
 
