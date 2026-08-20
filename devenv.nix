@@ -97,16 +97,16 @@ in
             break
           fi
 
-          # Run opencode with qwen3.8 orchestrator (CPU, 300k ctx)
+          # Run opencode with qwen3.8 executor (GPU, 64k ctx, fast prefill)
           # chunkTimeout set to 600s in opencode.json to survive long prefill
           if [ "$ITER" -eq 1 ]; then
             opencode run \
-              --model "orchestrator/qwen3.8-orchestrator" \
+              --model "executor/qwen3.8-executor" \
               --auto \
               "You are an autonomous agent. Apply the OpenSpec change '$CHANGE' using the openspec-apply-change skill. Steps: 1) Run openspec instructions apply --change \"$CHANGE\" --json 2) Read all context files 3) For each undone task: implement it using tools (edit, bash, read, grep), then mark it [x] in tasks.md 4) Do NOT ask for clarification — make decisions autonomously 5) Do NOT stop until all tasks are done or you hit a fatal error. Execute now." >> "$LOGFILE" 2>&1
           else
             opencode run \
-              --model "orchestrator/qwen3.8-orchestrator" \
+              --model "executor/qwen3.8-executor" \
               --auto \
               --continue \
               "Continue autonomously. Pick up the next undone task from '$CHANGE' and implement it using tools. Mark it [x] in tasks.md. Do NOT ask for clarification. Do NOT stop until all tasks are done or you hit a fatal error." >> "$LOGFILE" 2>&1
