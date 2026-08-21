@@ -6,6 +6,10 @@ module Graphos.UseCase.Detect
   , detectFilesWithExtensionsAndIgnore'
   , allSupportedExtensions
   , hardcodedIgnoreDirNames
+  , rootAnchoredIgnoreDirs
+  , depthIndependentIgnoreDirs
+  , isIgnoredEntry
+  , isIgnoredEntryRoot
   ) where
 
 import Data.Map.Strict (Map)
@@ -93,7 +97,7 @@ detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns = do
       , detectionFiles        = Map.empty
       }
     else do
-      files <- findAllFilesWithAndIgnore (fspShouldIgnore fsp) root extMap ignorePatterns
+      files <- findAllFilesWithAndIgnore root root (fspShouldIgnore fsp) root extMap ignorePatterns
       let categorized = categorizeFilesWith files extMap
           totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
@@ -112,17 +116,26 @@ findAllFiles dir = findAllFilesWith dir allSupportedExtensions
 
 -- | Find all files recursively using config-driven extension map
 findAllFilesWith :: FilePath -> Map FileCategory [String] -> IO [FilePath]
-findAllFilesWith dir extMap = findAllFilesWithAndIgnore (\_ _ -> False) dir extMap []
+findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir dir (\_ _ -> False) dir extMap []
 
--- | Find all files recursively using config-driven extension map and ignore patterns
-findAllFilesWithAndIgnore :: ([AnnotatedPattern] -> FilePath -> Bool) -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO [FilePath]
-findAllFilesWithAndIgnore shouldIgnoreFn dir extMap ignorePatterns = do
+-- | Find all files recursively using config-driven extension map and ignore patterns.
+-- The first argument is the scan root (for root-anchored ignore matching); the second
+-- is the current directory being walked.
+findAllFilesWithAndIgnore
+  :: FilePath            -- ^ scan root, used to anchor build-output directory names
+  -> FilePath            -- ^ current directory being walked
+  -> ([AnnotatedPattern] -> FilePath -> Bool)
+  -> FilePath            -- ^ unused legacy parameter (kept for backward compatibility)
+  -> Map FileCategory [String]
+  -> [AnnotatedPattern]
+  -> IO [FilePath]
+findAllFilesWithAndIgnore scanRoot dir shouldIgnoreFn _ extMap ignorePatterns = do
   entries <- listDirectory dir
   fmap concat $ mapM (\entry -> do
     let path = dir </> entry
     isDir <- doesDirectoryExist path
-    if isDir && not (isIgnoredEntry shouldIgnoreFn entry path ignorePatterns)
-      then findAllFilesWithAndIgnore shouldIgnoreFn path extMap ignorePatterns
+    if isDir && not (isIgnoredEntryRoot scanRoot shouldIgnoreFn entry dir path ignorePatterns)
+      then findAllFilesWithAndIgnore scanRoot path shouldIgnoreFn dir extMap ignorePatterns
       else if isSupportedWith entry extMap
            then pure [path]
            else pure []
@@ -139,20 +152,26 @@ categorizeFilesWith files extMap = Map.fromList
   | (cat, exts) <- Map.toList extMap
   ]
 
--- | Hardcoded directory names that should always be ignored.
--- These cover common build artifacts, dependency directories, IDE folders,
--- and cache directories across all major ecosystems.
--- Used as a fast check before applying file-based ignore patterns.
-hardcodedIgnoreDirNames :: [String]
-hardcodedIgnoreDirNames =
+-- | Build-output directory names that are pruned only when they appear as a
+-- direct child of the scan root. A directory named @build@ nested inside a
+-- source tree (e.g. @src\/domain\/build\/@) is a legitimate source directory
+-- and SHALL be extracted. Users who want deep pruning can declare it
+-- explicitly in @.graphosignore@.
+rootAnchoredIgnoreDirs :: [String]
+rootAnchoredIgnoreDirs =
+  [ "build", "out", "target", "dist", "dist-newstyle", "DerivedData", ".build" ]
+
+-- | Hardcoded directory names that are ignored at any depth (tooling/VCS state).
+-- These never represent legitimate source directories.
+depthIndependentIgnoreDirs :: [String]
+depthIndependentIgnoreDirs =
   -- Version control
   [ ".git", ".svn", ".hg"
   -- Dependency/package directories
   , "node_modules", "bower_components", "vendor"
   , "__pypackages__", ".pnpm-store", ".yarn"
-  -- Build outputs
-  , "dist", "dist-newstyle", "build", "target", "out", "DerivedData"
-  , ".build", ".cache", ".sass-cache"
+  -- Build outputs that are NOT root-anchored (caches, not the canonical build dir)
+  , ".cache", ".sass-cache"
   -- Python caches
   , "__pycache__", ".pytest_cache", ".mypy_cache", ".tox"
   , ".venv", ".env"
@@ -172,14 +191,41 @@ hardcodedIgnoreDirNames =
   , ".github", ".DS_Store", ".pdm-build"
   ]
 
--- | Check if a directory entry should be ignored.
--- Combines the hardcoded directory name check with file-based ignore patterns.
-isIgnoredEntry :: ([AnnotatedPattern] -> FilePath -> Bool) -> String -> FilePath -> [AnnotatedPattern] -> Bool
-isIgnoredEntry shouldIgnoreFn entry path ignorePatterns =
-  -- Fast check: hardcoded directory names (always ignored)
-  entry `elem` hardcodedIgnoreDirNames
-  -- Slower check: file-based ignore patterns (.gitignore, .graphosignore)
-  || shouldIgnoreFn ignorePatterns path
+-- | Hardcoded directory names that should always be ignored.
+-- Kept for backward compatibility; prefer 'rootAnchoredIgnoreDirs' and
+-- 'depthIndependentIgnoreDirs'. This is the union of the two classes.
+hardcodedIgnoreDirNames :: [String]
+hardcodedIgnoreDirNames = rootAnchoredIgnoreDirs ++ depthIndependentIgnoreDirs
+
+-- | Check if a directory entry should be ignored (backward-compatible wrapper).
+-- Defaults the scan root to "." and derives the parent directory from the
+-- entry path. Prefer 'isIgnoredEntryRoot' when the scan root is known.
+isIgnoredEntry
+  :: ([AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
+  -> String        -- ^ directory entry (basename)
+  -> FilePath       -- ^ full path to the directory entry
+  -> [AnnotatedPattern]
+  -> Bool
+isIgnoredEntry shouldIgnoreFn entry entryPath ignorePatterns =
+  let parentPath = reverse (dropWhile (/= '/') (reverse entryPath))
+  in isIgnoredEntryRoot parentPath shouldIgnoreFn entry parentPath entryPath ignorePatterns
+
+-- | Check if a directory entry should be ignored, given the scan root.
+-- The scan root is used to anchor build-output directory names: @build@,
+-- @out@, @target@, @dist@, @dist-newstyle@, @DerivedData@ and @.build@ are
+-- pruned only when they are a direct child of the scan root.
+isIgnoredEntryRoot
+  :: FilePath       -- ^ scan root
+  -> ([AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
+  -> String        -- ^ directory entry (basename)
+  -> FilePath       -- ^ path of the parent directory containing the entry
+  -> FilePath       -- ^ full path to the directory entry
+  -> [AnnotatedPattern]
+  -> Bool
+isIgnoredEntryRoot scanRoot shouldIgnoreFn entry parentPath entryPath ignorePatterns =
+  entry `elem` depthIndependentIgnoreDirs
+  || (entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot)
+  || shouldIgnoreFn ignorePatterns entryPath
 
 -- | Check if a file has a supported extension (using config-driven extensions)
 isSupportedWith :: String -> Map FileCategory [String] -> Bool

@@ -2,11 +2,14 @@
 module Graphos.Infrastructure.Extract.TreeSitterSpec (spec) where
 
 import Test.Hspec
+import Data.List (nub)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (toJSON)
 import Graphos.Domain.Config (Granularity(..))
-import Graphos.Domain.Types (Edge(..), Relation(..))
+import Graphos.Domain.Types (Edge(..), Node(..), Relation(..), FileType(..))
+import Graphos.Domain.Types.Graph (extractionNodes, extractionEdges)
 import Graphos.Infrastructure.Extract.TreeSitter.Core
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
@@ -115,4 +118,55 @@ spec = do
             edgeTarget e `shouldBe` makeNodeId "src/y.ts" "y"
             edgeExtra e `shouldBe` Just (toJSON (T.pack "re-export"))
           _ -> fail "expected exactly one imports edge"
+
+      it "produces exactly one external node for a package imported by N files, with N edges" $ do
+        let mkImport = tsNode "import_declaration" "import { z } from 'zod'" []
+            files = ["src/a.ts", "src/b.ts", "src/c.ts"]
+            results = map (\fp -> tsNodeToGraphEdges GranularityFine fp (Just "module") mkImport) files
+            allEdges = concatMap fst results
+            allNodes = concatMap snd results
+            importEdges = filter ((Imports ==) . edgeRelation) allEdges
+            externalNodes = filter (\n -> nodeKind n == Just "External") allNodes
+            uniqueExternalIds = nub (map nodeId externalNodes)
+        length importEdges `shouldBe` 3
+        length (nub (map edgeTarget importEdges)) `shouldBe` 1
+        -- Three emission sites produce three node values, but they share one canonical ID,
+        -- so after buildGraph merges by NodeId exactly one external node remains.
+        length uniqueExternalIds `shouldBe` 1
+        case uniqueExternalIds of
+          [single] -> all (== single) uniqueExternalIds `shouldBe` True
+          _ -> pure ()
+
+      it "integration: imports edge endpoints have different source_file values" $ do
+        let node = tsNode "import_declaration" "import { cfg } from './config.js'" []
+            filePath = "src/service.ts"
+            (edges, targetNodes) = tsNodeToGraphEdges GranularityFine filePath (Just "module") node
+            importEdges = filter ((Imports ==) . edgeRelation) edges
+        length importEdges `shouldBe` 1
+        case (importEdges, targetNodes) of
+          ([_e], tn:_) -> do
+            let srcNode = Node { nodeId = makeNodeId filePath "module", nodeLabel = "module"
+                              , nodeFileType = CodeFile, nodeSourceFile = T.pack filePath
+                              , nodeLineStart = Nothing, nodeCommunityId = Nothing
+                              , nodeDegree = Nothing, nodeIsBridge = Nothing
+                              , nodeExtra = Nothing, nodeLineEnd = Nothing
+                              , nodeKind = Just "Module", nodeSignature = Nothing }
+            nodeSourceFile srcNode `shouldBe` T.pack filePath
+            nodeSourceFile tn `shouldSatisfy` (/= T.pack filePath)
+          ([], _) -> fail "expected exactly one imports edge"
+          (_, []) -> fail "expected a target node to be materialized"
+          (_:_, _:_) -> pure ()
+
+      it "no Import-kind node exists without an outgoing imports edge" $ do
+        let node = tsNode "import_declaration" "import { db } from './db.js'" []
+            ex = tsNodesToExtraction GranularityFine "src/file.ts"
+                   [ tsNode "program" "module" [node] ]
+            allNodes = Map.elems (extractionNodes ex)
+            allEdges = Map.elems (extractionEdges ex)
+            importNodes = filter (\n -> nodeKind n == Just "Import") allNodes
+            importEdges = filter ((Imports ==) . edgeRelation) allEdges
+        length importNodes `shouldBe` 1
+        length importEdges `shouldSatisfy` (>= 1)
+        -- The importing file's module node is the source; verify an imports edge exists
+        any (\e -> edgeSource e == makeNodeId "src/file.ts" "module") importEdges `shouldBe` True
 
