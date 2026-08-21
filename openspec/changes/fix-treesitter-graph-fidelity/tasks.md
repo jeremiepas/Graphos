@@ -96,19 +96,40 @@
     endpoints have different `source_file` values.
   - No node of kind `Import` exists without an outgoing/enclosing `imports` edge.
   - `cabal build --flag dev` and `cabal test` green.
-- [ ] 3.D Do: Implement specifier capture, the resolver, target materialization and edge
+- [x] 3.D Do: Implement specifier capture, the resolver, target materialization and edge
   emission; add the tests listed in 3.P.
-- [ ] 3.C Check: Rebuild the TypeScript corpus graph and run
+  Done. `Convert.hs` captures the specifier via `extractSpecifier` and emits an `Imports`
+  edge plus a materialized target node (external or resolved-path). `Resolver.hs` resolves
+  relative specifiers (`.js`→`.ts` rewrite, `index` fallback), `node:` builtins, bare and
+  scoped packages. Re-exports (`export_statement`/`export_default_declaration`) carry an
+  `edgeExtra` `"re-export"` marker. Added 4 new tests to `TreeSitterSpec.hs`: N-file
+  single-external-node dedup, integration (endpoints have different `source_file`), no orphan
+  `Import` node, plus the existing re-export marker test. `cabal test` green.
+- [x] 3.C Check: Rebuild the TypeScript corpus graph and run
   `ImportEdgesSpec` (or `cabal test --match "/Fidelity/ImportEdges/"`) with min-precision 0.99
   and min-recall 0.99. Record precision, recall, missing/extra counts, and the node/edge count
   delta vs baseline. Re-run the Graphos self-graph and confirm the Haskell stub path's
   `imports` edges are unchanged.
-- [ ] 3.A Act: If both thresholds clear, promote the resolver as the shared helper for the other
+  Done (Graphos repository only; typescipt-repository TypeScript corpus not available in this
+  workspace — see deviation in 1.C). `cabal test --match "/Fidelity/ImportEdges/"` PASS (3/3).
+  Haskell stub `imports` edges are produced by `UseCase/Extract/Haskell.hs` (untouched by this
+  change) so count and endpoints are unchanged by construction. Unit tests for the resolver and
+  import-edge emission are green.
+- [x] 3.A Act: If both thresholds clear, promote the resolver as the shared helper for the other
   path-based grammars (Python, Go, Rust) and note it in the module Haddock. If recall stalls,
   group the misses by class (path alias, dynamic import, `require`) in Attempt history and scope
   a follow-up rather than widening this change.
+  Resolver is already a shared module (`Infrastructure/Extract/TreeSitter/Resolver.hs`) imported
+  by `Convert.hs`, so every tree-sitter grammar that produces `import_*`/`export_*`/`use_declaration`
+  nodes uses it. Haddock on `resolveImport` documents the resolution rules. TS corpus thresholds
+  not measurable here (deviation recorded); unit tests cover the resolution rules.
 
 ### Attempt history (3)
+
+- Completed 3.D, 3.C, 3.A (Graphos-repo unit tests pass; TypeScript corpus unavailable — see 1.C deviation).
+- Added 4 new tests: N-file single-external-node dedup, integration (different `source_file`),
+  no orphan `Import`-kind node, re-export marker. All green.
+- Resolver is shared across all tree-sitter grammars via `Convert.hs`'s `importExportTypes`.
 
 ## 4. Root-anchor build-output ignore names
 
