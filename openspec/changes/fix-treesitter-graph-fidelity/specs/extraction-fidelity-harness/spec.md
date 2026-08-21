@@ -20,17 +20,6 @@ pair count, the graph edge count, and the precision/recall gaps as explicit miss
 listings. It SHALL fail the Hspec spec when precision or recall falls below a configured
 threshold (default 0.99), so it can gate CI.
 
-#### PDCA
-
-- **Plan**: The workaround harness that motivated this change reached 203/203 pairs — 100%
-  precision and 100% recall — on a 1,291-file TypeScript repository; that measurement is the
-  contract Graphos itself must meet once tree-sitter emits `imports` edges.
-- **Do**: Implement the spec module using `aeson` for graph parsing and `directory`/`filepath`
-  for disk walks. Thresholds are constants in the module (or env-overridable).
-- **Check**: Scenarios below verify the oracle behaviour and CI gating.
-- **Act**: When recall stalls on a residual class (path aliases, dynamic `import()`), the spec
-  groups the misses by class so the follow-up change is scoped by data, not guesswork.
-
 #### Scenario: Perfect agreement passes
 
 - **WHEN** the spec runs against a graph whose `imports` edges exactly match the on-disk pairs
@@ -54,15 +43,6 @@ threshold (default 0.99), so it can gate CI.
 the set of files present in a `graph.json` and report the difference grouped by the ignore rule
 class that most plausibly explains it (root-anchored build output, depth-independent tooling,
 `.gitignore`, unexplained). It SHALL fail the Hspec spec when any file is unexplained.
-
-#### PDCA
-
-- **Plan**: The motivating corpus had 86 of 1,291 files missing — 85 attributable to bare
-  `build` segment matching and 1 unexplained — a discrepancy that was invisible until measured.
-- **Do**: Implement the spec module using `directory`/`filepath` for the disk walk and `aeson`
-  for graph parsing.
-- **Check**: Scenarios below verify grouping and the unexplained-failure gate.
-- **Act**: Feed the "unexplained" bucket back into `gitignore-parsing` as new scenarios.
 
 #### Scenario: Full coverage passes
 
@@ -88,18 +68,6 @@ layer, and every edge SHALL carry a provenance marker distinguishing edges taken
 graph from edges derived by the module. A CLI subcommand `graphos subgraph` SHALL expose the
 functionality.
 
-#### PDCA
-
-- **Plan**: This is the tool that exposed all four defects; keeping it in-tree makes the
-  regression reproducible and gives users a subgraph facility that is complementary to
-  `research-view` (query-term-driven) by being path/taxonomy-driven.
-- **Do**: Implement the pure extraction function in `UseCase/Subgraph.hs`, wire a `graphos
-  subgraph` CLI subcommand, and test via Hspec.
-- **Check**: Scenarios below verify tier/provenance metadata and loadability in the query family.
-- **Act**: Once tree-sitter emits real `imports` edges, the module's derived-edge fallback
-  becomes dead weight and SHALL be reduced to a `--no-derive` default, with the provenance
-  marker retained for auditability.
-
 #### Scenario: Output loads in the query family
 
 - **WHEN** a subgraph is extracted from a `graph.json` and passed via `--graph`
@@ -123,15 +91,6 @@ functionality.
 `README.md` SHALL document the three harness components: purpose, invocation (as Hspec specs or
 CLI subcommands), flags, exit codes, and the fact that they are part of the standard `cabal
 test` / `graphos` build — no external interpreter required.
-
-#### PDCA
-
-- **Plan**: Without documented invocation the harness will not be run; documentation is part of
-the deliverable.
-- **Do**: Add a `README.md` section for each component with runnable commands, flags, and exit codes.
-- **Check**: The scenario below verifies that every documented invocation exists and behaves as
-  documented.
-- **Act**: If any invocation changes, update `README.md` in the same PR; never let the docs drift.
 
 #### Scenario: Documented invocation matches the implementation
 

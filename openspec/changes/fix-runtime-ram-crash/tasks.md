@@ -1,19 +1,3 @@
-<!--
-  PDCA-PER-TASK workflow.
-  Each top-level `## N. <task>` is ONE task = ONE complete PDCA micro-cycle.
-  Within a task, run the steps in order and keep checkbox format so progress
-  can be tracked: `- [ ] N.P …`, `- [ ] N.D …`, `- [ ] N.C …`, `- [ ] N.A …`.
-
-  PASS rule:  a task PASSES only when its Check passes AND its Act is OK.
-              A passed task reaches the same done state as in classic SDD.
-  RETRY rule: if Act is NOT OK, the task does NOT pass — record the failed
-              attempt under "### Attempt history (N)" (KEEP THE TRACE, never
-              delete it), then start a NEW P → D → C → A attempt for the same
-              task. Repeat until an attempt passes.
-
-  Everything else matches the official spec-driven workflow.
--->
-
 ## 1. Add RTS profiling and heap limit CLI flags
 
 - [ ] 1.P Plan: Add `--rts-profile` and `--max-heap SIZE` flags to `app/Main.hs`. Check criteria: (1) `graphos . --rts-profile` produces GC stats on stderr, (2) `graphos . --max-heap 1G` fails with clear error when heap exceeds 1GB, (3) `cabal test` passes, (4) both flags can be combined. Affected: `app/Main.hs`. Risk: RTS options must be set before GHC runtime initializes — may need `+RTS` in executable wrapper or `setRTSOpts` from `GHC.RTS.Flags`.

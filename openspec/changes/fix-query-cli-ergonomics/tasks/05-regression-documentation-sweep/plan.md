@@ -1,11 +1,3 @@
-<!--
-  One PDCA step file for ONE task. Lives at tasks/<task-slug>/<step>.md
-  where <step> is plan | do | check | act.
-  tasks.md remains the tracked index; these files are the per-task journal.
-  Retry: if Act is NOT OK, keep this file as the trace and add a new cycle
-  under tasks/<task-slug>/attempt-N/ — never delete a prior attempt.
--->
-
 # Task 5 — Regression + documentation sweep — PLAN
 
 **Task slug**: `05-regression-documentation-sweep`

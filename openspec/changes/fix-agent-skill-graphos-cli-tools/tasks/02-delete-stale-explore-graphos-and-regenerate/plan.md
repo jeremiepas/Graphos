@@ -1,11 +1,3 @@
-<!--
-  One PDCA step file for ONE task. Lives at tasks/<task-slug>/<step>.md
-  where <step> is plan | do | check | act.
-  tasks.md remains the tracked index; these files are the per-task journal.
-  Retry: if Act is NOT OK, keep this file as the trace and add a new cycle
-  under tasks/<task-slug>/attempt-N/ — never delete a prior attempt.
--->
-
 # Task 2 — Delete stale explore_graphos.md and regenerate repo scaffolded files — PLAN
 
 **Task slug**: `02-delete-stale-explore-graphos-and-regenerate`

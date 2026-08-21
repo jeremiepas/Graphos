@@ -153,28 +153,3 @@ HTML rendering. This change adds a path/taxonomy-driven subgraph CLI subcommand
   tree-sitter path (`UseCase/Extract/TreeSitter.hs:31` discards `_gran`;
   `Infrastructure/Wiring.hs:180` hardcodes `GranularityFunction`). Filed as a follow-up so this
   change stays reviewable.
-
-## PDCA Cycle
-
-- **Plan**: Make a tree-sitter-extracted graph *connected and reloadable*, and prove it with an
-  on-disk oracle rather than by inspection. Success is measured on two corpora: (a)
-  `typescipt-repository` (TypeScript, 1,291 source files) — `ImportEdgesSpec` reports ≥ 99%
-  precision and ≥ 99% recall of `imports` edges, `GraphCoverageSpec` reports 0 files missing
-  for reasons other than an explicit ignore rule (today: 86 missing, 0 import edges); (b) the
-  Graphos repository itself — no regression in the Haskell stub path's existing `imports`
-  edges. Reload success is measured by `graphos query --graph <derived-graph>` accepting a
-  graph produced by `graphos subgraph` without schema errors (today: 5 successive
-  hard failures).
-- **Do**: Implement the six work items in `tasks.md` in dependency order — truncation policy
-  first (it unblocks specifier extraction), then import edges, then ignore scoping, then the
-  graph.json contract, then port the harness to Haskell, then run the two-corpus validation.
-  Keep all IO in Infrastructure and all resolution logic pure (architecture-purity spec).
-- **Check**: Hspec/QuickCheck units for specifier parsing, path resolution (relative, extension
-  candidates, `index` files, package specifiers), root-anchored ignore matching, and tolerant
-  JSON decoding; plus the two-corpus harness run recorded in `tasks.md`. `cabal build --flag
-  dev` and `cabal test` green with `-Werror`.
-- **Act**: If precision/recall clears the threshold on TypeScript, promote the specifier +
-  resolution helper to the shared path for Python/Go/Rust grammars and open the follow-up for
-  `--granularity`. If recall stalls below threshold because of dynamic imports or path aliases
-  (`tsconfig` `paths`), record the residual class in `tasks.md` attempt history and scope an
-  alias-resolution follow-up rather than widening this change.
