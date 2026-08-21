@@ -69,8 +69,20 @@ spec = do
       shouldIgnore patterns "app/bundle.min.js" `shouldBe` True
 
     it "ignores paths matching exact patterns" $ do
-      let patterns = [AnnotatedPattern (ExactPattern "build") False 0]
-      shouldIgnore patterns "src/build" `shouldBe` True
+      let patterns = [AnnotatedPattern (ExactPattern "node_modules") False 0]
+      shouldIgnore patterns "src/node_modules" `shouldBe` True
+
+    -- Inverted by change fix-treesitter-graph-fidelity: build-output directory
+    -- names are now root-anchored in Detect. The pure shouldIgnore matcher still
+    -- reports True for an explicit ExactPattern "build" against "src/build"
+    -- (the pattern matches "build" as a path segment anywhere), but a
+    -- higher-priority negation in .graphosignore can now override it. This test
+    -- asserts that a negation pattern re-includes "src/build".
+    it "build-output exact pattern is negatable at higher priority (fix-treesitter-graph-fidelity)" $ do
+      let patterns = [ AnnotatedPattern (ExactPattern "build") False 0       -- hardcoded
+                     , AnnotatedPattern (ExactPattern "src/build") True 2    -- graphosignore negation
+                     ]
+      shouldIgnore patterns "src/build" `shouldBe` False
 
     it "ignores paths matching glob patterns" $ do
       let patterns = [AnnotatedPattern (GlobPattern ".log") False 0]

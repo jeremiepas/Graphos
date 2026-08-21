@@ -24,8 +24,9 @@ module Graphos.Infrastructure.FileSystem.Ignore
   , parsePattern
 
     -- * Hardcoded defaults
-  , hardcodedIgnorePatterns
-  ) where
+    , hardcodedIgnorePatterns
+    , rootAnchoredIgnorePatterns
+    ) where
 
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf)
 import System.Directory (doesFileExist)
@@ -193,9 +194,22 @@ mergeIgnorePatterns = concat
 -- Hardcoded ignore patterns (priority 0)
 -- ───────────────────────────────────────────────
 
+-- | Build-output directory names that are pruned only when they appear as a
+-- direct child of the scan root. Mirrors 'Graphos.UseCase.Detect.rootAnchoredIgnoreDirs'.
+-- These are emitted as hardcoded patterns (priority 0) so that a higher-priority
+-- negation in @.graphosignore@ (e.g. @!src\/**\/build\/**@) can re-include them.
+rootAnchoredIgnorePatterns :: [AnnotatedPattern]
+rootAnchoredIgnorePatterns = map (annotatePattern 0) rootAnchoredDirs
+  where
+    rootAnchoredDirs = ["build", "out", "target", "dist", "dist-newstyle", "DerivedData", ".build"]
+
 -- | Hardcoded directory names that should always be ignored.
 -- These cover common build artifacts, dependency directories, IDE folders,
 -- and cache directories across all major ecosystems.
+-- The build-output names (@build@, @out@, @target@, @dist@, @dist-newstyle@,
+-- @DerivedData@, @.build@) are kept here for backward-compatible pattern
+-- matching but are root-anchored in 'Graphos.UseCase.Detect' — a negation
+-- pattern in @.graphosignore@ can re-include them.
 hardcodedIgnorePatterns :: [AnnotatedPattern]
 hardcodedIgnorePatterns = map (annotatePattern 0) hardcodedDirs
   where
@@ -205,7 +219,7 @@ hardcodedIgnorePatterns = map (annotatePattern 0) hardcodedDirs
       -- Dependency/package directories
       , "node_modules", "bower_components", "vendor"
       , "__pypackages__", ".pnpm-store", ".yarn"
-      -- Build outputs
+      -- Build outputs (root-anchored in Detect; kept here for pattern-based fallback)
       , "dist", "dist-newstyle", "build", "target", "out", "DerivedData"
       , ".build", ".cache", ".sass-cache"
       -- Python caches

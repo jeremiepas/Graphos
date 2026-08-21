@@ -327,6 +327,7 @@ test-suite graphos-test
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
     Graphos.UseCase.SubgraphSpec
+    Graphos.UseCase.DetectSpec
     Graphos.Fidelity.ImportEdgesSpec
     Graphos.Fidelity.GraphCoverageSpec
     Graphos.UseCase.ExportSpec
