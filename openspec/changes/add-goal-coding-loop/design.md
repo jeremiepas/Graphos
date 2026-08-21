@@ -128,6 +128,6 @@ If Check fails:
 
 Rollback: delete `.opencode/commands/goal.md`, `.opencode/agent/core/goal-orch.md`, `.opencode/agent/subagents/code/goal-worker.md`, and any `reqs-manifest.md` / `.tmp/goal/`. No other files are touched, so rollback is complete and reversible.
 
-Standardization for the next PDCA cycle:
+Standardization for a follow-up change:
 - If manual runs succeed, extract the loop's conventions (best-guess clarification, manifest as acceptance record, `task_id` resumption, DAG parallelism) into a workspace note under `.opencode/skills/` so future agents inherit them.
 - Feed learnings — which model handles orchestration best, which task shapes stall the loop — into the next iteration: a `/loop` command for scheduled external-feedback ingestion (the article's third loop, explicitly out of scope here).

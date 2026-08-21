@@ -18,18 +18,6 @@ grammars alike**. The graph SHALL NOT consist solely of per-file islands. An ext
 that emits a node of kind `Import` without also emitting a corresponding `imports` edge is
 non-conforming.
 
-#### PDCA
-
-- **Plan**: Today only the Haskell stub path emits `imports` edges, while the tree-sitter path
-  emits `Import` nodes without edges. The target state is cross-file connectivity for every
-  grammar that produces imports.
-- **Do**: Add `imports` edge emission to the tree-sitter extraction path (covered in detail by
-  the ADDED requirements below).
-- **Check**: The scenarios below verify repository-scale connectivity and the absence of orphan
-  import nodes.
-- **Act**: If a grammar cannot support import edges, document it explicitly and exclude it
-  from the "every grammar" claim rather than silently leaving the graph disconnected.
-
 #### Scenario: Repository-scale connectivity (Haskell)
 
 - **WHEN** the full pipeline runs on the Graphos repository itself
@@ -61,15 +49,6 @@ Tree-sitter extraction SHALL parse the module specifier from every import-like d
 display. The specifier SHALL be available to edge construction as structured data, not
 recovered by re-parsing the node label.
 
-#### PDCA
-
-- **Plan**: The specifier is the only join key available for path-based module systems; it must
-  survive normalization, newline stripping (`Convert.hs:184`) and truncation (`Core.hs:134`).
-- **Do**: Capture the specifier during the AST walk and carry it on the extracted declaration.
-- **Check**: Scenarios below verify specifier retention; the harness measures it on real corpora.
-- **Act**: If a grammar exposes no specifier child node, record it as an unsupported grammar
-  with a counted warning rather than emitting a specifier-less import node.
-
 #### Scenario: Single-line TypeScript import
 
 - **WHEN** a `.ts` file contains `import { ok } from '../../types/result.js';`
@@ -99,17 +78,6 @@ the source extension, the specifier as-is, and `<specifier>/index.<ext>`. Packag
 specifiers SHALL resolve to a canonical external module node identity. The target node SHALL be
 materialized in the extraction, because `buildGraph` drops edges with unknown endpoints
 (`Domain/Graph/Core.hs:70–72`).
-
-#### PDCA
-
-- **Plan**: `makeNodeId` is directory-hash + file-stem scoped (`Convert.hs:286–293`), so a
-  target identity must be computed from the resolved path, not from the specifier text.
-- **Do**: Add pure resolution in the extraction layer; materialize external module nodes once
-  per package.
-- **Check**: Scenarios below verify resolution rules and that no `imports` edge is silently
-  dropped by `buildGraph`.
-- **Act**: If `tsconfig` path aliases or bundler aliases produce unresolved specifiers, count
-  them and expose the count in the report rather than guessing.
 
 #### Scenario: Relative import resolves to the imported file's node
 
@@ -142,17 +110,6 @@ A re-export declaration SHALL produce an `imports` edge using the same resolutio
 import declaration. This covers `export { x } from './y.js'`, `export * from './y.js'` and
 `export type { T } from './y.js'`. The edge SHALL carry a marker in `edgeExtra` distinguishing it
 from a plain import, so consumers can filter barrel files.
-
-#### PDCA
-
-- **Plan**: Re-exports are imports for connectivity purposes and are required for barrel-file
-  subgraphs; the marker lets consumers distinguish them.
-- **Do**: Extend the import edge emitter to handle re-export declarations with an `edgeExtra`
-  marker.
-- **Check**: The scenarios below verify barrel-file connectivity and that plain imports are not
-  marked.
-- **Act**: If consumers need richer provenance (e.g., star vs named re-export), promote the
-  marker to a structured value in a follow-up.
 
 #### Scenario: Barrel file connects to its members
 

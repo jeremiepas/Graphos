@@ -108,7 +108,7 @@ The `agent-scaffolding` spec has golden-file tests comparing scaffold output to 
 
 - **If Check fails** (e.g., a golden test reveals the prose change broke the command-reference rendering, or the regenerated file is missing a section):
   - Roll back the `Scaffold.hs` template changes and the golden-file updates; re-delete and re-regenerate the two scaffolded files from the old templates (or restore them from git).
-  - File a follow-up PDCA cycle targeting the specific failure.
+  - File a follow-up change targeting the specific failure.
 - **If the model still reaches for `graphify` after this change**, the next cycle checks for other shadowing sources (e.g., a shell alias, a `graphify` binary on PATH, a stale skill cache). The global skill rename (Decision 4) should eliminate the name collision; if it persists, the cause is elsewhere.
 - **If the `Extract/Core.hs:155` parse error still blocks `cabal build`**, this change cannot reach its build gate — record as a prerequisite blocker in the task list and either fix it in a separate quick change or note it for the user.
 

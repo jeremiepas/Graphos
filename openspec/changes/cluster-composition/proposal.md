@@ -81,29 +81,6 @@ pure clusters, which is honest).
   badge rendering. `-Wall -Werror` clean.
 - **Build**: New module/record + extended prompt; no new dependency.
 
-## PDCA Cycle
-
-- **Plan**: Hypothesis — surfacing per-community composition makes mixed clusters
-  navigable (HTML badge tells humans "this is mixed") and improves LLM labels (the prompt
-  names the unifying concept instead of the most frequent word). Success measured by: (a)
-  `computeCompositions` produces correct counts on a synthetic mixed graph; (b) HTML
-  viewer shows the badge on every community at every depth; (c) on a mixed corpus, LLM
-  labels name concepts ("Authentication", "Export Pipeline") rather than code identifiers
-  ("verifyToken", "renderHTML"); (d) legacy graphs load without `compositions` and all
-  existing commands work; (e) pure-code communities show `ccMixedRatio = 0` honestly.
-- **Do**: Add `CommunityComposition` + `computeCompositions`; persist to `graph.json`;
-  render HTML badge; update `labelPrompt` with composition tags + split lines + new
-  preamble.
-- **Check**: `cabal test` green with new Hspec cases; build a mixed corpus and confirm
-  badges render + LLM labels improve; `--no-embed` graph (no semantic edges) still gets
-  composition (honest pure clusters); legacy graph loads; `-Wall -Werror` clean.
-- **Act**: If LLM labels don't improve with the new prompt, iterate the preamble wording
-  (the signal is there; the prompt may need to explicitly say "name the concept that the
-  code implements and the docs describe"). If the badge is too noisy on large graphs, make
-  it tooltip-only above 1K communities. If `ccMixedRatio` is 0 on real mixed corpora, the
-  literal-name `inferCodeDocEdges` isn't producing cross-type edges — feed into
-  `semantic-edge-inference` as the real fix.
-
 ## Relationship to other changes
 
 - **`semantic-edge-inference`** (planned): independent. That change makes clusters mixed;

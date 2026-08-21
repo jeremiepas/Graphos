@@ -64,22 +64,3 @@ matches its own contract.
 - **Specs/Skills**: `query-cli-contract`, `neighbor-expansion` delta specs; the
   `graphos-query`/`graphos` skill command reference continues to describe `--json` and is
   now accurate.
-
-## PDCA Cycle
-
-- **Plan**: Close the two conformance gaps discovered by direct CLI testing so the
-  query-family commands accept what their own specs and skills advertise. Success is
-  measured by (a) `graphos neighbors Graphos.UseCase.QuerySpec --depth 1` returning the same
-  neighborhood as `mod_Graphos.UseCase.QuerySpec` does today, (b) `graphos query "Graph"
-  --json` emitting valid JSON with `verdict`/`hash` fields, and (c) no regression in existing
-  text output (PRD §16.1 query latency budget < 500ms).
-- **Do**: Implement the parser/UseCase changes in `tasks.md`, keeping all IO in
-  Infrastructure and all resolution logic pure in UseCase (architecture-purity).
-- **Check**: Hspec + QuickCheck tests in `tests/Graphos/UseCase/QuerySpec.hs` and
-  `tests/Graphos/CLI/ParserSpec.hs` cover id-first vs label-fallback resolution, multi-match
-  reporting, and JSON/text field agreement; `cabal test` is green; manual smoke test
-  against `graphos-out/graph.json` confirms both fixed invocations.
-- **Act**: If JSON/text agreement holds and the fallback preserves the < 500ms latency
-  budget, standardize the `resolveNodeArg` helper as the single node-argument resolver for
-  future query-family commands; if the label fallback adds latency on large graphs, feed
-  that into the next query-performance iteration.

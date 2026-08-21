@@ -27,15 +27,6 @@ traversal and SHALL report every candidate with its distinct source location so 
 can disambiguate and re-run with a node id. Resolution MUST remain pure (UseCase layer); the
 CLI dispatcher (Infrastructure) only wires the resolved id into `neighborhoodExpansion`.
 
-<!-- PDCA:
-  - Plan: agents should be able to pass what they see (a display name) without a
-    round-trip through `explain` just to discover the internal id.
-  - Do: add a `resolveNodeArg` helper in `Graphos.UseCase.Query` reused by `neighbors`
-    (and available to future query-family commands).
-  - Check: scenarios below verify id-first, label fallback, multi-match, and zero-match.
-  - Act: if the fallback adds measurable latency on 100k+ graphs, feed that into the next
-    query-performance iteration; if multi-match noise is too high, tighten resolution order.
--->
 
 #### Scenario: Direct neighbors by internal id
 - **WHEN** `graphos neighbors mod_Graphos.UseCase.QuerySpec --depth 1` is run on a node with three adjacent nodes

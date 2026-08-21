@@ -84,28 +84,6 @@ a graph that still separates code and docs.
   scale-guard fallback, legacy graph load, config gating. `-Wall -Werror` clean.
 - **Build**: New module sections + config fields; no new dependency.
 
-## PDCA Cycle
-
-- **Plan**: Hypothesis — semantic embedding-based edge inference makes mixed code+docs
-  clustering actually work in the common case (different names, same concept). Success
-  measured by: (a) on a mixed corpus where literal-name inference produces N code↔doc edges,
-  semantic inference produces ≥ 3N such edges with cosine ≥ 0.5; (b) Leiden communities on
-  that corpus have non-zero cross-type edges for ≥ 60% of size-≥5 communities; (c) single-
-  corpus graphs skip the pass automatically; (d) >10K code nodes falls back to literal-only
-  without force; (e) `--no-semantic-edges` reproduces today's behavior.
-- **Do**: Add `gEmbeddings`/`gEmbeddingsPath` to `Graph`; write `embeddings.json` sidecar in
-  pipeline; implement `inferSemanticCodeDocEdges` + `isSingleCorpus`; wire with gating;
-  add config + CLI flags; document embedding models.
-- **Check**: `cabal test` green with new Hspec cases; build a mixed corpus (this repo +
-  `docs/`) and confirm Leiden produces mixed communities with cross-type `References` edges;
-  confirm `--no-semantic-edges` reproduces today's clustering; confirm single-corpus skip;
-  confirm >10K fallback warning; `-Wall -Werror` clean.
-- **Act**: If semantic inference at >10K nodes is too slow even with the cap, feed into a
-  follow-up `ann-index-for-semantic-inference` change (HNSW/IVF via `vector-search`). If the
-  0.5 cosine threshold produces too few edges on real corpora, lower to 0.4 and re-measure.
-  If `nomic-embed-text` produces poor code↔doc similarity, document `bge-m3` or `voyage-code-2`
-  as the recommended model for mixed corpora.
-
 ## Relationship to other changes
 
 - **`cluster-composition`** (planned): independent — that change computes composition

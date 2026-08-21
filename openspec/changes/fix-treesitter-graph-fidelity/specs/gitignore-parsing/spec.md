@@ -19,19 +19,6 @@ pruned when nested inside a source tree. Names that denote tooling or VCS state 
 `node_modules`, `.git`, `.stack-work`, `.cache`, `__pycache__` and equivalents — keep
 depth-independent matching.
 
-#### PDCA
-
-- **Plan**: `build` is a legitimate source-domain name (`src/domain/build/`,
-  `src/services/phase/build/`); `Detect.hs:154` and `Ignore.hs:209` both list it, and
-  `Ignore.hs:73–76` matches `ExactPattern` as a path segment anywhere.
-- **Do**: Split the hardcoded list into a root-anchored class and a depth-independent class;
-  match the anchored class against the path relative to the scan root.
-- **Check**: Scenarios below verify anchored matching and depth-independent exceptions; the
-  existing assertion at `tests/Graphos/Infrastructure/FileSystem/IgnoreSpec.hs:71–73`
-  (`shouldIgnore … "src/build" == True`) is intentionally inverted by this change.
-- **Act**: If a corpus legitimately needs deep pruning of `build`, it declares it explicitly in
-  `.graphosignore` — which is now honoured (see the negation requirement below).
-
 #### Scenario: Root build directory is pruned
 
 - **WHEN** a repository contains `./build/output.js` and the scan root is `.`
@@ -63,16 +50,6 @@ a directory that the hardcoded list would otherwise remove. The hardcoded list S
 lowest-priority layer, consistent with the existing priority order (hardcoded 0, gitignore 1,
 graphosignore 2).
 
-#### PDCA
-
-- **Plan**: Today `entry \`elem\` hardcodedIgnoreDirNames || shouldIgnoreFn …`
-  (`Detect.hs:180`) short-circuits, so negations never run and the pruning is absolute.
-- **Do**: Evaluate negations first, then the hardcoded list, then the pattern list.
-- **Check**: Scenarios below verify that negations re-include and that the default still applies
-  without them.
-- **Act**: If evaluation order costs measurable traversal time on large trees, cache the
-  negation prefix set per directory rather than reverting to the short-circuit.
-
 #### Scenario: Negation re-includes a hardcoded-ignored directory
 
 - **WHEN** `.graphosignore` contains `!dist/keep/**` and the repository contains
@@ -89,15 +66,6 @@ graphosignore 2).
 The detect stage SHALL report the number of paths excluded, grouped by the rule class that
 excluded them (root-anchored build output, depth-independent tooling, `.gitignore`,
 `.graphosignore`), so that missing files are explainable without re-running the scan.
-
-#### PDCA
-
-- **Plan**: Without per-class counts, coverage gaps are not explainable; accounting is required
-  for both the harness and user trust.
-- **Do**: Count exclusions per rule class during detect and surface them in the run report.
-- **Check**: The scenario below verifies that the report shows class counts that sum to the
-  total excluded count.
-- **Act**: If a new rule class is added, extend the report schema in the same change.
 
 #### Scenario: Report explains exclusions
 

@@ -3,13 +3,8 @@
 ## Purpose
 TBD - created by archiving change add-qwen3-llamacpp-orchestrator. Update Purpose after archive.
 ## Requirements
-### Requirement: Orchestrator drives PDCA artifact cycle
-The `openspec-orchestrator` SHALL be a long-running dev-env service that autonomously advances the OpenSpec PDCA artifact cycle (proposal → specs → design → tasks → plan → do → check → act → archive) for a named change using opencode driven by Qwen 3.6 served via llama.cpp.
-
-- **Plan**: Replace manual hand-driven artifact invocation with an automated loop that parses status, dispatches artifacts via opencode, and waits for completion.
-- **Do**: Implement the orchestrator loop in the `orchestrator/` directory (Infrastructure/dev-env tooling — not part of the Haskell Graphos library), consuming the `openspec` CLI and opencode's headless interface.
-- **Check**: The scenarios below verify the loop advances artifacts correctly and pauses on questions.
-- **Act**: If the loop stalls on certain artifact types, refine the opencode dispatch prompt or artifact parser to handle edge cases, then re-test.
+### Requirement: Orchestrator drives the spec-driven artifact cycle
+The `openspec-orchestrator` SHALL be a long-running dev-env service that autonomously advances the OpenSpec spec-driven artifact cycle (proposal → specs → design → tasks → archive) for a named change using opencode driven by Qwen 3.6 served via llama.cpp. The orchestrator loop lives in the `orchestrator/` directory (Infrastructure/dev-env tooling — not part of the Haskell Graphos library) and consumes the `openspec` CLI and opencode's headless interface.
 
 #### Scenario: Orchestrator advances to the first ready artifact
 - **WHEN** a change exists in `openspec/changes/<name>/` with artifacts in the proposal stage
@@ -19,7 +14,7 @@ The `openspec-orchestrator` SHALL be a long-running dev-env service that autonom
 - **WHEN** opencode produces output for a `ready` artifact
 - **THEN** the orchestrator writes the output to the correct artifact file under `openspec/changes/<name>/spec/<artifact-name>/` (or the appropriate artifact directory)
 
-#### Scenario: Orchestrator progresses through all PDCA artifacts
+#### Scenario: Orchestrator progresses through all artifacts
 - **WHEN** the current artifact reaches `complete` status
 - **THEN** the orchestrator advances to the next `ready` artifact in the sequence and repeats until all artifacts are `complete`
 
@@ -32,15 +27,11 @@ The `openspec-orchestrator` SHALL be a long-running dev-env service that autonom
 - **THEN** the orchestrator resumes artifact generation from the point of pause, passing the user's answer to opencode
 
 #### Scenario: Orchestrator exits when all artifacts are complete
-- **WHEN** all PDCA artifacts for the change reach `complete` status
+- **WHEN** all artifacts for the change reach `complete` status
 - **THEN** the orchestrator stops advancing artifacts and proceeds to the auto-verify gate
 
 ### Requirement: Auto-verify gate before archive
 After all artifacts are complete, the orchestrator SHALL run `openspec validate --change <name>` and `openspec verify --change <name>` (where available). If both pass and no remediation items remain, the orchestrator SHALL auto-invoke `openspec archive --change <name>`.
-
-- **Plan**: Prevent invalid or incomplete changes from being archived by requiring a clean validate + verify before archive.
-- **Do**: After the last artifact completes, execute validate and verify in sequence; only call archive on success.
-- **Check**: The scenarios below verify the gate behavior.
 
 #### Scenario: Auto-archive on clean verify
 - **WHEN** `openspec validate --change <name>` and `openspec verify --change <name>` both succeed with no issues
@@ -55,11 +46,7 @@ After all artifacts are complete, the orchestrator SHALL run `openspec validate 
 - **THEN** the orchestrator does NOT archive and instead enters the remediation loop
 
 ### Requirement: Bounded remediation loop
-If verify or check flags issues, the orchestrator SHALL feed each finding back into the relevant artifact as a fix-up pass, with a bounded retry count (default: 3 rounds). Only archive after a clean verify within the retry budget.
-
-- **Plan**: Ensure recoverability from common spec/implementation mismatches without infinite retry.
-- **Do**: Parse validate/verify output, identify affected artifacts, re-dispatch those artifacts to opencode with the findings as context, up to the maximum retry count.
-- **Check**: The scenarios below verify the remediation behavior and budget enforcement.
+If verify or check flags issues, the orchestrator SHALL feed each finding back into the relevant artifact as a fix-up pass, with a bounded retry count (default: 3 rounds). Only archive after a clean verify within the retry budget. The validate/verify findings are included as structured context in the opencode dispatch prompt when an artifact is re-dispatched.
 
 #### Scenario: Remediation retries on verify failure
 - **WHEN** `openspec verify --change <name>` reports issues
@@ -78,11 +65,7 @@ If verify or check flags issues, the orchestrator SHALL feed each finding back i
 - **THEN** the validate/verify findings are included as structured context in the opencode dispatch prompt
 
 ### Requirement: Dev-env lifecycle management
-The orchestrator SHALL expose `start` / `stop` / `status` commands so the service runs in the background of the dev shell, logs to `graphos-out/orchestrator/*.log`, and is restartable.
-
-- **Plan**: Allow operators to manage the orchestrator lifecycle without leaving the dev shell environment.
-- **Do**: Implement lifecycle commands as devenv scripts in `shell.nix`, log all output to `graphos-out/orchestrator/`, and track the process PID for stop/restart.
-- **Check**: The scenarios below verify lifecycle management.
+The orchestrator SHALL expose `start` / `stop` / `status` commands so the service runs in the background of the dev shell, logs to `graphos-out/orchestrator/*.log`, and is restartable. Lifecycle commands are implemented as devenv scripts in `shell.nix`; all stdout/stderr is appended to `graphos-out/orchestrator/`, and the process PID is tracked for stop/restart.
 
 #### Scenario: Start command launches the orchestrator
 - **WHEN** a user runs the `start` command (e.g., `openspec-orch start`)
@@ -105,11 +88,7 @@ The orchestrator SHALL expose `start` / `stop` / `status` commands so the servic
 - **THEN** the new instance launches with a fresh PID, overwriting the old PID file, and resumes operation
 
 ### Requirement: Multi-change fan-out
-The orchestrator SHALL accept a change name OR the `--all` flag to process every in-progress change in `openspec/changes/` that is not yet archived, serially (one at a time).
-
-- **Plan**: Support batch processing of multiple changes while keeping Qwen 3.6 context coherent per change.
-- **Do**: Enumerate changes from `openspec/changes/`, filter for non-archived and non-complete, iterate sequentially.
-- **Check**: The scenarios below verify multi-change behavior.
+The orchestrator SHALL accept a change name OR the `--all` flag to process every in-progress change in `openspec/changes/` that is not yet archived, serially (one at a time). Changes are enumerated from `openspec/changes/`, filtered for non-archived and non-complete, and iterated sequentially to keep Qwen 3.6 context coherent per change.
 
 #### Scenario: Orchestrator processes a single named change
 - **WHEN** the orchestrator is invoked with a specific change name
@@ -128,11 +107,7 @@ The orchestrator SHALL accept a change name OR the `--all` flag to process every
 - **THEN** it completes all artifacts and verify for one change before beginning the next
 
 ### Requirement: Local model provider isolation
-The orchestrator SHALL consume a local llama.cpp server providing an OpenAI-compatible `/v1/chat/completions` endpoint at `http://localhost:8080`. All LLM calls for the orchestrator agent SHALL target this endpoint exclusively — no cloud API keys or remote model endpoints SHALL be used.
-
-- **Plan**: Guarantee fully offline, zero-cost model serving for the orchestrator loop.
-- **Do**: Configure the orchestrator's opencode dispatch to route all chat completions through the local llama.cpp endpoint via a dedicated model provider configuration.
-- **Check**: The scenarios below verify model isolation.
+The orchestrator SHALL consume a local llama.cpp server providing an OpenAI-compatible `/v1/chat/completions` endpoint at `http://localhost:8080`. All LLM calls for the orchestrator agent SHALL target this endpoint exclusively — no cloud API keys or remote model endpoints SHALL be used. The orchestrator's opencode dispatch routes all chat completions through this local llama.cpp endpoint via a dedicated model provider configuration.
 
 #### Scenario: Orchestrator uses local endpoint only
 - **WHEN** the orchestrator dispatches an artifact to opencode
@@ -143,6 +118,6 @@ The orchestrator SHALL consume a local llama.cpp server providing an OpenAI-comp
 - **THEN** the orchestrator emits an error, does NOT proceed with artifact generation, and waits for the llama.cpp server to become available
 
 #### Scenario: No cloud API keys consumed
-- **WHEN** the orchestrator runs all PDCA artifacts
+- **WHEN** the orchestrator runs all artifacts
 - **THEN** zero requests are made to external (non-localhost) model endpoints
 

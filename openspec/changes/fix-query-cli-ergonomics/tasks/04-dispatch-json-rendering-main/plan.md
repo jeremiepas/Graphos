@@ -1,11 +1,3 @@
-<!--
-  One PDCA step file for ONE task. Lives at tasks/<task-slug>/<step>.md
-  where <step> is plan | do | check | act.
-  tasks.md remains the tracked index; these files are the per-task journal.
-  Retry: if Act is NOT OK, keep this file as the trace and add a new cycle
-  under tasks/<task-slug>/attempt-N/ — never delete a prior attempt.
--->
-
 # Task 4 — Dispatch --json rendering for query, path, explain in app/Main.hs — PLAN
 
 **Task slug**: `04-dispatch-json-rendering-main`

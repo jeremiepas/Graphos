@@ -19,15 +19,6 @@ existing `QueryResponse` fields (verdict, best score, result-set hash, scored no
 edges, suggestions) and no interleaved log lines. Without `--json`, the existing text
 rendering SHALL be unchanged.
 
-<!-- PDCA:
-  - Plan: make `graphos query --json` work as already advertised by the
-    `query-cli-contract` "JSON output mode" requirement and by the `graphos-query` skill.
-  - Do: thread `CommonQueryOpts` through `queryOpts` in `Graphos.CLI.Parser` and dispatch
-    to the already-existing `renderQueryResponseJSON` in `app/Main.hs`.
-  - Check: scenarios verify JSON validity and text/JSON field agreement.
-  - Act: if log lines leak into JSON stdout, route logging to stderr in JSON mode and
-    standardize that rule across all query-family commands.
--->
 
 #### Scenario: Query JSON contains verdict and hash
 - **WHEN** `graphos query "term" --json` is run

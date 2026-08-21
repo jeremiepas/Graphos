@@ -48,13 +48,6 @@ A fifth, minor issue: the legacy `queryGraph` / `pathQuery` / `explainNode` buil
 - `buildLabelIndex` with `(:)` produces the same `Map Text [NodeId]` set as the `(++)` version (order-insensitive comparison).
 - Regression: a synthetic graph with two `NodeId`s that collide under the old `nidToInt` hash now finds the correct shortest path through both (the bug-finding test).
 
-## PDCA Cycle
-
-- **Plan**: Hypothesis — threading `GraphIndex` + `CachedFGL` through the MCP server removes O(N) and O(N + E) per-request work, dropping `query_graph` latency from seconds to milliseconds on 100K-node graphs, and `shortest_path` from O(N + E) per call to O(V_path + E_path) plus a one-time O(N + E) at load. The `nidToInt` fix eliminates a class of silent missing-path / missing-bridge bugs. Success measured by a before/after timed comparison on the largest available `graph.json` and by the new collision regression test.
-- **Do**: Thread `lrIndex` and `lrCachedFGL` through the MCP server; rewrite `handleQueryGraph` (single call) and `handleShortestPath` (`pathQueryWithIndex`); switch `toCachedFGL` to sequential indices and `cachedFindIdx` to `Map` lookup; add `*WithCached` query variants; switch `buildLabelIndex` to `(:)`.
-- **Check**: Run `cabal test` (no regression). Run `cabal run graphos -- mcp <graph.json>` and issue `query_graph` + `shortest_path` tool calls against the largest available graph — confirm latency drops by the expected order of magnitude and that `shortest_path` now returns paths between node pairs that previously returned `Nothing` due to collisions. Confirm the collision regression test fails on the old code and passes on the new.
-- **Act**: If latency does not drop, profile the handler — the remaining cost is likely in `findMatchingNodes` (already O(k × log N)) or in JSON serialization of large result sets (separate concern). If the collision regression test passes on the old code, the synthetic collision case is not representative — construct a real-world collision from the largest graph's `NodeId`s. If `cabal test` regresses, the sequential-index mapping or the `(:)` label index has an order-sensitivity bug — bisect by reverting one change at a time.
-
 ## Relationship to `optimise-community-detection-large-graph`
 
 Independent. That change optimizes the *extraction/clustering* pipeline (`Domain/Community.hs`, `Pipeline.hs` Step 5). This change optimizes the *query serving* path (`Server/MCP.hs`, `Domain/Graph/Query.hs`, `Domain/Graph/FGL.hs`). No file overlap except `Domain/Graph/Index.hs` (the `buildLabelIndex` `(++)`→`(:)` fix), which is a one-line change with no interaction with Leiden. Merge order: either first; the two are commutative.

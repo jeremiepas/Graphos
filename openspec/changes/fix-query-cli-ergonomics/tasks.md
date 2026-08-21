@@ -1,19 +1,3 @@
-<!--
-  PDCA-PER-TASK workflow.
-  Each top-level `## N. <task>` is ONE task = ONE complete PDCA micro-cycle.
-  Within a task, run the steps in order and keep checkbox format so progress
-  can be tracked: `- [x] N.P …`, `- [x] N.D …`, `- [x] N.C …`, `- [x] N.A …`.
-
-  PASS rule:  a task PASSES only when its Check passes AND its Act is OK.
-              A passed task reaches the same done state as in classic SDD.
-  RETRY rule: if Act is NOT OK, the task does NOT pass — record the failed
-              attempt under "### Attempt history (N)" (KEEP THE TRACE, never
-              delete it), then start a NEW P → D → C → A attempt for the same
-              task. Repeat until an attempt passes.
-
-  Everything else matches the official spec-driven workflow.
--->
-
 ## 1. Add `resolveNodeArg` helper in `Graphos.UseCase.Query`
 
 - [x] 1.P Plan: Add a pure node-argument resolver in the UseCase layer (`src/Graphos/UseCase/Query.hs`). Scope: new `NodeResolution` sum type + `resolveNodeArg :: Text -> Graph -> GraphIndex -> NodeResolution`. Resolution order: exact id → exact label (via `giLabelIndex`) → case-insensitive label fallback. Do NOT change `neighborhoodExpansion` signature (still `NodeId -> Int -> Graph -> GraphIndex -> NeighborsResult`). Affected: `Query.hs` exports + module list. Risks: reusing `symbolLookup` must not couple expansion to fuzzy scoring.

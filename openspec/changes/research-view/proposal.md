@@ -82,31 +82,6 @@ textual.
   detail panel, parser acceptance, `-Wall -Werror` clean.
 - **Build**: New modules + parser extension; no new dependency.
 
-## PDCA Cycle
-
-- **Plan**: Hypothesis — `graphos research` will let an agent or human produce a single
-  navigable HTML artifact from N query terms, replacing the manual "run N queries, paste
-  nodes into a D3 file" workflow we performed in this chat. Success measured by: (a)
-  `graphos research phase work block governance --json` returns a `ResearchView` whose
-  `nodes` set equals the union of the four individual `query --json` node sets (PRD §16.1
-  correctness); (b) the induced `edges` array contains only edges where both endpoints are
-  in the union; (c) the HTML renders in a browser via `file://` with no network calls and
-  shows the discovery legend + hover detail; (d) `research` with a single term produces a
-  node set identical to `graphos query <term> --json`; (e) end-to-end on a 10K-node graph
-  completes in < 2s (N queries × < 500ms each, PRD §16.1).
-- **Do**: Implement `buildResearchView` (multi-query union + induce + per-term attribution);
-  implement `ResearchView` + `ToJSON`; extend `HTML.hs` with `renderResearchHtml` (legend +
-  detail panel + D3/vis-network); add CLI `research` subcommand + flags; dispatch in
-  `Main.hs`; defer HTTP endpoint to after `query-http-port`.
-- **Check**: `cabal test` green with new Hspec cases; manually open the HTML via `file://`
-  and confirm legend, hover, and offline self-containedness; verify single-term equivalence
-  with `query --json`; time the 10K-node end-to-end; `-Wall -Werror` clean.
-- **Act**: If the research view becomes the primary exploration entry point for agents,
-  standardize it in the `graphos-query` skill as the recommended first call for
-  multi-faceted questions. If the per-term discovery coloring is confusing, fall back to
-  community-only coloring with a "discovered by" tooltip. If `--terms-file` is rarely used,
-  consider deprecating it in favor of shell expansion (`graphos research $(cat terms.txt)`).
-
 ## Relationship to other changes
 
 - **`explorer-queries`** (planned): `research` is complementary — `around`/`cluster` are

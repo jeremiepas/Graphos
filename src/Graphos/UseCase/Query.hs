@@ -9,6 +9,7 @@ module Graphos.UseCase.Query
   ( queryGraph
   , queryGraphWithIndex
   , queryGraphWithIndexScored
+  , queryGraphWithIndexScoredCached
   , pathQuery
   , pathQueryWithIndex
   , pathQueryWithIndexCached
@@ -51,8 +52,8 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, shortestPath, depthFirstSearch, gNodes, gEdges
                             , articulationPoints, biconnectedComponents, dominators)
 import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet, bfsFrom, giLabelIndex, giAdj)
-import Graphos.Domain.Graph.Analysis (CachedFGL)
-import Graphos.Domain.Graph.Query (shortestPathWithCached)
+import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
+import Graphos.Domain.Graph.Query (shortestPathWithCached, depthFirstSearchWithCached)
 import Graphos.Domain.Graph.Score
   ( MatchVerdict(..)
   , ScoredNode(..)
@@ -130,7 +131,13 @@ unConfidence (Confidence d) = d
 -- No traversal when best score is 0 (deleted the degenerate-fallback path).
 -- Verdict thresholds: strong ≥ 0.5, weak > 0, none = 0.
 queryGraphWithIndexScored :: Graph -> GraphIndex -> Text -> Text -> Int -> QueryResponse
-queryGraphWithIndexScored g idx query mode _budget =
+queryGraphWithIndexScored g idx query mode budget =
+  queryGraphWithIndexScoredCached g idx (toCachedFGL g) query mode budget
+
+-- | Scored query path using a prebuilt CachedFGL — no per-call FGL rebuild.
+-- The dfs-mode expansion reads from the cached FGL instead of rebuilding it.
+queryGraphWithIndexScoredCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Int -> QueryResponse
+queryGraphWithIndexScoredCached g idx cfg query mode _budget =
   let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
       -- Scored term matching via inverted index
       matched :: [(NodeId, Int)]
@@ -154,13 +161,13 @@ queryGraphWithIndexScored g idx query mode _budget =
       verdict = computeVerdict bestScore
       -- BFS from top-scoring nodes (only when not NoMatch)
       topNodes :: [NodeId]
-      topNodes = take 5 [nid | (nid, _) <- scoredPairs]
-      expanded :: Set.Set NodeId
-      expanded = case verdict of
-        NoMatch -> Set.empty
-        _       -> if mode == T.pack "dfs"
-                    then Set.unions [depthFirstSearch g nid 6 | nid <- topNodes]
-                    else bfsFromSet idx (Set.fromList topNodes) 3
+       topNodes = take 5 [nid | (nid, _) <- scoredPairs]
+       expanded :: Set.Set NodeId
+       expanded = case verdict of
+         NoMatch -> Set.empty
+         _       -> if mode == T.pack "dfs"
+                     then Set.unions [depthFirstSearchWithCached cfg nid 6 | nid <- topNodes]
+                     else bfsFromSet idx (Set.fromList topNodes) 3
       -- Gather scored nodes in the expanded subgraph
       nodeMap :: Map NodeId Node
       nodeMap = gNodes g

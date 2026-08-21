@@ -1,19 +1,3 @@
-<!--
-  PDCA-PER-TASK workflow.
-  Each top-level `## N. <task>` is ONE task = ONE complete PDCA micro-cycle.
-  Within a task, run the steps in order and keep checkbox format so progress
-  can be tracked: `- [ ] N.P …`, `- [ ] N.D …`, `- [ ] N.C …`, `- [ ] N.A …`.
-
-  PASS rule:  a task PASSES only when its Check passes AND its Act is OK.
-              A passed task reaches the same done state as in classic SDD.
-  RETRY rule: if Act is NOT OK, the task does NOT pass — record the failed
-              attempt under "### Attempt history (N)" (KEEP THE TRACE, never
-              delete it), then start a NEW P → D → C → A attempt for the same
-              task. Repeat until an attempt passes.
-
-  Everything else matches the official spec-driven workflow.
--->
-
 # Task 2 — Replace diff-list edge accumulators with Map — PLAN
 
 **Task slug**: `02-replace-diff-list-edge-accumulators`
