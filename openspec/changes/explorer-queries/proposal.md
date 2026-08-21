@@ -89,27 +89,6 @@ just omit the composition field). So this change ships independently but is more
   `--json` single document, legacy graph graceful degradation. `-Wall -Werror` clean.
 - **Build**: New functions + parser extensions; no new dependency.
 
-## PDCA Cycle
-
-- **Plan**: Hypothesis — `around` + `cluster` + filter flags make the query family usable as
-  a mixed-corpus explorer by humans (HTML, via the in-flight HTTP port) and agents (CLI/MCP).
-  Success measured by: (a) `graphos around <node> --json` returns in < 500ms on a 10K-node
-  graph (PRD §16.1); (b) `--filetype doc` narrows query results to `DocFile` nodes only; (c)
-  `--mixed-only` drops nodes in pure communities when compositions available, no-ops + warns
-  when absent; (d) `around` and `cluster` emit a single JSON document with no interleaved
-  logs; (e) all filter flags accepted by all query-family subcommands without "invalid
-  option" errors; (f) legacy graph (no compositions) works with all new commands.
-- **Do**: Add `ExplorerFilter` + `applyExplorerFilter`; add `aroundNode` / `clusterDetail`
-  orchestration; add `AroundResponse` / `ClusterResponse` + `ToJSON`; add CLI subcommands +
-  flags; dispatch in `Main.hs`; defer HTTP endpoints to after `add-query-api-port-and-view`.
-- **Check**: `cabal test` green with new Hspec cases; time `around` on a 10K-node graph;
-  verify `--filetype`/`--kind`/`--mixed-only` narrow correctly; verify legacy graph
-  degradation; `-Wall -Werror` clean.
-- **Act**: If `around` is widely used by agents, standardize it as the primary entry point
-  of the `graphos-query` skill (replacing `query` as the recommended first call). If
-  `--mixed-only` no-op on legacy graphs confuses users, document the requirement explicitly
-  in the skill. If `cluster <id>` is more useful than `around`, re-prioritize the skill docs.
-
 ## Relationship to other changes
 
 - **`cluster-composition`** (planned): `--mixed-only` consumes `ccMixedRatio` from that

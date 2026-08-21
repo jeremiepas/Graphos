@@ -1,19 +1,3 @@
-<!--
-  PDCA-PER-TASK workflow.
-  Each top-level `## N. <task>` is ONE task = ONE complete PDCA micro-cycle.
-  Within a task, run the steps in order and keep checkbox format so progress
-  can be tracked: `- [ ] N.P …`, `- [ ] N.D …`, `- [ ] N.C …`, `- [ ] N.A …`.
-
-  PASS rule:  a task PASSES only when its Check passes AND its Act is OK.
-              A passed task reaches the same done state as in classic SDD.
-  RETRY rule: if Act is NOT OK, the task does NOT pass — record the failed
-              attempt under "### Attempt history (N)" (KEEP THE TRACE, never
-              delete it), then start a NEW P → D → C → A attempt for the same
-              task. Repeat until an attempt passes.
-
-  Everything else matches the official spec-driven workflow.
--->
-
 ## 1. Add guarded `cabal update` to `ci:build` and `ci:release-build` tasks
 
 - [ ] 1.P Plan: Prepend a guarded `cabal update` to the `ci:build` and `ci:release-build` task exec strings in `devenv.nix` so dependency resolution works on a clean-slate runner (no `~/.cabal` cache). The guard MUST fail the task only when `cabal update` fails AND no cached Hackage index exists. Check criteria: (1) `devenv tasks run ci:build` succeeds on a clean slate; (2) `zip-archive` resolves to a Hackage version during `cabal configure`; (3) warm-cache runs are unaffected; (4) `ci:release-build` gets the same guard. Affected: `devenv.nix`. Risk: shell quoting inside the Nix multi-line string.

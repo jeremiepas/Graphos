@@ -183,6 +183,6 @@ skills are regenerated.
 - Rollback: all changes are in `Parser.hs`, `Query.hs`, `Render.hs` (no), `Main.hs`,
   `renderCommandReference`, and tests. A single `git revert` of the change commit restores
   the previous behavior; no data migration is involved.
-- Next PDCA cycle: if the `resolveNodeArg` pattern holds, extract it as the canonical
+- Follow-up: if the `resolveNodeArg` pattern holds, extract it as the canonical
   node-argument resolver for any future query-family command that takes a node argument
   (`explain` could be migrated to it as a follow-up, but is out of scope here).
