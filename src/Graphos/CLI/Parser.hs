@@ -122,6 +122,7 @@ commonQueryOptsP = CommonQueryOpts
   <*> switch (long "json" <> help "Output as JSON")
   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
   <*> flag Semantic All (long "edges" <> help "Edge mode: semantic (default) or all")
+  <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -142,11 +143,12 @@ researchOpts = do
     <*> optional (strOption (long "label" <> metavar "TEXT" <> help "Label for output file (default: timestamp)"))
     <*> optional (strOption (long "mode" <> value "default" <> metavar "MODE" <> help "Research mode (default, deep, etc.)"))
     <*> pure (CommonQueryOpts
-          { cqoGraphPath  = graphPath
-          , cqoBudget     = 2000
-          , cqoJson       = False
-          , cqoLabelWidth = 120
-          , cqoEdges      = Semantic
+          { cqoGraphPath   = graphPath
+          , cqoBudget      = 2000
+          , cqoJson        = False
+          , cqoLabelWidth  = 120
+          , cqoEdges       = Semantic
+          , cqoStrictGraph = False
           })
 
 symbolsOpts :: Parser Command

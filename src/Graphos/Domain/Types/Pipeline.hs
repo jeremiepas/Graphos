@@ -22,6 +22,8 @@ module Graphos.Domain.Types.Pipeline
 
     -- * Detection types
   , Detection(..)
+  , ExclusionCounts(..)
+  , emptyExclusionCounts
   , FileCategory(..)
   ) where
 
@@ -169,13 +171,28 @@ data Neo4jStreamingConfig = Neo4jStreamingConfig
   , neo4jsPassword :: Text  -- ^ Password
   } deriving (Eq, Show)
 
+-- | Per-class exclusion counts from the detect stage.
+-- Lets missing files be explained without re-running the scan.
+data ExclusionCounts = ExclusionCounts
+  { excRootAnchored     :: !Int  -- ^ pruned by root-anchored build-output rule
+  , excDepthIndependent :: !Int  -- ^ pruned by depth-independent tooling rule
+  , excGitignore        :: !Int  -- ^ pruned by a .gitignore pattern
+  , excGraphosignore    :: !Int  -- ^ pruned by a .graphosignore pattern
+  , excUnexplained      :: !Int  -- ^ pruned by an unknown mechanism
+  } deriving (Eq, Show)
+
+-- | A zero-filled exclusion counts record.
+emptyExclusionCounts :: ExclusionCounts
+emptyExclusionCounts = ExclusionCounts 0 0 0 0 0
+
 -- | File detection result
 data Detection = Detection
-  { detectionTotalFiles  :: Int
-  , detectionTotalWords  :: Int
-  , detectionNeedsGraph   :: Bool
+  { detectionTotalFiles    :: Int
+  , detectionTotalWords    :: Int
+  , detectionNeedsGraph    :: Bool
   , detectionWarning      :: Maybe Text
   , detectionFiles        :: Map FileCategory [FilePath]
+  , detectionExclusions   :: ExclusionCounts
   } deriving (Eq, Show)
 
 -- | Pipeline steps for checkpoint tracking

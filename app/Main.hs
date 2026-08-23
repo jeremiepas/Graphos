@@ -14,7 +14,7 @@ import qualified Data.Text.IO as TIO
 import System.IO (stderr)
 
 import Graphos.CLI.Parser
-import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), defaultConfig)
+import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON)
@@ -472,6 +472,7 @@ main = do
                         , detectionNeedsGraph = True
                         , detectionWarning = Nothing
                         , detectionFiles = Map.empty
+                        , detectionExclusions = emptyExclusionCounts
                         }
               logInfo env "[merge] Exporting..."
               exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing []

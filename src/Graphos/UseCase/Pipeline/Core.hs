@@ -108,6 +108,20 @@ runPipeline appEnv config = catch (do
       lpLogInfo lp $ T.pack $ "  Found " ++ show (detectionTotalFiles detection) ++ " files"
       lpLogDebug lp $ T.pack $ "  File categories: " ++ show (Map.keys (detectionFiles detection))
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))
+      let excs = detectionExclusions detection
+          totalExcluded = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
+      when (totalExcluded > 0) $ do
+        lpLogInfo lp $ T.pack $ "  Excluded " ++ show totalExcluded ++ " directories:"
+        when (excRootAnchored excs > 0) $
+          lpLogInfo lp $ T.pack $ "    root-anchored build output: " ++ show (excRootAnchored excs)
+        when (excDepthIndependent excs > 0) $
+          lpLogInfo lp $ T.pack $ "    depth-independent tooling: " ++ show (excDepthIndependent excs)
+        when (excGitignore excs > 0) $
+          lpLogInfo lp $ T.pack $ "    .gitignore: " ++ show (excGitignore excs)
+        when (excGraphosignore excs > 0) $
+          lpLogInfo lp $ T.pack $ "    .graphosignore: " ++ show (excGraphosignore excs)
+        when (excUnexplained excs > 0) $
+          lpLogInfo lp $ T.pack $ "    unexplained: " ++ show (excUnexplained excs)
 
       now <- getCurrentTime
       let pipelineId = T.pack $ show now

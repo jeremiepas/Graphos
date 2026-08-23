@@ -36,7 +36,7 @@ import qualified Data.ByteString.Lazy as LBS
 
 import Graphos.Domain.Types
   ( Node(..), Extraction(..)
-  , FileCategory(..), Detection(..)
+  , FileCategory(..), Detection(..), emptyExclusionCounts
   , IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex
   , PipelineConfig(..), EmbeddingConfig(..)
   )
@@ -189,6 +189,7 @@ ingestFile appEnv config filePath = do
             , detectionNeedsGraph = True
             , detectionWarning     = Nothing
             , detectionFiles       = Map.singleton category [filePath]
+            , detectionExclusions   = emptyExclusionCounts
             }
 
       -- Extract entities from the single file

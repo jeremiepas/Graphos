@@ -19,7 +19,7 @@ module Graphos.Domain.Types.Node
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), object, (.=), (.:), (.:?), withObject, withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), object, (.=), (.:), (.:?), (.!=), withObject, withText)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
@@ -125,7 +125,7 @@ instance FromJSON Node where
     <$> v .:  "id"
     <*> v .:  "label"
     <*> v .:  "file_type"
-    <*> v .:  "source_file"
+    <*> v .:? "source_file" .!= ""
     <*> v .:? "line_start"
     <*> v .:? "line_end"
     <*> v .:? "signature"

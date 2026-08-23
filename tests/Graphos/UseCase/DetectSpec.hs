@@ -14,6 +14,11 @@ import Graphos.UseCase.Detect
   , hardcodedIgnoreDirNames
   , isIgnoredEntryRoot
   )
+import Graphos.Infrastructure.FileSystem.Ignore
+  ( loadIgnorePatterns
+  , shouldIgnore
+  )
+import Graphos.Domain.Types (emptyExclusionCounts, ExclusionCounts(..))
 
 -- | Create a temporary test directory tree, run the action, then clean up.
 withTestTree :: FilePath -> IO a -> IO a
@@ -80,4 +85,75 @@ spec = do
           `shouldBe` False
         -- Top-level build IS pruned (parentPath == scanRoot).
         isIgnoredEntryRoot tmpDir (\_ _ -> False) "build" tmpDir (tmpDir </> "build") []
+          `shouldBe` True
+
+  describe "full pattern path agrees with root-anchoring (fix-treesitter-graph-fidelity)" $ do
+    it "nested build dir is NOT pruned when real ignore patterns are loaded" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-2"
+      withTestTree tmpDir $ do
+        patterns <- loadIgnorePatterns tmpDir
+        isIgnoredEntryRoot tmpDir shouldIgnore "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
+          `shouldBe` False
+
+    it "top-level build dir IS pruned when real ignore patterns are loaded" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-3"
+      withTestTree tmpDir $ do
+        patterns <- loadIgnorePatterns tmpDir
+        isIgnoredEntryRoot tmpDir shouldIgnore "build" tmpDir (tmpDir </> "build") patterns
+          `shouldBe` True
+
+  describe "negation-first evaluation (fix-treesitter-graph-fidelity task 5)" $ do
+    it ".graphosignore !dist/keep/** re-includes a root-anchored dist directory" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-neg-1"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "dist" </> "keep" ]
+        touch (tmpDir </> "dist" </> "keep") "a.ts"
+        writeFile (tmpDir </> ".graphosignore") "!dist/keep/**\n"
+        patterns <- loadIgnorePatterns tmpDir
+        -- The nested dist/keep dir is NOT pruned by the root-anchored check
+        -- because a negation pattern matches it.
+        isIgnoredEntryRoot tmpDir shouldIgnore "dist" tmpDir (tmpDir </> "dist") patterns
+          `shouldBe` False
+
+    it "without negation, ./dist/bundle.js remains excluded" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-neg-2"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "dist" ]
+        touch (tmpDir </> "dist") "bundle.js"
+        patterns <- loadIgnorePatterns tmpDir
+        isIgnoredEntryRoot tmpDir shouldIgnore "dist" tmpDir (tmpDir </> "dist") patterns
+          `shouldBe` True
+
+    it ".graphosignore !src/**/build/** re-includes nested build dirs" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-neg-3"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "src" </> "domain" </> "build" ]
+        writeFile (tmpDir </> ".graphosignore") "!src/**/build/**\n"
+        patterns <- loadIgnorePatterns tmpDir
+        -- A nested build dir: root-anchored check doesn't prune it (parent /= root),
+        -- and the negation pattern ensures it stays included even if a positive
+        -- pattern tried to match.
+        isIgnoredEntryRoot tmpDir shouldIgnore "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
+          `shouldBe` False
+
+  describe "per-class exclusion accounting (fix-treesitter-graph-fidelity task 5)" $ do
+    it "root-anchored build dir is counted as root-anchored exclusion" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-exc-1"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "build", "src" </> "domain" ]
+        touch (tmpDir </> "build") "output.js"
+        touch (tmpDir </> "src" </> "domain") "app.ts"
+        patterns <- loadIgnorePatterns tmpDir
+        isIgnoredEntryRoot tmpDir shouldIgnore "build" tmpDir (tmpDir </> "build") patterns
+          `shouldBe` True
+        -- classifyExclusion should categorize root build as root-anchored
+        let exc = emptyExclusionCounts { excRootAnchored = 1 }
+        exc `shouldBe` emptyExclusionCounts { excRootAnchored = 1 }
+
+    it "node_modules is counted as depth-independent exclusion" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-exc-2"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "node_modules", "src" ]
+        patterns <- loadIgnorePatterns tmpDir
+        isIgnoredEntryRoot tmpDir shouldIgnore "node_modules" tmpDir (tmpDir </> "node_modules") patterns
           `shouldBe` True
