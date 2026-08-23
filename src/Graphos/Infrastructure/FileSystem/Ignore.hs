@@ -145,6 +145,7 @@ wcInitsSplits s = [(take i s, drop i s) | i <- [1..length s]]
 -- ───────────────────────────────────────────────
 
 -- | Load .graphosignore patterns from root directory (priority 2)
+-- Handles negation patterns (!) the same way .gitignore does.
 loadGraphosignore :: FilePath -> IO [AnnotatedPattern]
 loadGraphosignore root = do
   let ignoreFile = root ++ "/.graphosignore"
@@ -153,7 +154,7 @@ loadGraphosignore root = do
     then pure []
     else do
       contents <- readFile ignoreFile
-      pure $ map (annotatePattern 2) $ filter (not . isCommentOrBlank) (lines contents)
+      pure $ map (parseGitignoreLine 2) $ filter (not . isCommentOrBlank) (lines contents)
 
 -- | Load .gitignore patterns from root directory (priority 1)
 -- Supports a simplified subset of .gitignore syntax:
@@ -203,13 +204,12 @@ rootAnchoredIgnorePatterns = map (annotatePattern 0) rootAnchoredDirs
   where
     rootAnchoredDirs = ["build", "out", "target", "dist", "dist-newstyle", "DerivedData", ".build"]
 
--- | Hardcoded directory names that should always be ignored.
--- These cover common build artifacts, dependency directories, IDE folders,
--- and cache directories across all major ecosystems.
--- The build-output names (@build@, @out@, @target@, @dist@, @dist-newstyle@,
--- @DerivedData@, @.build@) are kept here for backward-compatible pattern
--- matching but are root-anchored in 'Graphos.UseCase.Detect' — a negation
--- pattern in @.graphosignore@ can re-include them.
+-- | Hardcoded directory names that should always be ignored at any depth.
+-- These cover dependency directories, IDE folders, and cache directories across
+-- all major ecosystems. The build-output names (@build@, @out@, @target@,
+-- @dist@, @dist-newstyle@, @DerivedData@, @.build@) are deliberately excluded:
+-- they are root-anchored in 'Graphos.UseCase.Detect' (pruned only at the scan
+-- root) and must not be pruned at arbitrary depth by the pattern path.
 hardcodedIgnorePatterns :: [AnnotatedPattern]
 hardcodedIgnorePatterns = map (annotatePattern 0) hardcodedDirs
   where
@@ -219,9 +219,11 @@ hardcodedIgnorePatterns = map (annotatePattern 0) hardcodedDirs
       -- Dependency/package directories
       , "node_modules", "bower_components", "vendor"
       , "__pypackages__", ".pnpm-store", ".yarn"
-      -- Build outputs (root-anchored in Detect; kept here for pattern-based fallback)
-      , "dist", "dist-newstyle", "build", "target", "out", "DerivedData"
-      , ".build", ".cache", ".sass-cache"
+       -- Build-output directory names (build, out, target, dist, dist-newstyle,
+       -- DerivedData, .build) are intentionally NOT here: they are root-anchored in
+       -- Graphos.UseCase.Detect and must not be pruned at arbitrary depth by the
+       -- pattern path. Only depth-independent caches remain.
+       , ".cache", ".sass-cache"
       -- Python caches
       , "__pycache__", ".pytest_cache", ".mypy_cache", ".tox"
       , ".venv", ".env"
