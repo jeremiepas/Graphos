@@ -35,20 +35,22 @@ import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 
 data CommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath  :: !FilePath
-  , cqoBudget     :: !Int
-  , cqoJson       :: !Bool
-  , cqoLabelWidth :: !Int
-  , cqoEdges      :: !EdgeMode
+  { cqoGraphPath   :: !FilePath
+  , cqoBudget      :: !Int
+  , cqoJson        :: !Bool
+  , cqoLabelWidth  :: !Int
+  , cqoEdges       :: !EdgeMode
+  , cqoStrictGraph :: !Bool
   } deriving (Eq, Show)
 
 defaultCommonQueryOpts :: CommonQueryOpts
 defaultCommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath  = "graphos-out/graph.json"
-  , cqoBudget     = 2000
-  , cqoJson       = False
-  , cqoLabelWidth = 120
-  , cqoEdges      = Semantic
+  { cqoGraphPath   = "graphos-out/graph.json"
+  , cqoBudget      = 2000
+  , cqoJson        = False
+  , cqoLabelWidth  = 120
+  , cqoEdges       = Semantic
+  , cqoStrictGraph = False
   }
 
 -- | Estimate token count from character count (rough: chars / 4).

@@ -12,6 +12,7 @@ module Graphos.UseCase.Detect
   , isIgnoredEntryRoot
   ) where
 
+import Data.List (isPrefixOf)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
@@ -19,7 +20,8 @@ import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
-import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..))
+import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
+import Graphos.Infrastructure.FileSystem.Ignore (matches)
 
 -- | All supported file extensions organized by category
 -- Prefer using config-driven extensions from GraphosConfig when available.
@@ -56,6 +58,7 @@ detectFiles root = do
       , detectionNeedsGraph  = False
       , detectionWarning     = Just $ T.pack $ "Directory not found: " ++ root
       , detectionFiles        = Map.empty
+      , detectionExclusions   = emptyExclusionCounts
       }
     else do
       files <- findAllFiles root
@@ -69,6 +72,7 @@ detectFiles root = do
                                   then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
                                   else Nothing
         , detectionFiles       = categorized
+        , detectionExclusions   = emptyExclusionCounts
         }
 
 -- | Detect files in a directory using config-driven extension categories.
@@ -95,9 +99,10 @@ detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns = do
       , detectionNeedsGraph  = False
       , detectionWarning     = Just $ T.pack $ "Directory not found: " ++ root
       , detectionFiles        = Map.empty
+      , detectionExclusions   = emptyExclusionCounts
       }
     else do
-      files <- findAllFilesWithAndIgnore root root (fspShouldIgnore fsp) root extMap ignorePatterns
+      (files, excs) <- findAllFilesWithExclusions root root (fspShouldIgnore fsp) extMap ignorePatterns
       let categorized = categorizeFilesWith files extMap
           totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
@@ -108,6 +113,7 @@ detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns = do
                                   then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
                                   else Nothing
         , detectionFiles       = categorized
+        , detectionExclusions   = excs
         }
 
 -- | Find all files recursively (using default extensions)
@@ -129,17 +135,70 @@ findAllFilesWithAndIgnore
   -> Map FileCategory [String]
   -> [AnnotatedPattern]
   -> IO [FilePath]
-findAllFilesWithAndIgnore scanRoot dir shouldIgnoreFn _ extMap ignorePatterns = do
+findAllFilesWithAndIgnore scanRoot dir shouldIgnoreFn _ extMap ignorePatterns =
+  fst <$> findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns
+
+-- | Like 'findAllFilesWithAndIgnore' but also returns per-class exclusion counts.
+-- A directory is counted once per class that excluded it. The counts let the
+-- run report explain missing files without re-running the scan.
+findAllFilesWithExclusions
+  :: FilePath
+  -> FilePath
+  -> ([AnnotatedPattern] -> FilePath -> Bool)
+  -> Map FileCategory [String]
+  -> [AnnotatedPattern]
+  -> IO ([FilePath], ExclusionCounts)
+findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = do
   entries <- listDirectory dir
-  fmap concat $ mapM (\entry -> do
+  results <- mapM (\entry -> do
     let path = dir </> entry
     isDir <- doesDirectoryExist path
-    if isDir && not (isIgnoredEntryRoot scanRoot shouldIgnoreFn entry dir path ignorePatterns)
-      then findAllFilesWithAndIgnore scanRoot path shouldIgnoreFn dir extMap ignorePatterns
+    if isDir
+      then if isIgnoredEntryRoot scanRoot shouldIgnoreFn entry dir path ignorePatterns
+             then pure ([], classifyExclusion scanRoot shouldIgnoreFn entry dir path ignorePatterns)
+             else do
+               (subFiles, subExc) <- findAllFilesWithExclusions scanRoot path shouldIgnoreFn extMap ignorePatterns
+               pure (subFiles, subExc)
       else if isSupportedWith entry extMap
-           then pure [path]
-           else pure []
+             then pure ([path], emptyExclusionCounts)
+             else pure ([], emptyExclusionCounts)
     ) entries
+  let (files, excs) = unzip results
+      totalExc = foldr addExclusionCounts emptyExclusionCounts excs
+  pure (concat files, totalExc)
+
+-- | Classify a pruned directory into an exclusion class.
+-- Determines which rule class caused the directory to be pruned, for
+-- per-class accounting in the run report.
+classifyExclusion
+  :: FilePath
+  -> ([AnnotatedPattern] -> FilePath -> Bool)
+  -> String
+  -> FilePath
+  -> FilePath
+  -> [AnnotatedPattern]
+  -> ExclusionCounts
+classifyExclusion scanRoot _ entry parentPath entryPath ignorePatterns
+  | entry `elem` depthIndependentIgnoreDirs = emptyExclusionCounts { excDepthIndependent = 1 }
+  | entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot = emptyExclusionCounts { excRootAnchored = 1 }
+  | otherwise =
+      let gitMatch = any (\ap -> apPriority ap == 1 && matches entryPath (apPattern ap)) ignorePatterns
+          graphosMatch = any (\ap -> apPriority ap == 2 && matches entryPath (apPattern ap)) ignorePatterns
+      in if graphosMatch
+           then emptyExclusionCounts { excGraphosignore = 1 }
+           else if gitMatch
+                  then emptyExclusionCounts { excGitignore = 1 }
+                  else emptyExclusionCounts { excUnexplained = 1 }
+
+-- | Add two exclusion counts records element-wise.
+addExclusionCounts :: ExclusionCounts -> ExclusionCounts -> ExclusionCounts
+addExclusionCounts a b = ExclusionCounts
+  { excRootAnchored     = excRootAnchored a + excRootAnchored b
+  , excDepthIndependent = excDepthIndependent a + excDepthIndependent b
+  , excGitignore        = excGitignore a + excGitignore b
+  , excGraphosignore    = excGraphosignore a + excGraphosignore b
+  , excUnexplained      = excUnexplained a + excUnexplained b
+  }
 
 -- | Categorize files by type (using default extensions)
 categorizeFiles :: [FilePath] -> Map FileCategory [FilePath]
@@ -214,6 +273,12 @@ isIgnoredEntry shouldIgnoreFn entry entryPath ignorePatterns =
 -- The scan root is used to anchor build-output directory names: @build@,
 -- @out@, @target@, @dist@, @dist-newstyle@, @DerivedData@ and @.build@ are
 -- pruned only when they are a direct child of the scan root.
+--
+-- Negation-first evaluation: a negation pattern (e.g. @!dist\/keep\/**@) from
+-- @.graphosignore@ or @.gitignore@ is consulted before the hardcoded list,
+-- so a user can re-include a directory that the hardcoded list would prune.
+-- The hardcoded list is the lowest-priority layer, consistent with the
+-- existing priority order (hardcoded 0, gitignore 1, graphosignore 2).
 isIgnoredEntryRoot
   :: FilePath       -- ^ scan root
   -> ([AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
@@ -223,9 +288,59 @@ isIgnoredEntryRoot
   -> [AnnotatedPattern]
   -> Bool
 isIgnoredEntryRoot scanRoot shouldIgnoreFn entry parentPath entryPath ignorePatterns =
-  entry `elem` depthIndependentIgnoreDirs
-  || (entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot)
-  || shouldIgnoreFn ignorePatterns entryPath
+  let hardcodedMatch =
+        entry `elem` depthIndependentIgnoreDirs
+        || (entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot)
+  in if hardcodedMatch
+       then not (negationCovers scanRoot ignorePatterns entryPath)
+       else shouldIgnoreFn ignorePatterns entryPath
+
+-- | Check if any negation pattern in the list matches the given path, or
+-- covers a path inside it (i.e. the directory is an ancestor of the
+-- negation target). This is used to re-include a directory that the
+-- hardcoded list would prune, so that files inside it can be reached by
+-- negation patterns. For example, @!dist\/keep\/**@ means the @dist@
+-- directory at the root should not be pruned, because the negation target
+-- lives inside it.
+negationCovers :: FilePath -> [AnnotatedPattern] -> FilePath -> Bool
+negationCovers scanRoot patterns dirPath =
+  let relDir = relativize scanRoot dirPath
+  in any (\ap -> apNegate ap && coversPath (apPattern ap) relDir) patterns
+  where
+    -- A negation pattern covers a directory if it matches the directory
+    -- path directly, or if the directory is an ancestor of the pattern's
+    -- literal prefix (so files inside the directory would match the
+    -- negation).
+    coversPath (WildcardPattern p) path =
+      matches path (WildcardPattern p)
+      || dirIsAncestorOf p path
+    coversPath other path = matches path other
+
+-- | Make a path relative to the scan root, stripping any leading @./@.
+relativize :: FilePath -> FilePath -> FilePath
+relativize root path
+  | root == "." = stripLeadingDotSlash path
+  | root `isPrefixOf` path = drop (length root + 1) path  -- +1 for the /
+  | otherwise = path
+  where
+    stripLeadingDotSlash ('.':'/':rest) = rest
+    stripLeadingDotSlash s = s
+
+-- | Check if a directory path is an ancestor of a pattern's literal path.
+-- For example, @dist@ is an ancestor of @dist\/keep\/**@, so the @dist@
+-- directory should not be pruned when a negation targets @dist\/keep\/**@.
+dirIsAncestorOf :: String -> FilePath -> Bool
+dirIsAncestorOf patternPath dirPath =
+  let normDir = stripDotSlash dirPath
+      normPat = stripDotSlash (takeLiteralPrefix patternPath)
+  in not (null normPat) && not (null normDir)
+     && normPat /= normDir
+     && (normDir ++ "/") `isPrefixOf` normPat
+  where
+    stripDotSlash ('.':'/':rest) = rest
+    stripDotSlash s = s
+    -- Extract the literal (non-wildcard) prefix of a pattern path
+    takeLiteralPrefix = takeWhile (/= '*')
 
 -- | Check if a file has a supported extension (using config-driven extensions)
 isSupportedWith :: String -> Map FileCategory [String] -> Bool

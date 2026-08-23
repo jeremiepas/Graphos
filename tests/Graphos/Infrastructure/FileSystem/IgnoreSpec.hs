@@ -194,6 +194,16 @@ spec = do
         patterns <- loadGraphosignore tmpDir
         apPriority (NE.head $ NE.fromList patterns) `shouldBe` 2
 
+    it "handles negation patterns (!) in .graphosignore (fix-treesitter-graph-fidelity)" $ do
+      let tmpDir = "/tmp/graphos-test-ignore-spec-neg"
+      withTestDir tmpDir $ do
+        writeFile (tmpDir </> ".graphosignore") "!dist/keep/**\n"
+        patterns <- loadGraphosignore tmpDir
+        length patterns `shouldBe` 1
+        apNegate (patterns !! 0) `shouldBe` True
+        apPriority (patterns !! 0) `shouldBe` 2
+        apPattern (patterns !! 0) `shouldBe` WildcardPattern "dist/keep/**"
+
   describe "loadGitignore" $ do
     it "returns empty list when .gitignore does not exist" $ do
       let tmpDir = "/tmp/graphos-test-ignore-spec-5"
@@ -273,14 +283,24 @@ spec = do
         any (\ap -> apPattern ap == PrefixPattern "dist") patterns `shouldBe` True
 
   describe "hardcodedIgnorePatterns" $ do
-    it "contains common directories" $ do
+    it "contains common depth-independent directories" $ do
       -- Entries containing dots are now parsed as ExactPattern (not SuffixPattern)
       any (\ap -> apPattern ap == ExactPattern ".git") hardcodedIgnorePatterns `shouldBe` True
       any (\ap -> apPattern ap == ExactPattern "node_modules") hardcodedIgnorePatterns `shouldBe` True
-      any (\ap -> apPattern ap == ExactPattern "target") hardcodedIgnorePatterns `shouldBe` True
       any (\ap -> apPattern ap == ExactPattern "vendor") hardcodedIgnorePatterns `shouldBe` True
       any (\ap -> apPattern ap == ExactPattern ".next") hardcodedIgnorePatterns `shouldBe` True
       any (\ap -> apPattern ap == ExactPattern ".gradle") hardcodedIgnorePatterns `shouldBe` True
+
+    it "does NOT contain root-anchored build-output names (fix-treesitter-graph-fidelity)" $ do
+      -- build/out/target/dist/etc are root-anchored in Detect and must not be
+      -- pruned at arbitrary depth by the pattern path.
+      all (\n -> not (any (\ap -> apPattern ap == ExactPattern n) hardcodedIgnorePatterns))
+        ["build", "out", "target", "dist", "dist-newstyle", "DerivedData", ".build"]
+        `shouldBe` True
+      -- and they live in the root-anchored class instead
+      all (\n -> any (\ap -> apPattern ap == ExactPattern n) rootAnchoredIgnorePatterns)
+        ["build", "out", "target", "dist", "dist-newstyle", "DerivedData", ".build"]
+        `shouldBe` True
 
     it "all hardcoded patterns have priority 0" $ do
       all (\ap -> apPriority ap == 0) hardcodedIgnorePatterns `shouldBe` True
