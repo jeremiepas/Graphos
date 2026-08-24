@@ -4,6 +4,14 @@
   "small_model": "executor/qwen3.8-executor",
   "compaction": { "auto": true, "tail_turns": 5 },
   "experimental": { "mcp_timeout": 60000, "primary_tools": ["edit", "bash"] },
+  "repositories": {
+    "graphos": {
+      "path": "/home/jeremie/Documents/Graphos"
+    },
+    "homelab": {
+      "path": "/home/jeremie/Documents/homelab"
+    }
+  },
   "provider": {
     "llama": {
       "name": "Local llama.cpp server (Qwen 3.6)",
