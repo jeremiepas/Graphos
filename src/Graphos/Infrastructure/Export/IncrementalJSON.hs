@@ -14,10 +14,11 @@ module Graphos.Infrastructure.Export.IncrementalJSON
   , writeCompositions
   ) where
 
-import Data.Aeson (Value, encode)
+import Data.Aeson (Value(..), encode)
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Map.Strict (Map)
+import Data.Map.Strict (Map, empty)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
@@ -39,7 +40,10 @@ openWriter path = do
   h <- openFile path WriteMode
   firstRef <- newIORef True
   hPutStr h "{\n"
-  pure W.IncrementalWriter { W.iwHandle = h, W.iwFirst = firstRef }
+  let iw = W.IncrementalWriter { W.iwHandle = h, W.iwFirst = firstRef }
+  writeKey iw "\"schema_version\""
+  safePut iw (encode (graphFileSchemaVersion :: Text))
+  pure iw
 
 closeWriter :: W.IncrementalWriter -> IO ()
 closeWriter iw = do
@@ -108,11 +112,8 @@ writeGodNodes iw gods = do
 
 writeAnalysisTail :: W.IncrementalWriter -> Maybe (Map Int Text) -> IO ()
 writeAnalysisTail iw mLabels = do
-  case mLabels of
-    Just labels -> do
-      writeKey iw "\"community_labels\""
-      safePut iw (encode labels)
-    Nothing -> pure ()
+  writeKey iw "\"community_labels\""
+  safePut iw (encode (maybe empty id mLabels))
 
 writeCommunityAggregates :: W.IncrementalWriter -> [CommunityAggregate] -> IO ()
 writeCommunityAggregates iw aggregates = do
@@ -120,8 +121,6 @@ writeCommunityAggregates iw aggregates = do
   safePut iw (encode aggregates)
 
 writeCompositions :: W.IncrementalWriter -> Maybe Value -> IO ()
-writeCompositions iw mCompositions = case mCompositions of
-  Just comps -> do
-    writeKey iw "\"compositions\""
-    safePut iw (encode comps)
-  Nothing -> pure ()
+writeCompositions iw mCompositions = do
+  writeKey iw "\"compositions\""
+  safePut iw (encode (maybe (Object KM.empty) id mCompositions))

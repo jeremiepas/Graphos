@@ -11,6 +11,7 @@ module Graphos.Fidelity.GraphCoverageSpec (spec) where
 import Control.Monad (forM)
 import Data.Aeson (decode, encode)
 import qualified Data.ByteString.Lazy as BSL
+import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -18,7 +19,10 @@ import qualified Data.Text.IO as TIO
 import Data.Text (Text)
 import Graphos.Domain.Types (FileType(CodeFile), Node(..))
 import Graphos.Domain.Types.Graph (LabeledGraph(..))
+import qualified Graphos.Domain.Graph as DG
+import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory)
+import System.Environment (lookupEnv)
 import System.FilePath ((</>), makeRelative, normalise, splitDirectories, takeDirectory, takeExtension)
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Hspec
@@ -66,11 +70,14 @@ listSourceFiles root = walk root root
           else pure [normalise (makeRelative base p) | takeExtension p `elem` sourceExtensions]
 
 -- | Files referenced by the nodes of a graph, relative to the repository root.
-graphFiles :: LabeledGraph -> Set.Set FilePath
-graphFiles gr = Set.fromList
+graphFilesFrom :: Map.Map Text Node -> Set.Set FilePath
+graphFilesFrom nodes = Set.fromList
   [ normalise (T.unpack (nodeSourceFile n))
-  | n <- Map.elems (gNodes gr)
+  | n <- Map.elems nodes
   ]
+
+graphFiles :: LabeledGraph -> Set.Set FilePath
+graphFiles gr = graphFilesFrom (gNodes gr)
 
 -- | Machine-readable coverage report grouped by class.
 coverageReport :: Set.Set FilePath -> Map.Map MissingClass [FilePath] -> Text
@@ -131,6 +138,49 @@ runCoverage diskFiles graphFiles' = withSystemTempDirectory "graphos-coverage" $
             _      -> "export const x = 1;\n"
       TIO.writeFile f body
 
+-- | Strip a root prefix from an absolute path, yielding a root-relative path.
+stripRootPrefix :: FilePath -> FilePath -> FilePath
+stripRootPrefix root p
+  | root `isPrefixOf` p = dropWhile (== '/') (drop (length root) p)
+  | otherwise = p
+
+-- | Directories the pipeline ignores (must mirror UseCase/Detect.hs) so the
+-- on-disk scan does not count files the pipeline intentionally skips.
+pipelineIgnoredDirs :: [String]
+pipelineIgnoredDirs =
+  [ "node_modules", "dist", "build", "out", "target", "dist-newstyle"
+  , ".git", ".cache", ".venv", "venv", "__pycache__", ".next", ".nuxt"
+  , ".stack-work", ".cargo", ".idea", ".vscode", ".direnv", ".tmp"
+  ]
+
+-- | True when any path segment of a root-relative path is a pipeline-ignored dir.
+underIgnoredDir :: FilePath -> Bool
+underIgnoredDir rel = any (`elem` pipelineIgnoredDirs) (splitDirectories rel)
+
+-- | Run the coverage oracle against a real corpus named by env vars
+-- (GRAPHOS_FIDELITY_ROOT, GRAPHOS_FIDELITY_GRAPH). Returns the report plus the
+-- unexplained-missing count; 'Nothing' when the env vars are unset.
+runRealCoverage :: IO (Maybe (Text, Int))
+runRealCoverage = do
+  mRoot  <- lookupEnv "GRAPHOS_FIDELITY_ROOT"
+  mGraph <- lookupEnv "GRAPHOS_FIDELITY_GRAPH"
+  case (mRoot, mGraph) of
+    (Just root, Just graphPath) -> do
+      allOnDisk <- Set.fromList <$> listSourceFiles root
+      let onDisk = Set.filter (not . underIgnoredDir) allOnDisk
+      mLR <- loadGraphFromFile graphPath
+      case mLR of
+        Left err -> error ("GraphCoverageSpec: failed to load real corpus graph.json: " ++ T.unpack err)
+        Right lr -> do
+          let g = lrGraph lr
+              normRoot    = normalise root
+              graphFilesRel = Set.map (stripRootPrefix normRoot) (graphFilesFrom (DG.gNodes g))
+              grouped     = groupMissing onDisk graphFilesRel
+              unexplained = length (Map.findWithDefault [] Unexplained grouped)
+              report      = coverageReport onDisk grouped
+          return (Just (report, unexplained))
+    _ -> return Nothing
+
 spec :: Spec
 spec = describe "GraphCoverage fidelity" $ do
   it "passes when every source file on disk is present in the graph" $ do
@@ -157,3 +207,11 @@ spec = describe "GraphCoverage fidelity" $ do
     unexplained `shouldNotBe` 0
     report `shouldSatisfy` T.isInfixOf "MISSING (build-output)"
     report `shouldSatisfy` T.isInfixOf "MISSING (unexplained)"
+
+  it "real corpus coverage (env GRAPHOS_FIDELITY_ROOT / GRAPHOS_FIDELITY_GRAPH)" $ do
+    mResult <- runRealCoverage
+    case mResult of
+      Nothing -> pendingWith "set GRAPHOS_FIDELITY_ROOT and GRAPHOS_FIDELITY_GRAPH to run the real-corpus coverage oracle"
+      Just (report, unexplained) -> do
+        TIO.putStr report
+        unexplained `shouldBe` 0

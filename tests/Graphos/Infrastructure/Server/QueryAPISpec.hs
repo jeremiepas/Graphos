@@ -93,9 +93,14 @@ fixtureLoadResult =
        , lrCommunities     = Map.empty
        , lrCohesion        = Map.empty
        , lrGodNodes        = []
-       , lrCommunityLabels = Map.empty
-       , lrCompositions    = Nothing
-       }
+        , lrCommunityLabels = Map.empty
+        , lrCompositions    = Nothing
+        , lrCommunityAggregates = []
+        , lrDegradedRelations   = 0
+        , lrDegradedFileTypes   = 0
+        , lrSkippedNodes        = 0
+        , lrSkippedEdges        = 0
+        }
 
 -- | Helper to run a request against apiApp and return status, headers, and body.
 runApi :: Method -> ByteString -> IO (Status, ResponseHeaders, BSL.ByteString)

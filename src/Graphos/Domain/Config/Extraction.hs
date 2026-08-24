@@ -44,7 +44,7 @@ import Data.Aeson.Types (defaultOptions, fieldLabelModifier)
 
 -- | How to extract symbols from a file.
 --   'ExtractLSP' uses a Language Server Protocol server (requires the server to be installed).
---   'ExtractTreeSitter' uses tree-sitter CLI for fast, reliable AST parsing (no server needed).
+--   'ExtractTreeSitter' uses tree-sitter via C FFI for fast, reliable AST parsing (no server needed).
 --   'ExtractStub' creates a single node per file (no parsing).
 data ExtractorMode
   = ExtractLSP
@@ -314,11 +314,11 @@ instance FromJSON FileExtensionConfig where
 -- | Default file extension categories (hardcoded fallback).
 defaultFileExtensions :: FileExtensionConfig
 defaultFileExtensions = FileExtensionConfig
-  { fecCode  = [ ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp"
-               , ".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua", ".zig", ".hs", ".lhs"
-               , ".ex", ".exs", ".m", ".mm", ".jl", ".vue", ".svelte", ".dart", ".ps1"
-                , ".nix"  -- Nix DSL
-                ]
+  { fecCode  = [ ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp"
+                , ".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua", ".zig", ".hs", ".lhs"
+                , ".ex", ".exs", ".m", ".mm", ".jl", ".vue", ".svelte", ".dart", ".ps1"
+                 , ".nix"  -- Nix DSL
+                 ]
   , fecDoc   = [ ".md", ".txt", ".rst", ".adoc", ".org"
                , ".text", ".raml"  -- NEW
                ]
