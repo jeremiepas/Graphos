@@ -201,9 +201,13 @@ runPipeline appEnv config = catch (do
             let emptyCommMap = Map.empty :: CommunityMap
                 emptyCohesion = Map.empty :: CohesionMap
                 noAnalysis = analyzeGraph graph emptyCommMap emptyCohesion
+            epWriteNodes ep iw (Map.elems (gNodes graph))
+            epWriteEdges ep iw (Map.elems (gEdges graph))
             epWriteCommunities ep iw emptyCommMap
             epWriteCohesion ep iw emptyCohesion
             epWriteGodNodes ep iw (analysisGodNodes noAnalysis)
+            epWriteCommunityAggregates ep iw []
+            epWriteCompositions ep iw (gCompositions graph)
             epWriteAnalysisTail ep iw Nothing
             epCloseWriter ep iw
             pure (graph, emptyCommMap, emptyCohesion, noAnalysis, Nothing :: Maybe (Map.Map CommunityId Text), [])
