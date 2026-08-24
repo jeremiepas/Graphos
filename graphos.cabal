@@ -63,8 +63,12 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
-                    Graphos.Domain.Graph.Score
-                    Graphos.Domain.Query.Research
+                     Graphos.Domain.Graph.Score
+                     Graphos.Domain.Query.Research
+                     Graphos.Domain.Query.Cypher.Mapping
+                     Graphos.Domain.Query.Cypher.AST
+                     Graphos.Domain.Query.Cypher.Parser
+                     Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
                    Graphos.Domain.Extraction
@@ -215,6 +219,8 @@ library
     , hashmap              >= 0.3
     , lens                 >= 5.0
     , lens-aeson           >= 1.1
+    , megaparsec           >= 9.0
+    , regex-tdfa           >= 1.3
     , lsp                  >= 2.0
     , lsp-types            >= 2.0
     , mtl                  >= 2.2
@@ -311,6 +317,10 @@ test-suite graphos-test
     Graphos.UseCase.ConversationSpec
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec
+    Graphos.Domain.Graph.CollisionSpec
+    Graphos.Domain.Query.Cypher.MappingSpec
+    Graphos.Domain.Query.Cypher.ParserSpec
+    Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec

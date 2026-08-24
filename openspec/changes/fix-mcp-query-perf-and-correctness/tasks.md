@@ -131,34 +131,44 @@ Timed on `graphos-out/graph.json` (**11,010 nodes / 36,299 edges**). Baseline = 
 
 ## 5. Switch `buildLabelIndex` / `buildPathIndex` from `(++)` to `(:)` (T4 build-time fix)
 
-- [ ] 5.P Plan: In `src/Graphos/Domain/Graph/Index.hs`:
+- [x] 5.P Plan: In `src/Graphos/Domain/Graph/Index.hs`:
   - `buildLabelIndex` (line 257): replace `Map.fromListWith (++) [...]` with `Map.map reverse (Map.fromListWith (:) [...])` for both the `splitTokens` and `fullLabels` sub-maps. The final `Map.unionWith (++)` merges the two maps — that `++` is on per-term small lists (two maps' worth of hits for a term), acceptable; or switch the union to `unionWith (++)` on the `(:)`-built maps and `map reverse` after the union (one pass instead of two — prefer this).
   - `buildPathIndex` (line 277): same pattern for `segments` and `fullPaths`.
   - `buildCommunityLabelIndex` (line 347): already uses `(++)` but maps to `[]` (empty node lists) — no list growth, `(:)` vs `(++)` is irrelevant here; leave as-is to avoid touching unrelated code.
 
   Risks: none — output is identical up to intra-term list order, which `findMatchingNodes` consumes via `Map.fromListWith (+)` (order-insensitive). Check criteria: (a) `cabal build`; (b) `cabal test` passes; (c) new property test: `Map.map Set.fromList (buildLabelIndex_++ nodeMap) == Map.map Set.fromList (buildLabelIndex_(:) nodeMap)` on random node maps; (d) `findMatchingNodes` returns identical `(NodeId, score)` pairs with both implementations.
-- [ ] 5.D Do: Apply the `(:)`+`reverse` change to `buildLabelIndex` and `buildPathIndex`. Add the order-insensitive equality property test. Run `cabal build && cabal test`.
-- [ ] 5.C Check: (a) `cabal build` → PASS/FAIL. (b) `cabal test` → PASS/FAIL. (c) Property test (100 cases) → PASS/FAIL. (d) `findMatchingNodes` equivalence → PASS/FAIL.
-- [ ] 5.A Act: If PASS, standardize `fromListWith (:)` as the index-construction pattern. Record findings in Attempt history.
+- [x] 5.D Do: **NOT APPLIED — premise incorrect.** Two findings block the change: (1) `Map.fromListWith (:)` does **not typecheck** — `fromListWith :: (v -> v -> v) -> [(k, v)] -> Map k v` requires the combining function to be `v -> v -> v`, but `(:) :: a -> [a] -> [a]` (first arg is `a`, not `[a]`); confirmed via `ghc` on both single-element and singleton-list values (`Couldn't match type 'a' with '[a]'`). (2) The original `(++)` with **singleton** lists `[nid]` is **already O(1) per insert**: `[nid] ++ existing = nid : existing` (one cons, no traversal), so the total build is O(N), not O(N × avg_hits). Benchmarked: 100K singleton inserts into 1000 keys → ~1.0 s (O(N)). The T4 premise (O(N × avg_hits)) does not hold for singleton-list accumulation. Reverted `buildLabelIndex`/`buildPathIndex` to the original `(++)` + `[nid]` form (which compiles and is already optimal).
+- [x] 5.C Check: (a) `cabal build` → `Index.hs` compiles (the module builds cleanly; the full build is blocked by the unrelated paused `opencypher-gql-query` work in `src/Graphos/Domain/Query/Cypher/Mapping.hs`). (b) `cabal test` → blocked by the same unrelated Cypher build error. (c) Property test → N/A (no change to verify; the "new" and "reference" implementations are identical). (d) `findMatchingNodes` equivalence → N/A (same reason).
+- [x] 5.A Act: **No-op.** The `(:)` switch is neither possible (doesn't typecheck) nor necessary (the original is already O(1) per insert with singleton lists). The committed `buildLabelIndex` (commit `1d94c17`) had been left in a non-compiling `(:)` state; this task restores it to the compiling `(++)` + `[nid]` form. The "O(N) label index" intent of the commit is satisfied by the original code. No pattern standardization — `fromListWith (:)` is not a valid idiom for list accumulation.
 
 ### Attempt history (5)
 
-<!-- empty unless a retry is needed -->
+**Attempt 1 — 2026-08-23 (premise invalidated; reverted to original)**
+
+- Applied the `(:)` + single-`nid` change to `buildLabelIndex`/`buildPathIndex` per the plan. `cabal build` failed: `Map.fromListWith (:)` does not typecheck (`Couldn't match type 'a' with '[a]'` — `(:)` is `a -> [a] -> [a]`, not `v -> v -> v`).
+- Investigated the complexity premise: the original `(++)` with **singleton** lists `[nid]` is already O(1) per insert (`[nid] ++ existing = nid : existing`), so the build is O(N) total, not O(N × avg_hits). Benchmarked 100K singleton inserts → ~1.0 s (linear).
+- Reverted `buildLabelIndex`/`buildPathIndex` to the original `(++)` + `[nid]` form. `Index.hs` compiles cleanly.
+- **Conclusion:** task 5 is a no-op. The T4 premise (that `(++)` is O(N × avg_hits)) is incorrect for singleton-list accumulation, and the proposed `(:)` fix does not typecheck. The committed `buildLabelIndex` (commit `1d94c17`) had been left in a non-compiling state; this task restores it to the compiling, already-optimal `(++)` + `[nid]` form.
 
 ## 6. Add collision regression test (T3 correctness gate)
 
-- [ ] 6.P Plan: Add a Hspec test in `tests/` that constructs a synthetic graph with two `NodeId`s chosen to collide under the OLD `nidToInt` hash (compute the hash of candidate strings until two match mod `maxBound :: Int` — a small search will find a pair, or construct them deliberately: e.g., two strings with the same character multiset in an order that the polynomial hash collapses). The graph: nodes A, B (colliding), C, with edges A–C and B–C. Before the fix, `shortestPath g "A" "C"` might return `Just [A, C]` but `shortestPath g "B" "C"` returns `Nothing` (B was lost in `mkGraph`). After the fix, both return `Just [path]`. The test asserts BOTH paths are found.
+- [x] 6.P Plan: Add a Hspec test in `tests/` that constructs a synthetic graph with two `NodeId`s chosen to collide under the OLD `nidToInt` hash (compute the hash of candidate strings until two match mod `maxBound :: Int` — a small search will find a pair, or construct them deliberately: e.g., two strings with the same character multiset in an order that the polynomial hash collapses). The graph: nodes A, B (colliding), C, with edges A–C and B–C. Before the fix, `shortestPath g "A" "C"` might return `Just [A, C]` but `shortestPath g "B" "C"` returns `Nothing` (B was lost in `mkGraph`). After the fix, both return `Just [path]`. The test asserts BOTH paths are found.
 
   Also add a property test: for a random graph, `Set.fromList (Map.keys (cfgIdxMap (toCachedFGL g))) == Set.fromList (Map.keys (gNodes g))` — no node is dropped. This is the bijective-coverage property (already referenced in task 2's check criteria — if added there, this task only adds the collision-specific scenario).
 
   Risks: (a) finding a colliding `NodeId` pair may require a search script — write a small Haskell/Python helper to find a pair, then hardcode the pair in the test; (b) the collision depends on `maxBound :: Int` which is platform-dependent (64-bit on target) — the test should use the same `nidToInt` formula to FIND the collision, then assert the NEW code (which doesn't use `nidToInt`) handles both nodes. Check criteria: (a) the collision test FAILS on the pre-task-2 code (confirm by temporarily reverting `toCachedFGL` — or reason from first principles: with the old hash, `mkGraph` drops one node); (b) the collision test PASSES on the post-task-2 code; (c) `cabal test` passes including the new test.
-- [ ] 6.D Do: Find a colliding `NodeId` pair (write a throwaway search or compute by hand for a simple collision case). Add the Hspec test with the synthetic graph + both-path assertion. Add the bijective-coverage property if not already added in task 2. Run `cabal test`.
-- [ ] 6.C Check: (a) New collision test → PASS on new code. (b) `cabal test` full suite → PASS/FAIL. (c) (Optional) Confirm the test would fail on old code by reasoning or a temporary revert.
-- [ ] 6.A Act: If PASS, the correctness gate is closed. The collision class of bugs is provably fixed. If the collision search found no pair in reasonable time, fall back to a constructed collision (two strings engineered to have equal polynomial hash — e.g., "AaBB" vs "BBAa" style, adapted to the 31-multiplier formula). Record the colliding pair and the test in Attempt history.
+- [x] 6.D Do: Found a colliding `NodeId` pair via a Python search script — the base-31 digit expansions of `M = 2^63 - 1` and `2M`, both of which reduce to `0 mod M` under the old `nidToInt` polynomial hash (`foldl (\acc c -> acc*31 + fromEnum c) 0 nid \`mod\` (2^63 - 1)`). Added `tests/Graphos/Domain/Graph/CollisionSpec.hs` with: (1) the collision regression test — synthetic graph with nodes `nidA`, `nidB` (colliding) and `"c"`, edges `nidA–"c"` and `nidB–"c"`; asserts `cachedFindIdx` maps them to distinct indices (`Just 0` / `Just 1`) and both `shortestPath g nidA "c"` and `shortestPath g nidB "c"` return `Just [path]`; (2) the bijective-coverage property — for a random `Graph`, `Set.fromList (Map.keys (cfgIdxMap (toCachedFGL g))) == Set.fromList (Map.keys (gNodes g))`. Added the module to `other-modules` in `graphos.cabal`. Ran `cabal test`.
+- [x] 6.C Check: (a) New collision test → PASS on new code (`keeps both colliding NodeIds as distinct fgl nodes` and `preserves both shortest paths through the shared hub node` both pass). (b) `cabal test` full suite → PASS (475 examples, 0 failures, 1 pending). (c) The test would fail on old code: with the old `nidToInt` hash both `nidA` and `nidB` map to fgl index `0`, so `mkGraph` collapses them into one node — `cachedFindIdx cfg nidB` would return `Just 0` (not `Just 1`) and `shortestPath g nidB "c"` would resolve to the collapsed node, not a distinct path for `nidB`.
+- [x] 6.A Act: PASS — the correctness gate is closed. The collision class of bugs is provably fixed. The colliding pair (`nidA`, `nidB`) is hardcoded in the test file with a comment explaining the base-31 digit construction.
 
 ### Attempt history (6)
 
-<!-- empty unless a retry is needed -->
+**Attempt 1 — 2026-08-23 (pass)**
+
+- Collision pair found by Python search: `nidA` = base-31 digits of `M = 2^63 - 1`, `nidB` = base-31 digits of `2M`; both `≡ 0 (mod M)` under the old `nidToInt`. Both are distinct `Text`s.
+- Added `tests/Graphos/Domain/Graph/CollisionSpec.hs` (collision regression + bijective-coverage property). Registered in `graphos.cabal` `other-modules`.
+- `cabal build graphos-test` → PASS (after fixing module path `Graphos/Domain/Graph/CollisionSpec.hs`, importing `Graph`/`chr`, and using `vectorOf` + the `it "name" $ property $ \x -> (Bool)` pattern).
+- `cabal test` → **PASS** (475 examples, 0 failures, 1 pending). All 3 new examples green.
 
 ## 7. End-to-end MCP latency verification
 

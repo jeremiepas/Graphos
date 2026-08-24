@@ -161,11 +161,12 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       verdict = computeVerdict bestScore
       -- BFS from top-scoring nodes (only when not NoMatch)
       topNodes :: [NodeId]
-       topNodes = take 5 [nid | (nid, _) <- scoredPairs]
-       expanded :: Set.Set NodeId
-       expanded = case verdict of
-         NoMatch -> Set.empty
-         _       -> if mode == T.pack "dfs"
+      topNodes = take 5 [nid | (nid, _) <- scoredPairs]
+      expanded :: Set.Set NodeId
+      expanded =
+        case verdict of
+          NoMatch -> Set.empty
+          _       -> if mode == T.pack "dfs"
                      then Set.unions [depthFirstSearchWithCached cfg nid 6 | nid <- topNodes]
                      else bfsFromSet idx (Set.fromList topNodes) 3
       -- Gather scored nodes in the expanded subgraph
