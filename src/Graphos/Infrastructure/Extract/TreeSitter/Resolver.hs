@@ -51,5 +51,5 @@ resolveDots p = T.unpack (T.intercalate "/" (go (T.splitOn "/" (T.pack p)) []))
       | x == ".." = case acc of
           [] -> go rest acc
           ("" : _) -> go rest acc
-          (_ : _) -> go rest (drop 1 acc)
+           (_ : restAcc) -> go rest restAcc
       | otherwise = go rest (x : acc)
