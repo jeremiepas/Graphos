@@ -16,6 +16,9 @@ module Graphos.Domain.Graph.Index
     -- * Construction
   , buildIndex
   , buildIndexWithLabels
+  , buildLabelIndex
+  , buildPathIndex
+  , tokenizeLabel
 
     -- * Queries
   , lookupTerm
@@ -255,16 +258,16 @@ bfsFromSet idx starts maxDepth = go Set.empty starts 0
 -- individual tokens like "auth" (4 chars) are the only ones that pass.
 buildLabelIndex :: Map NodeId Node -> Map Text [NodeId]
 buildLabelIndex nodeMap =
-  let splitTokens = Map.map reverse (Map.fromListWith (:)
-        [ (word, nid)
+  let splitTokens = Map.map reverse (Map.fromListWith (++)
+        [ (word, [nid])
         | (nid, n) <- Map.toList nodeMap
         , word <- tokenizeLabel (nodeLabel n)
         ])
       -- Also index the full lowercased label for exact/fuzzy match.
       -- This ensures "MyModule" is findable even if its split tokens
       -- are all filtered as stop words or too short.
-      fullLabels = Map.map reverse (Map.fromListWith (:)
-        [ (T.toLower (nodeLabel n), nid)
+      fullLabels = Map.map reverse (Map.fromListWith (++)
+        [ (T.toLower (nodeLabel n), [nid])
         | (nid, n) <- Map.toList nodeMap
         , T.length (T.toLower (nodeLabel n)) > 2
         ])
