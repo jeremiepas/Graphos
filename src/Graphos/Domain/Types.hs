@@ -16,6 +16,11 @@ module Graphos.Domain.Types
   , Confidence(..)
 
 
+    -- * graph.json contract
+  , graphFileSchemaVersion
+  , graphFileTopLevelKeys
+  , graphFileRequiredKeys
+
     -- * Extraction types
   , Extraction(..)
   , emptyExtraction
@@ -98,6 +103,7 @@ module Graphos.Domain.Types
 import Graphos.Domain.Types.Node (NodeId, Node(..), FileType(..))
 import Graphos.Domain.Types.Writer (IncrementalWriter(..))
 import Graphos.Domain.Types.Edge (EdgeId(..), Edge(..), Relation(..), relationToText, textToRelation, Confidence(..))
+import Graphos.Domain.Types.GraphFile (graphFileSchemaVersion, graphFileTopLevelKeys, graphFileRequiredKeys)
 import Graphos.Domain.Types.Graph (Extraction(..), emptyExtraction, extractionFromLists, extNodes, extEdges, LabeledGraph, CommunityId, CommunityMap, CohesionMap, PushMode(..), GraphDiff(..), Hyperedge(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), ExclusionCounts(..), emptyExclusionCounts, FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..), CommunityAggregate(..))

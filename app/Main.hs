@@ -22,7 +22,7 @@ import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
-import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
+import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
 import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
 import Graphos.Domain.Community (computeCompositions)
@@ -68,6 +68,10 @@ import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFac
 
 -- All parsers (pipelineOpts, queryOpts, commandOpts, etc.)
 -- and the Command type are defined in Graphos.CLI.Parser
+
+loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
+loadGraphOpt strict path =
+  if strict then loadGraphFromFileStrict path else loadGraphFromFile path
 
 main :: IO ()
 main = do
@@ -188,7 +192,7 @@ main = do
       let graphPath = cqoGraphPath qopts
           budget    = cqoBudget qopts
       logInfo env $ "Query: " <> question <> " (" <> mode <> ", budget=" <> T.pack (show budget) <> ")"
-      loadResult <- loadGraphFromFile graphPath
+      loadResult <- loadGraphOpt (cqoStrictGraph qopts) graphPath
       case loadResult of
         Left err -> (if cqoJson qopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
@@ -206,7 +210,7 @@ main = do
       let graphPath = cqoGraphPath popts
       logInfo env $ "Path: " <> from <> " -> " <> to
       logDebug env "Loading graph from disk..."
-      loadResult <- loadGraphFromFile graphPath
+      loadResult <- loadGraphOpt (cqoStrictGraph popts) graphPath
       case loadResult of
         Left err -> (if cqoJson popts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
@@ -237,7 +241,7 @@ main = do
     ExplainCmd node eopts -> do
       let graphPath = cqoGraphPath eopts
       (if cqoJson eopts then hPutStrLn stderr else putStrLn) $ "[graphos] Explain: " ++ T.unpack node
-      loadResult <- loadGraphFromFile graphPath
+      loadResult <- loadGraphOpt (cqoStrictGraph eopts) graphPath
       case loadResult of
         Left err -> (if cqoJson eopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
@@ -277,7 +281,7 @@ main = do
                   Nothing -> pure ()
 
     SymbolsCmd name symOpts -> do
-      loadResult <- loadGraphFromFile (cqoGraphPath symOpts)
+      loadResult <- loadGraphOpt (cqoStrictGraph symOpts) (cqoGraphPath symOpts)
       case loadResult of
         Left err -> putStrLn $ "Error: " ++ T.unpack err
         Right loaded -> do
@@ -289,7 +293,7 @@ main = do
             else putStrLn $ T.unpack $ renderSymbolResultText (cqoBudget symOpts) result
 
     NeighborsCmd nodeArg depth nbrOpts -> do
-      loadResult <- loadGraphFromFile (cqoGraphPath nbrOpts)
+      loadResult <- loadGraphOpt (cqoStrictGraph nbrOpts) (cqoGraphPath nbrOpts)
       case loadResult of
         Left err -> (if cqoJson nbrOpts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
@@ -313,7 +317,7 @@ main = do
 
     ResearchCmd termsArg seedsArg graphPath doHtml doJson termsFileArg labelArg researchMode commonOpts -> do
       hSetBuffering stdout NoBuffering
-      loadResult <- loadGraphFromFile graphPath
+      loadResult <- loadGraphOpt (cqoStrictGraph commonOpts) graphPath
       case loadResult of
         Left err -> putStrLn $ "Error: " ++ T.unpack err
         Right loaded -> do

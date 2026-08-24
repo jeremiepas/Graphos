@@ -227,7 +227,8 @@ tsNodeToGraphEdges gran filePath parentLabel node =
           in if T.null tailText
              then Nothing
              else let raw = T.strip (T.drop (T.length "from ") tailText)
-                      specifier = stripQuotes raw
+                      rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
+                      specifier = stripQuotes (T.stripEnd rawNoSemi)
                   in if T.null specifier
                      then Nothing
                      else resolveImport filePath (T.unpack specifier)

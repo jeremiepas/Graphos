@@ -55,6 +55,7 @@ library
                     Graphos.Domain.Types.Analysis
                     Graphos.Domain.Types.Ingest
                     Graphos.Domain.Types.Writer
+                    Graphos.Domain.Types.GraphFile
                     -- Domain - Graph
                     Graphos.Domain.Graph
                     Graphos.Domain.Graph.Core
