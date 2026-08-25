@@ -86,11 +86,11 @@ Switching `nidToInt` (hash) to sequential `0..N-1` indices changes the internal 
 - **WHEN** `cabal test` is run after the change
 - **THEN** all existing tests pass without modification (any order-sensitive assertions on FGL-backed algorithm output are relaxed to set/sorted comparison)
 
-### Requirement: buildLabelIndex and buildPathIndex use O(N) list construction
+### Requirement: buildLabelIndex and buildPathIndex use O(1)-per-insert list construction
 
-`buildLabelIndex` and `buildPathIndex` (`Domain/Graph/Index.hs`) SHALL use `Map.fromListWith (:)` followed by a `map reverse` (or equivalent O(1)-per-insert construction), not `Map.fromListWith (++)`. This keeps one-time index construction O(N × avg_tokens) rather than O(N × avg_tokens × avg_hits_per_term).
+`buildLabelIndex` and `buildPathIndex` (`Domain/Graph/Index.hs`) SHALL use O(1)-per-insert list construction. The current implementation uses `Map.fromListWith (++)` with singleton lists `[nid]` followed by `Map.map reverse`, which is O(1) per insert (`[nid] ++ existing = nid : existing` — one cons, no traversal). This keeps one-time index construction O(N × avg_tokens).
 
 #### Scenario: Label index content is preserved
 
-- **WHEN** `buildLabelIndex` is built with `(++)` vs `(:)`+`reverse` on the same node map
-- **THEN** both produce the same `Map Text [NodeId]` when compared order-insensitively (e.g., `Map.map Set.fromList` on both sides); `findMatchingNodes` returns the same `(NodeId, score)` pairs either way
+- **WHEN** `buildLabelIndex` is built with `(++)` + singleton lists `[nid]` on the same node map
+- **THEN** it produces a `Map Text [NodeId]` where each term maps to the list of `NodeId`s whose label contains that term; `findMatchingNodes` returns the correct `(NodeId, score)` pairs
