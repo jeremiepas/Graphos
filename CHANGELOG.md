@@ -17,6 +17,13 @@
 - Leiden community detection now scales to 100k+ node graphs (16x faster at
   100k nodes: 169s → 10.5s, compiled): in-place assignment updates, batched
   refinement, incremental merge indexing.
+- **MCP query path now caches `GraphIndex` and `CachedFGL` at load time** (was
+  rebuilt per request). `query_graph` and `shortest_path` latency drops from
+  O(N) to O(k) on the second and subsequent calls. `handleQueryGraph` now
+  makes a single query invocation (was 3). `bridge_nodes` uses the cached FGL
+  (was rebuilt per call).
+- **MCP `query_graph` response gains fields**: `verdict`, `best_score`, `hash`,
+  `suggestions`. `traverse` field kept as `mode` echo for one release.
 
 ### Fixed
 - `mergeSmallCommunities` no longer silently drops nodes when a community that
@@ -29,6 +36,11 @@
   instead of thunk creation.
 - The debug-trace `traces/` directory is only created when tracing is enabled
   and events were emitted.
+- **FGL node indexing is now bijective** (sequential `0..N-1` indices, was
+  hash-based `nidToInt`). Two distinct `NodeId`s that collided under the old
+  hash no longer silently lose one node — `shortestPath`/`articulationPoints`/
+  `biconnectedComponents`/`dominators` now find paths/bridges through
+  collision-prone node pairs.
 
 ## 0.1.0.0
 
