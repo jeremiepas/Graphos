@@ -22,6 +22,7 @@
 | 14 | [Observability](14-observability.md) | `graphos <path> --otel` | OTLP traces + metrics + logs + debug trace |
 | 15 | [Config Init](15-config-init.md) | `graphos init` | Bootstrap graphos.yaml with defaults |
 | 16 | [LSP Discovery](16-lsp-discovery.md) | `graphos lservers` | Auto-detect installed LSP servers |
+| 17 | [Cypher](17-cypher.md) | `graphos cypher "<query>"` | Read-only openCypher/GQL subset (MATCH/WHERE/RETURN) over the property graph |
 
 ## Workflow Dependency Map
 

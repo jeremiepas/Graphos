@@ -310,6 +310,7 @@ test-suite graphos-test
     Graphos.UseCase.Extract.ImageSpec
     Graphos.UseCase.QuerySpec
     Graphos.UseCase.Query.RefineSpec
+    Graphos.UseCase.Query.RenderSpec
     Graphos.UseCase.SelectContextSpec
     Graphos.UseCase.SelectContextNoiseSpec
     Graphos.UseCase.FormatContextSpec
