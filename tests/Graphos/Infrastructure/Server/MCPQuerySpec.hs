@@ -87,3 +87,30 @@ spec = describe "MCP query handler JSON shape" $ do
           KM.lookup (Key.fromText "nodes") obj `shouldBe` Just (Array mempty)
           KM.lookup (Key.fromText "edges") obj `shouldBe` Just (Array mempty)
         Right _ -> expectationFailure "expected JSON object"
+
+  describe "handleCypherQuery" $ do
+    it "returns columns, rows, truncated for a valid query" $ do
+      let args = mkArgs [("query", String "MATCH (n) RETURN n")]
+      result <- handleCypherQuery queryGraph idx args
+      case result of
+        Left err -> expectationFailure (T.unpack err)
+        Right (Object obj) -> do
+          keyLookup "columns" obj `shouldBe` True
+          keyLookup "rows" obj `shouldBe` True
+          keyLookup "truncated" obj `shouldBe` True
+          KM.lookup (Key.fromText "truncated") obj `shouldBe` Just (Bool False)
+        Right _ -> expectationFailure "expected JSON object"
+
+    it "errors when query is missing" $ do
+      let args = mkArgs []
+      result <- handleCypherQuery queryGraph idx args
+      case result of
+        Left err -> err `shouldBe` "Missing required argument: query"
+        Right _  -> expectationFailure "expected Left"
+
+    it "reports a parse error for out-of-subset queries" $ do
+      let args = mkArgs [("query", String "CREATE (a)")]
+      result <- handleCypherQuery queryGraph idx args
+      case result of
+        Left err -> T.isInfixOf "Cypher parse error" err `shouldBe` True
+        Right _  -> expectationFailure "expected Left"
