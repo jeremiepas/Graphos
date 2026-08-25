@@ -24,6 +24,8 @@ import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
+import Graphos.Domain.Query.Cypher.Parser (parseQuery)
+import Graphos.Domain.Query.Cypher.Eval (evaluate)
 import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
 import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
@@ -31,7 +33,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderCypherResultText, renderCypherResultJSON)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
@@ -204,6 +206,25 @@ main = do
           if cqoJson qopts
             then putStrLn $ T.unpack $ renderQueryResponseJSON refinedResp
             else putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
+
+    CypherCmd queryText copts -> do
+      env <- defaultLogEnv (if cqoJson copts then LogError else LogInfo)
+      let graphPath = cqoGraphPath copts
+          budget    = cqoBudget copts
+      logInfo env $ "Cypher: " <> queryText
+      loadResult <- loadGraphOpt (cqoStrictGraph copts) graphPath
+      case loadResult of
+        Left err -> (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
+        Right loaded -> do
+          let g = lrGraph loaded
+              idx = lrIndex loaded
+          case parseQuery queryText of
+            Left err -> (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Cypher error: " ++ T.unpack err
+            Right q -> do
+              let result = evaluate budget q g idx
+              if cqoJson copts
+                then putStrLn $ T.unpack $ renderCypherResultJSON result
+                else putStrLn $ T.unpack $ renderCypherResultText budget result
 
     PathCmd from to popts -> do
       env <- defaultLogEnv (if cqoJson popts then LogError else LogInfo)
