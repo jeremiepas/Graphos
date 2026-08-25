@@ -13,6 +13,8 @@ module Graphos.UseCase.Query.Render
   , renderNeighborsResultJSON
   , renderPathResultJSON
   , renderExplainResultJSON
+  , renderCypherResultText
+  , renderCypherResultJSON
   , renderAmbiguousText
   , renderAmbiguousJSON
   , renderNotFoundText
@@ -30,6 +32,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL (decodeUtf8)
 
 import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict)
+import Graphos.Domain.Query.Cypher.Eval (CypherResult(..))
 import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
@@ -174,6 +177,26 @@ renderExplainResultJSON (Just node) =
     , "source_file" .= nodeSourceFile node
     , "community"   .= nodeCommunityId node
     ])
+
+-- | Render a CypherResult as a human-readable table: a count line, the
+-- column header, then one line per row (values as compact JSON).
+renderCypherResultText :: Int -> CypherResult -> Text
+renderCypherResultText budget cr =
+  let header = T.intercalate "  " (crColumns cr)
+      rowLines = [ T.intercalate "  " (map encodeText row) | row <- crRows cr ]
+      countLine = "Results (" <> T.pack (show (length (crRows cr))) <> " rows)"
+                  <> if crTruncated cr then " [truncated]" else ""
+      body = if null rowLines then "(no rows)" else T.unlines rowLines
+  in truncateOutput budget (countLine <> "\n" <> header <> "\n" <> body)
+
+-- | Render a CypherResult as a single JSON document:
+-- @{"columns":[...],"rows":[[...]],"truncated":bool}@.
+renderCypherResultJSON :: CypherResult -> Text
+renderCypherResultJSON cr = encodeText $ object
+  [ "columns"   .= crColumns cr
+  , "rows"      .= crRows cr
+  , "truncated" .= crTruncated cr
+  ]
 
 -- | Render an ambiguous node-argument resolution as text: list every candidate
 -- with its id and source location so the caller can re-run with a node id.

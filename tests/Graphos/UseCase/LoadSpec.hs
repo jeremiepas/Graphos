@@ -8,7 +8,6 @@ import Data.Maybe (fromJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Aeson.KeyMap as KM
-import System.IO (writeFile)
 import System.IO.Temp (withSystemTempDirectory)
 import System.FilePath ((</>))
 
@@ -57,8 +56,9 @@ spec = do
         Right lr -> do
           lrDegradedRelations lr `shouldBe` 1
           edgeCount lr `shouldBe` 1
-          let e = head (Map.elems (gEdges (lrGraph lr)))
-          edgeRelation e `shouldBe` Inferred
+          case Map.elems (gEdges (lrGraph lr)) of
+            (e : _) -> edgeRelation e `shouldBe` Inferred
+            [] -> fail "expected at least one edge"
     it "degrades an unknown file_type to code and counts it" $ do
       res <- withTempGraph unknownFtGraph loadGraphFromFile
       case res of
@@ -104,7 +104,7 @@ spec = do
       let goodNodes = T.intercalate ","
             [ "{\"id\":\"n" <> T.pack (show i) <> "\",\"label\":\"N" <> T.pack (show i)
               <> "\",\"file_type\":\"code\",\"source_file\":\"n" <> T.pack (show i) <> ".hs\"}"
-            | i <- [1..98] ]
+            | i <- ([1..98] :: [Int]) ]
           bad1 = "{\"label\":\"no id\",\"file_type\":\"code\"}"
           bad2 = "{\"id\":\"bad\",\"label\":\"Bad\"}"
           json = "{\"nodes\":[" <> goodNodes <> "," <> bad1 <> "," <> bad2 <> "],\"edges\":[]}"
