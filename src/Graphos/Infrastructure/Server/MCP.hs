@@ -8,6 +8,7 @@ module Graphos.Infrastructure.Server.MCP
   -- * Handlers (exported for testing)
   , handleQueryGraph
   , handleSelectContext
+  , handleCypherQuery
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:), (.:?), (.!=), withObject, encode, eitherDecode)
@@ -39,6 +40,8 @@ import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextT
 import Graphos.UseCase.Conversation (queryConversationsFromCommunity, summarizeConversation)
 import Graphos.Domain.Graph.Index (GraphIndex)
 import Graphos.Domain.Graph.Analysis (CachedFGL, articulationPointsWithCached)
+import Graphos.Domain.Query.Cypher.Parser (parseQuery)
+import Graphos.Domain.Query.Cypher.Eval (evaluate, CypherResult(..))
 import Graphos.Infrastructure.FileSystem.Conversation (saveConversationToFile, loadConversationsFromDir)
 
 
@@ -110,6 +113,7 @@ handleToolCall g idx cfg commMap analysis reqId params = do
                _ -> KM.empty
   result <- case toolName of
     "query_graph"        -> handleQueryGraph g idx args
+    "cypher_query"       -> handleCypherQuery g idx args
     "get_node"           -> handleGetNode g args
     "get_neighbors"      -> handleGetNeighbors g args
     "get_community"      -> handleGetCommunity g commMap args
@@ -158,6 +162,25 @@ handleQueryGraph g idx args = do
         , "suggestions"  .= qrespSuggestions resp
         , "traverse"     .= mode
         ]
+
+-- | Run a read-only openCypher/GQL query against the warm graph + index.
+-- Reuses the loaded graph (no per-call rebuild). Returns columns, rows, and a
+-- truncated flag.
+handleCypherQuery :: Graph -> GraphIndex -> KM.KeyMap Value -> IO (Either Text Value)
+handleCypherQuery g idx args = do
+  let query = textArg args "query"
+      budget = fromMaybe 2000 (intArgMaybe args "budget")
+  if T.null query
+    then pure (Left "Missing required argument: query")
+    else case parseQuery query of
+      Left err -> pure (Left ("Cypher parse error: " <> err))
+      Right q -> do
+        let result = evaluate budget q g idx
+        pure (Right (object
+          [ "columns"   .= crColumns result
+          , "rows"      .= crRows result
+          , "truncated" .= crTruncated result
+          ]))
 
 handleGetNode :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
 handleGetNode g args = do
@@ -408,6 +431,7 @@ toolsListResponse reqId = object
 allTools :: [(Text, Text, [(Text, Text, Bool)])]
 allTools =
   [ ("query_graph", "Query the knowledge graph using BFS or DFS traversal. Returns verdict, best_score, hash, ranked nodes/edges, and omitted counts. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything.", [("question", "The search question", True), ("mode", "bfs or dfs", False), ("budget", "Token budget", False), ("edges", "semantic or all", False)])
+  , ("cypher_query", "Run a read-only openCypher/GQL query (MATCH/WHERE/RETURN) against the graph. Returns columns, rows, and a truncated flag. Labels map to node kind, relationship types to edge relation, properties to node/edge fields.", [("query", "The Cypher query", True), ("budget", "Row budget (default: 2000)", False)])
   , ("get_node", "Get details of a specific node", [("node_id", "Node ID to look up", True)])
   , ("get_neighbors", "Get all neighbors of a node", [("node_id", "Node ID", True)])
   , ("get_community", "Get community membership for a node", [("node_id", "Node ID", True)])

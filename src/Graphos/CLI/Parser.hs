@@ -10,6 +10,7 @@ module Graphos.CLI.Parser
   , neighborsOpts
   , pathOpts
   , explainOpts
+  , cypherOpts
   , commonQueryOptsP
   , serveOpts
   , pushOpts
@@ -39,6 +40,7 @@ import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConf
 data Command
   = Run PipelineConfig
   | QueryCmd Text Text CommonQueryOpts
+  | CypherCmd Text CommonQueryOpts
   | ResearchCmd [Text] [Text] FilePath Bool Bool (Maybe FilePath) (Maybe FilePath) (Maybe Text) CommonQueryOpts
   | PathCmd Text Text CommonQueryOpts
   | ExplainCmd Text CommonQueryOpts
@@ -128,6 +130,11 @@ queryOpts :: Parser Command
 queryOpts = QueryCmd
   <$> argument str (metavar "QUESTION")
   <*> flag "bfs" "dfs" (long "dfs" <> help "Use DFS traversal instead of BFS")
+  <*> commonQueryOptsP
+
+cypherOpts :: Parser Command
+cypherOpts = CypherCmd
+  <$> argument str (metavar "QUERY")
   <*> commonQueryOptsP
 
 researchOpts :: Parser Command
@@ -230,6 +237,7 @@ subgraphOpts = SubgraphCmd
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
+  <> command "cypher" (info cypherOpts (progDesc "Run a read-only openCypher/GQL query"))
   <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
   <> command "explain" (info explainOpts (progDesc "Explain a node"))
   <> command "symbols" (info symbolsOpts (progDesc "Look up an exact symbol by name"))
@@ -290,6 +298,9 @@ renderCommandReference = unlines $
   , "graphos query QUESTION          Query the knowledge graph"
   , "  --dfs / --budget N / --graph FILE"
   , "  --json / --label-width N / --edges"
+  , ""
+  , "graphos cypher QUERY            Read-only openCypher/GQL query"
+  , "  --graph FILE / --budget N / --json"
   , ""
   , "graphos path FROM TO             Find shortest path"
   , "  --graph FILE / --budget N / --json"

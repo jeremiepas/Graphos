@@ -44,6 +44,7 @@ spec = do
 
     it "contains key subcommands" $ do
       renderCommandReference `shouldSatisfy` isInfixOf "graphos query"
+      renderCommandReference `shouldSatisfy` isInfixOf "graphos cypher"
       renderCommandReference `shouldSatisfy` isInfixOf "graphos path"
       renderCommandReference `shouldSatisfy` isInfixOf "graphos explain"
       renderCommandReference `shouldSatisfy` isInfixOf "graphos symbols"
@@ -76,6 +77,8 @@ spec = do
       parseWith explainOpts ["node", "--json"] `shouldSatisfy` isRight
     it "neighbors accepts a display-name argument (metavar widened)" $ do
       parseWith neighborsOpts ["Some.Display.Name", "--depth", "1"] `shouldSatisfy` isRight
+    it "cypher accepts a positional query plus --json / --budget" $ do
+      parseWith cypherOpts ["MATCH (n) RETURN n", "--json", "--budget", "100"] `shouldSatisfy` isRight
 
   describe "serveOpts" $ do
     it "parses default serve command" $ do
