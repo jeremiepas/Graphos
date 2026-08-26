@@ -50,3 +50,25 @@ spec = do
       let global = defaultGraphosConfig { gcGranularity = GranularityFile }
           project = defaultGraphosConfig
       gcGranularity (mergeGraphosConfig global project) `shouldBe` GranularityFile
+
+  describe "SemanticEdgesConfig JSON" $ do
+    it "round-trips the default" $
+      decode (encode defaultSemanticEdgesConfig) `shouldBe` Just defaultSemanticEdgesConfig
+
+    it "round-trips a custom config" $ do
+      let cfg = SemanticEdgesConfig False 10 0.7
+      decode (encode cfg) `shouldBe` Just cfg
+
+    it "serializes to snake_case keys" $ do
+      encode defaultSemanticEdgesConfig `shouldBe`
+        "{\"enabled\":true,\"max_fan_out\":50,\"threshold\":0.5}"
+
+    it "parses explicit values" $ do
+      decode "{\"enabled\":false,\"max_fan_out\":10,\"threshold\":0.7}" `shouldBe`
+        Just (SemanticEdgesConfig False 10 0.7)
+
+    it "defaults a missing section to enabled/50/0.5" $ do
+      decode "{}" `shouldBe` Just defaultSemanticEdgesConfig
+
+    it "fills partial keys with defaults" $ do
+      decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5)
