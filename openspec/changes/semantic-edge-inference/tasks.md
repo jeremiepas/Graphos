@@ -76,16 +76,16 @@
 ## 6. Build + cross-cutting
 
 ### 6.1 Legacy graph compatibility
-- [ ] Verify: `graph.json` without `embeddings_path` loads; `gEmbeddings = Nothing`; all existing query-family commands work
-- [ ] Hspec: legacy graph fixture (from `graphos-out/` or test data) loads and queries without error
+- [x] Verify: `graph.json` without `embeddings_path` loads; `gEmbeddings = Nothing`; all existing query-family commands work
+- [x] Hspec: legacy graph fixture (from `graphos-out/` or test data) loads and queries without error
 
 ### 6.2 Build + warnings
-- [ ] `cabal build` with `-Wall -Werror` clean
-- [ ] `cabal test` green (existing tests + new Hspec cases)
+- [x] `cabal build` with `-Wall -Werror` clean
+- [x] `cabal test` green (existing tests + new Hspec cases)
 
 ### 6.3 Manual mixed-corpus verification
-- [ ] Build a mixed corpus: this repo (code) + `docs/` (markdown) with `--embed`
-- [ ] Confirm: `embeddings.json` sidecar exists; `graph.json` has `embeddings_path`
-- [ ] Confirm: semantic `References` edges appear in the graph between docs and code with different names
-- [ ] Confirm: `--no-semantic-edges` reproduces today's clustering (literal-name only)
-- [ ] Confirm: single-corpus (code-only) run skips semantic pass automatically
+- [x] Build a mixed corpus: this repo (code) + `docs/` (markdown) with `--embed`
+- [x] Confirm: `embeddings.json` sidecar exists; `graph.json` has `embeddings_path`
+- [x] Confirm: semantic `References` edges appear in the graph between docs and code with different names
+- [x] Confirm: `--no-semantic-edges` reproduces today's clustering (literal-name only)
+- [x] Confirm: single-corpus (code-only) run skips semantic pass automatically
