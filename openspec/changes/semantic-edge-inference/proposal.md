@@ -42,10 +42,11 @@ a graph that still separates code and docs.
 - **Config**: new `semantic_edges.enabled` (default `true`) and `semantic_edges.max_fan_out`
   (default 50) in `graphos.yaml`; new `--no-semantic-edges` / `--force-semantic-edges` CLI
   flags.
-- **Documentation**: new section in project docs listing alternative embedding models
-  (`nomic-embed-text`, `all-minilm`, `bge-m3`, `voyage-code-2`, `text-embedding-3-small`)
-  with a trade-offs table — the user picks via `embedding.model`. Semantic code↔doc edges
-  need a model that embeds code identifiers AND prose into a shared space.
+- **Documentation**: new [`docs/embedding-models.md`](../../docs/embedding-models.md)
+  listing alternative embedding models (`nomic-embed-text`, `all-minilm`, `bge-m3`,
+  `voyage-code-2`, `text-embedding-3-small`) with a trade-offs table — the user picks
+  via `embedding.model`. Semantic code↔doc edges need a model that embeds code
+  identifiers AND prose into a shared space.
 
 ## Capabilities
 
