@@ -22,27 +22,27 @@
 ## 2. inferSemanticCodeDocEdges
 
 ### 2.1 Implement the function
-- [ ] Add `inferSemanticCodeDocEdges :: Graph -> Map NodeId [Double] -> [Edge]` in `src/Graphos/UseCase/Infer.hs`
-- [ ] Collect `DocFile` nodes with non-empty embeddings
-- [ ] Collect `CodeFile` nodes with non-empty embeddings
-- [ ] For each doc node: compute `cosineSimilarity docVec codeVec` against all code nodes, filter >= 0.5, sort desc, take top `maxSemanticFanOut`, emit `References` edges with confidence = cosine
-- [ ] Use existing `makeInferredEdge` helper with `References` edge type
-- [ ] Dedup on `(source, target)` via existing `dedupOn`
-- [ ] Export `inferSemanticCodeDocEdges` from module
+- [x] Add `inferSemanticCodeDocEdges :: Graph -> Map NodeId [Double] -> [Edge]` in `src/Graphos/UseCase/Infer.hs`
+- [x] Collect `DocFile` nodes with non-empty embeddings
+- [x] Collect `CodeFile` nodes with non-empty embeddings
+- [x] For each doc node: compute `cosineSimilarity docVec codeVec` against all code nodes, filter >= 0.5, sort desc, take top `maxSemanticFanOut`, emit `References` edges with confidence = cosine
+- [x] Use existing `makeInferredEdge` helper with `References` edge type
+- [x] Dedup on `(source, target)` via existing `dedupOn`
+- [x] Export `inferSemanticCodeDocEdges` from module
 
 ### 2.2 Test the function
-- [ ] Hspec: doc node with cosine 0.82 to code node emits `References` edge with confidence 0.82
-- [ ] Hspec: below-threshold (0.4) match emits no edge
-- [ ] Hspec: 80 code nodes above threshold with `maxSemanticFanOut = 50` emits only top-50
-- [ ] Hspec: doc node with no embedding emits no edge (no error)
-- [ ] Hspec: doc node with empty-vector embedding emits no edge (no error)
+- [x] Hspec: doc node with cosine 0.82 to code node emits `References` edge with confidence 0.82
+- [x] Hspec: below-threshold (0.4) match emits no edge
+- [x] Hspec: 80 code nodes above threshold with `maxSemanticFanOut = 50` emits only top-50
+- [x] Hspec: doc node with no embedding emits no edge (no error)
+- [x] Hspec: doc node with empty-vector embedding emits no edge (no error)
 
 ## 3. Single-corpus auto-skip
 
 ### 3.1 Implement isSingleCorpus
-- [ ] Add `isSingleCorpus :: Graph -> Bool` in `src/Graphos/UseCase/Infer.hs` (or `Domain/Graph/Core.hs`)
-- [ ] Returns `True` when all nodes share one `FileType`
-- [ ] Hspec: all-`CodeFile` → `True`; mixed → `False`; all-`DocFile` → `True`
+- [x] Add `isSingleCorpus :: Graph -> Bool` in `src/Graphos/UseCase/Infer.hs` (or `Domain/Graph/Core.hs`)
+- [x] Returns `True` when all nodes share one `FileType`
+- [x] Hspec: all-`CodeFile` → `True`; mixed → `False`; all-`DocFile` → `True`
 
 ## 4. Pipeline wiring + gating
 
@@ -57,13 +57,13 @@
 - [x] Hspec: parser accepts both flags; `--help` lists them
 
 ### 4.3 Wire into inferEdges
-- [ ] In `src/Graphos/UseCase/Infer.hs` `inferEdges`: after existing inferences, if `gEmbeddings = Just embs` AND `seEnabled` AND (`codeNodeCount <= 10000` OR `force`) AND NOT (`isSingleCorpus` AND NOT `force`):
+- [x] In `src/Graphos/UseCase/Infer.hs` `inferEdges`: after existing inferences, if `gEmbeddings = Just embs` AND `seEnabled` AND (`codeNodeCount <= 10000` OR `force`) AND NOT (`isSingleCorpus` AND NOT `force`):
   - Call `inferSemanticCodeDocEdges g embs`
   - Merge result into the edge list
-- [ ] Log: `"semantic edges: inferred N (cap=M, threshold=0.5, mode=auto-skip|forced|fallback|disabled)"`
-- [ ] When `codeNodeCount > 10000` AND NOT `force`: log `"semantic inference capped at 10K code nodes, falling back to literal-name inference"` and skip semantic pass
-- [ ] When `isSingleCorpus` AND NOT `force`: log `"single-corpus graph detected, skipping semantic edge inference"` and skip
-- [ ] Hspec: embeddings present + enabled → semantic edges in output; `seEnabled = False` → no semantic edges; single-corpus → skip log + 0 edges; `--force-semantic-edges` on single-corpus → runs pass (0 edges); 15K code nodes without force → fallback log + literal-only
+- [x] Log: `"semantic edges: inferred N (cap=M, threshold=0.5, mode=auto-skip|forced|fallback|disabled)"`
+- [x] When `codeNodeCount > 10000` AND NOT `force`: log `"semantic inference capped at 10K code nodes, falling back to literal-name inference"` and skip semantic pass
+- [x] When `isSingleCorpus` AND NOT `force`: log `"single-corpus graph detected, skipping semantic edge inference"` and skip
+- [x] Hspec: embeddings present + enabled → semantic edges in output; `seEnabled = False` → no semantic edges; single-corpus → skip log + 0 edges; `--force-semantic-edges` on single-corpus → runs pass (0 edges); 15K code nodes without force → fallback log + literal-only
 
 ## 5. Documentation
 

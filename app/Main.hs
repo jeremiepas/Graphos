@@ -46,7 +46,7 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed)
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges)
 import Graphos.Infrastructure.Config (loadConfig)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
@@ -473,7 +473,7 @@ main = do
                                    , resMinSize = minCommSize
                                    , resMergeInto = MergeToNeighbor
                                    , resMaxIterations = maxLeidenIterations }
-                  mergeResult = mergeGraphsAndAnalyze (lrGraph graphA) (lrGraph graphB) density res
+                  mergeResult = mergeGraphsAndAnalyze (lrGraph graphA) (lrGraph graphB) density res (gcSemanticEdges defaultGraphosConfig) False
                   mergedGraph = mrGraph mergeResult
                   commMap = mrCommunities mergeResult
               logInfo env $ T.pack $ "[merge] Merged graph: " ++ show (Map.size (gNodes mergedGraph)) ++ " nodes, " ++ show (Map.size (gEdges mergedGraph)) ++ " edges"

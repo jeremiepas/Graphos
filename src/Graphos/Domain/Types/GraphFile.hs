@@ -28,6 +28,7 @@ graphFileTopLevelKeys =
   , "community_aggregates"
   , "compositions"
   , "community_labels"
+  , "embeddings_path"
   ]
 
 -- | Keys the loader requires; the exporter writes these unconditionally.
