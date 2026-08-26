@@ -47,14 +47,14 @@
 ## 4. Pipeline wiring + gating
 
 ### 4.1 Config fields
-- [ ] Add `SemanticEdgesConfig` (or fields on existing config) in `src/Graphos/Domain/Config/`: `seEnabled :: Bool` (default `True`), `seMaxFanOut :: Int` (default 50), `seThreshold :: Double` (default 0.5)
-- [ ] `FromJSON` parses `semantic_edges:` section from `graphos.yaml` with defaults
-- [ ] Hspec: config round-trips; missing section uses defaults
+- [x] Add `SemanticEdgesConfig` (or fields on existing config) in `src/Graphos/Domain/Config/`: `seEnabled :: Bool` (default `True`), `seMaxFanOut :: Int` (default 50), `seThreshold :: Double` (default 0.5)
+- [x] `FromJSON` parses `semantic_edges:` section from `graphos.yaml` with defaults
+- [x] Hspec: config round-trips; missing section uses defaults
 
 ### 4.2 CLI flags
-- [ ] Add `--no-semantic-edges` and `--force-semantic-edges` switches in `src/Graphos/CLI/Parser.hs` (pipeline command)
-- [ ] Wire to override config: `--no-semantic-edges` → `seEnabled = False`; `--force-semantic-edges` → bypass scale cap + auto-skip
-- [ ] Hspec: parser accepts both flags; `--help` lists them
+- [x] Add `--no-semantic-edges` and `--force-semantic-edges` switches in `src/Graphos/CLI/Parser.hs` (pipeline command)
+- [x] Wire to override config: `--no-semantic-edges` → `seEnabled = False`; `--force-semantic-edges` → bypass scale cap + auto-skip
+- [x] Hspec: parser accepts both flags; `--help` lists them
 
 ### 4.3 Wire into inferEdges
 - [ ] In `src/Graphos/UseCase/Infer.hs` `inferEdges`: after existing inferences, if `gEmbeddings = Just embs` AND `seEnabled` AND (`codeNodeCount <= 10000` OR `force`) AND NOT (`isSingleCorpus` AND NOT `force`):

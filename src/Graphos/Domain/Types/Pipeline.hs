@@ -84,6 +84,8 @@ data PipelineConfig = PipelineConfig
   , cfgGranularity    :: Maybe Granularity             -- ^ CLI granularity override (--granularity)
   , cfgIngest         :: IngestConfig                  -- ^ Single-file ingest configuration
   , cfgTimeout        :: Maybe Int                     -- ^ Pipeline timeout in seconds (Nothing = unlimited)
+  , cfgNoSemanticEdges    :: Bool                      -- ^ Disable semantic code↔doc edge inference (--no-semantic-edges)
+  , cfgForceSemanticEdges :: Bool                      -- ^ Force semantic inference, bypass scale cap + auto-skip (--force-semantic-edges)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -160,6 +162,8 @@ defaultConfig = PipelineConfig
   , cfgGranularity    = Nothing
   , cfgIngest         = defaultIngestConfig
   , cfgTimeout        = Nothing
+  , cfgNoSemanticEdges    = False
+  , cfgForceSemanticEdges = False
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
