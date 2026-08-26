@@ -15,6 +15,7 @@ import System.Directory (createDirectoryIfMissing)
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
+import Graphos.Domain.Config (SemanticEdgesConfig(..))
 import Graphos.Domain.Graph (gNodes, gEdges)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
@@ -28,12 +29,12 @@ import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
-import Graphos.UseCase.Infer (inferEdges)
+import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode)
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.Domain.Labeling (LabelingResult(..))
 import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
-import Graphos.UseCase.Pipeline.Core (PipelineResult(..))
+import Graphos.UseCase.Pipeline.Core (PipelineResult(..), logSemanticInference)
 
 -- | Run incremental pipeline for --watch mode.
 runIncrementalPipeline :: AppEnv -> PipelineConfig -> [FilePath] -> IO (Either Text PipelineResult)
@@ -86,12 +87,17 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
                              , resMergeInto = MergeToNeighbor
                              , resMaxIterations = cfgMaxLeidenIterations configWithStreaming }
             (commMap, cohesion) = clusterGraphWithResolution graph res
-            allInferred = inferEdges (cfgEdgeDensity configWithStreaming) graph commMap
+            seCfg = (gcSemanticEdges (cfgGraphosConfig configWithStreaming)) { seEnabled = not (cfgNoSemanticEdges configWithStreaming) }
+            force = cfgForceSemanticEdges configWithStreaming
+            mode = semanticMode seCfg force graph
+            semanticEdges = inferSemanticEdgesForMode mode seCfg graph
+            allInferred = inferNonSemanticEdges (cfgEdgeDensity configWithStreaming) graph commMap ++ semanticEdges
             enriched = if null allInferred
               then graph
               else buildGraphFromExtractions (cfgDirected configWithStreaming)
                    [extractionFromLists (Map.elems (gNodes graph))
                                         (Map.elems (gEdges graph) ++ allInferred)]
+        logSemanticInference lp seCfg mode semanticEdges
         pure (enriched, commMap, cohesion)
 
   createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
@@ -171,12 +177,17 @@ runSingleFilePipeline appEnv config filePath = catch (do
                                      , resMaxIterations = cfgMaxLeidenIterations config
                                      }
                     (commMap, _cohesion) = clusterSingle graph (nodeId seedNode) 3 res
-                    allInferred = inferEdges (cfgEdgeDensity config) graph commMap
+                    seCfg = (gcSemanticEdges (cfgGraphosConfig config)) { seEnabled = not (cfgNoSemanticEdges config) }
+                    force = cfgForceSemanticEdges config
+                    mode = semanticMode seCfg force graph
+                    semanticEdges = inferSemanticEdgesForMode mode seCfg graph
+                    allInferred = inferNonSemanticEdges (cfgEdgeDensity config) graph commMap ++ semanticEdges
                     enriched = if null allInferred
                       then graph
                       else buildGraphFromExtractions (cfgDirected config)
                            [extractionFromLists (Map.elems (gNodes graph))
                                                 (Map.elems (gEdges graph) ++ allInferred)]
+                logSemanticInference lp seCfg mode semanticEdges
                 lpLogInfo lp $ T.pack $ "  Clusters: " ++ show (Map.size commMap)
                 pure (enriched, commMap)
               [] -> pure (graph, Map.empty)

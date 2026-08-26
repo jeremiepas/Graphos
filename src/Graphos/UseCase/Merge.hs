@@ -12,6 +12,7 @@ module Graphos.UseCase.Merge
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Types
+import Graphos.Domain.Config (SemanticEdgesConfig)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, mergeGraphs)
 import Graphos.Domain.Community (Resolution(..), detectCommunitiesWithResolution, scoreAllCohesion)
 import Graphos.UseCase.Infer (inferEdges)
@@ -33,8 +34,8 @@ data MergeResult = MergeResult
 -- Edge inference and analysis run on the enriched merged graph.
 --
 -- The 'first' graph's directed flag is preserved.
-mergeGraphsAndAnalyze :: Graph -> Graph -> EdgeDensity -> Resolution -> MergeResult
-mergeGraphsAndAnalyze graphA graphB density res =
+mergeGraphsAndAnalyze :: Graph -> Graph -> EdgeDensity -> Resolution -> SemanticEdgesConfig -> Bool -> MergeResult
+mergeGraphsAndAnalyze graphA graphB density res seCfg force =
   let -- Step 1: Merge graphs (Domain pure function)
       merged = mergeGraphs graphA graphB
 
@@ -42,7 +43,7 @@ mergeGraphsAndAnalyze graphA graphB density res =
       (commMap, _cohesion) = clusterGraphWithResolution' merged res
 
       -- Step 3: Infer additional edges
-      allInferred = inferEdges density merged commMap
+      allInferred = inferEdges density seCfg force merged commMap
       enriched = if null allInferred
         then merged
         else buildGraphFromExtractions False
