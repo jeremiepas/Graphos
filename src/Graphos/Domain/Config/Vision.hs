@@ -9,9 +9,11 @@ module Graphos.Domain.Config.Vision
   , defaultEmbeddingConfig
   , LabelingConfig(..)
   , defaultLabelingConfig
+  , SemanticEdgesConfig(..)
+  , defaultSemanticEdgesConfig
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), genericToJSON, withObject, (.:?), (.!=))
+import Data.Aeson (ToJSON(..), FromJSON(..), genericToJSON, withObject, object, (.:?), (.!=), (.=))
 import Data.Aeson.Types (defaultOptions, fieldLabelModifier)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -99,6 +101,41 @@ defaultEmbeddingConfig = EmbeddingConfig
   , embBaseUrl   = "http://localhost:11434/v1"
   , embDimension = 0
   , embHeaders   = Map.empty
+  }
+
+-- ───────────────────────────────────────────────
+-- Semantic Edge Inference Configuration
+-- ───────────────────────────────────────────────
+
+-- | Configuration for semantic (embedding-based) code↔doc edge inference.
+-- Enabled by default — only runs when the graph has embeddings AND is a
+-- mixed corpus (code + docs). Override with --no-semantic-edges or
+-- --force-semantic-edges.
+data SemanticEdgesConfig = SemanticEdgesConfig
+  { seEnabled   :: Bool       -- ^ Enable semantic edge inference (default: True)
+  , seMaxFanOut :: Int        -- ^ Max semantic edges per doc node (default: 50)
+  , seThreshold :: Double     -- ^ Min cosine similarity (default: 0.5)
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON SemanticEdgesConfig where
+  toJSON cfg = object
+    [ "enabled"     .= seEnabled cfg
+    , "max_fan_out" .= seMaxFanOut cfg
+    , "threshold"   .= seThreshold cfg
+    ]
+
+instance FromJSON SemanticEdgesConfig where
+  parseJSON = withObject "SemanticEdgesConfig" $ \v -> SemanticEdgesConfig
+    <$> v .:? "enabled"   .!= True
+    <*> v .:? "max_fan_out" .!= 50
+    <*> v .:? "threshold" .!= 0.5
+
+-- | Default semantic edges configuration (enabled, fan-out 50, threshold 0.5).
+defaultSemanticEdgesConfig :: SemanticEdgesConfig
+defaultSemanticEdgesConfig = SemanticEdgesConfig
+  { seEnabled   = True
+  , seMaxFanOut = 50
+  , seThreshold = 0.5
   }
 
 -- ───────────────────────────────────────────────
