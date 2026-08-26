@@ -227,6 +227,7 @@ productionExportPort _logEnv _obsEnv =
         , UEP.epWriteAnalysisTail = Inc.writeAnalysisTail
         , UEP.epWriteCommunityAggregates = Inc.writeCommunityAggregates
         , UEP.epWriteCompositions = Inc.writeCompositions
+        , UEP.epWriteEmbeddingsPath = Inc.writeEmbeddingsPath
         , UEP.epFlushWriter = Inc.flushWriter
         , UEP.epCloseWriter = Inc.closeWriter
         , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph

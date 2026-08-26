@@ -34,9 +34,10 @@ import Data.Map.Strict (Map, empty)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (doesFileExist)
+import System.FilePath (takeDirectory, (</>), isAbsolute)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, buildGraph, gCompositions)
+import Graphos.Domain.Graph (Graph, buildGraph, gCompositions, gEmbeddings, gEmbeddingsPath)
 import Graphos.Domain.Graph.Index (GraphIndex, buildIndexWithLabels)
 import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
 
@@ -87,7 +88,8 @@ loadGraphFromFile' strict path = do
         Right root -> do
           case parseGraphFile strict path root of
             Left e -> pure $ Left e
-            Right lr -> do
+            Right lr0 -> do
+              lr <- loadEmbeddingsSidecar path lr0
               when (lrDegradedRelations lr > 0 || lrDegradedFileTypes lr > 0
                     || lrSkippedNodes lr > 0 || lrSkippedEdges lr > 0) $
                 putStrLn $ "WARNING: " ++ show (lrDegradedRelations lr) ++ " degraded relations, "
@@ -95,6 +97,29 @@ loadGraphFromFile' strict path = do
                            ++ show (lrSkippedNodes lr) ++ " skipped nodes, "
                            ++ show (lrSkippedEdges lr) ++ " skipped edges"
               pure $ Right lr
+
+-- | If the graph points to an embeddings sidecar, read it and attach the
+-- vectors. A missing or unparseable sidecar degrades to Nothing with a
+-- warning so the rest of the graph still loads.
+loadEmbeddingsSidecar :: FilePath -> LoadResult -> IO LoadResult
+loadEmbeddingsSidecar graphPath lr =
+  case gEmbeddingsPath (lrGraph lr) of
+    Nothing -> pure lr
+    Just p -> do
+      let sidecar = if isAbsolute p then p else takeDirectory graphPath </> p
+      exists <- doesFileExist sidecar
+      if not exists
+        then do
+          putStrLn $ "WARNING: embeddings sidecar not found: " ++ sidecar
+          pure lr
+        else do
+          bs <- BSL.readFile sidecar
+          case (eitherDecode bs :: Either String (Map NodeId [Double])) of
+            Left err -> do
+              putStrLn $ "WARNING: failed to parse embeddings sidecar " ++ sidecar ++ ": " ++ err
+              pure lr
+            Right embs ->
+              pure $ lr { lrGraph = (lrGraph lr) { gEmbeddings = Just embs } }
 
 -- ───────────────────────────────────────────────
 -- Top-level parsing
@@ -114,9 +139,11 @@ parseGraphFile strict path (Object km) = do
   labels      <- parseSection "community_labels" km (empty :: Map Int Text)
   compositions <- parseSection "compositions" km (Nothing :: Maybe Value)
   aggregates  <- parseSection "community_aggregates" km ([] :: [CommunityAggregate])
+  embeddingsPath <- optionalText "embeddings_path" km
   let extraction = extractionFromLists nodes edges
       graph = buildGraph False extraction
-      graphWithComps = graph { gCompositions = compositions }
+      graphWithComps = graph { gCompositions = compositions
+                             , gEmbeddingsPath = fmap T.unpack embeddingsPath }
       idx = buildIndexWithLabels graphWithComps communities labels
       cachedFGL = toCachedFGL graphWithComps
   pure LoadResult

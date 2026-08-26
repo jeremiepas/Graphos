@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Graphos.UseCase.LoadSpec (spec) where
 
+import Control.Monad (forM_)
 import Data.Aeson (Value(..))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -14,7 +15,7 @@ import System.FilePath ((</>))
 import Test.Hspec
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (gNodes, gEdges)
+import Graphos.Domain.Graph (gNodes, gEdges, gEmbeddings, gEmbeddingsPath)
 import Graphos.UseCase.Load (LoadResult(..), loadGraphFromFile, loadGraphFromFileStrict)
 import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
 
@@ -118,6 +119,34 @@ spec = do
   describe "writer/loader round-trip" $ do
     it "preserves all top-level sections" roundTripTest
 
+  describe "embeddings sidecar" $ do
+    it "loads node embeddings from the sidecar referenced by embeddings_path" $ do
+      res <- withTempGraphAndSidecar embeddingsGraph (Just sidecarJSON)
+      case res of
+        Left e -> fail $ "expected success, got: " <> T.unpack e
+        Right lr -> do
+          gEmbeddingsPath (lrGraph lr) `shouldBe` Just "embeddings.json"
+          gEmbeddings (lrGraph lr) `shouldBe` Just (Map.fromList [("a", [1.0, 2.0]), ("b", [3.0, 4.0])])
+    it "degrades to no embeddings when the sidecar file is missing" $ do
+      res <- withTempGraphAndSidecar embeddingsGraph Nothing
+      case res of
+        Left e -> fail $ "expected success, got: " <> T.unpack e
+        Right lr -> do
+          gEmbeddingsPath (lrGraph lr) `shouldBe` Just "embeddings.json"
+          gEmbeddings (lrGraph lr) `shouldBe` Nothing
+    it "degrades to no embeddings when the sidecar is unparseable" $ do
+      res <- withTempGraphAndSidecar embeddingsGraph (Just "not json")
+      case res of
+        Left e -> fail $ "expected success, got: " <> T.unpack e
+        Right lr -> gEmbeddings (lrGraph lr) `shouldBe` Nothing
+    it "leaves embeddings unset for a legacy graph without embeddings_path" $ do
+      res <- withTempGraph legacyGraph loadGraphFromFile
+      case res of
+        Left e -> fail $ "expected success, got: " <> T.unpack e
+        Right lr -> do
+          gEmbeddingsPath (lrGraph lr) `shouldBe` Nothing
+          gEmbeddings (lrGraph lr) `shouldBe` Nothing
+
 roundTripTest :: IO ()
 roundTripTest = withSystemTempDirectory "graphos-roundtrip" $ \dir -> do
   let path = dir </> "graph.json"
@@ -190,6 +219,12 @@ nullSrcGraph =
   "{\"nodes\":[{\"id\":\"a\",\"label\":\"A\",\"file_type\":\"code\",\"source_file\":null},"
   <> "{\"id\":\"b\",\"label\":\"B\",\"file_type\":\"code\",\"source_file\":\"b.hs\"}],\"edges\":[]}"
 
+embeddingsGraph :: Text
+embeddingsGraph = "{\"nodes\":" <> baseNodes <> ",\"edges\":[],\"embeddings_path\":\"embeddings.json\"}"
+
+sidecarJSON :: Text
+sidecarJSON = "{\"a\":[1.0,2.0],\"b\":[3.0,4.0]}"
+
 -- ───────────────────────────────────────────────
 -- Helpers
 -- ───────────────────────────────────────────────
@@ -199,6 +234,13 @@ withTempGraph json load = withSystemTempDirectory "graphos-loadspec" $ \dir -> d
   let path = dir </> "graph.json"
   writeFile path (T.unpack json)
   load path
+
+withTempGraphAndSidecar :: Text -> Maybe Text -> IO (Either Text LoadResult)
+withTempGraphAndSidecar json sidecar = withSystemTempDirectory "graphos-loadspec" $ \dir -> do
+  let path = dir </> "graph.json"
+  writeFile path (T.unpack json)
+  forM_ sidecar $ \sc -> writeFile (dir </> "embeddings.json") (T.unpack sc)
+  loadGraphFromFile path
 
 nodeCount :: LoadResult -> Int
 nodeCount = Map.size . gNodes . lrGraph

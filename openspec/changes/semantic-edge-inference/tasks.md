@@ -3,21 +3,21 @@
 ## 1. Embeddings persisted to graph output
 
 ### 1.1 Add embedding fields to Graph
-- [ ] Add `gEmbeddings :: Maybe (Map NodeId [Double])` and `gEmbeddingsPath :: Maybe FilePath` to `Graph` in `src/Graphos/Domain/Graph/Core.hs` (additive; `Nothing` defaults)
-- [ ] Update `Graph` `ToJSON` to write `embeddings_path` field (omit when `Nothing`)
-- [ ] Update `Graph` `FromJSON` to read `embeddings_path` (default `Nothing` when absent)
-- [ ] Hspec: `Graph` round-trips with and without `embeddings_path`; legacy JSON without the field loads as `Nothing`
+- [x] Add `gEmbeddings :: Maybe (Map NodeId [Double])` and `gEmbeddingsPath :: Maybe FilePath` to `Graph` in `src/Graphos/Domain/Graph/Core.hs` (additive; `Nothing` defaults)
+- [x] Update `Graph` `ToJSON` to write `embeddings_path` field (omit when `Nothing`)
+- [x] Update `Graph` `FromJSON` to read `embeddings_path` (default `Nothing` when absent)
+- [x] Hspec: `Graph` round-trips with and without `embeddings_path`; legacy JSON without the field loads as `Nothing`
 
 ### 1.2 Write embeddings sidecar in pipeline
-- [ ] In `src/Graphos/UseCase/Pipeline/Core.hs`: after building the graph, if embeddings were generated, write `embeddings.json` to the output dir (JSON object: `Map NodeId [Double]`)
-- [ ] Set `gEmbeddingsPath = Just "embeddings.json"` on the output graph
-- [ ] If no embeddings, leave `gEmbeddingsPath = Nothing`
-- [ ] Hspec: pipeline with `--embed` produces both `graph.json` (with pointer) and `embeddings.json`; without `--embed` produces only `graph.json` (no pointer)
+- [x] In `src/Graphos/UseCase/Pipeline/Core.hs`: after building the graph, if embeddings were generated, write `embeddings.json` to the output dir (JSON object: `Map NodeId [Double]`)
+- [x] Set `gEmbeddingsPath = Just "embeddings.json"` on the output graph
+- [x] If no embeddings, leave `gEmbeddingsPath = Nothing`
+- [x] Hspec: pipeline with `--embed` produces both `graph.json` (with pointer) and `embeddings.json`; without `--embed` produces only `graph.json` (no pointer)
 
 ### 1.3 Load embeddings in loadGraphFromFile
-- [ ] In `src/Graphos/UseCase/Load.hs` `loadGraphFromFile`: after loading `graph.json`, if `gEmbeddingsPath = Just path`, read the sidecar file and populate `gEmbeddings = Just ...`
-- [ ] If sidecar file missing, log warning and set `gEmbeddings = Nothing` (not an error)
-- [ ] Hspec: graph with sidecar loads embeddings; missing sidecar warns + `Nothing`; legacy graph without pointer loads `Nothing`
+- [x] In `src/Graphos/UseCase/Load.hs` `loadGraphFromFile`: after loading `graph.json`, if `gEmbeddingsPath = Just path`, read the sidecar file and populate `gEmbeddings = Just ...`
+- [x] If sidecar file missing, log warning and set `gEmbeddings = Nothing` (not an error)
+- [x] Hspec: graph with sidecar loads embeddings; missing sidecar warns + `Nothing`; legacy graph without pointer loads `Nothing`
 
 ## 2. inferSemanticCodeDocEdges
 
