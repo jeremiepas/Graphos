@@ -12,6 +12,7 @@ module Graphos.Infrastructure.Export.IncrementalJSON
   , writeAnalysisTail
   , writeCommunityAggregates
   , writeCompositions
+  , writeEmbeddingsPath
   ) where
 
 import Data.Aeson (Value(..), encode)
@@ -124,3 +125,10 @@ writeCompositions :: W.IncrementalWriter -> Maybe Value -> IO ()
 writeCompositions iw mCompositions = do
   writeKey iw "\"compositions\""
   safePut iw (encode (maybe (Object KM.empty) id mCompositions))
+
+writeEmbeddingsPath :: W.IncrementalWriter -> Maybe Text -> IO ()
+writeEmbeddingsPath iw mp = case mp of
+  Nothing -> pure ()
+  Just p  -> do
+    writeKey iw "\"embeddings_path\""
+    safePut iw (encode p)
