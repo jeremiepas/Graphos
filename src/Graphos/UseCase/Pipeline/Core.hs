@@ -6,6 +6,7 @@ module Graphos.UseCase.Pipeline.Core
   , edgeCollapseThreshold
   , generateGraphEmbeddings
   , writeEmbeddingsSidecar
+  , logSemanticInference
   ) where
 
 import Control.DeepSeq (deepseq)
@@ -23,7 +24,7 @@ import System.Mem (performGC)
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
-import Graphos.Domain.Config (FileExtensionConfig(..))
+import Graphos.Domain.Config (FileExtensionConfig(..), SemanticEdgesConfig(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath)
 import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
@@ -39,7 +40,7 @@ import Graphos.UseCase.Extract (extractAll)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
 import Graphos.UseCase.Analyze (analyzeGraph)
-import Graphos.UseCase.Infer (inferEdges)
+import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
 import Graphos.UseCase.Report (generateReport)
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.Domain.Labeling (LabelingResult(..))
@@ -66,6 +67,18 @@ generateGraphEmbeddings llm cfg graph = do
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
 writeEmbeddingsSidecar :: FilePath -> Map NodeId [Double] -> IO ()
 writeEmbeddingsSidecar path embs = BSL.writeFile path (encode embs)
+
+-- | Log the semantic edge inference decision (mode + inferred count) for the current run.
+logSemanticInference :: LoggingPort -> SemanticEdgesConfig -> SemanticMode -> [Edge] -> IO ()
+logSemanticInference lp se mode semanticEdges = do
+  when (mode == SemanticFallback) (lpLogInfo lp "semantic inference capped at 10K code nodes, falling back to literal-name inference")
+  when (mode == SemanticAutoSkip) (lpLogInfo lp "single-corpus graph detected, skipping semantic edge inference")
+  lpLogInfo lp $ T.concat
+    [ "semantic edges: inferred ", T.pack (show (length semanticEdges))
+    , " (cap=", T.pack (show (seMaxFanOut se))
+    , ", threshold=", T.pack (show (seThreshold se))
+    , ", mode=", semanticModeName mode, ")"
+    ]
 
 -- | Pipeline result
 data PipelineResult = PipelineResult
@@ -263,7 +276,11 @@ runPipeline appEnv config = catch (do
             opSetGauge op "graphos_communities" (fromIntegral $ Map.size commMap)
             opDebugTraceSpan op "cluster" (StartTime clusterStart) (EndTime clusterEnd) (Map.fromList [("communities", T.pack $ show $ Map.size commMap)])
 
-            let allInferred = inferEdges (cfgEdgeDensity configWithStreaming) graph commMap
+            let seCfg = (gcSemanticEdges (cfgGraphosConfig configWithStreaming)) { seEnabled = not (cfgNoSemanticEdges configWithStreaming) }
+                force = cfgForceSemanticEdges configWithStreaming
+                mode = semanticMode seCfg force graph
+                semanticEdges = inferSemanticEdgesForMode mode seCfg graph
+                allInferred = inferNonSemanticEdges (cfgEdgeDensity configWithStreaming) graph commMap ++ semanticEdges
                 enrichedGraph' = (if null allInferred
                   then graph
                   else buildGraphFromExtractions (cfgDirected configWithStreaming)
@@ -272,6 +289,7 @@ runPipeline appEnv config = catch (do
                   { gEmbeddings = gEmbeddings graph
                   , gEmbeddingsPath = gEmbeddingsPath graph }
             enrichedGraph' `deepseq` pure ()
+            logSemanticInference lp seCfg mode semanticEdges
             lpLogInfo lp $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity configWithStreaming) ++ ")"
 
             lpLogInfo lp "Step 5: Re-clustering and analyzing..."
