@@ -33,6 +33,10 @@ isRight :: Either a b -> Bool
 isRight (Right _) = True
 isRight _         = False
 
+isLeft :: Either a b -> Bool
+isLeft (Left _) = True
+isLeft _       = False
+
 spec :: Spec
 spec = do
   describe "renderCommandReference" $ do
@@ -76,8 +80,12 @@ spec = do
       renderCommandReference `shouldSatisfy` isInfixOf "--label-width"
 
   describe "query family uniform flag surface" $ do
-    it "query accepts --json / --label-width / --edges" $ do
-      parseWith queryOpts ["q", "--json", "--label-width", "80", "--edges"] `shouldSatisfy` isRight
+    it "query accepts --json / --label-width / --edges all / --budget" $ do
+      parseWith queryOpts ["q", "--json", "--label-width", "80", "--edges", "all", "--budget", "1000"] `shouldSatisfy` isRight
+    it "query accepts --edges semantic" $ do
+      parseWith queryOpts ["q", "--edges", "semantic"] `shouldSatisfy` isRight
+    it "query rejects an unknown --edges mode" $ do
+      parseWith queryOpts ["q", "--edges", "bogus"] `shouldSatisfy` isLeft
     it "query still accepts --dfs and --budget" $ do
       parseWith queryOpts ["q", "--dfs", "--budget", "1000"] `shouldSatisfy` isRight
     it "path accepts --json" $ do
