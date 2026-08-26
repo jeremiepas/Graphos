@@ -7,7 +7,7 @@
 {-# LANGUAGE StrictData #-}
 module Graphos.Domain.Graph.Core
   ( -- * Types
-    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions, gHash )
+    Graph( Graph, gNodes, gEdges, gAdjFwd, gAdjBack, gDirected, gCompositions, gHash, gEmbeddings, gEmbeddingsPath )
 
     -- * Construction
   , buildGraph
@@ -24,7 +24,7 @@ module Graphos.Domain.Graph.Core
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
 import Data.Bits (xor, shiftR, (.&.))
 import Data.List (sort)
 import Data.Map.Strict (Map)
@@ -50,6 +50,8 @@ data Graph = Graph
   , gDirected      :: Bool
   , gCompositions  :: Maybe Value               -- per-community composition metadata
   , gHash          :: !Text                     -- deterministic hash over graph structure
+  , gEmbeddings    :: Maybe (Map NodeId [Double])  -- node embeddings (transient; loaded from sidecar)
+  , gEmbeddingsPath :: Maybe FilePath          -- pointer to embeddings.json sidecar
   } deriving (Eq, Show)
 
 -- | Force full evaluation of a Graph to WHNF + all nested structures.
@@ -58,7 +60,7 @@ instance NFData Graph where
   rnf Graph{} = ()
 
 instance ToJSON Graph where
-  toJSON g = object
+  toJSON g = object $
     [ "nodes"      .= gNodes g
     , "edges"      .= gEdges g
     , "adj_fwd"    .= gAdjFwd g
@@ -67,6 +69,9 @@ instance ToJSON Graph where
     , "compositions" .= gCompositions g
     , "hash"       .= gHash g
     ]
+    ++ case gEmbeddingsPath g of
+         Just p  -> [ "embeddings_path" .= p ]
+         Nothing -> []
 
 instance FromJSON Graph where
   parseJSON = withObject "Graph" $ \v -> Graph
@@ -77,6 +82,8 @@ instance FromJSON Graph where
     <*> v .: "directed"
     <*> v .: "compositions"
     <*> v .: "hash"
+    <*> pure (Nothing :: Maybe (Map NodeId [Double]))
+     <*> v .:? "embeddings_path"
 
 -- ───────────────────────────────────────────────
 -- Construction
@@ -108,6 +115,8 @@ buildGraph directed extraction =
     , gDirected      = directed
     , gCompositions  = Nothing
     , gHash          = computeGraphHash nodes edgeMap
+    , gEmbeddings    = Nothing
+    , gEmbeddingsPath = Nothing
     }
 
 -- | Merge two extractions (dedup nodes by id, combine edges)
@@ -130,18 +139,25 @@ mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =
   let mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
-                     (gEdges old <> gEdges new)
+                      (gEdges old <> gEdges new)
       mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
       mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
-   in Graph
-    { gNodes         = mergedNodes
-    , gEdges         = mergedEdges
-    , gAdjFwd        = mergedFwd
-    , gAdjBack       = mergedBwd
-    , gDirected      = gDirected old
-    , gCompositions  = Nothing
-    , gHash          = computeGraphHash mergedNodes mergedEdges
-    }
+      mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
+                      (Just a, Just b) -> Just (a <> b)
+                      (Just a, Nothing) -> Just a
+                      (Nothing, Just b) -> Just b
+                      (Nothing, Nothing) -> Nothing
+    in Graph
+     { gNodes         = mergedNodes
+     , gEdges         = mergedEdges
+     , gAdjFwd        = mergedFwd
+     , gAdjBack       = mergedBwd
+     , gDirected      = gDirected old
+     , gCompositions  = Nothing
+     , gHash          = computeGraphHash mergedNodes mergedEdges
+     , gEmbeddings    = mergedEmbs
+     , gEmbeddingsPath = gEmbeddingsPath old
+     }
 
 -- ───────────────────────────────────────────────
 -- Analysis helpers
