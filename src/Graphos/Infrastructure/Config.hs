@@ -35,8 +35,9 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , MemgraphConfig(..)
                              , LabelingConfig(..)
                              , ObservabilityConfig(..)
-                             , EmbeddingConfig(..)
-                             , VisionConfig(..)
+                              , EmbeddingConfig(..)
+                              , SemanticEdgesConfig(..)
+                              , VisionConfig(..)
                              , FileExtensionConfig(..)
                              , ExtractorConfig(..)
                              , Granularity(..)
@@ -64,6 +65,7 @@ data ConfigFile = ConfigFile
   , cfLabeling          :: Maybe LabelingConfig
   , cfObservability     :: Maybe ObservabilityConfig
   , cfEmbedding         :: Maybe EmbeddingConfig
+  , cfSemanticEdges     :: Maybe SemanticEdgesConfig
   , cfVision            :: Maybe VisionConfig
   , cfIngest            :: Maybe IngestConfig
   } deriving (Eq, Show)
@@ -81,6 +83,7 @@ instance FromJSON ConfigFile where
     <*> v .:? "labeling"
     <*> v .:? "observability"
     <*> v .:? "embedding"
+    <*> v .:? "semantic_edges"
     <*> v .:? "vision"
     <*> v .:? "ingest"
 
@@ -180,8 +183,11 @@ mergeConfig cfgFile defaults = GraphosConfig
       Just obs  -> obs
       Nothing   -> gcObservability defaults
   , gcEmbedding = case cfEmbedding cfgFile of
-      Just emb   -> emb
-      Nothing    -> gcEmbedding defaults
+       Just emb   -> emb
+       Nothing    -> gcEmbedding defaults
+  , gcSemanticEdges = case cfSemanticEdges cfgFile of
+       Just se    -> se
+       Nothing    -> gcSemanticEdges defaults
   , gcVision = case cfVision cfgFile of
       Just vision -> vision
       Nothing     -> gcVision defaults
