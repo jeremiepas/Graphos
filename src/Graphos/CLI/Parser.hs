@@ -116,6 +116,12 @@ granularityReader = eitherReader $ \s -> case s of
   "file"     -> Right GranularityFile
   other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
 
+edgeModeReader :: ReadM EdgeMode
+edgeModeReader = eitherReader $ \s -> case s of
+  "semantic" -> Right Semantic
+  "all"      -> Right All
+  other      -> Left $ "Unknown edge mode: " ++ other ++ ". Expected semantic or all"
+
 -- | Shared query-family flags: --graph, --budget, --json, --label-width, --edges.
 -- Reused by query/path/explain/symbols/neighbors so every command in the family
 -- accepts the same machine-readable flag surface (query-cli-contract).
@@ -125,7 +131,7 @@ commonQueryOptsP = CommonQueryOpts
   <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
   <*> switch (long "json" <> help "Output as JSON")
   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
-  <*> flag Semantic All (long "edges" <> help "Edge mode: semantic (default) or all")
+  <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
 
 queryOpts :: Parser Command
@@ -238,12 +244,12 @@ subgraphOpts = SubgraphCmd
 
 commandOpts :: Parser Command
 commandOpts = subparser
-  ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
+  ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
   <> command "cypher" (info cypherOpts (progDesc "Run a read-only openCypher/GQL query"))
-  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
-  <> command "explain" (info explainOpts (progDesc "Explain a node"))
-  <> command "symbols" (info symbolsOpts (progDesc "Look up an exact symbol by name"))
-  <> command "neighbors" (info neighborsOpts (progDesc "Expand neighborhood around a node"))
+  <> command "path"  (info (pathOpts <**> helper) (progDesc "Find shortest path between two nodes"))
+  <> command "explain" (info (explainOpts <**> helper) (progDesc "Explain a node"))
+  <> command "symbols" (info (symbolsOpts <**> helper) (progDesc "Look up an exact symbol by name"))
+  <> command "neighbors" (info (neighborsOpts <**> helper) (progDesc "Expand neighborhood around a node"))
   <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
   <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
@@ -299,26 +305,26 @@ renderCommandReference = unlines $
   , ""
   , "graphos query QUESTION          Query the knowledge graph"
   , "  --dfs / --budget N / --graph FILE"
-  , "  --json / --label-width N / --edges"
+  , "  --json / --label-width N / --edges MODE"
   , ""
   , "graphos cypher QUERY            Read-only openCypher/GQL query"
   , "  --graph FILE / --budget N / --json"
   , ""
   , "graphos path FROM TO             Find shortest path"
   , "  --graph FILE / --budget N / --json"
-  , "  --label-width N / --edges"
+  , "  --label-width N / --edges MODE"
   , ""
   , "graphos explain NODE            Explain a node"
   , "  --graph FILE / --budget N / --json"
-  , "  --label-width N / --edges"
+  , "  --label-width N / --edges MODE"
   , ""
   , "graphos symbols NAME            Look up symbol by name"
   , "  --graph FILE / --budget N / --json"
-  , "  --label-width N / --edges"
+  , "  --label-width N / --edges MODE"
   , ""
   , "graphos neighbors NODE          Expand neighborhood (id or display name)"
   , "  --depth N / --graph FILE / --budget N"
-  , "  --json / --label-width N / --edges"
+  , "  --json / --label-width N / --edges MODE"
   , ""
   , "graphos ingest FILE             Ingest single file"
   , "  --embed / --no-embed / --output, -o DIR"
