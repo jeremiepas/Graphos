@@ -2,6 +2,8 @@
 module Graphos.Domain.GraphSpec where
 
 import Test.Hspec
+import Data.Aeson (Value(..), eitherDecode, encode)
+import Data.Either (fromRight, isRight)
 import Data.Maybe (fromJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
@@ -242,6 +244,39 @@ spec = do
           merged = mergeGraphs g1 g2
       -- Old graph takes precedence (<>) - first argument wins
       nodeLabel (fromJust (Map.lookup "a" (gNodes merged))) `shouldBe` "Original"
+
+  describe "embeddings_path JSON round-trip" $ do
+    it "omits embeddings_path when gEmbeddingsPath is Nothing" $ do
+      let g = buildGraph False (extractionFromLists [testNode "a"] [])
+      let decoded = eitherDecode (encode g) :: Either String (Map.Map Text Value)
+      decoded `shouldSatisfy` isRight
+      Map.member "embeddings_path" (fromRight Map.empty decoded) `shouldBe` False
+
+    it "includes embeddings_path when set" $ do
+      let g = (buildGraph False (extractionFromLists [testNode "a"] []))
+            { gEmbeddingsPath = Just "embeddings.json" }
+      let decoded = eitherDecode (encode g) :: Either String (Map.Map Text Value)
+      decoded `shouldSatisfy` isRight
+      let m = fromRight Map.empty decoded
+      Map.member "embeddings_path" m `shouldBe` True
+      m Map.! "embeddings_path" `shouldBe` String "embeddings.json"
+
+    it "decodes embeddings_path and leaves gEmbeddings as Nothing" $ do
+      let g = (buildGraph False (extractionFromLists [testNode "a"] []))
+            { gEmbeddingsPath = Just "embeddings.json" }
+      let decoded = eitherDecode (encode g) :: Either String Graph
+      decoded `shouldSatisfy` isRight
+      let g' = fromRight (error "decode failed") decoded
+      gEmbeddingsPath g' `shouldBe` Just "embeddings.json"
+      gEmbeddings g' `shouldBe` Nothing
+
+    it "decodes graphs without embeddings_path" $ do
+      let g = buildGraph False (extractionFromLists [testNode "a"] [])
+      let decoded = eitherDecode (encode g) :: Either String Graph
+      decoded `shouldSatisfy` isRight
+      let g' = fromRight (error "decode failed") decoded
+      gEmbeddingsPath g' `shouldBe` Nothing
+      gEmbeddings g' `shouldBe` Nothing
 
   describe "isFileNode" $ do
     it "identifies file nodes by label matching source" $ do

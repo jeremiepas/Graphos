@@ -42,6 +42,7 @@ spec = describe "exportAll" $ do
             , epWriteAnalysisTail = \_ _ -> pure ()
             , epWriteCommunityAggregates = \_ _ -> pure ()
             , epWriteCompositions = \_ _ -> pure ()
+            , epWriteEmbeddingsPath = \_ _ -> pure ()
             , epFlushWriter = \_ -> pure ()
             , epCloseWriter = \_ -> pure ()
             , epExportCommunityGraph = \_ _ _ -> pure ()
