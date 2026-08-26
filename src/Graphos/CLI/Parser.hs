@@ -103,9 +103,11 @@ pipelineOpts = PipelineConfig
     <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
     <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
      <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
-      <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
-      <*> pure defaultIngestConfig
-      <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
+       <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
+       <*> pure defaultIngestConfig
+       <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
+       <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
+       <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
