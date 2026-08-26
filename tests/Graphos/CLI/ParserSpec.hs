@@ -3,8 +3,10 @@ module Graphos.CLI.ParserSpec where
 import Test.Hspec
 import Data.List (isInfixOf)
 import Options.Applicative
+import Options.Applicative.Help (renderHelp, parserHelp)
 
 import Graphos.CLI.Parser
+import Graphos.Domain.Types (PipelineConfig(..))
 
 parseServe :: [String] -> Either String Command
 parseServe args =
@@ -18,6 +20,13 @@ parseWith p args =
   case execParserPure defaultPrefs (info p idm) args of
     Success cmd -> Right cmd
     Failure f   -> Left $ fst $ renderFailure f "cmd"
+    CompletionInvoked _ -> Left "completion"
+
+parsePipeline :: [String] -> Either String PipelineConfig
+parsePipeline args =
+  case execParserPure defaultPrefs (info pipelineOpts idm) args of
+    Success cfg -> Right cfg
+    Failure f   -> Left $ fst $ renderFailure f "run"
     CompletionInvoked _ -> Left "completion"
 
 isRight :: Either a b -> Bool
@@ -99,3 +108,29 @@ spec = do
     it "parses combined flags" $ do
       parseServe ["--dir", "static", "--graph", "g.json", "--port", "9090", "--api-only"] `shouldBe`
         Right (Serve "static" "g.json" 9090 True False)
+
+  describe "pipelineOpts semantic-edges flags" $ do
+    it "defaults both flags to False" $ do
+      parsePipeline [] `shouldSatisfy` \case
+        Right cfg -> cfgNoSemanticEdges cfg == False && cfgForceSemanticEdges cfg == False
+        Left _    -> False
+
+    it "--no-semantic-edges sets cfgNoSemanticEdges" $ do
+      parsePipeline ["--no-semantic-edges"] `shouldSatisfy` \case
+        Right cfg -> cfgNoSemanticEdges cfg == True
+        Left _    -> False
+
+    it "--force-semantic-edges sets cfgForceSemanticEdges" $ do
+      parsePipeline ["--force-semantic-edges"] `shouldSatisfy` \case
+        Right cfg -> cfgForceSemanticEdges cfg == True
+        Left _    -> False
+
+    it "accepts both flags together" $ do
+      parsePipeline ["--no-semantic-edges", "--force-semantic-edges"] `shouldSatisfy` \case
+        Right cfg -> cfgNoSemanticEdges cfg == True && cfgForceSemanticEdges cfg == True
+        Left _    -> False
+
+    it "--help lists both semantic-edges flags" $ do
+      let helpText = renderHelp 80 (parserHelp defaultPrefs (infoParser (info pipelineOpts idm)))
+      helpText `shouldSatisfy` isInfixOf "--no-semantic-edges"
+      helpText `shouldSatisfy` isInfixOf "--force-semantic-edges"
