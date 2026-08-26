@@ -68,10 +68,10 @@
 ## 5. Documentation
 
 ### 5.1 Embedding models doc
-- [ ] Create `docs/embedding-models.md` with trade-offs table: model name, local/hosted, dimension, code-prose quality, latency, cost
-- [ ] Models: `nomic-embed-text` (default, local, 768-dim), `all-minilm` (local, 384-dim, faster, lower quality), `bge-m3` (local, 1024-dim, multilingual, better code+prose), `voyage-code-2` (hosted, 1536-dim, code-specialized), `text-embedding-3-small` (OpenAI, 1536-dim, hosted)
-- [ ] Note: for semantic code↔doc edges, a model that embeds code identifiers AND prose into a shared space is required — `nomic-embed-text` works but `bge-m3` or `voyage-code-2` recommended for mixed corpora
-- [ ] Show how to set via `embedding.model` in `graphos.yaml`
+- [x] Create `docs/embedding-models.md` with trade-offs table: model name, local/hosted, dimension, code-prose quality, latency, cost
+- [x] Models: `nomic-embed-text` (default, local, 768-dim), `all-minilm` (local, 384-dim, faster, lower quality), `bge-m3` (local, 1024-dim, multilingual, better code+prose), `voyage-code-2` (hosted, 1536-dim, code-specialized), `text-embedding-3-small` (OpenAI, 1536-dim, hosted)
+- [x] Note: for semantic code↔doc edges, a model that embeds code identifiers AND prose into a shared space is required — `nomic-embed-text` works but `bge-m3` or `voyage-code-2` recommended for mixed corpora
+- [x] Show how to set via `embedding.model` in `graphos.yaml`
 
 ## 6. Build + cross-cutting
 
