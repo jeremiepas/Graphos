@@ -4,13 +4,17 @@ module Graphos.UseCase.Pipeline.Core
   ( runPipeline
   , PipelineResult(..)
   , edgeCollapseThreshold
+  , generateGraphEmbeddings
+  , writeEmbeddingsSidecar
   ) where
 
 import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when)
+import qualified Data.ByteString.Lazy as BSL
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Aeson (toJSON)
+import Data.Aeson (toJSON, encode)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
@@ -20,10 +24,11 @@ import System.Mem (performGC)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Config (FileExtensionConfig(..))
-import Graphos.Domain.Graph (gNodes, gEdges, gCompositions)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath)
 import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
+import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
@@ -44,6 +49,23 @@ import Graphos.Domain.Labeling (LabelingResult(..))
 -- collapse and are logged as a prominent warning.
 edgeCollapseThreshold :: Double
 edgeCollapseThreshold = 0.05
+
+-- | Generate embeddings for all nodes in a graph.
+-- Nodes whose embedding call fails are omitted from the result.
+generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> IO (Map NodeId [Double])
+generateGraphEmbeddings llm cfg graph = do
+  let nodes = Map.elems (gNodes graph)
+  results <- mapM genNodeEmbedding nodes
+  let embs = Map.fromList [ (nodeId n, v) | (n, r) <- zip nodes results, Right v <- [r] ]
+  pure embs
+  where
+    genNodeEmbedding n = do
+      let inputText = nodeLabel n <> " " <> nodeSourceFile n
+      lpGenerateEmbedding llm cfg inputText
+
+-- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
+writeEmbeddingsSidecar :: FilePath -> Map NodeId [Double] -> IO ()
+writeEmbeddingsSidecar path embs = BSL.writeFile path (encode embs)
 
 -- | Pipeline result
 data PipelineResult = PipelineResult
@@ -165,26 +187,38 @@ runPipeline appEnv config = catch (do
 
       lpLogInfo lp "Step 3: Building graph..."
       buildStart <- getCurrentTime
-      let graph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
-      _ <- evaluate (Map.size (gNodes graph) + Map.size (gEdges graph))
-      graph `deepseq` pure ()
+      let builtGraph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
+      _ <- evaluate (Map.size (gNodes builtGraph) + Map.size (gEdges builtGraph))
+      builtGraph `deepseq` pure ()
       buildEnd <- getCurrentTime
       opRecordHistogram op "graphos_build_duration_seconds" (realToFrac (diffUTCTime buildEnd buildStart) :: Double)
       opIncCounter op "graphos_pipeline_steps_total" 1
-      opSetGauge op "graphos_graph_nodes" (fromIntegral $ Map.size (gNodes graph))
-      opSetGauge op "graphos_graph_edges" (fromIntegral $ Map.size (gEdges graph))
-      opDebugTraceSpan op "build" (StartTime buildStart) (EndTime buildEnd) (Map.fromList [("nodes", T.pack $ show $ Map.size (gNodes graph)), ("edges", T.pack $ show $ Map.size (gEdges graph))])
-      lpLogInfo lp $ T.pack $ "  Graph: " ++ show (Map.size (gNodes graph)) ++ " nodes, " ++ show (Map.size (gEdges graph)) ++ " edges"
+      opSetGauge op "graphos_graph_nodes" (fromIntegral $ Map.size (gNodes builtGraph))
+      opSetGauge op "graphos_graph_edges" (fromIntegral $ Map.size (gEdges builtGraph))
+      opDebugTraceSpan op "build" (StartTime buildStart) (EndTime buildEnd) (Map.fromList [("nodes", T.pack $ show $ Map.size (gNodes builtGraph)), ("edges", T.pack $ show $ Map.size (gEdges builtGraph))])
+      lpLogInfo lp $ T.pack $ "  Graph: " ++ show (Map.size (gNodes builtGraph)) ++ " nodes, " ++ show (Map.size (gEdges builtGraph)) ++ " edges"
 
       let codeFiles = length $ Map.findWithDefault [] CodeFiles (detectionFiles detection)
           nonCodeFiles = detectionTotalFiles detection - codeFiles
-          nodeCount = fromIntegral (Map.size (gNodes graph)) :: Double
-          edgeCount = fromIntegral (Map.size (gEdges graph)) :: Double
+          nodeCount = fromIntegral (Map.size (gNodes builtGraph)) :: Double
+          edgeCount = fromIntegral (Map.size (gEdges builtGraph)) :: Double
           ratio = if nodeCount == 0 then 0 else edgeCount / nodeCount
       when (codeFiles > nonCodeFiles && nodeCount > 0 && ratio < edgeCollapseThreshold) $
         lpLogInfo lp $ T.pack $ "  WARNING: edge/node ratio (" ++ show ratio ++ ") is below threshold " ++ show edgeCollapseThreshold ++ "; edge extraction may have collapsed"
 
       createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
+
+      graph <- if cfgEmbed configWithStreaming
+        then do
+          let embCfg = gcEmbedding (cfgGraphosConfig configWithStreaming)
+          lpLogInfo lp "  Generating node embeddings..."
+          embs <- generateGraphEmbeddings (llmPort appEnv) embCfg builtGraph
+          let sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
+          writeEmbeddingsSidecar sidecar embs
+          lpLogInfo lp $ T.pack $ "  Wrote " ++ show (Map.size embs) ++ " node embeddings to embeddings.json"
+          pure (builtGraph { gEmbeddings = Just embs, gEmbeddingsPath = Just "embeddings.json" })
+        else pure builtGraph
+
       lpLogInfo lp $ T.pack $ "  Streaming graph data to " ++ cfgOutputDir configWithStreaming ++ "/graph.json"
       iw <- epOpenIncrementalWriter ep (cfgOutputDir configWithStreaming ++ "/graph.json")
 
@@ -208,6 +242,7 @@ runPipeline appEnv config = catch (do
             epWriteGodNodes ep iw (analysisGodNodes noAnalysis)
             epWriteCommunityAggregates ep iw []
             epWriteCompositions ep iw (gCompositions graph)
+            epWriteEmbeddingsPath ep iw (fmap T.pack (gEmbeddingsPath graph))
             epWriteAnalysisTail ep iw Nothing
             epCloseWriter ep iw
             pure (graph, emptyCommMap, emptyCohesion, noAnalysis, Nothing :: Maybe (Map.Map CommunityId Text), [])
@@ -229,11 +264,13 @@ runPipeline appEnv config = catch (do
             opDebugTraceSpan op "cluster" (StartTime clusterStart) (EndTime clusterEnd) (Map.fromList [("communities", T.pack $ show $ Map.size commMap)])
 
             let allInferred = inferEdges (cfgEdgeDensity configWithStreaming) graph commMap
-                enrichedGraph' = if null allInferred
+                enrichedGraph' = (if null allInferred
                   then graph
                   else buildGraphFromExtractions (cfgDirected configWithStreaming)
-                       [extractionFromLists (Map.elems (gNodes graph))
-                                            (Map.elems (gEdges graph) ++ allInferred)]
+                        [extractionFromLists (Map.elems (gNodes graph))
+                                             (Map.elems (gEdges graph) ++ allInferred)])
+                  { gEmbeddings = gEmbeddings graph
+                  , gEmbeddingsPath = gEmbeddingsPath graph }
             enrichedGraph' `deepseq` pure ()
             lpLogInfo lp $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity configWithStreaming) ++ ")"
 
@@ -281,6 +318,7 @@ runPipeline appEnv config = catch (do
             epWriteCommunityAggregates ep iw aggregates
 
             epWriteCompositions ep iw (gCompositions graphWithComps)
+            epWriteEmbeddingsPath ep iw (fmap T.pack (gEmbeddingsPath graphWithComps))
             epWriteAnalysisTail ep iw llmLabels
             epFlushWriter ep iw
             epCloseWriter ep iw

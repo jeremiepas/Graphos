@@ -53,6 +53,7 @@ data ExportPort = ExportPort
   , epWriteAnalysisTail       :: IncrementalWriter -> Maybe (Map CommunityId Text) -> IO ()
   , epWriteCommunityAggregates :: IncrementalWriter -> [CommunityAggregate] -> IO ()
   , epWriteCompositions       :: IncrementalWriter -> Maybe Value -> IO ()
+  , epWriteEmbeddingsPath     :: IncrementalWriter -> Maybe Text -> IO ()
   , epFlushWriter             :: IncrementalWriter -> IO ()
   , epCloseWriter             :: IncrementalWriter -> IO ()
     -- | Community graph export
