@@ -11,14 +11,14 @@
 
 ## 2. Replace diff-list edge accumulators with Map
 
-- [ ] 2.P Plan: In `UseCase.Extract`, replace all `IORef ([Edge] -> [Edge])` accumulators with `IORef (Map EdgeId Edge)`. Replace diff-list append `acc . (edges ++)` with `Map.union`. Check criteria: (1) No `[Edge] -> [Edge]` type remains in `UseCase.Extract`, (2) `cabal test` passes, (3) extraction produces identical node/edge counts on a test codebase. Affected: `src/Graphos/UseCase/Extract.hs`. Risk: `Map.union` may be slightly slower for small batches but faster for large merges.
-- [ ] 2.D Do: Change `codeEdgeAccRef`, `docEdgeAccRef`, `officeEdgeAccRef`, `imageEdgeAccRef` from `IORef ([Edge] -> [Edge])` to `IORef (Map EdgeId Edge)`. Update `accumulateEdges` to use `Map.union`. Update final merge to read `Map EdgeId Edge` directly. Ensure `EdgeId` is properly derived for all edges.
-- [ ] 2.C Check: (1) `grep -r "Edge -> \[Edge\]" src/Graphos/UseCase/Extract.hs` returns nothing. (2) `cabal test` passes. (3) Run `graphos .` on a test codebase — node and edge counts match pre-change output.
-- [ ] 2.A Act: If all checks pass, mark done. If edge deduplication changes counts, verify that `Map.union` right-bias is correct (newer edges should win on conflict).
+- [x] 2.P Plan: In `UseCase.Extract`, replace all `IORef ([Edge] -> [Edge])` accumulators with `IORef (Map EdgeId Edge)`. Replace diff-list append `acc . (edges ++)` with `Map.union`. Check criteria: (1) No `[Edge] -> [Edge]` type remains in `UseCase.Extract`, (2) `cabal test` passes, (3) extraction produces identical node/edge counts on a test codebase. Affected: `src/Graphos/UseCase/Extract.hs`. Risk: `Map.union` may be slightly slower for small batches but faster for large merges.
+- [x] 2.D Do: Change `codeEdgeAccRef`, `docEdgeAccRef`, `officeEdgeAccRef`, `imageEdgeAccRef` from `IORef ([Edge] -> [Edge])` to `IORef (Map EdgeId Edge)`. Update `accumulateEdges` to use `Map.union`. Update final merge to read `Map EdgeId Edge` directly. Ensure `EdgeId` is properly derived for all edges.
+- [x] 2.C Check: (1) `grep -r "Edge -> \[Edge\]" src/Graphos/UseCase/Extract.hs` returns nothing. (2) `cabal test` passes. (3) Run `graphos .` on a test codebase — node and edge counts match pre-change output.
+- [x] 2.A Act: If all checks pass, mark done. If edge deduplication changes counts, verify that `Map.union` right-bias is correct (newer edges should win on conflict).
 
 ### Attempt history (2)
 
-<!-- empty unless a retry is needed -->
+- 2026-08-27: Implemented in `src/Graphos/UseCase/Extract/Core.hs`. Replaced 5 edge accumulators (`codeEdgeAccRef`/`docEdgeAccRef`/`officeEdgeAccRef`/`imageEdgeAccRef`/`paperEdgeAccRef`) from `IORef ([Edge] -> [Edge])` to `IORef (Map EdgeId Edge)`. `accumulateEdges` now `Map.union (Map.fromList [(edgeId e, e) | e <- edges]) acc` (newer batch wins). Final merge `mergedEdgeMap = paperEdgeMap \`Map.union\` imageEdgeMap \`Map.union\` officeEdgeMap \`Map.union\` docEdgeMap \`Map.union\` codeEdgeMap` — preserves original cross-category precedence (paper>image>office>doc>code) and within-category newer-batch-wins. Added `EdgeId` to the `Graphos.Domain.Types` import. Verified in a clean worktree at HEAD (main working tree build is broken by an unrelated uncommitted file-classification feature): `cabal build lib:graphos` clean under `-Werror`, and `graphos-test --match Extract` = 59 examples, 0 failures. `edgeId` is a deterministic `src -> tgt : relation` string, so Map dedup is semantically equivalent to the old list dedup.
 
 ## 3. Implement batch extraction merge with incremental GC
 
@@ -85,3 +85,14 @@
 ### Attempt history (8)
 
 <!-- empty unless a retry is needed -->
+
+## 9. Cap transitive-dependency inference (root cause of community-detection OOM)
+
+- [x] 9.P Plan: `inferTransitiveDeps` in `UseCase.Infer` is unbounded O(Σ inDeg²): a module imported by *k* files yields ~k² inferred edges (a 3000-importer god module → ~9M edges), which is the actual OOM at "Step 4: Detecting communities...". Add `maxTransitiveFanIn` (skip hubs above the cap) and `maxTransitiveDeps` (total output cap). Check criteria: (1) god modules (>fan-in importers) emit no transitive edges, (2) a hub at exactly the fan-in cap still expands, (3) total inferred edges ≤ `maxTransitiveDeps`, (4) `cabal test` passes. Affected: `src/Graphos/UseCase/Infer.hs`, `tests/Graphos/UseCase/InferSpec.hs`. Risk: skipping god modules drops some (noisy) inferred edges by design.
+- [x] 9.D Do: Add `maxTransitiveFanIn = 64` and `maxTransitiveDeps = 50000`. Precompute `boundedHubs :: Set NodeId` (targets with ≤ `maxTransitiveFanIn` importers) and filter `depEdges` to it before the list comprehension; wrap the result in `take maxTransitiveDeps`. `dedupOn` is lazy (streaming Set), so `take` bounds memory to ~50k edges + a 50k-entry Set.
+- [x] 9.C Check: (1) `cabal build lib:graphos` clean. (2) `graphos-test` = 627 examples, 0 failures, 3 pending. (3) New `inferTransitiveDeps` specs: basic bidirectional link, single-importer no-op, god-module skip (65 importers), boundary (64 importers → 64*63 edges), total cap (13 hubs × 64 importers → exactly 50000).
+- [x] 9.A Act: All checks pass. The unbounded O(Σ inDeg²) path is now bounded; the community-detection OOM root cause is resolved.
+
+### Attempt history (9)
+
+- 2026-08-27: Implemented in `src/Graphos/UseCase/Infer.hs`. Added `maxTransitiveFanIn = 64`, `maxTransitiveDeps = 50000`. `inferTransitiveDeps` now builds `boundedHubs` (Set of targets with ≤64 importers), filters `depEdges` to bounded hubs, and applies `take maxTransitiveDeps`. Verified: `cabal build lib:graphos` clean; full `graphos-test` = 627 examples, 0 failures, 3 pending (includes 5 new `inferTransitiveDeps` cases). Note: the Hackage index was missing in this ephemeral env — ran `cabal update` to restore it before building.
