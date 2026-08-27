@@ -45,6 +45,18 @@ maxCommunityBridges = 10000
 maxLabelFanOut :: Int
 maxLabelFanOut = 20
 
+-- | Maximum number of importers a module may have before its transitive-dep
+-- expansion is skipped. A module imported by thousands of files is a god
+-- module; connecting all its importers pairwise is O(inDeg^2) noise edges
+-- (~9M for a 3000-importer hub) and exhausts memory.
+maxTransitiveFanIn :: Int
+maxTransitiveFanIn = 64
+
+-- | Maximum number of inferred transitive-dep edges per run. Guards against
+-- pathological import structures; candidates beyond the cap are dropped.
+maxTransitiveDeps :: Int
+maxTransitiveDeps = 50000
+
 data BridgeClassification = BridgeClassification
   { bcNodeId        :: NodeId
   , bcIsArticulation :: Bool
@@ -103,21 +115,30 @@ inferCommunityBridges g commMap =
        , notEdgeAlready g srcNid tgtNid
        ]
 
+-- | Infer shared-dependency edges: if both @src@ and @tgt@ import @mid@,
+-- link @src@ -> @tgt@. Hubs imported by more than 'maxTransitiveFanIn'
+-- files are skipped (pairwise expansion is O(inDeg^2) and exhausts memory),
+-- and the total is capped at 'maxTransitiveDeps'.
 inferTransitiveDeps :: Graph -> [Edge]
 inferTransitiveDeps g =
   let edges = Map.toList (gEdges g)
       depEdges = [((s, t), e) | ((s, t), e) <- edges
-                               , edgeRelation e `elem` [Imports, DependsOn]]
+                                , edgeRelation e `elem` [Imports, DependsOn]]
       predMap = Map.fromListWith (++) [(t, [s]) | ((s, t), _) <- depEdges]
+      -- Hubs with a bounded importer list only; god modules are skipped.
+      boundedHubs = Set.fromList [t | (t, importers) <- Map.toList predMap
+                                      , length importers <= maxTransitiveFanIn]
+      boundedDepEdges = [((s, t), e) | ((s, t), e) <- depEdges
+                                       , t `Set.member` boundedHubs]
       transitiveDeps = dedupOn (\e -> (edgeSource e, edgeTarget e))
         [makeInferredEdge src tgt DependsOn 0.4
-        | ((src, mid), _) <- depEdges
+        | ((src, mid), _) <- boundedDepEdges
         , Just targets <- [Map.lookup mid predMap]
         , tgt <- targets
         , tgt /= src
         , notEdgeAlready g src tgt
         ]
-  in transitiveDeps
+  in take maxTransitiveDeps transitiveDeps
 
 inferSharedContextEdges :: Graph -> Int -> [Edge]
 inferSharedContextEdges g minShared =
