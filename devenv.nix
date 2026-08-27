@@ -8,7 +8,7 @@ let
     poppler-utils
   ];
   tooling = with pkgs; [
-    aider-chat
+    gh
     jq
     pyright
     python313Packages.pyyaml
@@ -47,7 +47,7 @@ in
     # update fails AND no cached index exists. The index lives under
     # ~/.cache/cabal (cabal >= 3.10) or ~/.cabal (older cabal).
     "ci:build" = {
-      exec = ''cabal update || { { test -d ~/.cache/cabal/packages/hackage.haskell.org || test -d ~/.cabal/packages/hackage.haskell.org; } && echo "cabal update failed; using cached index"; } || { echo "cabal update failed and no cached index"; exit 1; } && cabal configure --enable-tests --flag dev -j4 && cabal build all -j4'';
+      exec = ''{ cabal update || { echo "cabal update failed, retrying in 10s..."; sleep 10; cabal update; } || { echo "cabal update failed, retrying in 20s..."; sleep 20; cabal update; }; } || { { test -d ~/.cache/cabal/packages/hackage.haskell.org || test -d ~/.cabal/packages/hackage.haskell.org; } && echo "cabal update failed; using cached index"; } || { echo "cabal update failed and no cached index"; exit 1; } && cabal configure --enable-tests --flag dev -j4 && cabal build all -j4'';
     };
     "ci:test" = {
       exec = "cabal test all";
@@ -59,7 +59,7 @@ in
     };
     # Same guarded cabal update as ci:build (clean-slate CI has no Hackage index).
     "ci:release-build" = {
-      exec = ''cabal update || { { test -d ~/.cache/cabal/packages/hackage.haskell.org || test -d ~/.cabal/packages/hackage.haskell.org; } && echo "cabal update failed; using cached index"; } || { echo "cabal update failed and no cached index"; exit 1; } && cabal configure --enable-tests && cabal build all'';
+      exec = ''{ cabal update || { echo "cabal update failed, retrying in 10s..."; sleep 10; cabal update; } || { echo "cabal update failed, retrying in 20s..."; sleep 20; cabal update; }; } || { { test -d ~/.cache/cabal/packages/hackage.haskell.org || test -d ~/.cabal/packages/hackage.haskell.org; } && echo "cabal update failed; using cached index"; } || { echo "cabal update failed and no cached index"; exit 1; } && cabal configure --enable-tests && cabal build all'';
     };
     "ci:release-test" = {
       exec = "cabal test all";
