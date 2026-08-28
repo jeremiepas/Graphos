@@ -155,8 +155,8 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
         ]
       bestScore :: Double
       bestScore = case scoredPairs of
-        (_, s):_ -> s
-        []       -> 0
+        []  -> 0
+        _   -> maximum [s | (_, s) <- scoredPairs]
       verdict :: MatchVerdict
       verdict = computeVerdict bestScore
       -- BFS from top-scoring nodes (only when not NoMatch)

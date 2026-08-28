@@ -62,6 +62,30 @@ spec = do
           suggestions = findSuggestions ["node0"] idx
       length suggestions `shouldSatisfy` (<= 10)
 
+  describe "boundedDL" $ do
+    it "returns 0 for identical strings" $ do
+      boundedDL (T.pack "database") (T.pack "database") `shouldBe` 0
+
+    it "returns 1 for a single insertion" $ do
+      boundedDL (T.pack "databas") (T.pack "database") `shouldBe` 1
+
+    it "returns 1 for a single transposition" $ do
+      boundedDL (T.pack "ca") (T.pack "ac") `shouldBe` 1
+
+    it "returns 3 when strings differ beyond the bound" $ do
+      boundedDL (T.pack "alpha") (T.pack "zzzzz") `shouldBe` 3
+
+    it "computes a 24-char distance (regression: was exponential)" $ do
+      boundedDL (T.pack "sol-1231-tasks-json-only")
+                (T.pack "sol-1231-tasks-json-onlz") `shouldBe` 1
+
+    it "returns 3 for two very different 24-char strings" $ do
+      boundedDL (T.pack "sol-1231-tasks-json-only")
+                (T.pack "zzzzzzzzzzzzzzzzzzzzzzzz") `shouldBe` 3
+
+    it "handles 60-char strings without blowing up" $ do
+      boundedDL (T.pack ['a' | _ <- [1..60 :: Int]]) (T.pack ['b' | _ <- [1..60 :: Int]]) `shouldBe` 3
+
   describe "resultHash" $ do
     it "returns identical hash for identical input lists" $ do
       let ids = ["node-a", "node-b", "node-c"] :: [NodeId]
