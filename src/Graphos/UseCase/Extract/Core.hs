@@ -253,7 +253,10 @@ extractAll appEnv config detection = do
              let imageChunks = chunkList imageBatchSize allImageSources
              mapM_ (\chunk -> do
                results <- mapM (extractImageSource appEnv config) chunk
-               mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate imageNodeMapRef imageEdgeAccRef ext) results
+               mapM_ (\ext -> do
+                 epPushExtractionStreaming ep config ext
+                 accumulate imageNodeMapRef imageEdgeAccRef ext
+                 mergeIntoRunning ext) results
                n <- readIORef imageNodeMapRef >>= evaluate . Map.size
                _ <- evaluate n
                performGC
