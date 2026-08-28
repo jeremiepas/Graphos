@@ -86,6 +86,8 @@ data PipelineConfig = PipelineConfig
   , cfgTimeout        :: Maybe Int                     -- ^ Pipeline timeout in seconds (Nothing = unlimited)
   , cfgNoSemanticEdges    :: Bool                      -- ^ Disable semantic code↔doc edge inference (--no-semantic-edges)
   , cfgForceSemanticEdges :: Bool                      -- ^ Force semantic inference, bypass scale cap + auto-skip (--force-semantic-edges)
+  , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
+  , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
   } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -164,6 +166,8 @@ defaultConfig = PipelineConfig
   , cfgTimeout        = Nothing
   , cfgNoSemanticEdges    = False
   , cfgForceSemanticEdges = False
+  , cfgRtsProfile         = False
+  , cfgMaxHeap            = Nothing
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
