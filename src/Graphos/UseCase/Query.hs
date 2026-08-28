@@ -60,9 +60,9 @@ import Graphos.Domain.Graph.Score
   , QueryResponse(..)
   , computeVerdict
   , verdictThreshold
-  , normalizeScore
-  , fullLabelBoost
-  , resultHash
+   , normalizeScore
+   , fullLabelBoostForTerms
+   , resultHash
   , findSuggestions
   )
 
@@ -114,13 +114,6 @@ queryGraph g query mode budget =
 fromMaybeLbl :: NodeId -> Map NodeId Text -> Text
 fromMaybeLbl nid m = Map.findWithDefault nid nid m
 
--- | Extract the first whitespace-delimited token from a label.
-firstToken :: Text -> Text
-firstToken label =
-  case T.words (T.toLower label) of
-    (w:_) -> w
-    _     -> T.empty
-
 -- | Unwrap Confidence newtype to get the underlying Double.
 unConfidence :: Confidence -> Double
 unConfidence (Confidence d) = d
@@ -148,10 +141,9 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       -- Compute normalized scores with full-label boost
       scoredPairs :: [(NodeId, Double)]
       scoredPairs =
-        [ (nid, normalizeScore rawScore (length terms) + fullLabelBoost term (nodeLabel n))
+        [ (nid, normalizeScore rawScore (length terms) + fullLabelBoostForTerms terms (nodeLabel n))
         | (nid, rawScore) <- matched
         , Just n <- [Map.lookup nid (gNodes g)]
-        , let term = firstToken (nodeLabel n)
         ]
       bestScore :: Double
       bestScore = case scoredPairs of
@@ -178,11 +170,12 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
         [ ScoredNode
             { snNodeId      = nid
             , snLabel       = nodeLabel n
-            , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoost (firstToken (nodeLabel n)) (nodeLabel n)
+            , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoostForTerms terms (nodeLabel n)
             , snSourceFile  = nodeSourceFile n
             , snCommunityId = nodeCommunityId n
             }
         | nid <- Set.toList expanded
+        , nid `Map.member` scoreMap
         , Just n <- [Map.lookup nid nodeMap]
         ]
       -- Sort score-descending
@@ -211,14 +204,17 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       -- Result-set hash
       hash :: Text
       hash = resultHash [snNodeId n | n <- scoredNodesSorted]
-  in QueryResponse
-    { qrespVerdict     = verdict
-    , qrespBestScore   = bestScore
-    , qrespHash        = hash
-    , qrespNodes       = scoredNodesSorted
-    , qrespEdges       = edges
-    , qrespSuggestions = suggestions
-    }
+     in QueryResponse
+        { qrespVerdict     = verdict
+        , qrespBestScore   = bestScore
+        , qrespHash        = hash
+        , qrespNodes       = scoredNodesSorted
+        , qrespEdges       = edges
+        , qrespSuggestions = suggestions
+        , qrespOmittedNodes = 0
+        , qrespOmittedEdges = 0
+        }
+
 
 -- | Find shortest path between two concepts using pre-built index and FGL cache
 pathQueryWithIndexCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Maybe [NodeId]
