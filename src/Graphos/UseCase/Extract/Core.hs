@@ -95,6 +95,7 @@ extractAll appEnv config detection = do
   imageEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
   paperNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
   paperEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  runningRef <- newIORef emptyExtraction :: IO (IORef Extraction)
 
   let totalFiles = length codeFiles + length docFiles + length officeFiles + length imageFiles + length paperFiles
   progressRef <- newIORef 0 :: IO (IORef Int)
@@ -117,6 +118,9 @@ extractAll appEnv config detection = do
       accumulate nodeRef edgeRef ext = do
         accumulateNodes nodeRef (Map.elems (extractionNodes ext))
         accumulateEdges edgeRef (Map.elems (extractionEdges ext))
+
+      mergeIntoRunning :: Extraction -> IO ()
+      mergeIntoRunning ext = modifyIORef' runningRef $ \running -> mergeExtractions running ext
 
   let officeThreadCount = max 1 (min 4 numThreads)
   unless (null officeFiles) $
