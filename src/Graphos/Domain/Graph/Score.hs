@@ -23,6 +23,7 @@ module Graphos.Domain.Graph.Score
   , normalizeScore
   , computeScore
   , fullLabelBoost
+  , fullLabelBoostForTerms
 
     -- * Hash
   , resultHash
@@ -120,12 +121,14 @@ scoredNodeLabel = snLabel
 -- This replaces QueryResult end-to-end. The renderer consumes this type,
 -- so verdict/hash/suggestions are always available to the caller.
 data QueryResponse = QueryResponse
-  { qrespVerdict     :: !MatchVerdict
-  , qrespBestScore   :: !Double
-  , qrespHash        :: !Text           -- ^ FNV-1a hex over ordered result node ids
-  , qrespNodes       :: ![ScoredNode]   -- ^ Ranked score-descending
-  , qrespEdges       :: ![(Text, Text, Text, Double)]
-  , qrespSuggestions :: ![Text]         -- ^ Did-you-mean suggestions (always on NoMatch, alongside Weak)
+  { qrespVerdict      :: !MatchVerdict
+  , qrespBestScore    :: !Double
+  , qrespHash         :: !Text           -- ^ FNV-1a hex over ordered result node ids
+  , qrespNodes        :: ![ScoredNode]   -- ^ Ranked score-descending
+  , qrespEdges        :: ![(Text, Text, Text, Double)]
+  , qrespSuggestions  :: ![Text]         -- ^ Did-you-mean suggestions (always on NoMatch, alongside Weak)
+  , qrespOmittedNodes :: !Int            -- ^ Number of nodes dropped to fit budget
+  , qrespOmittedEdges :: !Int            -- ^ Number of edges dropped to fit budget
   } deriving (Eq, Show, Generic)
 
 instance NFData QueryResponse
@@ -160,6 +163,15 @@ computeScore terms idx nid =
 fullLabelBoost :: Text -> Text -> Double
 fullLabelBoost queryTerm label
   | T.toLower queryTerm == T.toLower label = 0.1
+  | otherwise = 0
+
+-- | Full-label exact match boost across a whole query term list.
+--
+-- When any query term exactly equals the lowercased full label of a node,
+-- give it a small boost (+0.1) to rank it higher.
+fullLabelBoostForTerms :: [Text] -> Text -> Double
+fullLabelBoostForTerms terms label
+  | any (\t -> T.toLower t == T.toLower label) terms = 0.1
   | otherwise = 0
 
 -- | FNV-1a hash over ordered node ids, returned as 8-char hex.
