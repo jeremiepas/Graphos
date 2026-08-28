@@ -29,6 +29,7 @@ module Graphos.Domain.Graph.Score
 
     -- * Suggestions
   , findSuggestions
+  , boundedDL
   ) where
 
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withText)
@@ -245,40 +246,53 @@ findNearest vocab word =
       candidates = filter (\v -> inRange v) vocab
       inRange v = let vl = T.length v
                   in abs (vl - wl) <= 2 && T.head v == fc
-      -- Compute bounded DL distance (≤ 2)
-      results = [(v, (boundedDL word v, sharedPrefixCount word v))
+      -- Compute bounded DL distance (≤ 2) once per candidate
+      results = [ (v, (d, sharedPrefixCount word v))
                 | v <- candidates
-                , boundedDL word v <= 2]
+                , let d = boundedDL word v
+                , d <= 2 ]
   in results
 
 -- | Compute Damerau-Levenshtein distance, bounded at 2.
 -- Returns 3 if distance exceeds 2 (for pruning).
--- Uses standard DP with early termination when minimum possible
--- distance exceeds 2.
+--
+-- Two-row DP: O(m*n) time, O(n) space. The previous un-memoized
+-- recursion recomputed each (i,j) subproblem exponentially many times
+-- (work ~ 1.84^(m+n)), hanging for minutes on ~24-char query terms.
 boundedDL :: Text -> Text -> Int
 boundedDL a b
   | abs (T.length a - T.length b) > 2 = 3
   | otherwise = dl (T.unpack a) (T.unpack b)
   where
     dl :: String -> String -> Int
-    dl xs ys = go (length xs) (length ys)
-      where
-        go 0 j = if j > 2 then 3 else j
-        go i 0 = if i > 2 then 3 else i
-        go i j
-          | xa == xb  = go (i-1) (j-1)
-          | otherwise =
-              let del = go (i-1) j
-                  ins = go i (j-1)
-                  sub = go (i-1) (j-1)
-                  trans = if i > 1 && j > 1 && xa == ys !! (j-2) && xb == xs !! (i-2)
-                          then go (i-2) (j-2)
-                          else 3
-                  m = min (min del ins) (min sub trans)
-              in if m >= 3 then 3 else 1 + m
-          where
-            xa = xs !! (i-1)
-            xb = ys !! (j-1)
+    dl xs ys =
+      let n = length ys
+          row0 = map (\j -> if j > 2 then 3 else j) [0..n] :: [Int]
+          buildRow :: [Int] -> [Int] -> Int -> [Int]
+          buildRow pp p i =
+            let x  = xs !! (i - 1)
+                xp = if i >= 2 then xs !! (i - 2) else '\NUL'
+                cell j prevCell
+                  | j == 0    = i
+                  | otherwise =
+                      let subCost = if x == ys !! (j - 1) then 0 else 1
+                          del   = p !! j + 1
+                          ins   = prevCell + 1
+                          sub   = p !! (j - 1) + subCost
+                          trans = if j >= 2 && x == ys !! (j - 2) && xp == ys !! (j - 1)
+                                    then pp !! (j - 2) + 1
+                                    else 3
+                          m = min (min (min del ins) sub) trans
+                      in if m >= 3 then 3 else m
+                step acc j =
+                  let (prevCell, accList) = acc
+                      c = cell j prevCell
+                  in (c, c : accList)
+                (_, rev) = foldl' step (i, []) [1..n]
+            in i : reverse rev
+          rows = foldl' (\(pp, p) i -> let r = buildRow pp p i in (p, r))
+                        (row0, row0) [1..length xs]
+      in snd rows !! n
 
 -- | Count of shared leading characters between two texts.
 sharedPrefixCount :: Text -> Text -> Int
