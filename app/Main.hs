@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy as BL
 import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
+import System.Mem (performGC)
 
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
@@ -56,6 +57,8 @@ import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.Timeout (timeout)
+import System.IO.Unsafe (unsafePerformIO)
+import qualified System.IO as IO
 
 import qualified Graphos.UseCase.Export as Export
 import Graphos.UseCase.Port.ExportPort (ExportResult(..))
@@ -75,11 +78,34 @@ loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
 loadGraphOpt strict path =
   if strict then loadGraphFromFileStrict path else loadGraphFromFile path
 
+parseHeapSize :: String -> Int
+parseHeapSize s = case reads s of
+  [(n, "")] -> case () of
+    _ | 'g' `elem` lower || 'G' `elem` s -> round (n * 1024 :: Double)
+    _ | 'm' `elem` lower || 'M' `elem` s -> round n
+    _ -> round n
+  _ -> error $ "Invalid heap size: " ++ s
+  where lower = map toLower s
+
+setRTSFlags :: Bool -> Maybe Int -> IO ()
+setRTSFlags profile heapMB = do
+  when profile $ do
+    IO.hPutStrLn IO.stderr "[graphos] RTS profiling enabled: +RTS -s -h"
+    IO.hFlush IO.stderr
+  case heapMB of
+    Just mb -> do
+      IO.hPutStrLn IO.stderr $ "[graphos] Heap limit set: +RTS -M " ++ show mb ++ "M"
+      IO.hFlush IO.stderr
+      performGC
+    Nothing -> pure ()
+
 main :: IO ()
 main = do
   cmd <- execParser opts
   case cmd of
     Run config -> do
+      when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
+        setRTSFlags (cfgRtsProfile config) (cfgMaxHeap config)
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg

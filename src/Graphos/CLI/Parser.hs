@@ -106,8 +106,10 @@ pipelineOpts = PipelineConfig
        <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
        <*> pure defaultIngestConfig
        <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
-       <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
-       <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
+        <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
+        <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
+        <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
+        <*> optional (option auto (long "max-heap" <> metavar "MB" <> help "Maximum heap size in megabytes (e.g. 1G, 512M) (--max-heap)"))
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of

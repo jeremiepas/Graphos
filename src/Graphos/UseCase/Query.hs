@@ -204,16 +204,16 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       -- Result-set hash
       hash :: Text
       hash = resultHash [snNodeId n | n <- scoredNodesSorted]
-     in QueryResponse
-        { qrespVerdict     = verdict
-        , qrespBestScore   = bestScore
-        , qrespHash        = hash
-        , qrespNodes       = scoredNodesSorted
-        , qrespEdges       = edges
-        , qrespSuggestions = suggestions
-        , qrespOmittedNodes = 0
-        , qrespOmittedEdges = 0
-        }
+      in QueryResponse
+         { qrespVerdict      = verdict
+         , qrespBestScore    = bestScore
+         , qrespHash         = hash
+         , qrespNodes        = scoredNodesSorted
+         , qrespEdges        = edges
+         , qrespSuggestions  = suggestions
+         , qrespOmittedNodes = 0
+         , qrespOmittedEdges = 0
+         }
 
 
 -- | Find shortest path between two concepts using pre-built index and FGL cache
