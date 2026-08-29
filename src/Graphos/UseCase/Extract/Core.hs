@@ -149,6 +149,7 @@ extractAll appEnv config detection = do
               ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
               epPushExtractionStreaming ep config ext
               accumulate codeNodeMapRef codeEdgeAccRef ext
+              mergeIntoRunning ext
               logProgress
               ) chunk
             else do
@@ -159,6 +160,7 @@ extractAll appEnv config detection = do
                 (do ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
                     epPushExtractionStreaming ep config ext
                     accumulate codeNodeMapRef codeEdgeAccRef ext
+                    mergeIntoRunning ext
                     logProgress
                 )) chunk
           n <- readIORef codeNodeMapRef >>= evaluate . Map.size
@@ -168,26 +170,22 @@ extractAll appEnv config detection = do
 
         let fileGroups = groupByLSPServer (epLanguageServerCommands ep) lspFiles
             numGroups = length fileGroups
-        logInfo $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (threads: " ++ show numThreads ++ ")"
+            lspConcurrency = cfgLspConcurrency config
+        logInfo $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (lsp-concurrency: " ++ show lspConcurrency ++ ")"
         if numThreads <= 1
           then mapM_ (\grp -> do
             exts <- extractGroup appEnv absRoot config grp
-            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) exts
+            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext >> mergeIntoRunning ext) exts
             mapM_ (\_ -> logProgress) grp
             ) fileGroups
-          else if numGroups <= numThreads
-            then do
-              results <- mapConcurrently (extractGroup appEnv absRoot config) fileGroups
-              mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
-              mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
-            else do
-              sem <- newQSemN numThreads
-              results <- mapConcurrently (\grp -> bracket_
-                (waitQSemN sem 1)
-                (signalQSemN sem 1)
-                (extractGroup appEnv absRoot config grp)) fileGroups
-              mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
-              mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
+          else do
+            sem <- newQSemN lspConcurrency
+            results <- mapConcurrently (\grp -> bracket_
+              (waitQSemN sem 1)
+              (signalQSemN sem 1)
+              (extractGroup appEnv absRoot config grp)) fileGroups
+            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext >> mergeIntoRunning ext) (concat results)
+            mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
         performGC
 
         mapM_ (\fp -> do
@@ -195,6 +193,7 @@ extractAll appEnv config detection = do
           let ext = extractionFromLists [makeStubNode fp] []
           epPushExtractionStreaming ep config ext
           accumulate codeNodeMapRef codeEdgeAccRef ext
+          mergeIntoRunning ext
           logProgress
           ) stubFiles
       )
@@ -216,7 +215,7 @@ extractAll appEnv config detection = do
                   (waitQSemN sem 1)
                   (signalQSemN sem 1)
                   (epExtractOfficeFile ep config fp)) chunk
-                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate officeNodeMapRef officeEdgeAccRef ext) results
+                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate officeNodeMapRef officeEdgeAccRef ext >> mergeIntoRunning ext) results
                 mapM_ (\_ -> logProgress) chunk
                 n <- readIORef officeNodeMapRef >>= evaluate . Map.size
                 _ <- evaluate n
@@ -243,7 +242,7 @@ extractAll appEnv config detection = do
                   (waitQSemN sem 1)
                   (signalQSemN sem 1)
                   (epExtractDocFile ep fp)) chunk
-                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
+                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext >> mergeIntoRunning ext) results
                 n <- readIORef docNodeMapRef >>= evaluate . Map.size
                 _ <- evaluate n
                 performGC
@@ -289,7 +288,7 @@ extractAll appEnv config detection = do
                     accumulate paperNodeMapRef paperEdgeAccRef ext
                     recordResult ext
                     ) paperFiles
-                  else do
+                   else do
                     sem <- newQSemN paperThreadCount
                     let chunks = chunkList 50 paperFiles
                     mapM_ (\chunk -> do
@@ -299,7 +298,7 @@ extractAll appEnv config detection = do
                          (do ext <- epExtractPdfFile ep config fp
                              recordResult ext
                              pure ext)) chunk
-                      mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext) results
+                      mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext >> mergeIntoRunning ext) results
                       n <- readIORef paperNodeMapRef >>= evaluate . Map.size
                       _ <- evaluate n
                       performGC
@@ -316,22 +315,8 @@ extractAll appEnv config detection = do
 
   logDebug "  [extract] Code + doc + office + image + paper extraction complete"
 
-  codeNodeMap <- readIORef codeNodeMapRef
-  codeEdgeAcc <- readIORef codeEdgeAccRef
-  docNodeMap <- readIORef docNodeMapRef
-  docEdgeAcc <- readIORef docEdgeAccRef
-  officeNodeMap <- readIORef officeNodeMapRef
-  officeEdgeAcc <- readIORef officeEdgeAccRef
-  imageNodeMap <- readIORef imageNodeMapRef
-  imageEdgeAcc <- readIORef imageEdgeAccRef
-  paperNodeMap <- readIORef paperNodeMapRef
-  paperEdgeAcc <- readIORef paperEdgeAccRef
-  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap `Map.union` imageNodeMap `Map.union` paperNodeMap
-      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc (imageEdgeAcc (paperEdgeAcc []))))
-      merged = Extraction
-        { extractionNodes = mergedNodeMap
-        , extractionEdges = Map.fromList [(edgeId e, e) | e <- mergedEdgeList]
-        }
+  running <- readIORef runningRef
+  let merged = running
 
   logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges"
   pure merged
