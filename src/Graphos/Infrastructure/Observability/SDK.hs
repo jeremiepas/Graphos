@@ -32,6 +32,7 @@ module Graphos.Infrastructure.Observability.SDK
   , CounterName
   , GaugeName
   , HistogramName
+  , HistogramAgg(..)
   , incCounter
   , decCounter
   , setGauge
@@ -56,14 +57,13 @@ module Graphos.Infrastructure.Observability.SDK
   ) where
 
 import Control.Concurrent.Async (Async, async, cancel)
-import Control.Concurrent.MVar (MVar, newMVar, swapMVar, modifyMVar_)
+import Control.Concurrent.MVar (MVar, newMVar, swapMVar, modifyMVar)
 import Control.Exception (SomeException, catch)
 import Control.Monad (void)
 import System.Timeout (timeout)
 import System.IO (hPutStrLn, stderr)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Int (Int64)
-import Data.List (sort)
 import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -139,17 +139,60 @@ type CounterName = Text
 type GaugeName = Text
 type HistogramName = Text
 
+-- | Predefined Prometheus histogram buckets (seconds).
+histogramBuckets :: [Double]
+histogramBuckets = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+-- | Aggregated histogram state — O(1) memory per metric regardless of observation count.
+data HistogramAgg = HistogramAgg
+  { haCount    :: !Int64
+  , haSum      :: !Double
+  , haMin      :: !(Maybe Double)
+  , haMax      :: !(Maybe Double)
+  , haBuckets  :: !(Map Double Int64)  -- ^ cumulative bucket count: upper bound -> count
+  }
+
+emptyHistogramAgg :: HistogramAgg
+emptyHistogramAgg = HistogramAgg
+  { haCount = 0
+  , haSum = 0.0
+  , haMin = Nothing
+  , haMax = Nothing
+  , haBuckets = Map.empty
+  }
+
+updateHistogramAgg :: Double -> HistogramAgg -> HistogramAgg
+updateHistogramAgg val agg =
+  let newMin = case haMin agg of
+        Nothing -> Just val
+        Just mn  -> Just (min mn val)
+      newMax = case haMax agg of
+        Nothing -> Just val
+        Just mx  -> Just (max mx val)
+      -- Increment all cumulative buckets whose upper bound >= val
+      bucketInc = Map.fromList [(b, 1) | b <- histogramBuckets, val <= b]
+  in agg
+    { haCount = haCount agg + 1
+    , haSum   = haSum agg + val
+    , haMin   = newMin
+    , haMax   = newMax
+    , haBuckets = Map.unionWith (+) (haBuckets agg) bucketInc
+    }
+
 -- | Atomic metrics store with counters, gauges, and histograms.
 -- Retained from custom implementation for Prometheus /metrics endpoint.
 -- Phase 2 will migrate this to SDK MeterProvider + OTLP metrics push.
 data MetricsStore = MetricsStore
   { msCounters   :: IORef (Map CounterName Int64)
   , msGauges     :: IORef (Map GaugeName Double)
-  , msHistograms :: IORef (Map HistogramName [Double])
+  , msHistograms :: IORef (Map HistogramName HistogramAgg)
   }
 
 newMetricsStore :: IO MetricsStore
-newMetricsStore = MetricsStore <$> newIORef Map.empty <*> newIORef Map.empty <*> newIORef Map.empty
+newMetricsStore = MetricsStore
+  <$> newIORef Map.empty
+  <*> newIORef Map.empty
+  <*> newIORef Map.empty
 
 incCounter :: MetricsStore -> CounterName -> Int64 -> IO ()
 incCounter ms name delta = atomicModifyIORef' (msCounters ms) $ \m ->
@@ -165,8 +208,8 @@ setGauge ms name val = atomicModifyIORef' (msGauges ms) $ \m ->
 
 observeHistogram :: MetricsStore -> HistogramName -> Double -> IO ()
 observeHistogram ms name val = atomicModifyIORef' (msHistograms ms) $ \m ->
-  let existing = Map.findWithDefault [] name m
-  in (Map.insert name (val : existing) m, ())
+  let existing = Map.findWithDefault emptyHistogramAgg name m
+  in (Map.insert name (updateHistogramAgg val existing) m, ())
 
 readCounter :: MetricsStore -> CounterName -> IO Int64
 readCounter ms name = Map.findWithDefault 0 name <$> readIORef (msCounters ms)
@@ -197,12 +240,10 @@ renderPrometheusMetrics ms = do
       , name <> " " <> T.pack (show val)
       , ""
       ]
-    renderHistogram (name, vals) =
-      let sorted = sort vals
-          cnt = length sorted
-          sum_ = sum sorted
-          buckets = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0] :: [Double]
-          bucketLines = map (renderBucket name sorted) buckets
+    renderHistogram (name, agg) =
+      let cnt = haCount agg
+          sum_ = haSum agg
+          bucketLines = map (renderBucket name agg) histogramBuckets
           infLine = name <> "_bucket{le=\"+Inf\"} " <> T.pack (show cnt)
       in [ "# HELP " <> name <> " Histogram " <> name
          , "# TYPE " <> name <> " histogram"
@@ -212,17 +253,22 @@ renderPrometheusMetrics ms = do
          ++ [name <> "_count " <> T.pack (show cnt)]
          ++ [name <> "_sum " <> T.pack (show sum_)]
          ++ [""]
-    renderBucket name vals le =
-      let cnt = length $ filter (<= le) vals
+    renderBucket name agg le =
+      let cnt = Map.findWithDefault 0 le (haBuckets agg)
       in name <> "_bucket{le=\"" <> T.pack (show le) <> "\"} " <> T.pack (show cnt)
 
 -- ───────────────────────────────────────────────
 -- Debug tracing (structured JSON events, Graphos-specific)
 -- ───────────────────────────────────────────────
 
+-- | Maximum number of debug trace events to buffer in memory before flushing to disk.
+debugTraceCapacity :: Int
+debugTraceCapacity = 10000
+
 -- | Debug trace environment for local structured event logging.
 -- Retained from custom implementation — this writes JSONL files for
 -- offline analysis, not OTLP.
+-- Buffer is bounded: when capacity is reached, events are flushed to disk.
 data DebugTraceEnv = DebugTraceEnv
   { dtEnabled :: Bool
   , dtPath    :: FilePath
@@ -234,6 +280,7 @@ newDebugTraceEnv enabled tracePath =
   DebugTraceEnv enabled tracePath <$> newMVar []
 
 -- | Emit a structured debug trace event.
+-- When the in-memory buffer reaches capacity, events are flushed to disk automatically.
 debugTraceEvent :: DebugTraceEnv -> Text -> Map Text Text -> IO ()
 debugTraceEvent env name attrs
   | not (dtEnabled env) = pure ()
@@ -242,7 +289,14 @@ debugTraceEvent env name attrs
       let ts = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S.%3qZ" now
           attrsJson = T.intercalate "," $ map (\(k,v) -> "\"" <> k <> "\":\"" <> v <> "\"") (Map.toList attrs)
           line = "{\"timestamp\":\"" <> ts <> "\",\"event\":\"" <> name <> "\"," <> attrsJson <> "}"
-      modifyMVar_ (dtBuffer env) (\buf -> pure $ buf ++ [line])
+      modifyMVar (dtBuffer env) $ \buf -> do
+        let buf' = buf ++ [line]
+        if length buf' >= debugTraceCapacity
+          then do
+            -- Flush current buffer to disk, keep only the new event
+            let eventsToFlush = buf
+            pure (buf', flushEventsToDisk env eventsToFlush)
+          else pure (buf', pure ())
 
 -- | Record a span start/end as a trace event.
 debugTraceSpan :: DebugTraceEnv -> Text -> UTCTime -> UTCTime -> Map Text Text -> IO ()
@@ -251,6 +305,19 @@ debugTraceSpan env name start end attrs
   | otherwise = do
       let dur = realToFrac (diffUTCTime end start) :: Double
       debugTraceEvent env ("span_" <> name) (Map.insert "duration_s" (T.pack $ show dur) attrs)
+
+-- | Write buffered events to a JSONL file on disk.
+-- Creates the trace directory if needed. Errors are silently ignored to avoid
+-- disrupting the main application flow.
+flushEventsToDisk :: DebugTraceEnv -> [Text] -> IO ()
+flushEventsToDisk env events
+  | null events = pure ()
+  | otherwise = do
+      createDirectoryIfMissing True (dtPath env) `catch` (\(_ :: SomeException) -> pure ())
+      now <- getCurrentTime
+      let filename = formatTime defaultTimeLocale "%Y%m%d_%H%M%S" now ++ ".jsonl"
+          filepath = dtPath env ++ "/" ++ filename
+      TIO.writeFile filepath (T.unlines events) `catch` (\(_ :: SomeException) -> pure ())
 
 -- | Flush buffered trace events to disk.
 -- The trace directory is created lazily here, only when tracing is enabled and
@@ -268,7 +335,7 @@ flushDebugTrace env
           now <- getCurrentTime
           let filename = formatTime defaultTimeLocale "%Y%m%d_%H%M%S" now ++ ".jsonl"
               filepath = dtPath env ++ "/" ++ filename
-          TIO.writeFile filepath (T.unlines events)
+          TIO.writeFile filepath (T.unlines events) `catch` (\(_ :: SomeException) -> pure ())
 
 -- ───────────────────────────────────────────────
 -- Prometheus metrics HTTP endpoint
@@ -400,4 +467,3 @@ shutdownObservability env = do
       componentTimeout (void $ shutdownTracerProvider provider (Just 5000)) "OTLP SDK shutdown"
       logInfo logEnv "OpenTelemetry SDK shut down (spans flushed)"
     Nothing -> pure ()
-
