@@ -133,6 +133,19 @@ spec = do
       qrespNodes r `shouldBe` []
       qrespEdges r `shouldBe` []
 
+  describe "fullLabelBoostForTerms" $ do
+    it "returns 0.1 when a query term equals the full label (case-insensitive)" $ do
+      fullLabelBoostForTerms [T.pack "foo"] (T.pack "Foo") `shouldBe` 0.1
+
+    it "returns 0 when no query term equals the full label" $ do
+      fullLabelBoostForTerms [T.pack "foo", T.pack "bar"] (T.pack "baz") `shouldBe` 0
+
+    it "returns 0.1 when only one of multiple query terms equals the label" $ do
+      fullLabelBoostForTerms [T.pack "foo", T.pack "bar"] (T.pack "BAR") `shouldBe` 0.1
+
+    it "returns 0 for a multi-word label when no query term equals it" $ do
+      fullLabelBoostForTerms [T.pack "foo"] (T.pack "foo bar") `shouldBe` 0
+
   describe "queryGraphWithIndexScored (hash determinism)" $ do
     it "identical query on same graph yields identical hash" $ do
       let ext = extractionFromLists

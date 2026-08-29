@@ -119,6 +119,45 @@ rustup component add rust-analyzer                      # Rust
 cabal install haskell-language-server                    # Haskell
 ```
 
+## Ignore Patterns
+
+Graphos honours `.gitignore` and `.graphosignore` files to exclude build artifacts, dependencies, and other irrelevant files. Use `--ignore GLOB` to add additional patterns at runtime.
+
+### `.graphosignore`
+
+Create a `.graphosignore` file in your project root to declare patterns that should always be excluded. Syntax matches `.gitignore`:
+
+```gitignore
+# Exclude build outputs
+dist/
+build/
+target/
+
+# Exclude large binary assets
+*.pdf
+*.mp4
+```
+
+**Where it is read:** `.graphosignore` is read from the scan root directory (the directory passed to `graphos scan <DIR>` or the directory argument to `graphos`), not the current working directory.
+
+**Match semantics:**
+- Patterns match against scan-root-relative paths using normalized forward slashes
+- Backslashes are converted to forward slashes; `.` and `..` path components are resolved
+- `*` matches within a single path component; `**` matches across components
+- Leading `/` anchors to the scan root; leading `**/` matches any prefix
+- Trailing `/` matches directories only; `!` negates a pattern
+- Comments (`#`) and blank lines are ignored
+
+### `--ignore` flag
+
+Pass additional patterns via the CLI. Can be repeated for multiple patterns:
+
+```bash
+graphos . --ignore "**/vendor/**" --ignore "*.log"
+```
+
+Patterns are merged with `.gitignore` and `.graphosignore` patterns. File-level patterns (e.g., `*.log`) match against the basename; directory patterns (e.g., `vendor/`) match against path components. CLI patterns are applied in addition to any patterns from `.graphosignore` files.
+
 ## Extraction Fidelity Harness
 
 The harness validates the fidelity of extraction against ground truth from the source files and
@@ -216,6 +255,9 @@ graphos ./my-project --update
 
 # Watch mode
 graphos ./my-project --watch
+
+# Additional ignore patterns
+graphos ./my-project --ignore "**/vendor/**" --ignore "*.log"
 
 # Query the knowledge graph (natural language)
 graphos query "how does authentication work?"

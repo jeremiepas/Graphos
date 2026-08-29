@@ -13,6 +13,7 @@ module Graphos.Domain.Graph.Core
   , buildGraph
   , mergeExtractions
   , mergeGraphs
+  , addEdges
 
     -- * Hashing
   , computeGraphHash
@@ -158,6 +159,44 @@ mergeGraphs old new =
      , gEmbeddings    = mergedEmbs
      , gEmbeddingsPath = gEmbeddingsPath old
      }
+
+-- | Add edges to an existing graph without creating a new Graph.
+-- Updates gEdges, gAdjFwd, and gAdjBack in place (via immutable Map updates).
+-- Preserves all other graph fields including embeddings and compositions.
+-- For undirected graphs, each edge updates both forward and backward adjacency
+-- in both directions. For directed graphs, source→target in fwd and target→source in back.
+-- Dangling edges (source or target not in gNodes) are silently dropped.
+addEdges :: Graph -> [Edge] -> Graph
+addEdges graph edges =
+  let nodes = gNodes graph
+      existingEdges = gEdges graph
+      directed = gDirected graph
+      -- Filter out dangling edges
+      validEdges = [e | e <- edges
+                      , Map.member (edgeSource e) nodes
+                      , Map.member (edgeTarget e) nodes]
+      -- Merge edge map
+      newEdgeMap = existingEdges `Map.union` Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
+      -- Update forward adjacency: source -> target
+      fwdUpdates = Map.fromListWith Set.union
+        [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
+      -- Update backward adjacency: target -> source
+      bwdUpdates = Map.fromListWith Set.union
+        [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+      -- For undirected graphs, also add reverse adjacency
+      (fwdAdj, bwdAdj) = if directed
+        then (Map.union (gAdjFwd graph) fwdUpdates, Map.union (gAdjBack graph) bwdUpdates)
+        else let revFwd = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+                 revBwd = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
+             in (Map.union (gAdjFwd graph) (fwdUpdates `Map.union` revFwd)
+                , Map.union (gAdjBack graph) (bwdUpdates `Map.union` revBwd))
+      newHash = computeGraphHash nodes newEdgeMap
+  in graph
+    { gEdges    = newEdgeMap
+    , gAdjFwd   = fwdAdj
+    , gAdjBack  = bwdAdj
+    , gHash     = newHash
+    }
 
 -- ───────────────────────────────────────────────
 -- Analysis helpers

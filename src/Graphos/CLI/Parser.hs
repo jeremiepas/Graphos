@@ -29,6 +29,7 @@ module Graphos.CLI.Parser
 import Options.Applicative
 import Data.Text (Text)
 import GHC.Conc (numCapabilities)
+import Data.Char (toLower)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
@@ -36,6 +37,7 @@ import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
+import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), parsePattern)
 
 data Command
   = Run PipelineConfig
@@ -107,9 +109,11 @@ pipelineOpts = PipelineConfig
        <*> pure defaultIngestConfig
        <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
         <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
-        <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
-        <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
-        <*> optional (option auto (long "max-heap" <> metavar "MB" <> help "Maximum heap size in megabytes (e.g. 1G, 512M) (--max-heap)"))
+         <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
+          <*> (map (\s -> AnnotatedPattern (parsePattern s) False 3) <$> many (strOption (long "ignore" <> metavar "GLOB" <> help "Additional gitignore-style ignore pattern (can be specified multiple times)")))
+         <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
+          <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
+         <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
@@ -117,6 +121,19 @@ granularityReader = eitherReader $ \s -> case s of
   "function" -> Right GranularityFunction
   "file"     -> Right GranularityFile
   other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
+
+heapSizeReader :: String -> Either String Int
+heapSizeReader s = case span (`notElem` ['G','g','M','m']) s of
+  (num, sfx@(_:_)) -> case reads num of
+    [(n, "")] -> case sfx of
+      'G':_ -> Right (round (n * 1024 :: Double))
+      'g':_ -> Right (round (n * 1024 :: Double))
+      'M':_ -> Right (round n)
+      'm':_ -> Right (round n)
+      _ -> Left $ "Cannot parse heap size: " ++ s
+  _ -> case reads s of
+    [(n, "")] -> Right (round n)
+    _ -> Left $ "Cannot parse heap size: " ++ s ++ ". Expected a number with optional G/M suffix (e.g. 1G, 512M, 2048)"
 
 edgeModeReader :: ReadM EdgeMode
 edgeModeReader = eitherReader $ \s -> case s of
@@ -304,6 +321,7 @@ renderCommandReference = unlines $
   , "  --granularity LEVEL           fine|function|file"
   , "  --threads, -j N / --edge-density MODE"
   , "  --resolution FLOAT / --mcp GRAPH_JSON"
+  , "  --ignore GLOB                 Additional ignore pattern (repeatable)"
   , ""
   , "graphos query QUESTION          Query the knowledge graph"
   , "  --dfs / --budget N / --graph FILE"

@@ -293,10 +293,10 @@ debugTraceEvent env name attrs
         let buf' = buf ++ [line]
         if length buf' >= debugTraceCapacity
           then do
-            -- Flush current buffer to disk, keep only the new event
             let eventsToFlush = buf
-            pure (buf', flushEventsToDisk env eventsToFlush)
-          else pure (buf', pure ())
+            flushEventsToDisk env eventsToFlush
+            pure (buf', ())
+          else pure (buf', ())
 
 -- | Record a span start/end as a trace event.
 debugTraceSpan :: DebugTraceEnv -> Text -> UTCTime -> UTCTime -> Map Text Text -> IO ()

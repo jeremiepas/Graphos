@@ -45,6 +45,7 @@ graphos [PATH]                  Build the knowledge graph (default: .)
   --granularity LEVEL           fine|function|file
   --threads, -j N / --edge-density MODE
   --resolution FLOAT / --mcp GRAPH_JSON
+  --ignore GLOB                 Additional ignore pattern (repeatable)
 
 graphos query QUESTION          Query the knowledge graph
   --dfs / --budget N / --graph FILE

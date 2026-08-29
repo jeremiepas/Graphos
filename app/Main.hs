@@ -2,17 +2,19 @@
 module Main where
 
 import Options.Applicative
-import System.Exit (exitWith, ExitCode(..))
+import System.Exit (exitWith, ExitCode(..), exitSuccess)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
 import Data.Maybe (isJust)
+import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
-import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn)
+import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
-import System.Mem (performGC)
+import System.Process (createProcess, proc)
+import System.Environment (getArgs, getExecutablePath, withArgs)
 
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
@@ -57,8 +59,6 @@ import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.Timeout (timeout)
-import System.IO.Unsafe (unsafePerformIO)
-import qualified System.IO as IO
 
 import qualified Graphos.UseCase.Export as Export
 import Graphos.UseCase.Port.ExportPort (ExportResult(..))
@@ -78,34 +78,58 @@ loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
 loadGraphOpt strict path =
   if strict then loadGraphFromFileStrict path else loadGraphFromFile path
 
-parseHeapSize :: String -> Int
+parseHeapSize :: String -> Maybe Int
 parseHeapSize s = case reads s of
   [(n, "")] -> case () of
-    _ | 'g' `elem` lower || 'G' `elem` s -> round (n * 1024 :: Double)
-    _ | 'm' `elem` lower || 'M' `elem` s -> round n
-    _ -> round n
-  _ -> error $ "Invalid heap size: " ++ s
+    _ | 'g' `elem` lower || 'G' `elem` s -> Just (round (n * 1024 :: Double))
+    _ | 'm' `elem` lower || 'M' `elem` s -> Just (round n)
+    _ -> Just (round n)
+  _ -> Nothing
   where lower = map toLower s
 
-setRTSFlags :: Bool -> Maybe Int -> IO ()
-setRTSFlags profile heapMB = do
-  when profile $ do
-    IO.hPutStrLn IO.stderr "[graphos] RTS profiling enabled: +RTS -s -h"
-    IO.hFlush IO.stderr
-  case heapMB of
-    Just mb -> do
-      IO.hPutStrLn IO.stderr $ "[graphos] Heap limit set: +RTS -M " ++ show mb ++ "M"
-      IO.hFlush IO.stderr
-      performGC
-    Nothing -> pure ()
+stripRTSFlags :: [String] -> ([String], Bool, Maybe String)
+stripRTSFlags args = go args False Nothing
+  where
+    go :: [String] -> Bool -> Maybe String -> ([String], Bool, Maybe String)
+    go [] profile heap = ( [], profile, heap )
+    go (a:as) profile heap = case a of
+      "--rts-profile" -> go as True heap
+      "--max-heap" -> case as of
+        h:rest -> go rest profile (Just h)
+        _      -> go as profile heap
+      other -> let (rest, p, h) = go as profile heap
+               in (other : rest, p, h)
+
+reexecWithRTS :: Bool -> Maybe String -> IO ()
+reexecWithRTS profile heapStr = do
+  originalArgs <- getArgs
+  exePath <- getExecutablePath
+  let rtsFlags = concat
+        [ if profile then "+RTS -s -hT" else ""
+        , if not (null rtsFlags) && isJust heapStr then " " else ""
+        , maybe "" (\sz -> "+RTS -M " ++ sz) heapStr
+        ]
+  case rtsFlags of
+    "" -> pure ()
+    _ -> do
+      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: " ++ rtsFlags
+      hFlush stderr
+      let (cleanArgs, _, _) = stripRTSFlags originalArgs
+          finalArgs = filter (not . null) (words rtsFlags) ++ ["--"] ++ cleanArgs
+      let spec = proc exePath finalArgs
+      _ <- createProcess spec
+      exitSuccess
 
 main :: IO ()
 main = do
-  cmd <- execParser opts
+  rawArgs <- getArgs
+  let args = dropWhile (/= "--") rawArgs
+  cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
+      let heapStr = fmap (\mb -> show mb ++ "M") (cfgMaxHeap config)
       when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
-        setRTSFlags (cfgRtsProfile config) (cfgMaxHeap config)
+        reexecWithRTS (cfgRtsProfile config) heapStr
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg
