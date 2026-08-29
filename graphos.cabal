@@ -278,7 +278,9 @@ executable graphos
     , containers
     , aeson
     , bytestring
-    , directory
+    , directory            >= 1.3.8.0
+    , process              >= 1.6
+    , filepath             >= 1.4
     , time
     , yaml
 
