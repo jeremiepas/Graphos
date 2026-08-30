@@ -1,3 +1,25 @@
+**Status: Implementation complete (27/48 tasks done). Awaiting verification of Tasks 1-7 before proceeding with Task 8 integration test.**
+
+**Branch:** `fix/runtime-ram-crash-final` — squashed commit `c5367c4` + checkbox corrections `fbc211f` pushed to origin.
+
+**Implementation summary:**
+- Task 1: RTS profiling/heap flags implemented (needs verification)
+- Task 2: Incremental LSP merge with GC implemented (needs verification)
+- Task 3: Batch extraction with GC implemented (needs verification)
+- Task 4: Bounded LSP concurrency implemented (needs verification)
+- Task 5: Bounded observability stores (tracerSpans, msHistograms, dtBuffer) implemented (needs verification)
+- Task 6: (duplicate of Task 5 in attempt history — same work)
+- Task 7: Compact Node representation with bit-field + ShortText implemented (needs verification)
+- Task 8: Integration test plan written (blocked by verification of Tasks 1-7)
+- Task 9: Transitive dependency cap implemented (verified)
+
+**Next steps:**
+1. haskelldev verifies Tasks 1.C, 1.A, 3.C, 3.A, 4.C, 4.A, 5.C, 5.A, 6.C, 6.A, 7.C, 7.A
+2. Once verified, haskelldev runs Task 8.D (50k+ file integration test)
+3. haskelldev completes Task 8.C, 8.A
+4. Create PR from `fix/runtime-ram-crash-final` to `main`
+5. Find reviewer for merge
+
 ## 1. Add RTS profiling and heap limit CLI flags
 
 - [x] 1.P Plan: Add `--rts-profile` and `--max-heap SIZE` flags to `app/Main.hs`. Check criteria: (1) `graphos . --rts-profile` produces GC stats on stderr, (2) `graphos . --max-heap 1G` fails with clear error when heap exceeds 1GB, (3) `cabal test` passes, (4) both flags can be combined. Affected: `app/Main.hs`. Risk: RTS options must be set before GHC runtime initializes — may need `+RTS` in executable wrapper or `setRTSOpts` from `GHC.RTS.Flags`.
