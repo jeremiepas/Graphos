@@ -8,6 +8,7 @@ import Data.Maybe (fromJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph
@@ -16,9 +17,9 @@ import Graphos.Domain.Graph
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -28,15 +29,16 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 -- Helper: create a test node with custom label
 testNodeWithLabel :: Text -> Text -> Node
 testNodeWithLabel nid label = Node
   { nodeId           = nid
-  , nodeLabel        = label
+  , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -46,6 +48,7 @@ testNodeWithLabel nid label = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 -- helper: generate a unique EdgeId from source and target
@@ -79,9 +82,9 @@ testEdgeWithConfidence src tgt conf = Edge
 testNodeWithFile :: Text -> FileType -> Text -> Node
 testNodeWithFile nid ft srcFile = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = ft
-  , nodeSourceFile   = srcFile
+  , nodeSourceFile   = fromText srcFile
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -91,6 +94,7 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 spec :: Spec
@@ -147,9 +151,9 @@ spec = do
     it "excludes file nodes from results" $ do
       let fileNode = Node
             { nodeId = "test.hs"
-            , nodeLabel = "test.hs"
+            , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
-            , nodeSourceFile = "test.hs"
+            , nodeSourceFile = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -159,6 +163,7 @@ spec = do
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
             , nodeSignature = Nothing
+            , nodePresentBits  = 0
             }
           ext = extractionFromLists [fileNode, testNode "func"] [testEdge "test.hs" "func"]
           g = buildGraph False ext
@@ -282,9 +287,9 @@ spec = do
     it "identifies file nodes by label matching source" $ do
       let n = Node
             { nodeId = "test.hs"
-            , nodeLabel = "test.hs"
+            , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
-            , nodeSourceFile = "test.hs"
+            , nodeSourceFile = fromText "test.hs"
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -293,6 +298,7 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
           g = buildGraph False ext
@@ -301,9 +307,9 @@ spec = do
     it "identifies method stubs" $ do
       let n = Node
             { nodeId = ".foo()"
-            , nodeLabel = ".foo()"
+            , nodeLabel = fromText ".foo()"
             , nodeFileType = CodeFile
-            , nodeSourceFile = "test.hs"
+            , nodeSourceFile = fromText "test.hs"
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -312,6 +318,7 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
           g = buildGraph False ext

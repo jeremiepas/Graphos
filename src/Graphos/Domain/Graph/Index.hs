@@ -42,6 +42,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.List (sortOn)
 
 import Graphos.Domain.Types (NodeId, Node(..), CommunityId, CommunityMap)
@@ -169,9 +170,9 @@ lookupPath segment idx = Map.findWithDefault [] (T.toLower segment) (giPathIndex
 pathGlobFilter :: Map NodeId Node -> Text -> Set NodeId -> Set NodeId
 pathGlobFilter nodeMap pattern candidates =
   Set.filter (\nid -> case Map.lookup nid nodeMap of
-                       Just n  -> matchGlob (T.toLower pattern) (T.toLower (nodeSourceFile n))
-                       Nothing -> False
-             ) candidates
+                         Just n  -> matchGlob (T.toLower pattern) (T.toLower (toText (nodeSourceFile n)))
+                         Nothing -> False
+              ) candidates
 
 -- | Pure glob matching: supports `*` (matches any single path segment)
 -- and `**` (matches any number of path segments including zero).
@@ -261,15 +262,15 @@ buildLabelIndex nodeMap =
   let splitTokens = Map.map reverse (Map.fromListWith (++)
         [ (word, [nid])
         | (nid, n) <- Map.toList nodeMap
-        , word <- tokenizeLabel (nodeLabel n)
+        , word <- tokenizeLabel (toText (nodeLabel n))
         ])
       -- Also index the full lowercased label for exact/fuzzy match.
       -- This ensures "MyModule" is findable even if its split tokens
       -- are all filtered as stop words or too short.
       fullLabels = Map.map reverse (Map.fromListWith (++)
-        [ (T.toLower (nodeLabel n), [nid])
+        [ (T.toLower (toText (nodeLabel n)), [nid])
         | (nid, n) <- Map.toList nodeMap
-        , T.length (T.toLower (nodeLabel n)) > 2
+        , T.length (T.toLower (toText (nodeLabel n))) > 2
         ])
   in Map.unionWith (++) splitTokens fullLabels
 
@@ -282,15 +283,15 @@ buildPathIndex nodeMap =
   let segments = Map.fromListWith (++)
         [ (seg, [nid])
         | (nid, n) <- Map.toList nodeMap
-        , let src = nodeSourceFile n
+        , let src = toText (nodeSourceFile n)
         , not (T.null src)
         , seg <- T.splitOn "/" (T.toLower src)
         , not (T.null seg)
         ]
       fullPaths = Map.fromListWith (++)
-        [ (T.toLower (nodeSourceFile n), [nid])
+        [ (T.toLower (toText (nodeSourceFile n)), [nid])
         | (nid, n) <- Map.toList nodeMap
-        , not (T.null (nodeSourceFile n))
+        , not (T.null (toText (nodeSourceFile n)))
         ]
   in Map.unionWith (++) segments fullPaths
 

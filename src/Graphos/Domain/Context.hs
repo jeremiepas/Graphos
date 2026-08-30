@@ -29,9 +29,10 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import GHC.Generics (Generic)
 
-import Graphos.Domain.Types (NodeId, CommunityId, Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..))
+import Graphos.Domain.Types (NodeId, CommunityId, Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..), bitNodeKind)
 import Graphos.Domain.Types.Node (setNodeExtraCapturedAt)
 
 -- ───────────────────────────────────────────────
@@ -286,15 +287,16 @@ conversationNodeToNode conv =
   (setNodeExtraCapturedAt (convTimestamp conv))
     Node
       { nodeId           = convId conv
-      , nodeLabel        = convQuestion conv
+      , nodeLabel        = fromText (convQuestion conv)
       , nodeFileType     = DocFile
-      , nodeSourceFile   = "memory/" <> convId conv <> ".md"
+      , nodeSourceFile   = fromText ("memory/" <> convId conv <> ".md")
       , nodeLineStart    = Nothing
       , nodeCommunityId  = Nothing
       , nodeDegree       = Nothing
       , nodeIsBridge     = Nothing
       , nodeExtra        = Nothing
       , nodeLineEnd      = Nothing
-      , nodeKind         = Just "Conversation"
+      , nodeKind         = Just (fromText "Conversation")
       , nodeSignature    = Nothing
+      , nodePresentBits  = bitNodeKind
       }

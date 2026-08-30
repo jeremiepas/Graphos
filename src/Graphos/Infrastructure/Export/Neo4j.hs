@@ -35,6 +35,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import System.Directory (removeFile)
 import System.Exit (ExitCode(..))
 import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStrLn)
@@ -207,7 +208,7 @@ generateParameterizedNodeStatement n =
         ]
       params = Aeson.object $
         [ "id"              Aeson..= nodeId n
-        , "label"           Aeson..= nodeLabel n
+        , "label"           Aeson..= toText (nodeLabel n)
         , "file_type"       Aeson..= T.pack (show (nodeFileType n))
         ]
         ++ maybe [] (\start -> ["line_start" Aeson..= start]) (nodeLineStart n)
@@ -254,7 +255,7 @@ generateCypherNodeStatement n =
   let baseProps :: [Text]
       baseProps =
         [ "id: " <> cypherQuote (nodeId n)
-        , "label: " <> cypherQuote (nodeLabel n)
+         , "label: " <> cypherQuote (toText (nodeLabel n))
         , "file_type: " <> cypherQuote (T.pack (show (nodeFileType n)))
         ]
       lineStartProp = maybe [] (\start -> ["line_start: " <> T.pack (show start)]) (nodeLineStart n)
@@ -409,7 +410,7 @@ generateRepresentativeNodeStatement n =
         ]
       params = Aeson.object $
         [ "id"              Aeson..= nodeId n
-        , "label"           Aeson..= nodeLabel n
+        , "label"           Aeson..= toText (nodeLabel n)
         , "file_type"       Aeson..= T.pack (show (nodeFileType n))
         , "representative"  Aeson..= Aeson.Bool True
         ]
@@ -444,7 +445,7 @@ generateCommunityEdgeStatements g commMap =
              [ "source_id"    Aeson..= T.pack ("community_" ++ show c1)
              , "target_id"    Aeson..= T.pack ("community_" ++ show c2)
              , "edge_count"   Aeson..= count
-             , "bridge_nodes" Aeson..= map (\nid -> maybe nid nodeLabel (Map.lookup nid (gNodes g))) bridges
+              , "bridge_nodes" Aeson..= map (\nid -> maybe nid (toText . nodeLabel) (Map.lookup nid (gNodes g))) bridges
              ]
          ]
      | ((c1, c2), (count, bridges)) <- Map.toList edgeCounts
@@ -454,7 +455,7 @@ generateCommunityEdgeStatements g commMap =
 topMemberLabels :: Graph -> [NodeId] -> Int -> [Text]
 topMemberLabels g members n =
   let sortedByDegree = sortOn (\nid -> negate (fromIntegral (Set.size (neighbors g nid)) :: Double)) members
-  in take n [ nodeLabel nd | nid <- sortedByDegree, Just nd <- [Map.lookup nid (gNodes g)] ]
+   in take n [ toText (nodeLabel nd) | nid <- sortedByDegree, Just nd <- [Map.lookup nid (gNodes g)] ]
 
 -- ───────────────────────────────────────────────
 -- Streaming node-by-node push (during extraction)

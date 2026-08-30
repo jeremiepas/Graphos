@@ -16,7 +16,9 @@ module Graphos.Infrastructure.Extract.Markdown
 import Control.Exception (SomeException, catch, evaluate)
 import Data.Char (isAlphaNum, isSpace)
 import Data.List (nub)
+import Data.Bits ((.|.))
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import System.IO (withFile, IOMode(ReadMode), hGetContents')
 
 import Graphos.Domain.Types
@@ -59,20 +61,21 @@ docFileNode filePath =
       dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       nid = T.pack (show dirHash) <> "_doc_" <> name
-  in Node
-     { nodeId           = nid
-    , nodeLabel        = name
-    , nodeFileType     = DocFile
-    , nodeSourceFile   = T.pack filePath
-    , nodeLineStart    = Just 1
-    , nodeCommunityId  = Nothing
-    , nodeDegree       = Nothing
-    , nodeIsBridge     = Nothing
-    , nodeExtra        = Nothing
-    , nodeLineEnd      = Nothing
-    , nodeKind         = Just "File"
-    , nodeSignature    = Nothing
-    }
+   in Node
+      { nodeId           = nid
+     , nodeLabel        = fromText name
+     , nodeFileType     = DocFile
+        , nodeSourceFile   = fromText (T.pack filePath)
+     , nodeLineStart    = Just 1
+     , nodeCommunityId  = Nothing
+     , nodeDegree       = Nothing
+     , nodeIsBridge     = Nothing
+     , nodeExtra        = Nothing
+     , nodeLineEnd      = Nothing
+     , nodeKind         = Just (fromText "File")
+     , nodeSignature    = Nothing
+     , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
+     }
 
 -- ───────────────────────────────────────────────
 -- Header parsing
@@ -105,19 +108,20 @@ mkHeaderNode filePath level title lineNum =
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       cleanTitle = T.filter (\c -> isAlphaNum c || c `elem` (" -'_/" :: String)) title
       nid = T.pack (show dirHash) <> "_h" <> T.pack (show level) <> "_" <> cleanTitle
-  in Node
+   in Node
     { nodeId           = nid
-    , nodeLabel        = cleanTitle
+    , nodeLabel        = fromText cleanTitle
     , nodeFileType     = DocFile
-    , nodeSourceFile   = T.pack filePath
+    , nodeSourceFile   = fromText (T.pack filePath)
     , nodeLineStart    = Just lineNum
     , nodeCommunityId  = Nothing
     , nodeDegree       = Nothing
     , nodeIsBridge     = Nothing
     , nodeExtra        = Nothing
     , nodeLineEnd      = Nothing
-    , nodeKind         = Just "Header"
+    , nodeKind         = Just (fromText "Header")
     , nodeSignature    = Nothing
+    , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
     }
 
 -- ───────────────────────────────────────────────
@@ -157,19 +161,20 @@ mkTagNode filePath tag =
   let dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       nid = T.pack (show dirHash) <> "_tag_" <> tag
-  in Node
+   in Node
     { nodeId           = nid
-    , nodeLabel        = "#" <> tag
+    , nodeLabel        = fromText ("#" <> tag)
     , nodeFileType     = DocFile
-    , nodeSourceFile   = T.pack filePath
+    , nodeSourceFile   = fromText (T.pack filePath)
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
     , nodeLineEnd      = Nothing
-    , nodeKind         = Just "Tag"
+    , nodeKind         = Just (fromText "Tag")
     , nodeSignature    = Nothing
+    , nodePresentBits  = bitNodeKind
     }
 
 -- ───────────────────────────────────────────────

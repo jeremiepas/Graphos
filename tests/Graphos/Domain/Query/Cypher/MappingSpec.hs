@@ -3,6 +3,7 @@ module Graphos.Domain.Query.Cypher.MappingSpec where
 import Test.Hspec
 import Data.Aeson (Value(..))
 import qualified Data.Map.Strict as Map
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types (Node(..), Edge(..), EdgeId(..), FileType(CodeFile), Relation(Calls), Confidence(..))
 import Graphos.Domain.Query.Cypher.Mapping
@@ -10,9 +11,9 @@ import Graphos.Domain.Query.Cypher.Mapping
 mkNode :: Node
 mkNode = Node
   { nodeId          = "n1"
-  , nodeLabel       = "foo"
+  , nodeLabel       = fromText "foo"
   , nodeFileType    = CodeFile
-  , nodeSourceFile  = "src/foo.hs"
+  , nodeSourceFile  = fromText "src/foo.hs"
   , nodeLineStart   = Just 10
   , nodeLineEnd     = Just 20
   , nodeSignature   = Just "foo :: Int -> Int"
@@ -21,6 +22,7 @@ mkNode = Node
   , nodeDegree      = Just 5
   , nodeIsBridge    = Just False
   , nodeExtra       = Nothing
+  , nodePresentBits = 0
   }
 
 mkEdge :: Edge

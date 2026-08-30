@@ -28,6 +28,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
 import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import Data.Maybe (fromMaybe)
 import Data.Aeson (toJSON)
 
@@ -35,7 +36,9 @@ import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
   ( Node(..), Edge(..), Extraction(..), extractionFromLists
   , NodeId, FileType(..), Relation(..), Confidence(..), EdgeId(..)
+  , bitNodeKind, bitNodeLineStart, bitNodeLineEnd
   )
+import Data.Bits ((.|.))
 import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision)
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
@@ -173,37 +176,38 @@ tsNodeToGraphEdges gran filePath parentLabel node =
       -- Imports/Exports edges
       (importEdges, importNodes) = if tType `elem` importExportTypes
         then case extractSpecifier node of
-               Just (targetPath, targetName) ->
-                 let targetId = if "external:" `isPrefixOf` targetPath
-                                then makeNodeId "external" targetName
-                                else makeNodeId targetPath targetName
-                     edge = Edge
-                       { edgeId        = EdgeId (makeNodeId filePath (fromMaybe "" parentLabel) <> "->" <> targetId <> ":imports")
-                       , edgeSource    = makeNodeId filePath (fromMaybe "" parentLabel)
-                       , edgeTarget    = targetId
-                       , edgeRelation  = Imports
-                       , edgeConfidence = Confidence 1.0
-                       , edgeWeight    = 1.0
-                       , edgeExtra     = if tType /= "import_declaration" && tType /= "import_statement" && tType /= "import_from_statement"
-                                          then Just (toJSON (T.pack "re-export"))
-                                          else Nothing
-                       }
-                     targetNode = Node
-                       { nodeId           = targetId
-                       , nodeLabel        = targetName
-                       , nodeFileType     = CodeFile
-                       , nodeSourceFile   = T.pack targetPath
-                       , nodeLineStart    = Nothing
-                       , nodeCommunityId  = Nothing
-                       , nodeDegree       = Nothing
-                       , nodeIsBridge     = Nothing
-                       , nodeExtra        = Nothing
-                       , nodeLineEnd      = Nothing
-                       , nodeKind         = Just "External"
-                       , nodeSignature    = Nothing
-                       }
-                 in ([edge], [targetNode])
-               Nothing -> ([], [])
+                Just (targetPath, targetName) ->
+                  let targetId = if "external:" `isPrefixOf` targetPath
+                                 then makeNodeId "external" targetName
+                                 else makeNodeId targetPath targetName
+                      edge = Edge
+                        { edgeId        = EdgeId (makeNodeId filePath (fromMaybe "" parentLabel) <> "->" <> targetId <> ":imports")
+                        , edgeSource    = makeNodeId filePath (fromMaybe "" parentLabel)
+                        , edgeTarget    = targetId
+                        , edgeRelation  = Imports
+                        , edgeConfidence = Confidence 1.0
+                        , edgeWeight    = 1.0
+                        , edgeExtra     = if tType /= "import_declaration" && tType /= "import_statement" && tType /= "import_from_statement"
+                                           then Just (toJSON (T.pack "re-export"))
+                                           else Nothing
+                        }
+                      targetNode = Node
+                        { nodeId           = targetId
+                        , nodeLabel        = fromText targetName
+                        , nodeFileType     = CodeFile
+                        , nodeSourceFile   = fromText (T.pack targetPath)
+                        , nodeLineStart    = Nothing
+                        , nodeLineEnd      = Nothing
+                        , nodeSignature    = Nothing
+                        , nodeCommunityId  = Nothing
+                        , nodeKind         = Just (fromText "External")
+                        , nodeDegree       = Nothing
+                        , nodeIsBridge     = Nothing
+                        , nodeExtra        = Nothing
+                        , nodePresentBits  = bitNodeKind
+                        }
+                  in ([edge], [targetNode])
+                Nothing -> ([], [])
         else ([], [])
 
       -- Recurse into children
@@ -254,17 +258,18 @@ stripQuotes t0
 makeNode :: FilePath -> TSNodeInfo -> Node
 makeNode filePath node = Node
   { nodeId           = makeNodeId filePath (tsNodeUntruncatedLabel node)
-  , nodeLabel        = tsNodeLabel node
+  , nodeLabel        = fromText (tsNodeLabel node)
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = T.pack filePath
+  , nodeSourceFile   = fromText (T.pack filePath)
   , nodeLineStart    = Just (tsnStartRow node + 1)
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
   , nodeLineEnd      = Just (tsnEndRow node + 1)
-  , nodeKind         = Just $ T.pack $ tsTypeToKind (tsnType node)
+           , nodeKind         = Just (fromText (T.pack $ tsTypeToKind (tsnType node)))
   , nodeSignature    = Nothing
+  , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
   }
 
 -- | Get the untruncated, normalized label for a node.

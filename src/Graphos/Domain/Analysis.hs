@@ -12,6 +12,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 
 import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidence(..),
                             FileType(..), CommunityId, CommunityMap, CohesionMap,
@@ -49,7 +50,7 @@ analyze g commMap cohesionMap =
 surprisingConnections :: Graph -> CommunityMap -> Int -> [SurprisingConnection]
 surprisingConnections g commMap topN =
   let nodeComm = nodeCommunityMap commMap
-      sourceFiles = Set.fromList [nodeSourceFile n | n <- Map.elems (gNodes g), not (T.null (nodeSourceFile n))]
+      sourceFiles = Set.fromList [toText (nodeSourceFile n) | n <- Map.elems (gNodes g), not (T.null (toText (nodeSourceFile n)))]
       isMultiSource = Set.size sourceFiles > 1
   in if isMultiSource
      then crossFileSurprises g nodeComm topN
@@ -76,12 +77,12 @@ nodeCommunityMap commMap = Map.fromList [(nid, cid) | (cid, nids) <- Map.toList 
 crossFileSurprises :: Graph -> Map NodeId CommunityId -> Int -> [SurprisingConnection]
 crossFileSurprises g nodeComm topN =
   let candidates = [(u, v, d, score, reasons)
-                   | (u, v, d) <- allEdges g
-                   , let uSrc = nodeSourceFile (nodeData g u)
-                   , let vSrc = nodeSourceFile (nodeData g v)
-                   , not (T.null uSrc)
-                   , not (T.null vSrc)
-                   , uSrc /= vSrc
+                    | (u, v, d) <- allEdges g
+                    , let uSrc = toText (nodeSourceFile (nodeData g u))
+                    , let vSrc = toText (nodeSourceFile (nodeData g v))
+                    , not (T.null uSrc)
+                    , not (T.null vSrc)
+                    , uSrc /= vSrc
                    , edgeRelation d `notElem` [Imports, Contains]
                    , not (isConceptNode (nodeData g u))
                    , not (isConceptNode (nodeData g v))
@@ -91,7 +92,7 @@ crossFileSurprises g nodeComm topN =
   in take topN [SurprisingConnection
     { scSource      = nodeLabel' g u
     , scTarget      = nodeLabel' g v
-    , scSourceFiles = [nodeSourceFile (nodeData g u), nodeSourceFile (nodeData g v)]
+    , scSourceFiles = [toText (nodeSourceFile (nodeData g u)), toText (nodeSourceFile (nodeData g v))]
     , scConfidence  = edgeConfidence d
     , scRelation    = relationToText (edgeRelation d)
     , scWhy         = T.intercalate "; " (if null reasons then ["cross-file semantic connection"] else reasons)
@@ -113,7 +114,7 @@ crossCommunitySurprises g nodeComm topN =
   in take topN [SurprisingConnection
     { scSource      = nodeLabel' g u
     , scTarget      = nodeLabel' g v
-    , scSourceFiles = [nodeSourceFile (nodeData g u), nodeSourceFile (nodeData g v)]
+    , scSourceFiles = [toText (nodeSourceFile (nodeData g u)), toText (nodeSourceFile (nodeData g v))]
     , scConfidence  = edgeConfidence d
     , scRelation    = relationToText (edgeRelation d)
     , scWhy         = "Bridges community " <> maybe "" (T.pack . show) cid_u <> " → community " <> maybe "" (T.pack . show) cid_v
@@ -176,9 +177,9 @@ fileCategory path
 nodeData :: Graph -> NodeId -> Node
 nodeData g nid = Map.findWithDefault (Node
   { nodeId           = nid
-  , nodeLabel        = T.pack "unknown"
+  , nodeLabel        = fromText "unknown"
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = T.pack ""
+  , nodeSourceFile   = fromText ""
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -187,10 +188,11 @@ nodeData g nid = Map.findWithDefault (Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }) nid (gNodes g)
 
 nodeLabel' :: Graph -> NodeId -> Text
-nodeLabel' g nid = nodeLabel (nodeData g nid)
+nodeLabel' g nid = toText (nodeLabel (nodeData g nid))
 
 allEdges :: Graph -> [(NodeId, NodeId, Edge)]
 allEdges g = [(s,t,e) | ((s,t), e) <- Map.toList (gEdges g)]

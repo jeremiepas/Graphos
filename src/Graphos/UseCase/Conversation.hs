@@ -15,6 +15,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Confidence(..), FileType(..), CommunityMap, EdgeId(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
@@ -53,7 +54,7 @@ queryConversations g query =
       -- Find all document nodes (conversations are stored as DocFile)
       convNodes = [(nid, n) | (nid, n) <- Map.toList (gNodes g)
                             , nodeFileType n == DocFile
-                            , "memory/" `T.isPrefixOf` nodeSourceFile n]
+                             , "memory/" `T.isPrefixOf` toText (nodeSourceFile n)]
       -- Score each conversation by how well it matches the query
       scored = [(conv, matchScore) | (_nid, n) <- convNodes
                                    , let conv = nodeToConversation n g
@@ -114,7 +115,7 @@ nodeToConversation n g =
                                    , edgeRelation e == References]
   in ConversationNode
     { convId            = nid
-    , convQuestion      = nodeLabel n
+    , convQuestion      = toText (nodeLabel n)
     , convSummary       = ""  -- Summary not stored in node label, needs separate storage
     , convTimestamp     = fromMaybe "" (nodeExtraCapturedAt n)
     , convRelevantNodes = relatedNodes

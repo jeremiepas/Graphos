@@ -11,6 +11,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.Aeson (Value, eitherDecode, encode)
 
 import Graphos.Domain.Types (CommunityId, Node(..), CommunityMap, FileType(..))
@@ -81,8 +82,8 @@ formatCommunity g commMap cohesion compMap cid =
                 ]
         Nothing ->
           let labels = map (\nid -> case Map.lookup nid (gNodes g) of
-                              Just n -> nodeLabel n
-                              Nothing -> "unknown") $ take 10 codeNodes
+                               Just n -> toText (nodeLabel n)
+                               Nothing -> "unknown") $ take 10 codeNodes
           in T.concat
                 [ "Community ", T.pack (show cid), " (cohesion: ", coh
                 , ", size: ", size, "):"
@@ -97,13 +98,13 @@ formatCommunity g commMap cohesion compMap cid =
           (codeNodes, docNodes) = partition (\nid -> case Map.lookup nid (gNodes g) of
                                                       Just n -> nodeFileType n `elem` [CodeFile, PaperFile]
                                                       Nothing -> False) topNodes
-      in ( map (\nid -> case Map.lookup nid (gNodes g) of
-                         Just n -> nodeLabel n <> " (code)"
-                         Nothing -> "unknown (code)") codeNodes
-         , map (\nid -> case Map.lookup nid (gNodes g) of
-                         Just n -> nodeLabel n <> " (doc)"
-                         Nothing -> "unknown (doc)") docNodes
-         )
+       in ( map (\nid -> case Map.lookup nid (gNodes g) of
+                          Just n -> toText (nodeLabel n) <> " (code)"
+                          Nothing -> "unknown (code)") codeNodes
+          , map (\nid -> case Map.lookup nid (gNodes g) of
+                          Just n -> toText (nodeLabel n) <> " (doc)"
+                          Nothing -> "unknown (doc)") docNodes
+          )
 
 -- | Split community IDs into batches of given size.
 batchCommunities :: [CommunityId] -> Int -> [[CommunityId]]

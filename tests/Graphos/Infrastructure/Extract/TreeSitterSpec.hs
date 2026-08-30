@@ -5,6 +5,7 @@ import Test.Hspec
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import Data.Text.Short (fromText, toText)
 import qualified Data.Text as T
 import Data.Aeson (toJSON)
 import Graphos.Domain.Config (Granularity(..))
@@ -126,7 +127,7 @@ spec = do
             allEdges = concatMap fst results
             allNodes = concatMap snd results
             importEdges = filter ((Imports ==) . edgeRelation) allEdges
-            externalNodes = filter (\n -> nodeKind n == Just "External") allNodes
+            externalNodes = filter (\n -> nodeKind n == Just (fromText "External")) allNodes
             uniqueExternalIds = nub (map nodeId externalNodes)
         length importEdges `shouldBe` 3
         length (nub (map edgeTarget importEdges)) `shouldBe` 1
@@ -145,14 +146,15 @@ spec = do
         length importEdges `shouldBe` 1
         case (importEdges, targetNodes) of
           ([_e], tn:_) -> do
-            let srcNode = Node { nodeId = makeNodeId filePath "module", nodeLabel = "module"
-                              , nodeFileType = CodeFile, nodeSourceFile = T.pack filePath
+            let srcNode = Node { nodeId = makeNodeId filePath "module", nodeLabel = fromText "module"
+                              , nodeFileType = CodeFile, nodeSourceFile = fromText (T.pack filePath)
                               , nodeLineStart = Nothing, nodeCommunityId = Nothing
                               , nodeDegree = Nothing, nodeIsBridge = Nothing
                               , nodeExtra = Nothing, nodeLineEnd = Nothing
-                              , nodeKind = Just "Module", nodeSignature = Nothing }
-            nodeSourceFile srcNode `shouldBe` T.pack filePath
-            nodeSourceFile tn `shouldSatisfy` (/= T.pack filePath)
+                              , nodeKind = Just (fromText "Module"), nodeSignature = Nothing
+                              , nodePresentBits = 0 }
+            toText (nodeSourceFile srcNode) `shouldBe` T.pack filePath
+            toText (nodeSourceFile tn) `shouldSatisfy` (/= T.pack filePath)
           ([], _) -> fail "expected exactly one imports edge"
           (_, []) -> fail "expected a target node to be materialized"
           (_:_, _:_) -> pure ()
@@ -163,7 +165,7 @@ spec = do
                    [ tsNode "program" "module" [node] ]
             allNodes = Map.elems (extractionNodes ex)
             allEdges = Map.elems (extractionEdges ex)
-            importNodes = filter (\n -> nodeKind n == Just "Import") allNodes
+            importNodes = filter (\n -> nodeKind n == Just (fromText "Import")) allNodes
             importEdges = filter ((Imports ==) . edgeRelation) allEdges
         length importNodes `shouldBe` 1
         length importEdges `shouldSatisfy` (>= 1)

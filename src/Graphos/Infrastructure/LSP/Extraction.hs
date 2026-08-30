@@ -16,6 +16,7 @@ import Control.Concurrent.MVar (takeMVar, putMVar)
 import Control.Exception (catch, SomeException(..), evaluate)
 import Control.Monad (unless)
 import Data.Aeson (Value(..))
+import Data.Bits ((.|.))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Vector as V
@@ -25,6 +26,7 @@ import Data.Maybe (mapMaybe)
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import qualified Data.Text.IO as TIO
 import System.Timeout (timeout)
 
@@ -418,17 +420,18 @@ symbolToNodes :: FilePath -> [DocumentSymbolResult] -> [Node]
 symbolToNodes filePath symbols =
   [ Node
     { nodeId           = makeNodeId filePath (safeLabel (dsrName sym))
-    , nodeLabel        = safeLabel (dsrName sym)
+    , nodeLabel        = fromText (safeLabel (dsrName sym))
     , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack filePath
+    , nodeSourceFile   = fromText (T.pack filePath)
     , nodeLineStart    = Just $ posLine (rangeStart (dsrRange sym))
     , nodeCommunityId  = Nothing
     , nodeDegree       = Nothing
     , nodeIsBridge     = Nothing
     , nodeExtra        = Nothing
     , nodeLineEnd      = Just $ posLine (rangeEnd (dsrRange sym))
-    , nodeKind         = Just $ symbolKindToText (dsrKind sym)
+    , nodeKind         = Just (fromText $ symbolKindToText (dsrKind sym))
     , nodeSignature    = Nothing
+    , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
     }
   | sym <- symbols
   ]
@@ -515,9 +518,9 @@ makeStubNode filePath =
       nodeId' = hashPrefix <> T.pack "_" <> name
   in Node
     { nodeId           = nodeId'
-    , nodeLabel        = name
+    , nodeLabel        = fromText name
     , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack filePath
+    , nodeSourceFile   = fromText (T.pack filePath)
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -526,6 +529,7 @@ makeStubNode filePath =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
+    , nodePresentBits  = 0
     }
 
 -- | Convert LSP SymbolKind integer to a human-readable text label.

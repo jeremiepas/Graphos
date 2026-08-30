@@ -230,8 +230,9 @@ library
     , process              >= 1.6
     , sorted-list          >= 0.2
     , stm                  >= 2.5
-    , text                 >= 1.2
-    , time                 >= 1.11
+     , text                 >= 1.2
+     , text-short           >= 0.1.6
+     , time                 >= 1.11
     , transformers         >= 0.5
     , tree-sitter          >= 0.9
     , tree-sitter-typescript >= 0.5
@@ -261,6 +262,7 @@ library
     , base64-bytestring     >= 1.0
     , cryptohash-sha256     >= 0.11
     , file-embed            >= 0.0.15
+    , text-short            >= 0.1
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -283,6 +285,7 @@ executable graphos
     , filepath             >= 1.4
     , time
     , yaml
+    , text-short           >= 0.1
 
 -- ───────────────────────────────────────────────
 -- Test Suite
@@ -356,6 +359,7 @@ test-suite graphos-test
     , aeson
     , bytestring           >= 0.11
     , containers
+    , text-short           >= 0.1
     , deepseq              >= 1.4
     , directory            >= 1.3
     , filepath             >= 1.4
@@ -363,6 +367,7 @@ test-suite graphos-test
     , optparse-applicative >= 0.17
     , process              >= 1.6
     , text
+    , text-short           >= 0.1.6
     , temporary            >= 1.3
     , wai                  >= 3.2
     , http-types           >= 0.12

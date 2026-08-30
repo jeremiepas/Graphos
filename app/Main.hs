@@ -3,6 +3,7 @@ module Main where
 
 import Options.Applicative
 import System.Exit (exitWith, ExitCode(..), exitSuccess)
+import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
@@ -304,7 +305,7 @@ main = do
                       Just n -> do
                         let relLabel = maybe "references" (T.unpack . relationToText . edgeRelation) mEdge
                             confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
-                        putStrLn $ "  " ++ T.unpack (nodeLabel n) ++ " --" ++ relLabel ++ "-->" ++ confLabel
+                        putStrLn $ "  " ++ T.unpack (toText (nodeLabel n)) ++ " --" ++ relLabel ++ "-->" ++ confLabel
                       Nothing -> pure ()
                     go ns
               go path
@@ -323,9 +324,9 @@ main = do
            case mnode of
             Nothing -> putStrLn $ "Node not found: " ++ T.unpack node
             Just n -> do
-              putStrLn $ "NODE: " ++ T.unpack (nodeLabel n)
+              putStrLn $ "NODE: " ++ T.unpack (toText (nodeLabel n))
               putStrLn $ "  ID: " ++ T.unpack (nodeId n)
-              putStrLn $ "  Source: " ++ T.unpack (nodeSourceFile n)
+              putStrLn $ "  Source: " ++ T.unpack (toText (nodeSourceFile n))
               case (nodeLineStart n, nodeLineEnd n) of
                 (Just start, Just end) | start /= end -> putStrLn $ "  Location: L" ++ show start ++ "-" ++ show end
                 (Just start, _)                        -> putStrLn $ "  Location: L" ++ show start
@@ -348,7 +349,7 @@ main = do
                   Just nb -> do
                     let relLabel = maybe "related" (T.unpack . relationToText . edgeRelation) mEdge
                         confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
-                    putStrLn $ "  --" ++ relLabel ++ "--> " ++ T.unpack (nodeLabel nb) ++ confLabel
+                    putStrLn $ "  --" ++ relLabel ++ "--> " ++ T.unpack (toText (nodeLabel nb)) ++ confLabel
                   Nothing -> pure ()
 
     SymbolsCmd name symOpts -> do

@@ -18,6 +18,7 @@ import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Directory (createDirectoryIfMissing)
 import System.Mem (performGC)
@@ -63,7 +64,7 @@ generateGraphEmbeddings llm cfg graph = do
   pure embs
   where
     genNodeEmbedding n = do
-      let inputText = nodeLabel n <> " " <> nodeSourceFile n
+      let inputText = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
       lpGenerateEmbedding llm cfg inputText
 
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
