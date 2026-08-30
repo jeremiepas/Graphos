@@ -111,9 +111,10 @@ pipelineOpts = PipelineConfig
         <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
          <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
           <*> (map (\s -> AnnotatedPattern (parsePattern s) False 3) <$> many (strOption (long "ignore" <> metavar "GLOB" <> help "Additional gitignore-style ignore pattern (can be specified multiple times)")))
-         <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
-          <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
-         <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
+           <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
+            <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
+          <*> switch (long "rts-applied" <> hidden <> help "Internal: set by parent process to prevent re-execution")
+          <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
