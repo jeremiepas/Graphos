@@ -3,6 +3,7 @@ module Graphos.Domain.Query.Cypher.EvalSpec where
 import Data.Aeson (Value(..))
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import Data.Text.Short (fromText)
 import Test.Hspec
 
 import Graphos.Domain.Types
@@ -24,17 +25,18 @@ import Graphos.Domain.Query.Cypher.Eval (evaluate, CypherResult(..))
 mkNode :: Text -> Text -> Text -> Node
 mkNode nid kind srcFile = Node
   { nodeId          = nid
-  , nodeLabel       = nid
+  , nodeLabel       = fromText nid
   , nodeFileType    = CodeFile
-  , nodeSourceFile  = srcFile
+  , nodeSourceFile  = fromText srcFile
   , nodeLineStart   = Just 1
   , nodeLineEnd     = Just 10
   , nodeSignature   = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind        = Just kind
+  , nodeKind        = Just (fromText kind)
   , nodeDegree      = Nothing
   , nodeIsBridge    = Nothing
   , nodeExtra       = Nothing
+  , nodePresentBits = 0
   }
 
 mkEdge :: Text -> Text -> Text -> Relation -> Edge

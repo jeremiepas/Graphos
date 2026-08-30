@@ -50,6 +50,7 @@ data GraphosConfig = GraphosConfig
   , gcLabeling         :: LabelingConfig               -- ^ LLM labeling settings
   , gcObservability    :: ObservabilityConfig           -- ^ Tracing, metrics, debug settings
   , gcEmbedding        :: EmbeddingConfig               -- ^ Local embedding settings (Ollama)
+  , gcSemanticEdges    :: SemanticEdgesConfig           -- ^ Semantic code↔doc edge inference settings
   , gcVision           :: VisionConfig                  -- ^ Vision analysis settings
   , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
   } deriving (Eq, Show, Generic)
@@ -68,6 +69,7 @@ defaultGraphosConfig = GraphosConfig
   , gcLabeling         = defaultLabelingConfig
   , gcObservability    = defaultObservabilityConfig
   , gcEmbedding        = defaultEmbeddingConfig
+  , gcSemanticEdges    = defaultSemanticEdgesConfig
   , gcVision           = defaultVisionConfig
   , gcIngest           = defaultIngestConfig
   }
@@ -109,8 +111,11 @@ mergeGraphosConfig global project = GraphosConfig
   , gcObservability = mergeObservabilityConfig (gcObservability global)
                                                  (gcObservability project)
   , gcEmbedding = if gcEmbedding project == defaultEmbeddingConfig
-                      then gcEmbedding global
-                      else gcEmbedding project
+                       then gcEmbedding global
+                       else gcEmbedding project
+  , gcSemanticEdges = if gcSemanticEdges project == defaultSemanticEdgesConfig
+                         then gcSemanticEdges global
+                         else gcSemanticEdges project
   , gcVision = if gcVision project == defaultVisionConfig
                     then gcVision global
                     else gcVision project

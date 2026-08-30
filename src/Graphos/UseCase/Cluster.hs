@@ -15,6 +15,7 @@ module Graphos.UseCase.Cluster
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Ord (comparing)
@@ -143,7 +144,7 @@ computeCommunityAggregates graph commMap cohesionMap artPoints mLabels =
                 Just n -> [n]
                 Nothing -> []) nids
             sorted = sortBy (comparing nodeLabel) nodesInComm
-        in take 3 [nodeLabel n | n <- sorted]
+        in take 3 [toText (nodeLabel n) | n <- sorted]
     in map (\(cid, members) ->
           let repLabels = representativeLabels members
               lbl = cleanLabel cid repLabels

@@ -37,29 +37,30 @@ graphos [PATH]                  Build the knowledge graph (default: .)
   --granularity LEVEL           fine|function|file
   --threads, -j N / --edge-density MODE
   --resolution FLOAT / --mcp GRAPH_JSON
+  --ignore GLOB                 Additional ignore pattern (repeatable)
 
 graphos query QUESTION          Query the knowledge graph
   --dfs / --budget N / --graph FILE
-  --json / --label-width N / --edges
+  --json / --label-width N / --edges MODE
 
 graphos cypher QUERY            Read-only openCypher/GQL query
   --graph FILE / --budget N / --json
 
 graphos path FROM TO             Find shortest path
   --graph FILE / --budget N / --json
-  --label-width N / --edges
+  --label-width N / --edges MODE
 
 graphos explain NODE            Explain a node
   --graph FILE / --budget N / --json
-  --label-width N / --edges
+  --label-width N / --edges MODE
 
 graphos symbols NAME            Look up symbol by name
   --graph FILE / --budget N / --json
-  --label-width N / --edges
+  --label-width N / --edges MODE
 
 graphos neighbors NODE          Expand neighborhood (id or display name)
   --depth N / --graph FILE / --budget N
-  --json / --label-width N / --edges
+  --json / --label-width N / --edges MODE
 
 graphos ingest FILE             Ingest single file
   --embed / --no-embed / --output, -o DIR

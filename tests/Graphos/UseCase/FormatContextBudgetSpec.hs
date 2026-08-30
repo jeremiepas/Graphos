@@ -3,6 +3,7 @@ module Graphos.UseCase.FormatContextBudgetSpec where
 import Test.Hspec
 import qualified Data.Text as T
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..)
                             , Relation(..), Confidence(..))
 import Graphos.Domain.Context (SelectedContext(..), SelectionStrategy(..)
@@ -12,9 +13,9 @@ import Graphos.UseCase.FormatContext
 mkNode :: Int -> T.Text -> Node
 mkNode i label = Node
   { nodeId           = T.pack ("n" ++ show i)
-  , nodeLabel        = label
+  , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "src/Test.hs"
+  , nodeSourceFile   = fromText "src/Test.hs"
   , nodeLineStart    = Just i
   , nodeLineEnd      = Nothing
   , nodeCommunityId  = Nothing
@@ -23,6 +24,7 @@ mkNode i label = Node
   , nodeExtra        = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 mkEdge :: Int -> T.Text -> T.Text -> Relation -> Double -> Edge

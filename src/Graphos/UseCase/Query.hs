@@ -40,6 +40,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing)
 import Data.List (sortOn, nubBy)
@@ -60,9 +61,9 @@ import Graphos.Domain.Graph.Score
   , QueryResponse(..)
   , computeVerdict
   , verdictThreshold
-  , normalizeScore
-  , fullLabelBoost
-  , resultHash
+   , normalizeScore
+   , fullLabelBoostForTerms
+   , resultHash
   , findSuggestions
   )
 
@@ -86,7 +87,7 @@ queryGraphWithIndex g idx query mode _budget =
       subgraphNodes = if mode == T.pack "dfs"
                       then Set.unions [depthFirstSearch g nid 6 | nid <- startNodes]
                       else bfsFromSet idx (Set.fromList startNodes) 3
-      nodeLabels = [(nid, nodeLabel n) | (nid, n) <- Map.toList (gNodes g), nid `Set.member` subgraphNodes]
+      nodeLabels = [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList (gNodes g), nid `Set.member` subgraphNodes]
       nodeLblMap = Map.fromList nodeLabels
       edges = [ ( fromMaybeLbl src nodeLblMap
                , fromMaybeLbl tgt nodeLblMap
@@ -113,13 +114,6 @@ queryGraph g query mode budget =
 
 fromMaybeLbl :: NodeId -> Map NodeId Text -> Text
 fromMaybeLbl nid m = Map.findWithDefault nid nid m
-
--- | Extract the first whitespace-delimited token from a label.
-firstToken :: Text -> Text
-firstToken label =
-  case T.words (T.toLower label) of
-    (w:_) -> w
-    _     -> T.empty
 
 -- | Unwrap Confidence newtype to get the underlying Double.
 unConfidence :: Confidence -> Double
@@ -148,15 +142,14 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       -- Compute normalized scores with full-label boost
       scoredPairs :: [(NodeId, Double)]
       scoredPairs =
-        [ (nid, normalizeScore rawScore (length terms) + fullLabelBoost term (nodeLabel n))
+        [ (nid, normalizeScore rawScore (length terms) + fullLabelBoostForTerms terms (toText (nodeLabel n)))
         | (nid, rawScore) <- matched
         , Just n <- [Map.lookup nid (gNodes g)]
-        , let term = firstToken (nodeLabel n)
         ]
       bestScore :: Double
       bestScore = case scoredPairs of
-        (_, s):_ -> s
-        []       -> 0
+        []  -> 0
+        _   -> maximum [s | (_, s) <- scoredPairs]
       verdict :: MatchVerdict
       verdict = computeVerdict bestScore
       -- BFS from top-scoring nodes (only when not NoMatch)
@@ -177,12 +170,13 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       scoredNodes =
         [ ScoredNode
             { snNodeId      = nid
-            , snLabel       = nodeLabel n
-            , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoost (firstToken (nodeLabel n)) (nodeLabel n)
-            , snSourceFile  = nodeSourceFile n
+            , snLabel       = toText (nodeLabel n)
+            , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoostForTerms terms (toText (nodeLabel n))
+            , snSourceFile  = toText (nodeSourceFile n)
             , snCommunityId = nodeCommunityId n
             }
         | nid <- Set.toList expanded
+        , nid `Map.member` scoreMap
         , Just n <- [Map.lookup nid nodeMap]
         ]
       -- Sort score-descending
@@ -190,7 +184,7 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       scoredNodesSorted = sortOn (negate . snScore) scoredNodes
       -- Edges within the subgraph
       nodeLblMap :: Map NodeId Text
-      nodeLblMap = Map.fromList [(nid, nodeLabel n) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
+      nodeLblMap = Map.fromList [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
       edges :: [(Text, Text, Text, Double)]
       edges =
         [ ( fromMaybeLbl src nodeLblMap
@@ -211,14 +205,17 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
       -- Result-set hash
       hash :: Text
       hash = resultHash [snNodeId n | n <- scoredNodesSorted]
-  in QueryResponse
-    { qrespVerdict     = verdict
-    , qrespBestScore   = bestScore
-    , qrespHash        = hash
-    , qrespNodes       = scoredNodesSorted
-    , qrespEdges       = edges
-    , qrespSuggestions = suggestions
-    }
+      in QueryResponse
+         { qrespVerdict      = verdict
+         , qrespBestScore    = bestScore
+         , qrespHash         = hash
+         , qrespNodes        = scoredNodesSorted
+         , qrespEdges        = edges
+         , qrespSuggestions  = suggestions
+         , qrespOmittedNodes = 0
+         , qrespOmittedEdges = 0
+         }
+
 
 -- | Find shortest path between two concepts using pre-built index and FGL cache
 pathQueryWithIndexCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Maybe [NodeId]
@@ -244,9 +241,9 @@ explainNodeWithIndex g idx term =
   let best = findBestNodeWithIndex idx term
   in fmap (\nid -> Map.findWithDefault (Node
     { nodeId           = T.pack "unknown"
-    , nodeLabel        = T.pack "unknown"
+    , nodeLabel        = fromText "unknown"
     , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack ""
+    , nodeSourceFile   = fromText ""
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -255,6 +252,7 @@ explainNodeWithIndex g idx term =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
+    , nodePresentBits  = 0
     }) nid (gNodes g)) best
 
 -- | Find shortest path between two concepts
@@ -332,9 +330,9 @@ symbolLookup name g idx =
       allHitIds = if null exactHits then ciHits else exactHits
       scoredNodes = [ ScoredNode
                         { snNodeId      = nid
-                        , snLabel       = nodeLabel n
+                        , snLabel       = toText (nodeLabel n)
                         , snScore       = if null exactHits then 0.5 else 1.0
-                        , snSourceFile  = nodeSourceFile n
+                        , snSourceFile  = toText (nodeSourceFile n)
                         , snCommunityId = nodeCommunityId n
                         }
                     | nid <- allHitIds
@@ -383,15 +381,15 @@ neighborhoodExpansion startId depth g idx =
        Just _ -> let expanded = bfsFrom idx startId depth
                      scoredNodes = [ ScoredNode
                                        { snNodeId      = nid
-                                       , snLabel       = nodeLabel n
+                                       , snLabel       = toText (nodeLabel n)
                                        , snScore       = proximityScore startId nid idx
-                                       , snSourceFile  = nodeSourceFile n
+                                        , snSourceFile  = toText (nodeSourceFile n)
                                        , snCommunityId = nodeCommunityId n
                                        }
-                                   | nid <- Set.toList expanded
-                                   , Just n <- [Map.lookup nid nodeMap]
-                                   ]
-                     nodeLblMap = Map.fromList [(nid, nodeLabel n) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
+                                    | nid <- Set.toList expanded
+                                    , Just n <- [Map.lookup nid nodeMap]
+                                    ]
+                     nodeLblMap = Map.fromList [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
                      edges = [ ( fromMaybeLbl src nodeLblMap
                                , fromMaybeLbl tgt nodeLblMap
                                , relationToText (edgeRelation e)

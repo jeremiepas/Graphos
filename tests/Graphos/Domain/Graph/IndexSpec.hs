@@ -6,10 +6,12 @@ module Graphos.Domain.Graph.IndexSpec where
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
 import Data.Text (Text)
+import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gNodes)
@@ -18,9 +20,9 @@ import Graphos.Domain.Graph.Index
 pathNode :: Text -> Text -> Node
 pathNode nid src = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = src
+  , nodeSourceFile   = fromText src
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -29,6 +31,7 @@ pathNode nid src = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 spec :: Spec
@@ -140,12 +143,12 @@ buildLabelIndexRef nodeMap =
   let splitTokens = Map.map reverse (Map.fromListWith (++)
         [ (word, [nid])
         | (nid, n) <- Map.toList nodeMap
-        , word <- tokenizeLabel (nodeLabel n)
+        , word <- tokenizeLabel (toText (nodeLabel n))
         ])
       fullLabels = Map.map reverse (Map.fromListWith (++)
-        [ (T.toLower (nodeLabel n), [nid])
+        [ (T.toLower (toText (nodeLabel n)), [nid])
         | (nid, n) <- Map.toList nodeMap
-        , T.length (T.toLower (nodeLabel n)) > 2
+        , T.length (T.toLower (toText (nodeLabel n))) > 2
         ])
   in Map.unionWith (++) splitTokens fullLabels
 
@@ -154,15 +157,15 @@ buildPathIndexRef nodeMap =
   let segments = Map.fromListWith (++)
         [ (seg, [nid])
         | (nid, n) <- Map.toList nodeMap
-        , let src = nodeSourceFile n
+        , let src = toText (nodeSourceFile n)
         , not (T.null src)
         , seg <- T.splitOn "/" (T.toLower src)
         , not (T.null seg)
         ]
       fullPaths = Map.fromListWith (++)
-        [ (T.toLower (nodeSourceFile n), [nid])
+        [ (T.toLower (toText (nodeSourceFile n)), [nid])
         | (nid, n) <- Map.toList nodeMap
-        , not (T.null (nodeSourceFile n))
+        , not (T.null (toText (nodeSourceFile n)))
         ]
   in Map.unionWith (++) segments fullPaths
 
@@ -173,9 +176,9 @@ buildPathIndexRef nodeMap =
 mkNode :: NodeId -> Text -> Text -> Node
 mkNode nid lbl src = Node
   { nodeId           = nid
-  , nodeLabel        = lbl
+  , nodeLabel        = fromText lbl
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = src
+  , nodeSourceFile   = fromText src
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -184,6 +187,7 @@ mkNode nid lbl src = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 labelWords :: [Text]

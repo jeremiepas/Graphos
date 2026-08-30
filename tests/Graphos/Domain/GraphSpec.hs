@@ -2,10 +2,13 @@
 module Graphos.Domain.GraphSpec where
 
 import Test.Hspec
+import Data.Aeson (Value(..), eitherDecode, encode)
+import Data.Either (fromRight, isRight)
 import Data.Maybe (fromJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph
@@ -14,9 +17,9 @@ import Graphos.Domain.Graph
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -26,15 +29,16 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 -- Helper: create a test node with custom label
 testNodeWithLabel :: Text -> Text -> Node
 testNodeWithLabel nid label = Node
   { nodeId           = nid
-  , nodeLabel        = label
+  , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -44,6 +48,7 @@ testNodeWithLabel nid label = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 -- helper: generate a unique EdgeId from source and target
@@ -77,9 +82,9 @@ testEdgeWithConfidence src tgt conf = Edge
 testNodeWithFile :: Text -> FileType -> Text -> Node
 testNodeWithFile nid ft srcFile = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = ft
-  , nodeSourceFile   = srcFile
+  , nodeSourceFile   = fromText srcFile
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -89,6 +94,7 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 spec :: Spec
@@ -145,9 +151,9 @@ spec = do
     it "excludes file nodes from results" $ do
       let fileNode = Node
             { nodeId = "test.hs"
-            , nodeLabel = "test.hs"
+            , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
-            , nodeSourceFile = "test.hs"
+            , nodeSourceFile = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -157,6 +163,7 @@ spec = do
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
             , nodeSignature = Nothing
+            , nodePresentBits  = 0
             }
           ext = extractionFromLists [fileNode, testNode "func"] [testEdge "test.hs" "func"]
           g = buildGraph False ext
@@ -243,13 +250,46 @@ spec = do
       -- Old graph takes precedence (<>) - first argument wins
       nodeLabel (fromJust (Map.lookup "a" (gNodes merged))) `shouldBe` "Original"
 
+  describe "embeddings_path JSON round-trip" $ do
+    it "omits embeddings_path when gEmbeddingsPath is Nothing" $ do
+      let g = buildGraph False (extractionFromLists [testNode "a"] [])
+      let decoded = eitherDecode (encode g) :: Either String (Map.Map Text Value)
+      decoded `shouldSatisfy` isRight
+      Map.member "embeddings_path" (fromRight Map.empty decoded) `shouldBe` False
+
+    it "includes embeddings_path when set" $ do
+      let g = (buildGraph False (extractionFromLists [testNode "a"] []))
+            { gEmbeddingsPath = Just "embeddings.json" }
+      let decoded = eitherDecode (encode g) :: Either String (Map.Map Text Value)
+      decoded `shouldSatisfy` isRight
+      let m = fromRight Map.empty decoded
+      Map.member "embeddings_path" m `shouldBe` True
+      m Map.! "embeddings_path" `shouldBe` String "embeddings.json"
+
+    it "decodes embeddings_path and leaves gEmbeddings as Nothing" $ do
+      let g = (buildGraph False (extractionFromLists [testNode "a"] []))
+            { gEmbeddingsPath = Just "embeddings.json" }
+      let decoded = eitherDecode (encode g) :: Either String Graph
+      decoded `shouldSatisfy` isRight
+      let g' = fromRight (error "decode failed") decoded
+      gEmbeddingsPath g' `shouldBe` Just "embeddings.json"
+      gEmbeddings g' `shouldBe` Nothing
+
+    it "decodes graphs without embeddings_path" $ do
+      let g = buildGraph False (extractionFromLists [testNode "a"] [])
+      let decoded = eitherDecode (encode g) :: Either String Graph
+      decoded `shouldSatisfy` isRight
+      let g' = fromRight (error "decode failed") decoded
+      gEmbeddingsPath g' `shouldBe` Nothing
+      gEmbeddings g' `shouldBe` Nothing
+
   describe "isFileNode" $ do
     it "identifies file nodes by label matching source" $ do
       let n = Node
             { nodeId = "test.hs"
-            , nodeLabel = "test.hs"
+            , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
-            , nodeSourceFile = "test.hs"
+            , nodeSourceFile = fromText "test.hs"
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -258,6 +298,7 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
           g = buildGraph False ext
@@ -266,9 +307,9 @@ spec = do
     it "identifies method stubs" $ do
       let n = Node
             { nodeId = ".foo()"
-            , nodeLabel = ".foo()"
+            , nodeLabel = fromText ".foo()"
             , nodeFileType = CodeFile
-            , nodeSourceFile = "test.hs"
+            , nodeSourceFile = fromText "test.hs"
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -277,6 +318,7 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
           g = buildGraph False ext
@@ -290,3 +332,93 @@ spec = do
     it "returns False for real source file" $ do
       let n = testNodeWithFile "func" CodeFile "model.py"
       isConceptNode n `shouldBe` False
+
+  describe "addEdges" $ do
+    it "returns the same graph when given an empty list" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          g' = addEdges g []
+      gNodes g' `shouldBe` gNodes g
+      gEdges g' `shouldBe` gEdges g
+      gAdjFwd g' `shouldBe` gAdjFwd g
+      gAdjBack g' `shouldBe` gAdjBack g
+
+    it "adds a single edge to the graph" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          newEdge = testEdge "b" "c"
+          g' = addEdges g [newEdge]
+      Map.size (gEdges g') `shouldBe` 2
+      Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
+      Set.member "b" (Map.findWithDefault Set.empty "c" (gAdjBack g')) `shouldBe` True
+
+    it "adds multiple edges to the graph" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c", testNode "d"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          edges = [testEdge "b" "c", testEdge "c" "d"]
+          g' = addEdges g edges
+      Map.size (gEdges g') `shouldBe` 3
+      Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
+      Set.member "d" (Map.findWithDefault Set.empty "c" (gAdjFwd g')) `shouldBe` True
+
+    it "handles duplicate edges (same source and target)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          e1 = testEdge "a" "b"
+          e2 = testEdgeWithConfidence "a" "b" (Confidence 0.5)
+          g' = addEdges g [e1, e2]
+      Map.size (gEdges g') `shouldBe` 1
+      -- The second edge (e2) should overwrite e1 since Map.insert uses Ord on keys
+      edgeConfidence (Map.findWithDefault (error "missing") ("a", "b") (gEdges g')) `shouldBe` Confidence 0.5
+
+    it "drops dangling edges (source not in graph)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          danglingEdge = testEdge "z" "a"
+          g' = addEdges g [danglingEdge]
+      Map.size (gEdges g') `shouldBe` 0
+      Map.size (gAdjFwd g') `shouldBe` 0
+
+    it "drops dangling edges (target not in graph)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          danglingEdge = testEdge "a" "z"
+          g' = addEdges g [danglingEdge]
+      Map.size (gEdges g') `shouldBe` 0
+      Map.size (gAdjFwd g') `shouldBe` 0
+
+    it "updates adjacency correctly for directed graphs" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph True ext
+          newEdge = testEdge "a" "b"
+          g' = addEdges g [newEdge]
+      Set.member "b" (Map.findWithDefault Set.empty "a" (gAdjFwd g')) `shouldBe` True
+      Set.member "a" (Map.findWithDefault Set.empty "b" (gAdjBack g')) `shouldBe` True
+      Set.size (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` 0
+      Set.size (Map.findWithDefault Set.empty "a" (gAdjBack g')) `shouldBe` 0
+
+    it "updates adjacency bidirectionally for undirected graphs" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          newEdge = testEdge "a" "b"
+          g' = addEdges g [newEdge]
+      Set.member "b" (Map.findWithDefault Set.empty "a" (gAdjFwd g')) `shouldBe` True
+      Set.member "a" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
+      Set.member "b" (Map.findWithDefault Set.empty "a" (gAdjBack g')) `shouldBe` True
+      Set.member "a" (Map.findWithDefault Set.empty "b" (gAdjBack g')) `shouldBe` True
+
+    it "preserves existing edges and nodes" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          newEdge = testEdge "b" "c"
+          g' = addEdges g [newEdge]
+      Map.size (gNodes g') `shouldBe` 3
+      Map.member ("a", "b") (gEdges g') `shouldBe` True
+      edgeRelation (Map.findWithDefault (error "missing") ("a", "b") (gEdges g')) `shouldBe` Calls
+
+    it "preserves graph metadata (directed, embeddings)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph True ext
+          g' = addEdges g [testEdge "a" "b"]
+      gDirected g' `shouldBe` True
+      gEmbeddings g' `shouldBe` gEmbeddings g

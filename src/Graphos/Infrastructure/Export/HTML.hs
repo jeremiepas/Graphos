@@ -30,6 +30,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
 import qualified Data.Set as Set
 
@@ -100,8 +101,8 @@ computePayload g analysis mLabels aggregates =
 
     -- 1. Collect strings for interning (deterministic order)
     allNodeIds = [nid | nid <- Map.keys nodeMap]
-    allSourceFiles = [nodeSourceFile n | n <- Map.elems nodeMap]
-    allKinds = [k | n <- Map.elems nodeMap, Just k <- [nodeKind n]]
+    allSourceFiles = [toText (nodeSourceFile n) | n <- Map.elems nodeMap]
+    allKinds = [toText k | n <- Map.elems nodeMap, Just k <- [nodeKind n]]
     allRelations = [relationToText (edgeRelation e) | e <- Map.elems edgeMap]
 
     uniqueNodeIds = Set.toAscList (Set.fromList allNodeIds)
@@ -116,14 +117,14 @@ computePayload g analysis mLabels aggregates =
 
     -- 2. Build Nodes
     nodes = [ VisNode
-              { vnLabel      = truncateLabel (sanitize (nodeLabel n))
-              , vnFileIdx    = Map.findWithDefault 0 (nodeSourceFile n) fileToIdx
-              , vnLine       = maybe 0 id (nodeLineStart n)
-              , vnCommId     = maybe (-1) id (nodeCommunityId n)
-              , vnDegree     = maybe 0 id (nodeDegree n)
-              , vnIsBridge   = maybe False id (nodeIsBridge n)
-              , vnKindIdx    = maybe 0 (\k -> Map.findWithDefault 0 k kindToIdx) (nodeKind n)
-              , vnFileType   = fileTypeToIdx (nodeFileType n)
+               { vnLabel      = truncateLabel (sanitize (toText (nodeLabel n)))
+               , vnFileIdx    = Map.findWithDefault 0 (toText (nodeSourceFile n)) fileToIdx
+               , vnLine       = maybe 0 id (nodeLineStart n)
+               , vnCommId     = maybe (-1) id (nodeCommunityId n)
+               , vnDegree     = maybe 0 id (nodeDegree n)
+               , vnIsBridge   = maybe False id (nodeIsBridge n)
+               , vnKindIdx    = maybe 0 (\k -> Map.findWithDefault 0 (toText k) kindToIdx) (nodeKind n)
+               , vnFileType   = fileTypeToIdx (nodeFileType n)
               }
             | n <- Map.elems nodeMap
             ]
@@ -365,7 +366,7 @@ communityAggregatesToJSON g commMap mLabels =
           , vcaLabel                  = case mLabels of
                                         Just m  -> maybe (T.pack ("Community " ++ show cid)) id (Map.lookup cid m >>= \t -> if T.null t then Nothing else Just t)
                                         Nothing -> T.pack ("Community " ++ show cid)
-          , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (nodeLabel n)) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
+          , vcaRepresentativeLabels   = take 3 [truncateLabel (sanitize (toText (nodeLabel n))) | nid <- take 10 members, Just n <- [Map.lookup nid nodeMap]]
           , vcaInterCommunityEdges    = 0
           , vcaDominantKind           = compDominantKind comp
           , vcaMixedRatio             = compMixedRatio comp

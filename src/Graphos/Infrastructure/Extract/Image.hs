@@ -14,6 +14,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import System.FilePath (takeFileName)
 
 import Graphos.Domain.Types
@@ -71,14 +72,14 @@ imageAnalysisToExtraction filePath analysis =
 makeImageNode :: FilePath -> ImageAnalysis -> Node
 makeImageNode filePath analysis = Node
   { nodeId = T.pack filePath
-  , nodeLabel = T.pack (takeFileName filePath)
+  , nodeLabel = fromText (T.pack (takeFileName filePath))
   , nodeFileType = ImageFile
-  , nodeSourceFile = T.pack filePath
+  , nodeSourceFile = fromText (T.pack filePath)
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind = Just "Image"
+  , nodeKind = Just (fromText "Image")
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Just $ Aeson.object
@@ -86,25 +87,27 @@ makeImageNode filePath analysis = Node
       , "kind" Aeson..= showKind (iaKind analysis)
       , "entities" Aeson..= map entityToJSON (iaEntities analysis)
       ]
+  , nodePresentBits = bitNodeKind
   }
 
 -- | Create an entity node from a vision-extracted entity.
 makeEntityNode :: FilePath -> Entity -> Node
 makeEntityNode filePath entity = Node
   { nodeId = T.pack (filePath ++ "#" ++ T.unpack (entityLabel entity))
-  , nodeLabel = entityLabel entity
+  , nodeLabel = fromText (entityLabel entity)
   , nodeFileType = ImageFile
-  , nodeSourceFile = T.pack filePath
+  , nodeSourceFile = fromText (T.pack filePath)
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind = Just (entityType entity)
+  , nodeKind = Just (fromText (entityType entity))
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Just $ Aeson.object
       [ "confidence" Aeson..= entityConfidence entity
       ]
+  , nodePresentBits = bitNodeKind
   }
 
 -- | Create a Contains edge from image node to entity node.
@@ -123,17 +126,18 @@ makeContainsEdge filePath entityNode = Edge
 imageStubNode :: FilePath -> Node
 imageStubNode fp = Node
   { nodeId = T.pack fp
-  , nodeLabel = T.pack (takeFileName fp)
+  , nodeLabel = fromText (T.pack (takeFileName fp))
   , nodeFileType = ImageFile
-  , nodeSourceFile = T.pack fp
+  , nodeSourceFile = fromText (T.pack fp)
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind = Just "Image"
+  , nodeKind = Just (fromText "Image")
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodePresentBits = bitNodeKind
   }
 
 -- | Convert ImageKind to Text for JSON serialization.

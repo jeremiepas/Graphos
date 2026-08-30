@@ -10,6 +10,7 @@ import Control.Exception (SomeException, catch)
 import Data.Char (toLower)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import System.FilePath (takeExtension, takeFileName)
 
 import Graphos.Domain.Types
@@ -51,15 +52,16 @@ extractOfficeFile _config env filePath = catch (do
 officeStubNode :: FilePath -> Node
 officeStubNode fp = Node
   { nodeId = T.pack fp
-  , nodeLabel = T.pack (takeFileName fp)
+  , nodeLabel = fromText (T.pack (takeFileName fp))
   , nodeFileType = OfficeFile
-  , nodeSourceFile = T.pack fp
+  , nodeSourceFile = fromText (T.pack fp)
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind = Just "File"
+  , nodeKind = Just (fromText "File")
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodePresentBits = bitNodeKind
   }

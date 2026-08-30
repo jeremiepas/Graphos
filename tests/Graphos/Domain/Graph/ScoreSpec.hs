@@ -6,6 +6,7 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
@@ -16,9 +17,9 @@ import Graphos.UseCase.Query (queryGraphWithIndexScored)
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -27,6 +28,7 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 spec :: Spec
@@ -61,6 +63,30 @@ spec = do
           idx = buildIndexWithLabels g Map.empty Map.empty
           suggestions = findSuggestions ["node0"] idx
       length suggestions `shouldSatisfy` (<= 10)
+
+  describe "boundedDL" $ do
+    it "returns 0 for identical strings" $ do
+      boundedDL (T.pack "database") (T.pack "database") `shouldBe` 0
+
+    it "returns 1 for a single insertion" $ do
+      boundedDL (T.pack "databas") (T.pack "database") `shouldBe` 1
+
+    it "returns 1 for a single transposition" $ do
+      boundedDL (T.pack "ca") (T.pack "ac") `shouldBe` 1
+
+    it "returns 3 when strings differ beyond the bound" $ do
+      boundedDL (T.pack "alpha") (T.pack "zzzzz") `shouldBe` 3
+
+    it "computes a 24-char distance (regression: was exponential)" $ do
+      boundedDL (T.pack "sol-1231-tasks-json-only")
+                (T.pack "sol-1231-tasks-json-onlz") `shouldBe` 1
+
+    it "returns 3 for two very different 24-char strings" $ do
+      boundedDL (T.pack "sol-1231-tasks-json-only")
+                (T.pack "zzzzzzzzzzzzzzzzzzzzzzzz") `shouldBe` 3
+
+    it "handles 60-char strings without blowing up" $ do
+      boundedDL (T.pack ['a' | _ <- [1..60 :: Int]]) (T.pack ['b' | _ <- [1..60 :: Int]]) `shouldBe` 3
 
   describe "resultHash" $ do
     it "returns identical hash for identical input lists" $ do
@@ -108,6 +134,19 @@ spec = do
       qrespVerdict r `shouldBe` NoMatch
       qrespNodes r `shouldBe` []
       qrespEdges r `shouldBe` []
+
+  describe "fullLabelBoostForTerms" $ do
+    it "returns 0.1 when a query term equals the full label (case-insensitive)" $ do
+      fullLabelBoostForTerms [T.pack "foo"] (T.pack "Foo") `shouldBe` 0.1
+
+    it "returns 0 when no query term equals the full label" $ do
+      fullLabelBoostForTerms [T.pack "foo", T.pack "bar"] (T.pack "baz") `shouldBe` 0
+
+    it "returns 0.1 when only one of multiple query terms equals the label" $ do
+      fullLabelBoostForTerms [T.pack "foo", T.pack "bar"] (T.pack "BAR") `shouldBe` 0.1
+
+    it "returns 0 for a multi-word label when no query term equals it" $ do
+      fullLabelBoostForTerms [T.pack "foo"] (T.pack "foo bar") `shouldBe` 0
 
   describe "queryGraphWithIndexScored (hash determinism)" $ do
     it "identical query on same graph yields identical hash" $ do

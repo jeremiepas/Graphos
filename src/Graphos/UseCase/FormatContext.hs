@@ -22,6 +22,7 @@ import Data.Ord (Down(..))
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Confidence(..)
                             , FileType(..), relationToText, CommunityId)
@@ -129,10 +130,10 @@ formatContextForLLMBudgeted budget sc =
 relevanceScore' :: NodeId -> Node -> Double
 relevanceScore' _ n = fromIntegral (matchScoreNode n)
   where
-    matchScoreNode :: Node -> Int
-    matchScoreNode node =
-      let lower = T.toLower (nodeLabel node)
-      in length (filter (`T.isInfixOf` lower) (T.words lower))
+     matchScoreNode :: Node -> Int
+     matchScoreNode node =
+       let lower = T.toLower (toText (nodeLabel node))
+       in length (filter (`T.isInfixOf` lower) (T.words lower))
 
 -- | Edge relevance score: sum of endpoint relevance scores.
 edgeRelevanceScore :: Edge -> Double
@@ -247,7 +248,7 @@ formatExpansionHintsBudgeted maxHints maxCommSize sc =
 -- | Key nodes section — compact: label + type + source location
 formatKeyNodes :: SelectedContext -> Text
 formatKeyNodes sc =
-  let sorted = sortOn (\(_, n) -> T.toLower (nodeLabel n)) (scNodes sc)
+  let sorted = sortOn (\(_, n) -> T.toLower (toText (nodeLabel n))) (scNodes sc)
       nodeLines = map (\(nid, n) -> "- " <> formatNodeCompact nid n) sorted
   in T.unlines ("### Key Nodes" : nodeLines)
 
@@ -286,15 +287,15 @@ formatExpansionHints sc =
 -- | Compact node representation: label [kind] — source:file:start-end | signature
 formatNodeCompact :: Text -> Node -> Text
 formatNodeCompact _nid n =
-  let kind = maybe "" (\k -> "[" <> k <> "] ") (nodeKind n)
-      base = nodeLabel n <> " " <> kind <> "[" <> showFileType (nodeFileType n) <> "]"
-      src = if T.null (nodeSourceFile n) then ""
-            else " — src:" <> nodeSourceFile n
+  let kind = maybe "" (\k -> "[" <> toText k <> "] ") (nodeKind n)
+      base = toText (nodeLabel n) <> " " <> kind <> "[" <> showFileType (nodeFileType n) <> "]"
+      src = if T.null (toText (nodeSourceFile n)) then ""
+            else " — src:" <> toText (nodeSourceFile n)
                 <> maybe "" (\start -> ":" <> T.pack (show start)) (nodeLineStart n)
-                <> case nodeLineEnd n of
-                     Just end -> "-" <> T.pack (show end)
-                     Nothing -> ""
-      sig = maybe "" (\s -> " | " <> s) (nodeSignature n)
+                 <> (case nodeLineEnd n of
+                      Just end -> "-" <> T.pack (show end)
+                      Nothing -> "")
+      sig = maybe "" (\s -> " | " <> toText s) (nodeSignature n)
   in base <> src <> sig
 
 -- | Compact edge representation: source → target [relation, confidence]

@@ -8,6 +8,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText, fromString)
 import System.Directory (createDirectoryIfMissing)
 
 import Graphos.Domain.Types
@@ -34,24 +35,24 @@ exportObsidian g analysis dir = do
 -- | Write a single node's markdown note
 writeNodeNote :: Graph -> FilePath -> (NodeId, Node) -> IO ()
 writeNodeNote g dir (nid, n) = do
-  let filename = sanitizeFilename (nodeLabel n) ++ ".md"
+  let filename = sanitizeFilename (toText (nodeLabel n)) ++ ".md"
       filepath = dir ++ "/nodes/" ++ filename
       nbs = Set.toList (neighbors g nid)
       neighborLinks = [formatNeighbor g nb | nb <- nbs]
       frontmatter = T.unlines
         [ "---"
         , "id: " <> quoteWrap nid
-        , "label: " <> quoteWrap (nodeLabel n)
-        , "source_file: " <> quoteWrap (nodeSourceFile n)
+        , "label: " <> quoteWrap (toText (nodeLabel n))
+        , "source_file: " <> quoteWrap (toText (nodeSourceFile n))
         , "file_type: " <> T.pack (show (nodeFileType n))
         , "degree: " <> T.pack (show (degree g nid))
         , "---"
         ]
       content = T.unlines
-        [ "# " <> nodeLabel n
+        [ "# " <> toText (nodeLabel n)
         , ""
         , "## Properties"
-        , "- **Source**: " <> nodeSourceFile n
+        , "- **Source**: " <> toText (nodeSourceFile n)
         , "- **Type**: " <> T.pack (show (nodeFileType n))
         , "- **Degree**: " <> T.pack (show (degree g nid))
         , ""
@@ -67,7 +68,7 @@ writeCommunityNote g dir cohesion (cid, members) = do
       filepath = dir ++ "/communities/" ++ filename
       score = Map.findWithDefault 0.0 cid cohesion
       memberList = T.intercalate ", " [formatNodeLink nb | nid <- members
-                                          , let nb = Map.findWithDefault (Node nid "unknown" CodeFile "" Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing) nid (gNodes g)]
+                                          , let nb = Map.findWithDefault (Node nid (fromString "unknown") CodeFile (fromString "") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0) nid (gNodes g)]
       content = T.unlines
         [ "# Community " <> T.pack (show cid)
         , ""
@@ -106,11 +107,11 @@ formatCanvasEdge src tgt =
 formatNeighbor :: Graph -> NodeId -> Text
 formatNeighbor g nbId =
   case Map.lookup nbId (gNodes g) of
-    Just nb -> "- [[" <> nodeLabel nb <> "]]"
+    Just nb -> "- [[" <> toText (nodeLabel nb) <> "]]"
     Nothing -> "- " <> nbId
 
 formatNodeLink :: Node -> Text
-formatNodeLink n = "[[" <> nodeLabel n <> "]]"
+formatNodeLink n = "[[" <> toText (nodeLabel n) <> "]]"
 
 quoteWrap :: Text -> Text
 quoteWrap t = "\"" <> t <> "\""
