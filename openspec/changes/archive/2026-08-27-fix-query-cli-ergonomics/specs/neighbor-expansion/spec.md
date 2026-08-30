@@ -28,7 +28,7 @@ can disambiguate and re-run with a node id. Resolution MUST remain pure (UseCase
 CLI dispatcher (Infrastructure) only wires the resolved id into `neighborhoodExpansion`.
 
 
-#### Scenario: Direct neighbors by internal id
+#### Scenario: Depth 1 returns direct neighbors
 - **WHEN** `graphos neighbors mod_Graphos.UseCase.QuerySpec --depth 1` is run on a node with three adjacent nodes
 - **THEN** exactly those three neighbors and their connecting edges are returned, identical to the pre-change behavior
 
@@ -44,7 +44,7 @@ CLI dispatcher (Infrastructure) only wires the resolved id into `neighborhoodExp
 - **WHEN** `graphos neighbors parse --depth 1` is run and two distinct nodes have the label `parse` in different source files
 - **THEN** both candidates are listed with their node id, label, and source file, no BFS expansion is performed, and no fuzzy traversal is invoked
 
-#### Scenario: Unknown name fails explicitly
+#### Scenario: Unknown node id fails explicitly
 - **WHEN** the given argument matches no node id and no label
 - **THEN** the command reports the argument as not found and returns no results
 
