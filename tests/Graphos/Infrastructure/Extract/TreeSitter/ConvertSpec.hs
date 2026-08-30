@@ -5,6 +5,7 @@ import Test.Hspec
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
+import Data.Text.Short (fromText, toText)
 import Graphos.Domain.Types
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
 import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
@@ -62,9 +63,9 @@ jsonFixture =
         ]
     ]
 
-labelsAt :: Granularity -> TSNodeInfo -> [T.Text]
+labelsAt :: Granularity -> TSNodeInfo -> [String]
 labelsAt gran fixture =
-  map nodeLabel (Map.elems (extractionNodes (tsNodesToExtraction gran "src/service.ts" [fixture])))
+  map (T.unpack . toText . nodeLabel) (Map.elems (extractionNodes (tsNodesToExtraction gran "src/service.ts" [fixture])))
 
 spec :: Spec
 spec = do
@@ -112,4 +113,4 @@ spec = do
     it "emits only the root node for code files" $ do
       let ex = tsNodesToExtraction GranularityFile "src/service.ts" [tsFixture]
       Map.size (extractionNodes ex) `shouldBe` 1
-      map nodeKind (Map.elems (extractionNodes ex)) `shouldBe` [Just "Module"]
+      map nodeKind (Map.elems (extractionNodes ex)) `shouldBe` [Just (fromText "Module")]

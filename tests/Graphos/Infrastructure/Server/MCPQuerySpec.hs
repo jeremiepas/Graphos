@@ -7,6 +7,7 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..)
                             , Relation(..), Confidence(..)
                             , extractionFromLists)
@@ -17,9 +18,9 @@ import Graphos.Infrastructure.Server.MCP
 mkNode :: Int -> T.Text -> Node
 mkNode i label = Node
   { nodeId           = T.pack ("n" ++ show i)
-  , nodeLabel        = label
+  , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "src/Test.hs"
+  , nodeSourceFile   = fromText "src/Test.hs"
   , nodeLineStart    = Just i
   , nodeLineEnd      = Nothing
   , nodeCommunityId  = Just 1
@@ -28,6 +29,7 @@ mkNode i label = Node
   , nodeExtra        = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 mkEdge :: Int -> T.Text -> T.Text -> Relation -> Edge

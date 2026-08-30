@@ -13,6 +13,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
   ( NodeId, CommunityId, CommunityMap, Node(..)
@@ -102,8 +103,8 @@ buildCommunityNodes g commMap =
     , cnLabel    = communityLabel g members
     , cnSize     = length members
     , cnCohesion = cohesionScore g members
-    , cnTopMembers = take 5 [nodeLabel n | nid <- members
-                                         , Just n <- [Map.lookup nid (gNodes g)]]
+     , cnTopMembers = take 5 [toText (nodeLabel n) | nid <- members
+                                          , Just n <- [Map.lookup nid (gNodes g)]]
     }
   | (cid, members) <- Map.toList commMap
   ]
@@ -115,7 +116,7 @@ communityLabel g members =
                                     , Just n <- [Map.lookup nid (gNodes g)]
                                     , let degree' = Set.size (neighbors g nid)]
       sorted = sortOn (\(_, d) -> negate d) nodesWithDeg
-      topLabels = take 3 [nodeLabel n | (n, _) <- sorted]
+      topLabels = take 3 [toText (nodeLabel n) | (n, _) <- sorted]
   in if null topLabels then "Unnamed" else T.intercalate ", " topLabels
 
 -- ───────────────────────────────────────────────

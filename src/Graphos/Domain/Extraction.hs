@@ -17,6 +17,7 @@ module Graphos.Domain.Extraction
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Graphos.Domain.Types
 
 class Extractor a where
@@ -39,8 +40,8 @@ validateExtraction ext =
      else Left errors
   where
     validateNodeIds nodes =
-      let duplicateIds = [nid | nid <- nodeLabel <$> nodes
-                              , length (filter (== nid) (nodeLabel <$> nodes)) > 1]
+      let duplicateIds = [toText nid | nid <- nodeLabel <$> nodes
+                               , length (filter (== nid) (nodeLabel <$> nodes)) > 1]
       in ["Duplicate node labels: " <> T.intercalate ", " (take 5 duplicateIds) | not (null duplicateIds)]
         ++ ["Empty node ID in extraction" | any (T.null . nodeId) nodes]
     validateEdges edges =

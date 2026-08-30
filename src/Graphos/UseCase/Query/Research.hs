@@ -18,6 +18,7 @@ import qualified Data.Set as Set
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 
 import Graphos.Domain.Types
   ( NodeId, Node(..)
@@ -146,9 +147,9 @@ foldQueryResponses :: [(Text, QueryResponse)] -> Map NodeId ResearchNode
 foldQueryResponses entries =
   let scoredNodeToNode sn = Node
           { nodeId = snNodeId sn
-          , nodeLabel = snLabel sn
+          , nodeLabel = fromText (snLabel sn)
           , nodeFileType = CodeFile
-          , nodeSourceFile = snSourceFile sn
+          , nodeSourceFile = fromText (snSourceFile sn)
           , nodeLineStart = Nothing
           , nodeLineEnd = Nothing
           , nodeSignature = Nothing
@@ -157,6 +158,7 @@ foldQueryResponses entries =
            , nodeDegree = Nothing
            , nodeIsBridge = Nothing
            , nodeExtra = Nothing
+           , nodePresentBits = 0
            }
       mergeNode :: ResearchNode -> ResearchNode -> ResearchNode
       mergeNode existing newRn =

@@ -26,12 +26,13 @@ import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..))
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..), bitNodeKind)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
@@ -369,17 +370,18 @@ extractImageSource appEnv config (EmbeddedImage archivePath mediaPath) = do
     imageStubNode :: FilePath -> Node
     imageStubNode fp = Node
       { nodeId = T.pack fp
-      , nodeLabel = T.pack (takeFileName fp)
+      , nodeLabel = fromText (T.pack (takeFileName fp))
       , nodeFileType = ImageFile
-      , nodeSourceFile = T.pack fp
+      , nodeSourceFile = fromText (T.pack fp)
       , nodeLineStart = Nothing
       , nodeLineEnd = Nothing
       , nodeSignature = Nothing
       , nodeCommunityId = Nothing
-      , nodeKind = Just "Image"
+      , nodeKind = Just (fromText "Image")
       , nodeDegree = Nothing
       , nodeIsBridge = Nothing
       , nodeExtra = Nothing
+      , nodePresentBits = bitNodeKind
       }
 
 -- | Collect embedded image paths from PPTX and DOCX office files via port.
