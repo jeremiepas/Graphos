@@ -88,9 +88,10 @@ data PipelineConfig = PipelineConfig
   , cfgNoSemanticEdges    :: Bool                      -- ^ Disable semantic code↔doc edge inference (--no-semantic-edges)
   , cfgForceSemanticEdges :: Bool                      -- ^ Force semantic inference, bypass scale cap + auto-skip (--force-semantic-edges)
    , cfgIgnorePatterns     :: [AnnotatedPattern]        -- ^ CLI-provided --ignore patterns merged with .gitignore/.graphosignore
-  , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
-  , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
-  , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
+   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
+   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
+   , cfgRtsApplied         :: Bool                      -- ^ Internal: set by parent to prevent re-execution
+   , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
    } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -170,9 +171,10 @@ defaultConfig = PipelineConfig
   , cfgNoSemanticEdges    = False
   , cfgForceSemanticEdges = False
   , cfgIgnorePatterns     = []
-  , cfgRtsProfile         = False
-  , cfgMaxHeap            = Nothing
-  , cfgLspConcurrency     = 2
+   , cfgRtsProfile         = False
+   , cfgMaxHeap            = Nothing
+   , cfgRtsApplied         = False
+   , cfgLspConcurrency     = 2
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

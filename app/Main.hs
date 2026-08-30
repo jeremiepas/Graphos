@@ -7,6 +7,7 @@ import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
+import Control.Exception (SomeException, catch, try)
 import Data.Maybe (isJust)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
@@ -107,7 +108,7 @@ reexecWithRTS profile heapStr = do
   exePath <- getExecutablePath
   let rtsFlags = concat
         [ if profile then "-s -hT" else ""
-        , if not (null rtsFlags) && isJust heapStr then " " else ""
+        , if profile && isJust heapStr then " " else ""
         , maybe "" (\sz -> "-M" ++ sz) heapStr
         ]
   case rtsFlags of
@@ -127,12 +128,14 @@ main = do
   -- Strip RTS flags passed by parent process (+RTS ... --) but preserve CLI flags
   let args = case break (== "--") rawArgs of
         (_, []) -> rawArgs  -- No "--" found, use all args
-        (rts, _:rest) -> rest  -- Drop RTS flags and "--", keep rest
+        (_, _:rest) -> rest  -- Drop RTS flags and "--", keep rest
+  -- Check if re-executed by parent (skip re-execution if already applied)
+  let rtsApplied = "--rts-applied" `elem` rawArgs
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
       let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
-      when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
+      when (not rtsApplied && (cfgRtsProfile config || isJust (cfgMaxHeap config))) $
         reexecWithRTS (cfgRtsProfile config) heapStr
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
