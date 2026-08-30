@@ -16,6 +16,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Text (Text)
+import Data.Text.Short (fromText, toText)
 import Graphos.Domain.Types (Confidence(..), Edge(..), EdgeId(..), FileType(CodeFile), Node(..), Relation(Imports))
 import Graphos.Domain.Types.Graph (LabeledGraph(..))
 import qualified Graphos.Domain.Graph as DG
@@ -94,8 +95,8 @@ resolveDots p = T.unpack (T.intercalate "/" (go (T.splitOn "/" (T.pack p)) []))
     go (x : rest) acc
       | x == "."   = go rest acc
       | x == ".."  = case acc of
-          [] -> go rest acc
-          ("" : _) -> go rest acc
+           [] -> go rest acc
+           ("" : _) -> go rest acc
            (_ : restAcc) -> go rest restAcc
       | otherwise  = go rest (x : acc)
 
@@ -159,11 +160,11 @@ specifierOf line =
 -- on-disk ground-truth oracle cannot resolve bare specifiers to files.
 importPairsFrom :: Map.Map Text Node -> [Edge] -> Set.Set (FilePath, FilePath)
 importPairsFrom nodes edges = Set.fromList
-  [ (normalise (T.unpack (nodeSourceFile (nodes Map.! edgeSource e)))
-   , normalise (T.unpack (nodeSourceFile (nodes Map.! edgeTarget e))))
+  [ (normalise (T.unpack (toText (nodeSourceFile (nodes Map.! edgeSource e))))
+   , normalise (T.unpack (toText (nodeSourceFile (nodes Map.! edgeTarget e)))))
   | e <- edges
   , edgeRelation e == Imports
-  , not (T.isPrefixOf "external:" (nodeSourceFile (nodes Map.! edgeTarget e)))
+  , not (T.isPrefixOf "external:" (toText (nodeSourceFile (nodes Map.! edgeTarget e))))
   ]
 
 graphImportPairs :: LabeledGraph -> Set.Set (FilePath, FilePath)
@@ -242,8 +243,8 @@ runRealCorpus = do
 -- | A minimal graph with an optional @imports@ edge between two file nodes.
 simpleGraphWithEdge :: Bool -> FilePath -> FilePath -> LabeledGraph
 simpleGraphWithEdge withEdge fileA fileB =
-  let nodeA = Node "a" "A" CodeFile (T.pack fileA) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-      nodeB = Node "b" "B" CodeFile (T.pack fileB) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+  let nodeA = Node "a" (fromText "A") CodeFile (fromText (T.pack fileA)) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+      nodeB = Node "b" (fromText "B") CodeFile (fromText (T.pack fileB)) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
       edge  = Edge (EdgeId "e1") "a" "b" Imports 1.0 (Confidence 1.0) Nothing
       (edges, adjFwd, adjBack) = if withEdge
         then ( Map.singleton (EdgeId "e1") edge
