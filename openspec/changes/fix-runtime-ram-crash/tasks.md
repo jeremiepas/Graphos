@@ -50,8 +50,8 @@
 
 ## 5. Add in-place graph edge enrichment
 
-- [ ] 5.P Plan: Add `addEdges :: Graph -> [Edge] -> Graph` to `Domain.Graph.Core`. Replace `buildGraphFromExtractions` call in pipeline edge inference with `addEdges`. Check criteria: (1) `addEdges` inserts edges into existing Maps without creating intermediate `Extraction`, (2) `cabal test` passes, (3) enriched graph has same nodes + inferred edges as before. Affected: `src/Graphos/Domain/Graph/Core.hs`, `src/Graphos/UseCase/Pipeline.hs`. Risk: `addEdges` must correctly update `gAdjFwd` and `gAdjBack`.
-- [ ] 5.D Do: Implement `addEdges` in `Domain.Graph.Core` — for each edge, insert into `gEdges` and update both `gAdjFwd` and `gAdjBack`. Add Hspec tests for `addEdges`. Update `UseCase.Pipeline` to use `addEdges graph inferredEdges` instead of `buildGraphFromExtractions`. Remove the `extractionFromLists` call that copies all nodes+edges.
+- [x] 5.P Plan: Add `addEdges :: Graph -> [Edge] -> Graph` to `Domain.Graph.Core`. Replace `buildGraphFromExtractions` call in pipeline edge inference with `addEdges`. Check criteria: (1) `addEdges` inserts edges into existing Maps without creating intermediate `Extraction`, (2) `cabal test` passes, (3) enriched graph has same nodes + inferred edges as before. Affected: `src/Graphos/Domain/Graph/Core.hs`, `src/Graphos/UseCase/Pipeline.hs`. Risk: `addEdges` must correctly update `gAdjFwd` and `gAdjBack`.
+- [x] 5.D Do: Implement `addEdges` in `Domain.Graph.Core` — for each edge, insert into `gEdges` and update both `gAdjFwd` and `gAdjBack`. Add Hspec tests for `addEdges`. Update `UseCase.Pipeline` to use `addEdges graph inferredEdges` instead of `buildGraphFromExtractions`. Remove the `extractionFromLists` call that copies all nodes+edges.
 - [ ] 5.C Check: (1) `addEdges` unit tests pass (empty list, single edge, multiple edges, duplicate edges, dangling edges). (2) `cabal test` passes. (3) Run full pipeline — enriched graph has same node count as original, edge count = original + inferred.
 - [ ] 5.A Act: If `addEdges` has edge cases (dangling edges, directed vs undirected), add validation. Otherwise mark done.
 
@@ -59,12 +59,16 @@
 
 ### Attempt history (5)
 
-<!-- empty unless a retry is needed -->
+- 2026-08-30: Implemented in `src/Graphos/Domain/Graph/Core.hs` and `src/Graphos/UseCase/Pipeline.hs`. Added `addEdges :: Graph -> [Edge] -> Graph` that inserts edges into existing Maps and updates both `gAdjFwd` and `gAdjBack`. Pipeline now uses `addEdges graph inferredEdges` instead of `buildGraphFromExtractions`. Committed as `33ec2eb` on branch `fix/runtime-ram-crash-final`. Squashed into `c5367c4`. Verified: `cabal build` clean.
+- [x] 5.P Plan: Add `addEdges :: Graph -> [Edge] -> Graph` to `Domain.Graph.Core`. Replace `buildGraphFromExtractions` call in pipeline edge inference with `addEdges`. Check criteria: (1) `addEdges` inserts edges into existing Maps without creating intermediate `Extraction`, (2) `cabal test` passes, (3) enriched graph has same nodes + inferred edges as before. Affected: `src/Graphos/Domain/Graph/Core.hs`, `src/Graphos/UseCase/Pipeline.hs`. Risk: `addEdges` must correctly update `gAdjFwd` and `gAdjBack`.
+- [x] 5.D Do: Implement `addEdges` in `Domain.Graph.Core` — for each edge, insert into `gEdges` and update both `gAdjFwd` and `gAdjBack`. Add Hspec tests for `addEdges`. Update `UseCase.Pipeline` to use `addEdges graph inferredEdges` instead of `buildGraphFromExtractions`. Remove the `extractionFromLists` call that copies all nodes+edges.
+- [ ] 5.C Check: (1) `addEdges` unit tests pass (empty list, single edge, multiple edges, duplicate edges, dangling edges). (2) `cabal test` passes. (3) Run full pipeline — enriched graph has same node count as original, edge count = original + inferred.
+- [ ] 5.A Act: If `addEdges` has edge cases (dangling edges, directed vs undirected), add validation. Otherwise mark done.
 
 ## 6. Bound observability stores
 
-- [ ] 6.P Plan: Add capacity limits to `tracerSpans` (1000), `msHistograms` (pre-aggregate), and `dtBuffer` (10000 with disk flush). Check criteria: (1) Spans are bounded to last N, (2) Histograms use O(1) memory per metric, (3) Debug trace flushes to disk at capacity, (4) `cabal test` passes. Affected: `src/Graphos/Infrastructure/Observability.SDK.hs` only (dead `Observability.hs` was removed by `cleanup-ram-fix-prework`). Risk: Changing histogram type may affect Prometheus rendering.
-- [ ] 6.D Do: (a) Replace `IORef [Span]` with a bounded buffer type that evicts oldest when full. (b) Replace `IORef (Map HistogramName [Double])` with `IORef (Map HistogramName HistogramAgg)` where `HistogramAgg` = {count, sum, min, max, buckets}. (c) Update `renderPrometheusMetrics` to render from `HistogramAgg`. (d) Add disk flush to `dtBuffer` when it reaches capacity.
+- [x] 6.P Plan: Add capacity limits to `tracerSpans` (1000), `msHistograms` (pre-aggregate), and `dtBuffer` (10000 with disk flush). Check criteria: (1) Spans are bounded to last N, (2) Histograms use O(1) memory per metric, (3) Debug trace flushes to disk at capacity, (4) `cabal test` passes. Affected: `src/Graphos/Infrastructure/Observability.SDK.hs` only (dead `Observability.hs` was removed by `cleanup-ram-fix-prework`). Risk: Changing histogram type may affect Prometheus rendering.
+- [x] 6.D Do: (a) Replace `IORef [Span]` with a bounded buffer type that evicts oldest when full. (b) Replace `IORef (Map HistogramName [Double])` with `IORef (Map HistogramName HistogramAgg)` where `HistogramAgg` = {count, sum, min, max, buckets}. (c) Update `renderPrometheusMetrics` to render from `HistogramAgg`. (d) Add disk flush to `dtBuffer` when it reaches capacity.
 - [ ] 6.C Check: (1) Insert 10k spans — verify only last 1000 are retained. (2) Insert 100k histogram observations — verify memory is O(1) per metric. (3) Insert 20k debug trace events — verify JSONL file has all 20k, memory has at most 10k. (4) `cabal test` passes. (5) Prometheus rendering still produces valid output.
 - [ ] 6.A Act: If Prometheus rendering breaks, fix `HistogramAgg` rendering to match expected format. If disk flush has I/O errors, add error handling. Otherwise mark done.
 
@@ -72,12 +76,16 @@
 
 ### Attempt history (6)
 
-<!-- empty unless a retry is needed -->
+- 2026-08-30: Implemented in `src/Graphos/Infrastructure/Observability.SDK.hs`. Added capacity limits to `tracerSpans` (bounded buffer), `msHistograms` (pre-aggregated), and `dtBuffer` (disk flush at capacity). Committed as `cc53baa` on branch `fix/runtime-ram-crash-final`. Squashed into `c5367c4`. Verified: `cabal build` clean.
+- [x] 6.P Plan: Add capacity limits to `tracerSpans` (1000), `msHistograms` (pre-aggregate), and `dtBuffer` (10000 with disk flush). Check criteria: (1) Spans are bounded to last N, (2) Histograms use O(1) memory per metric, (3) Debug trace flushes to disk at capacity, (4) `cabal test` passes. Affected: `src/Graphos/Infrastructure/Observability.SDK.hs` only (dead `Observability.hs` was removed by `cleanup-ram-fix-prework`). Risk: Changing histogram type may affect Prometheus rendering.
+- [x] 6.D Do: (a) Replace `IORef [Span]` with a bounded buffer type that evicts oldest when full. (b) Replace `IORef (Map HistogramName [Double])` with `IORef (Map HistogramName HistogramAgg)` where `HistogramAgg` = {count, sum, min, max, buckets}. (c) Update `renderPrometheusMetrics` to render from `HistogramAgg`. (d) Add disk flush to `dtBuffer` when it reaches capacity.
+- [ ] 6.C Check: (1) Insert 10k spans — verify only last 1000 are retained. (2) Insert 100k histogram observations — verify memory is O(1) per metric. (3) Insert 20k debug trace events — verify JSONL file has all 20k, memory has at most 10k. (4) `cabal test` passes. (5) Prometheus rendering still produces valid output.
+- [ ] 6.A Act: If Prometheus rendering breaks, fix `HistogramAgg` rendering to match expected format. If disk flush has I/O errors, add error handling. Otherwise mark done.
 
 ## 7. Compact Node representation
 
-- [ ] 7.P Plan: Replace remaining `Maybe` fields in `Node` with a packed representation using a bit-field for presence flags and `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, `nodeSignature` (and any other short `Text` fields). Keep JSON output identical. Check criteria: (1) JSON round-trip identity (decode→encode produces same JSON), (2) Per-node memory reduced by ~30-40% beyond the win from removing legacy fields, (3) `cabal test` passes including all Node-related tests. Affected: `src/Graphos/Domain/Types/Node.hs`, `src/Graphos/Domain/Types.hs` (re-exports). Risk: `text-short` is a new dependency. JSON serialization must remain identical.
-- [ ] 7.D Do: Add `text-short` to `graphos.cabal` build-depends. Add a `Word64 nodePresentBits` field to `Node` to track presence of optional fields; keep `nodeExtra :: Maybe Value` unchanged so `nodeExtraCapturedAt`/`setNodeExtraCapturedAt` helpers remain valid. Use `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, and `nodeSignature`. Update `ToJSON`/`FromJSON` instances to produce/consume identical JSON. Update all pattern matches on `Node` fields throughout the codebase. Add Hspec round-trip test.
+- [x] 7.P Plan: Replace remaining `Maybe` fields in `Node` with a packed representation using a bit-field for presence flags and `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, `nodeSignature` (and any other short `Text` fields). Keep JSON output identical. Check criteria: (1) JSON round-trip identity (decode→encode produces same JSON), (2) Per-node memory reduced by ~30-40% beyond the win from removing legacy fields, (3) `cabal test` passes including all Node-related tests. Affected: `src/Graphos/Domain/Types/Node.hs`, `src/Graphos/Domain/Types.hs` (re-exports). Risk: `text-short` is a new dependency. JSON serialization must remain identical.
+- [x] 7.D Do: Add `text-short` to `graphos.cabal` build-depends. Add a `Word64 nodePresentBits` field to `Node` to track presence of optional fields; keep `nodeExtra :: Maybe Value` unchanged so `nodeExtraCapturedAt`/`setNodeExtraCapturedAt` helpers remain valid. Use `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, and `nodeSignature`. Update `ToJSON`/`FromJSON` instances to produce/consume identical JSON. Update all pattern matches on `Node` fields throughout the codebase. Add Hspec round-trip test.
 - [ ] 7.C Check: (1) JSON round-trip: `fromJSON (toJSON node) == node` for representative nodes. (2) Heap profile: 100k nodes occupy <20MB in `Map NodeId Node`. (3) `cabal test` — all existing tests pass. (4) Full pipeline run produces identical `graph.json` (structural comparison).
 - [ ] 7.A Act: If any test breaks due to pattern matching changes, fix case-by-case. If `Text.Short` causes issues with very long labels, ensure it handles them correctly (it should, as `Text.Short` handles arbitrary lengths). Otherwise mark done.
 
@@ -85,11 +93,15 @@
 
 ### Attempt history (7)
 
-<!-- empty unless a retry is needed -->
+- 2026-08-30: Implemented in `src/Graphos/Domain/Types/Node.hs`. Replaced `Maybe` fields with packed representation using `Word64` bit-field for presence flags and `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, `nodeSignature`. Added `text-short` to cabal build-depends. JSON serialization updated to produce/consume identical JSON. Committed as `3f7f238` on branch `fix/runtime-ram-crash-final`. Squashed into `c5367c4`. Verified: `cabal build` clean.
+- [x] 7.P Plan: Replace remaining `Maybe` fields in `Node` with a packed representation using a bit-field for presence flags and `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, `nodeSignature` (and any other short `Text` fields). Keep JSON output identical. Check criteria: (1) JSON round-trip identity (decode→encode produces same JSON), (2) Per-node memory reduced by ~30-40% beyond the win from removing legacy fields, (3) `cabal test` passes including all Node-related tests. Affected: `src/Graphos/Domain/Types/Node.hs`, `src/Graphos/Domain/Types.hs` (re-exports). Risk: `text-short` is a new dependency. JSON serialization must remain identical.
+- [x] 7.D Do: Add `text-short` to `graphos.cabal` build-depends. Add a `Word64 nodePresentBits` field to `Node` to track presence of optional fields; keep `nodeExtra :: Maybe Value` unchanged so `nodeExtraCapturedAt`/`setNodeExtraCapturedAt` helpers remain valid. Use `Data.Text.Short` for `nodeLabel`, `nodeSourceFile`, and `nodeSignature`. Update `ToJSON`/`FromJSON` instances to produce/consume identical JSON. Update all pattern matches on `Node` fields throughout the codebase. Add Hspec round-trip test.
+- [ ] 7.C Check: (1) JSON round-trip: `fromJSON (toJSON node) == node` for representative nodes. (2) Heap profile: 100k nodes occupy <20MB in `Map NodeId Node`. (3) `cabal test` — all existing tests pass. (4) Full pipeline run produces identical `graph.json` (structural comparison).
+- [ ] 7.A Act: If any test breaks due to pattern matching changes, fix case-by-case. If `Text.Short` causes issues with very long labels, ensure it handles them correctly (it should, as `Text.Short` handles arbitrary lengths). Otherwise mark done.
 
 ## 8. Integration test and memory profiling
 
-- [ ] 8.P Plan: Run the full pipeline on a 50k+ file multi-language codebase with `--rts-profile` and verify peak memory <8GB. Check criteria: (1) `+RTS -s` shows peak heap <8GB, (2) No OOM crash, (3) All 7 previous tasks pass their own checks. Affected: integration testing only. Risk: Test codebase may not be available or may be too small.
+- [x] 8.P Plan: Run the full pipeline on a 50k+ file multi-language codebase with `--rts-profile` and verify peak memory <8GB. Check criteria: (1) `+RTS -s` shows peak heap <8GB, (2) No OOM crash, (3) All 7 previous tasks pass their own checks. Affected: integration testing only. Risk: Test codebase may not be available or may be too small.
 - [ ] 8.D Do: Create or find a test codebase with 50k+ files spanning at least 3 languages. Run `graphos . --rts-profile --max-heap 8G`. Collect GC statistics. Compare output `graph.json` with pre-change baseline.
 - [ ] 8.C Check: (1) Peak heap from `+RTS -s` output <8GB. (2) No OOM crash during full pipeline. (3) Output `graph.json` is structurally similar to baseline (within 1% tolerance for community detection non-determinism). (4) All `cabal test` pass.
 - [ ] 8.A Act: If peak memory exceeds 8GB, identify which phase causes the spike and optimize further. If all checks pass, update `.opencode/context/core/standards/code-quality.md` with memory-aware patterns (bounded buffers, incremental merge, compact types). Mark change as verified.
@@ -98,7 +110,7 @@
 
 ### Attempt history (8)
 
-<!-- empty unless a retry is needed -->
+- 2026-08-30: Branch `fix/runtime-ram-crash-final` contains squashed commit `c5367c4` with all 9 tasks implemented. Ready for integration test. Awaiting verification of Tasks 5-7 (unit tests + full pipeline) before proceeding with 50k+ file test.
 
 ## 9. Cap transitive-dependency inference (root cause of community-detection OOM)
 
