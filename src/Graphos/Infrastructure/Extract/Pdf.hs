@@ -15,6 +15,8 @@ module Graphos.Infrastructure.Extract.Pdf
 import Control.Exception (SomeException, catch)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.Bits ((.|.))
+import Data.Text.Short (fromText, toText)
 import System.Directory (doesFileExist)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
@@ -22,7 +24,7 @@ import System.Process (readProcessWithExitCode)
 import Graphos.Domain.Config.Extraction (Granularity(..), PdfExtractionMode(..))
 import Graphos.Domain.Config.Core (GraphosConfig(..), gcPdfExtraction)
 import Graphos.Domain.PdfStructure (parsePdfStructure, pdfStructureToExtraction)
-import Graphos.Domain.Types (Extraction, extractionFromLists, extractionNodes, extractionEdges, Node(..), FileType(..))
+import Graphos.Domain.Types (Extraction, extractionFromLists, extractionNodes, extractionEdges, Node(..), FileType(..), bitNodeLineStart, bitNodeKind)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), cfgGraphosConfig)
 import Graphos.Infrastructure.Logging (LogEnv, logDebug, logInfo, logWarn)
 
@@ -106,17 +108,18 @@ pdfStubNode filePath =
       dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       nid = T.pack (show dirHash) <> "_paper_" <> name
-  in Node
-       { nodeId           = nid
-       , nodeLabel        = name
-       , nodeFileType     = PaperFile
-       , nodeSourceFile   = T.pack filePath
-       , nodeLineStart    = Just 1
-       , nodeLineEnd      = Nothing
-       , nodeSignature    = Nothing
-       , nodeCommunityId  = Nothing
-       , nodeDegree       = Nothing
-       , nodeIsBridge     = Nothing
-       , nodeExtra        = Nothing
-       , nodeKind         = Just "File"
-       }
+   in Node
+        { nodeId           = nid
+        , nodeLabel        = fromText name
+        , nodeFileType     = PaperFile
+        , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeLineStart    = Just 1
+        , nodeLineEnd      = Nothing
+        , nodeSignature    = Nothing
+        , nodeCommunityId  = Nothing
+        , nodeDegree       = Nothing
+        , nodeIsBridge     = Nothing
+        , nodeExtra        = Nothing
+        , nodeKind         = Just (fromText "File")
+        , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
+        }

@@ -22,6 +22,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types (NodeId, Node(..))
 import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..))
@@ -76,11 +77,10 @@ refineEdges Semantic nodeMap edges = filter keepEdge edges
       case rel of
         "contains" ->
           let tgtNode = Map.lookup tgt nodeMap
-              tgtLabel = maybe tgt nodeLabel tgtNode
-          in not (isTrivia tgtLabel || isSingleTokenTypeParam tgtLabel)
-                && case tgtNode of
-                     Just n -> maybe False (\d -> d > 1 || T.length (nodeLabel n) <= 200) (nodeDegree n)
-                     Nothing -> True
+              tgtLabel = maybe tgt (toText . nodeLabel) tgtNode
+              pass = not (isTrivia tgtLabel || isSingleTokenTypeParam tgtLabel)
+              check = maybe True (\n -> maybe False (\d -> d > 1 || T.length (toText (nodeLabel n)) <= 200) (nodeDegree n)) tgtNode
+          in pass && check
         _ -> True
 
 -- | Collapse self-edges: remove edges where source == target.

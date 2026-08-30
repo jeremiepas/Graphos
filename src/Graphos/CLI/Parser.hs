@@ -29,6 +29,7 @@ module Graphos.CLI.Parser
 import Options.Applicative
 import Data.Text (Text)
 import GHC.Conc (numCapabilities)
+import Data.Char (toLower)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
@@ -36,6 +37,7 @@ import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
+import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), parsePattern)
 
 data Command
   = Run PipelineConfig
@@ -103,9 +105,15 @@ pipelineOpts = PipelineConfig
     <*> option auto (long "otel-shutdown-timeout" <> value 10 <> help "OTel shutdown timeout in seconds (default: 10)")
     <*> switch (long "vision" <> help "Enable image analysis via vision LLM")
      <*> switch (long "no-observability" <> help "Disable all observability (no tracing, metrics, or log shipping)")
-      <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
-      <*> pure defaultIngestConfig
-      <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
+       <*> optional (option granularityReader (long "granularity" <> metavar "LEVEL" <> help "Extraction granularity: fine|function|file (default: function; overrides config)"))
+       <*> pure defaultIngestConfig
+       <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
+        <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
+         <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
+          <*> (map (\s -> AnnotatedPattern (parsePattern s) False 3) <$> many (strOption (long "ignore" <> metavar "GLOB" <> help "Additional gitignore-style ignore pattern (can be specified multiple times)")))
+         <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
+          <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
+         <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
@@ -113,6 +121,25 @@ granularityReader = eitherReader $ \s -> case s of
   "function" -> Right GranularityFunction
   "file"     -> Right GranularityFile
   other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
+
+heapSizeReader :: String -> Either String Int
+heapSizeReader s = case span (`notElem` ['G','g','M','m']) s of
+  (num, sfx@(_:_)) -> case reads num of
+    [(n, "")] -> case sfx of
+      'G':_ -> Right (round (n * 1024 :: Double))
+      'g':_ -> Right (round (n * 1024 :: Double))
+      'M':_ -> Right (round n)
+      'm':_ -> Right (round n)
+      _ -> Left $ "Cannot parse heap size: " ++ s
+  _ -> case reads s of
+    [(n, "")] -> Right (round n)
+    _ -> Left $ "Cannot parse heap size: " ++ s ++ ". Expected a number with optional G/M suffix (e.g. 1G, 512M, 2048)"
+
+edgeModeReader :: ReadM EdgeMode
+edgeModeReader = eitherReader $ \s -> case s of
+  "semantic" -> Right Semantic
+  "all"      -> Right All
+  other      -> Left $ "Unknown edge mode: " ++ other ++ ". Expected semantic or all"
 
 -- | Shared query-family flags: --graph, --budget, --json, --label-width, --edges.
 -- Reused by query/path/explain/symbols/neighbors so every command in the family
@@ -123,7 +150,7 @@ commonQueryOptsP = CommonQueryOpts
   <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
   <*> switch (long "json" <> help "Output as JSON")
   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
-  <*> flag Semantic All (long "edges" <> help "Edge mode: semantic (default) or all")
+  <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
 
 queryOpts :: Parser Command
@@ -236,12 +263,12 @@ subgraphOpts = SubgraphCmd
 
 commandOpts :: Parser Command
 commandOpts = subparser
-  ( command "query" (info queryOpts (progDesc "Query the knowledge graph"))
+  ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
   <> command "cypher" (info cypherOpts (progDesc "Run a read-only openCypher/GQL query"))
-  <> command "path"  (info pathOpts (progDesc "Find shortest path between two nodes"))
-  <> command "explain" (info explainOpts (progDesc "Explain a node"))
-  <> command "symbols" (info symbolsOpts (progDesc "Look up an exact symbol by name"))
-  <> command "neighbors" (info neighborsOpts (progDesc "Expand neighborhood around a node"))
+  <> command "path"  (info (pathOpts <**> helper) (progDesc "Find shortest path between two nodes"))
+  <> command "explain" (info (explainOpts <**> helper) (progDesc "Explain a node"))
+  <> command "symbols" (info (symbolsOpts <**> helper) (progDesc "Look up an exact symbol by name"))
+  <> command "neighbors" (info (neighborsOpts <**> helper) (progDesc "Expand neighborhood around a node"))
   <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
   <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
@@ -294,29 +321,30 @@ renderCommandReference = unlines $
   , "  --granularity LEVEL           fine|function|file"
   , "  --threads, -j N / --edge-density MODE"
   , "  --resolution FLOAT / --mcp GRAPH_JSON"
+  , "  --ignore GLOB                 Additional ignore pattern (repeatable)"
   , ""
   , "graphos query QUESTION          Query the knowledge graph"
   , "  --dfs / --budget N / --graph FILE"
-  , "  --json / --label-width N / --edges"
+  , "  --json / --label-width N / --edges MODE"
   , ""
   , "graphos cypher QUERY            Read-only openCypher/GQL query"
   , "  --graph FILE / --budget N / --json"
   , ""
   , "graphos path FROM TO             Find shortest path"
   , "  --graph FILE / --budget N / --json"
-  , "  --label-width N / --edges"
+  , "  --label-width N / --edges MODE"
   , ""
   , "graphos explain NODE            Explain a node"
   , "  --graph FILE / --budget N / --json"
-  , "  --label-width N / --edges"
+  , "  --label-width N / --edges MODE"
   , ""
   , "graphos symbols NAME            Look up symbol by name"
   , "  --graph FILE / --budget N / --json"
-  , "  --label-width N / --edges"
+  , "  --label-width N / --edges MODE"
   , ""
   , "graphos neighbors NODE          Expand neighborhood (id or display name)"
   , "  --depth N / --graph FILE / --budget N"
-  , "  --json / --label-width N / --edges"
+  , "  --json / --label-width N / --edges MODE"
   , ""
   , "graphos ingest FILE             Ingest single file"
   , "  --embed / --no-embed / --output, -o DIR"

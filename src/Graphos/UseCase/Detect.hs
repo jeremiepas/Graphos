@@ -160,8 +160,9 @@ findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = d
                (subFiles, subExc) <- findAllFilesWithExclusions scanRoot path shouldIgnoreFn extMap ignorePatterns
                pure (subFiles, subExc)
       else if isSupportedWith entry extMap
-             then pure ([path], emptyExclusionCounts)
-             else pure ([], emptyExclusionCounts)
+              && not (shouldIgnoreFn ignorePatterns path)
+              then pure ([path], emptyExclusionCounts)
+              else pure ([], emptyExclusionCounts)
     ) entries
   let (files, excs) = unzip results
       totalExc = foldr addExclusionCounts emptyExclusionCounts excs

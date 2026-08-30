@@ -27,6 +27,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import Data.Ord (Down(..))
 
 import Graphos.Domain.Types
@@ -103,7 +104,7 @@ classifyComplexity query g =
       lower = T.toLower query
       -- Count matching nodes
       matches = [nid | (nid, n) <- Map.toList (gNodes g)
-                      , any (`T.isInfixOf` T.toLower (nodeLabel n)) terms]
+                       , any (`T.isInfixOf` T.toLower (toText (nodeLabel n))) terms]
       matchCount = length matches
       -- Check for architectural keywords
       archKeywords = ["overview", "architecture", "structure", "how does"
@@ -334,7 +335,7 @@ relevanceScore nid g terms =
 -- | Score a node's label against query terms (integer version for sorting)
 matchScore :: Node -> [Text] -> Int
 matchScore node terms =
-  let lower = T.toLower (nodeLabel node)
+  let lower = T.toLower (toText (nodeLabel node))
   in sum [1 | t <- terms, T.isInfixOf t lower]
 
 -- | Get node data by NodeId, defaulting to unknown
@@ -343,9 +344,9 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
   where
     unknownNode = Node
       { nodeId           = nid
-      , nodeLabel        = "unknown"
+      , nodeLabel        = fromText "unknown"
       , nodeFileType     = CodeFile
-      , nodeSourceFile   = ""
+      , nodeSourceFile   = fromText ""
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -354,6 +355,7 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
       , nodeLineEnd      = Nothing
       , nodeKind         = Nothing
       , nodeSignature    = Nothing
+      , nodePresentBits  = 0
       }
 
 -- | Build a reverse map: NodeId → CommunityId
