@@ -144,3 +144,24 @@
 ### Attempt history (9)
 
 - 2026-08-27: Implemented in `src/Graphos/UseCase/Infer.hs`. Added `maxTransitiveFanIn = 64`, `maxTransitiveDeps = 50000`. `inferTransitiveDeps` now builds `boundedHubs` (Set of targets with ≤64 importers), filters `depEdges` to bounded hubs, and applies `take maxTransitiveDeps`. Verified: `cabal build lib:graphos` clean; full `graphos-test` = 627 examples, 0 failures, 3 pending (includes 5 new `inferTransitiveDeps` cases). Note: the Hackage index was missing in this ephemeral env — ran `cabal update` to restore it before building.
+
+---
+
+## Delegation instructions for haskelldev
+
+**Branch:** `fix/runtime-ram-crash-final` — all implementation is pushed to origin.
+
+**Priority order for verification:**
+1. Task 1.C/A — Verify RTS profiling flags (`--rts-profile`, `--max-heap`)
+2. Task 3.C/A — Verify batch extraction with GC
+3. Task 4.C/A — Verify bounded LSP concurrency
+4. Task 5.C/A — Verify bounded observability stores (tracerSpans, msHistograms, dtBuffer)
+5. Task 6.C/A — Verify bounded observability stores (duplicate of Task 5)
+6. Task 7.C/A — Verify compact Node representation (JSON round-trip, memory profile)
+7. Task 8.D — Run integration test on 50k+ file codebase
+8. Task 8.C/A — Verify integration test results
+
+**After verification:**
+- Create PR from `fix/runtime-ram-crash-final` to `main`
+- Find a reviewer for merge
+- Update Paperclip issue AVI-140 with PR link
