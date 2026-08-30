@@ -18,6 +18,11 @@ SHALL be embedded in the document as well**, so the file works from `file://` wi
 access whatsoever. The document SHALL reference no external origin. The streaming-to-handle write
 approach SHALL be preserved to avoid building the full HTML in memory.
 
+#### Scenario: HTML works without a server
+
+- **WHEN** `graph.html` is opened directly via `file://` protocol
+- **THEN** the viewer loads and renders the overview phase without any network fetch for graph data
+
 #### Scenario: Works from file:// without a server
 
 - **WHEN** `graph.html` is opened directly from the filesystem with networking disabled
@@ -55,6 +60,21 @@ gains one.
 - **THEN** edge rendering is suppressed during the gesture through the renderer's interaction
   settings
 
+#### Scenario: Initial load under 3 seconds
+
+- **WHEN** a 78K-node / 8.5K-community graph.html is loaded in a browser
+- **THEN** the overview phase is interactive (pannable, zoomable) within 3 seconds of page load
+
+#### Scenario: Drill-down under 500ms
+
+- **WHEN** a user clicks a community dot in the overview
+- **THEN** the drill-down expansion completes and member nodes are interactive within 500ms
+
+#### Scenario: Pan/zoom stays above 30fps
+
+- **WHEN** a user pans or zooms the overview phase with 8,519 community dots rendered
+- **THEN** the frame rate remains above 30fps (edges hidden during drag via `hideEdgesOnDrag`)
+
 ### Requirement: Two-phase level-of-detail rendering
 
 The HTML viewer SHALL render the graph at a user-selected depth level — `Overview` (one dot per
@@ -82,6 +102,21 @@ multi-level depth state (see `html-depth-selector`).
 - **THEN** the number of rendered node-level dots does not exceed the member count of the single
   expanded community, and is strictly less than the total node count for graphs with more than one
   community
+
+#### Scenario: Overview phase renders community dots only
+
+- **WHEN** the HTML viewer loads a graph with 78,529 nodes across 8,519 communities
+- **THEN** the overview phase renders exactly one dot per community (8,519 dots) and zero individual node dots
+
+#### Scenario: Drill-down expands a single community
+
+- **WHEN** a user clicks a community dot in the overview phase
+- **THEN** that community's members are rendered as individual node dots with their internal edges and any bridge edges to other communities, and the remaining communities stay collapsed as dots
+
+#### Scenario: No simultaneous full-graph render
+
+- **WHEN** the viewer is in any phase (overview or drill-down)
+- **THEN** the number of rendered node-level dots SHALL NOT exceed the member count of the single expanded community plus the community dots, and SHALL be strictly less than the total node count for graphs with more than one community
 
 ## ADDED Requirements
 
