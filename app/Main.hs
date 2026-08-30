@@ -106,17 +106,17 @@ reexecWithRTS profile heapStr = do
   originalArgs <- getArgs
   exePath <- getExecutablePath
   let rtsFlags = concat
-        [ if profile then "+RTS -s -hT" else ""
+        [ if profile then "-s -hT" else ""
         , if not (null rtsFlags) && isJust heapStr then " " else ""
-        , maybe "" (\sz -> "+RTS -M " ++ sz) heapStr
+        , maybe "" (\sz -> "-M" ++ sz) heapStr
         ]
   case rtsFlags of
     "" -> pure ()
     _ -> do
-      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: " ++ rtsFlags
+      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ rtsFlags
       hFlush stderr
       let (cleanArgs, _, _) = stripRTSFlags originalArgs
-          finalArgs = filter (not . null) (words rtsFlags) ++ ["--"] ++ cleanArgs
+          finalArgs = words ("+RTS " ++ rtsFlags ++ " --") ++ cleanArgs
       let spec = proc exePath finalArgs
       _ <- createProcess spec
       exitSuccess
@@ -124,11 +124,14 @@ reexecWithRTS profile heapStr = do
 main :: IO ()
 main = do
   rawArgs <- getArgs
-  let args = dropWhile (/= "--") rawArgs
+  -- Strip RTS flags passed by parent process (+RTS ... --) but preserve CLI flags
+  let args = case break (== "--") rawArgs of
+        (_, []) -> rawArgs  -- No "--" found, use all args
+        (rts, _:rest) -> rest  -- Drop RTS flags and "--", keep rest
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
-      let heapStr = fmap (\mb -> show mb ++ "M") (cfgMaxHeap config)
+      let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
       when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
         reexecWithRTS (cfgRtsProfile config) heapStr
       -- Load graphos.yaml config and merge with CLI defaults
