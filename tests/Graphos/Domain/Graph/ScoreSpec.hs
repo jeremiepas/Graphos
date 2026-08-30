@@ -6,6 +6,7 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
@@ -16,9 +17,9 @@ import Graphos.UseCase.Query (queryGraphWithIndexScored)
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -27,6 +28,7 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 spec :: Spec

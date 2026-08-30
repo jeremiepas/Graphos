@@ -27,6 +27,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData(..))
@@ -99,8 +100,8 @@ instance ToJSON ResearchView where
 instance ToJSON ResearchNode where
   toJSON n = object
     [ "id"             .= nodeId (rnNode n)
-    , "label"          .= nodeLabel (rnNode n)
-    , "source_file"    .= nodeSourceFile (rnNode n)
+    , "label"          .= toText (nodeLabel (rnNode n))
+    , "source_file"    .= toText (nodeSourceFile (rnNode n))
     , "community"      .= nodeCommunityId (rnNode n)
     , "discovered_by"  .= rnDiscoveredBy n
     , "best_score"     .= rnBestScore n

@@ -26,7 +26,7 @@ module Graphos.Domain.Graph.Core
 
 import Control.DeepSeq (NFData(..))
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
-import Data.Bits (xor, shiftR, (.&.))
+import Data.Bits (xor, shiftR, (.&.), (.|.))
 import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -34,6 +34,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import Data.Word (Word32)
 
 import Graphos.Domain.Types
@@ -211,26 +212,27 @@ makeStubNode filePath =
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       hashPrefix = T.pack $ show dirHash
       nodeId' = hashPrefix <> T.pack "_" <> name
-  in Node
-    { nodeId           = nodeId'
-    , nodeLabel        = name
-    , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack filePath
-    , nodeLineStart    = Nothing
-    , nodeCommunityId  = Nothing
-    , nodeDegree       = Nothing
-    , nodeIsBridge     = Nothing
-    , nodeExtra        = Nothing
-    , nodeLineEnd      = Nothing
-    , nodeKind         = Nothing
-    , nodeSignature    = Nothing
-    }
+   in Node
+     { nodeId           = nodeId'
+     , nodeLabel        = fromText name
+     , nodeFileType     = CodeFile
+      , nodeSourceFile   = fromText (T.pack filePath)
+     , nodeLineStart    = Nothing
+     , nodeCommunityId  = Nothing
+     , nodeDegree       = Nothing
+     , nodeIsBridge     = Nothing
+     , nodeExtra        = Nothing
+     , nodeLineEnd      = Nothing
+     , nodeKind         = Nothing
+     , nodeSignature    = Nothing
+     , nodePresentBits  = 0
+     }
 
 -- | Check if a node is a file-level hub (synthetic AST node)
 isFileNode :: Graph -> Node -> Bool
 isFileNode g n =
-  let label = nodeLabel n
-      srcFile = nodeSourceFile n
+  let label = toText (nodeLabel n)
+      srcFile = toText (nodeSourceFile n)
       nid = nodeId n
       fwd = Map.findWithDefault Set.empty nid (gAdjFwd g)
       bwd = Map.findWithDefault Set.empty nid (gAdjBack g)
@@ -249,7 +251,7 @@ isFileNode g n =
 -- | Check if a node is a concept node (injected semantic annotation)
 isConceptNode :: Node -> Bool
 isConceptNode n =
-  let src = nodeSourceFile n
+  let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
