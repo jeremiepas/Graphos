@@ -63,9 +63,12 @@ estimateTokens t = max 1 (T.length t `div` 4)
 -- | Render a QueryResponse as human-readable text with budget-aware truncation.
 renderQueryResponseText :: Int -> QueryResponse -> Text
 renderQueryResponseText budget resp =
-  let verdictLine = "Verdict: " <> showVerdict (qrespVerdict resp)
-                     <> " (best score: " <> T.pack (show (qrespBestScore resp)) <> ")"
-                     <> " [hash: " <> qrespHash resp <> "]"
+  let omittedLine = if qrespOmittedNodes resp > 0
+                       then " [omitted: " <> T.pack (show (qrespOmittedNodes resp)) <> " nodes]"
+                       else ""
+      verdictLine = "Verdict: " <> showVerdict (qrespVerdict resp)
+                          <> " (best score: " <> T.pack (show (qrespBestScore resp)) <> ")"
+                          <> " [hash: " <> qrespHash resp <> "]" <> omittedLine
       nodes = qrespNodes resp
       edges = qrespEdges resp
       suggestions = qrespSuggestions resp

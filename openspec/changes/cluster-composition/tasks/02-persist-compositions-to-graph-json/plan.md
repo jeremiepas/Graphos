@@ -9,7 +9,7 @@ description: "Plan: add gCompositions to Graph, wire into pipeline, implement lo
 
 **Task slug**: `02-persist-compositions-to-graph-json`
 **Attempt**: 1
-**Status**: pending
+**Status**: completed
 
 ## Summary
 
@@ -93,4 +93,4 @@ cabal test --test-options="-tag load"              # if tags used
 
 ## Result
 
-Pending implementation.
+All subtasks completed. `gCompositions :: Maybe (Map CommunityId CommunityComposition)` added to `Graph` record. Pipeline wires `computeCompositions` post-Leiden. Load parses `compositions` from `graph.json` with graceful fallback. Build passes with `-Wall -Werror`. Tests pass (633 examples, 0 failures).

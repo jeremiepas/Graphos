@@ -9,7 +9,7 @@ description: "Plan: define CommunityComposition record, ToJSON/FromJSON, compute
 
 **Task slug**: `01-community-composition-record-computation`
 **Attempt**: 1
-**Status**: pending
+**Status**: completed
 
 ## Summary
 
@@ -95,4 +95,4 @@ cabal test
 
 ## Result
 
-Pending implementation.
+All subtasks completed. `CommunityComposition` record added to `src/Graphos/Domain/Community.hs` with `computeCompositions` function. JSON instances use snake_case field names. Build passes with `-Wall -Werror`. Tests pass (633 examples, 0 failures).
