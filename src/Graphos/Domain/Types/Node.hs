@@ -32,7 +32,7 @@ module Graphos.Domain.Types.Node
 import Control.DeepSeq (NFData(..))
 import Data.Bits ((.&.), (.|.), complement, shiftL)
 import Data.Maybe (isJust)
-import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), object, (.=), (.:), (.:?), (.:!=), (.!=), withObject, withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), object, (.=), (.:), (.:?), (.!=), withObject, withText)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
