@@ -15,7 +15,7 @@ module Graphos.Infrastructure.Wiring
   ) where
 
 import Control.Monad (when)
-import Data.Dynamic (Dynamic, toDyn, fromDynamic)
+import Data.Dynamic (toDyn, fromDynamic)
 import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Foreign.Ptr (Ptr)
