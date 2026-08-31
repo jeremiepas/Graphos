@@ -1,7 +1,7 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "executor/qwen3.8-executor",
-  "small_model": "executor/qwen3.8-executor",
+  "model": "llama/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S",
+  "small_model": "llama/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S",
   "compaction": { "auto": true, "tail_turns": 5 },
   "experimental": { "mcp_timeout": 60000, "primary_tools": ["edit", "bash"] },
   "repositories": {
@@ -22,8 +22,8 @@
         "chunkTimeout": 600000
       },
       "models": {
-        "qwen3.6-35b-a3b": {
-          "name": "qwen3.6-35b-a3b",
+        "unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S": {
+          "name": "unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S",
           "limit": {
             "context": 131172,
             "output": 8192
@@ -34,19 +34,6 @@
           },
           "tool_call": true,
           "reasoning": true
-        },
-        "qwen3.6-35b-a3b-nothink": {
-          "name": "qwen3.6-35b-a3b-nothink",
-          "limit": {
-            "context": 131172,
-            "output": 8192
-          },
-          "modalities": {
-            "input": ["text", "image"],
-            "output": ["text"]
-          },
-          "tool_call": true,
-          "reasoning": false
         }
       }
     },
