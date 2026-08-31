@@ -18,7 +18,7 @@ import Data.Char (isAlpha, isAlphaNum)
 import Data.List (find, isPrefixOf)
 import Data.Bits ((.|.))
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (makeStubNode)

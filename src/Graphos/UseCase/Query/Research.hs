@@ -18,7 +18,7 @@ import qualified Data.Set as Set
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
   ( NodeId, Node(..)
