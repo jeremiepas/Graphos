@@ -1,0 +1,95 @@
+name: Graphos Repo Analyzer
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_urls:
+        description: 'Comma-separated list of GitHub repo URLs to analyze'
+        required: true
+        default: 'https://github.com/Effect-TS/core,https://github.com/Effect-TS/cli'
+      graphos_version:
+        description: 'Graphos version tag (e.g., v0.1.0, main branch)'
+        required: false
+        default: 'latest'
+      deep_mode:
+        description: 'Enable deep extraction mode'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        repo: ${{ fromJSON(github.event.inputs.repo_urls || '[]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Nix (for fallback build)
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Download graphos binary
+        run: |
+          if [ "${{ github.event.inputs.graphos_version }}" = "latest" ]; then
+            TAG=$(curl -s https://api.github.com/repos/Graphos/graphos/releases/latest | jq -r .tag_name)
+          else
+            TAG="${{ github.event.inputs.graphos_version }}"
+          fi
+          echo "Downloading graphos $TAG"
+          if curl -sL "https://github.com/Graphos/graphos/releases/download/$TAG/graphos-linux-x86_64" \
+            -o graphos 2>/dev/null && chmod +x graphos; then
+            echo "Downloaded prebuilt binary"
+          else
+            echo "Prebuilt binary download failed, building from source via Nix..."
+            nix-shell --run "cabal update && cabal build -j4" --pure
+            GRAPHOS_BIN=$(nix-shell --run "cabal list-bin graphos" --pure)
+            cp "$GRAPHOS_BIN" graphos
+            chmod +x graphos
+          fi
+
+      - name: Clone target repo
+        run: |
+          REPO_URL="${{ matrix.repo }}"
+          REPO_NAME=$(basename "$REPO_URL" | sed 's/\.git$//')
+          git clone "$REPO_URL" "$REPO_NAME"
+
+      - name: Run graphos + measure time & memory
+        run: |
+          REPO_NAME=$(basename "${{ matrix.repo }}" | sed 's/\.git$//')
+          OUTPUT_DIR="graphos-out-$REPO_NAME"
+          mkdir -p "$OUTPUT_DIR"
+
+          /usr/bin/time -v -o "${OUTPUT_DIR}/time-memory.txt" \
+            ./graphos "$REPO_NAME" \
+            -o "$OUTPUT_DIR" \
+            --no-viz \
+            ${{ github.event.inputs.deep_mode == true && '--deep' || '' }}
+
+          echo "Results in $OUTPUT_DIR/"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphos-results-${{ github.run_number }}-${{ matrix.repo }}
+          path: graphos-out-*/
+
+      - name: Output metrics
+        run: |
+          REPO_NAME=$(basename "${{ matrix.repo }}" | sed 's/\.git$//')
+          OUTPUT_DIR="graphos-out-$REPO_NAME"
+          echo "## Graphos Analysis Results"
+          echo "### $REPO_NAME"
+          echo ""
+          echo "**Execution Time:** $(grep 'Elapsed (wall clock)' "${OUTPUT_DIR}/time-memory.txt" | cut -d: -f2- | tr -d ' ')"
+          echo "**Max Resident Memory:** $(grep 'Maximum resident' "${OUTPUT_DIR}/time-memory.txt" | cut -d: -f2- | tr -d ' ') KB"
+          echo ""
+          echo "**Graph nodes:** $(jq '.stats.nodes // 0' "${OUTPUT_DIR}/graph.json")"
+          echo "**Graph edges:** $(jq '.stats.edges // 0' "${OUTPUT_DIR}/graph.json")"
+          echo "**Communities:** $(jq '.stats.communities // 0' "${OUTPUT_DIR}/graph.json")"
