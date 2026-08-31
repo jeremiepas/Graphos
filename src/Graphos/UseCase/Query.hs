@@ -78,15 +78,15 @@ data QueryResult = QueryResult
 -- O(k×log N + hits) term matching, O(V_subgraph + E_subgraph) traversal.
 -- This is the optimized path — 10-100× faster on large graphs.
 queryGraphWithIndex :: Graph -> GraphIndex -> Text -> Text -> Int -> QueryResult
-queryGraphWithIndex g idx query mode _budget =
+queryGraphWithIndex g idx query mode budget =
   let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
       -- O(k×log N) lookup via inverted index instead of O(N) full-scan
       matched = findMatchingNodes terms idx
       startNodes = take 5 [nid | (nid, _score) <- matched, _score > 0]
       -- Direct BFS on adjacency map — no FGL conversion needed
       subgraphNodes = if mode == T.pack "dfs"
-                      then Set.unions [depthFirstSearch g nid 6 | nid <- startNodes]
-                      else bfsFromSet idx (Set.fromList startNodes) 3
+                       then Set.unions [depthFirstSearch g nid 6 budget | nid <- startNodes]
+                       else bfsFromSet idx (Set.fromList startNodes) 3 budget
       nodeLabels = [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList (gNodes g), nid `Set.member` subgraphNodes]
       nodeLblMap = Map.fromList nodeLabels
       edges = [ ( fromMaybeLbl src nodeLblMap
@@ -131,7 +131,7 @@ queryGraphWithIndexScored g idx query mode budget =
 -- | Scored query path using a prebuilt CachedFGL — no per-call FGL rebuild.
 -- The dfs-mode expansion reads from the cached FGL instead of rebuilding it.
 queryGraphWithIndexScoredCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Int -> QueryResponse
-queryGraphWithIndexScoredCached g idx cfg query mode _budget =
+queryGraphWithIndexScoredCached g idx cfg query mode budget =
   let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
       -- Scored term matching via inverted index
       matched :: [(NodeId, Int)]
@@ -160,8 +160,8 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
         case verdict of
           NoMatch -> Set.empty
           _       -> if mode == T.pack "dfs"
-                     then Set.unions [depthFirstSearchWithCached cfg nid 6 | nid <- topNodes]
-                     else bfsFromSet idx (Set.fromList topNodes) 3
+                     then Set.unions [depthFirstSearchWithCached cfg nid 6 budget | nid <- topNodes]
+                      else bfsFromSet idx (Set.fromList topNodes) 3 budget
       -- Gather scored nodes in the expanded subgraph
       nodeMap :: Map NodeId Node
       nodeMap = gNodes g
@@ -179,9 +179,11 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
         , nid `Map.member` scoreMap
         , Just n <- [Map.lookup nid nodeMap]
         ]
-      -- Sort score-descending
+      -- Sort score-descending and cap to budget
       scoredNodesSorted :: [ScoredNode]
-      scoredNodesSorted = sortOn (negate . snScore) scoredNodes
+      scoredNodesSorted = take budget $ sortOn (negate . snScore) scoredNodes
+      omittedNodes :: Int
+      omittedNodes = length scoredNodes - length scoredNodesSorted
       -- Edges within the subgraph
       nodeLblMap :: Map NodeId Text
       nodeLblMap = Map.fromList [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
@@ -212,7 +214,7 @@ queryGraphWithIndexScoredCached g idx cfg query mode _budget =
          , qrespNodes        = scoredNodesSorted
          , qrespEdges        = edges
          , qrespSuggestions  = suggestions
-         , qrespOmittedNodes = 0
+          , qrespOmittedNodes = omittedNodes
          , qrespOmittedEdges = 0
          }
 

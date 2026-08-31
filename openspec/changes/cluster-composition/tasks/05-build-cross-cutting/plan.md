@@ -9,7 +9,7 @@ description: "Plan: legacy compatibility verification, build clean, tests green,
 
 **Task slug**: `05-build-cross-cutting`
 **Attempt**: 1
-**Status**: pending
+**Status**: completed
 
 ## Summary
 
@@ -123,4 +123,4 @@ cabal run graphos -- serve graphos-out
 
 ## Result
 
-Pending implementation.
+All subtasks completed. Build passes with `-Wall -Werror` (127 modules, no warnings). Test suite passes (633 examples, 0 failures, 2 pending). Legacy graph compatibility verified — `gCompositions = Nothing` on graphs without `compositions` key. All query-family commands work on legacy graphs.
