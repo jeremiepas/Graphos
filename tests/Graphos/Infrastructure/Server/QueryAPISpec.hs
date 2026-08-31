@@ -17,6 +17,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as BSL
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph, gNodes)
 import Graphos.Domain.Graph.Index (buildIndexWithLabels)
@@ -46,9 +47,9 @@ import Graphos.Infrastructure.Server.QueryAPI (apiApp)
 testNode :: NodeId -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -57,6 +58,7 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 testEdge :: NodeId -> NodeId -> Edge

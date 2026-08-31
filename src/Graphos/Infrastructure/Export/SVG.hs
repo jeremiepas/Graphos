@@ -7,6 +7,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
@@ -61,10 +62,10 @@ renderNode positions commMap nid n =
     Nothing -> ""
     Just (x, y) ->
       let color = communityColor commMap nid
-          labelT = T.take 15 (nodeLabel n)
-      in T.concat
+          labelT = T.take 15 (toText (nodeLabel n))
+       in T.concat
         [ "  <circle class='node' cx='", T.pack (show x), "' cy='", T.pack (show y)
-        , "' r='5' fill='", color, "' title='", nodeLabel n, "'/>"
+        , "' r='5' fill='", color, "' title='", toText (nodeLabel n), "'/>"
         , "\n  <text class='label' x='", T.pack (show (x + 7)), "' y='", T.pack (show (y + 3))
         , "'>", escapeSvg labelT, "</text>\n"
         ]

@@ -4,39 +4,42 @@ import Test.Hspec
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.UseCase.Extract (resolveGranularity, isStubExtraction)
 
 pdfStubNode :: T.Text -> Node
 pdfStubNode path = Node
   { nodeId = path
-  , nodeLabel = path
+  , nodeLabel = fromText path
   , nodeFileType = PaperFile
-  , nodeSourceFile = path
+  , nodeSourceFile = fromText path
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind = Just "File"
+  , nodeKind = Just (fromText "File")
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodePresentBits = 0
   }
 
 makeStubNode :: T.Text -> Node
 makeStubNode path = Node
   { nodeId = path
-  , nodeLabel = path
+  , nodeLabel = fromText path
   , nodeFileType = CodeFile
-  , nodeSourceFile = path
+  , nodeSourceFile = fromText path
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind = Just "File"
+  , nodeKind = Just (fromText "File")
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodePresentBits = 0
   }
 
 spec :: Spec
@@ -86,18 +89,18 @@ spec = do
 
     it "returns False for a non-File single node with no edges" $ do
       let nonFileNode = makeStubNode "test.hs"
-          nonFile = extractionFromLists [nonFileNode { nodeKind = Just "Function" }] []
+          nonFile = extractionFromLists [nonFileNode { nodeKind = Just (fromText "Function") }] []
       isStubExtraction nonFile `shouldBe` False
 
     it "single File node with 0 edges is stub" $ do
       let node = makeStubNode "test"
-          n = node { nodeKind = Just "File" }
+          n = node { nodeKind = Just (fromText "File") }
           ext = extractionFromLists [n] []
       isStubExtraction ext `shouldBe` True
 
     it "single non-File node with 0 edges is not stub" $ do
       let node = makeStubNode "test"
-          n = node { nodeKind = Just "Function" }
+          n = node { nodeKind = Just (fromText "Function") }
           ext = extractionFromLists [n] []
       isStubExtraction ext `shouldBe` False
 

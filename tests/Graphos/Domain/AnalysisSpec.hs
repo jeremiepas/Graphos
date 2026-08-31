@@ -2,6 +2,7 @@ module Graphos.Domain.AnalysisSpec where
 
 import Test.Hspec
 import Data.Text (Text)
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion)
@@ -23,7 +24,7 @@ edgeIdFrom :: Text -> Text -> EdgeId
 edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
 
 testNode :: Text -> Node
-testNode nid = Node nid nid CodeFile "test.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0) Nothing

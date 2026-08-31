@@ -41,6 +41,7 @@ import Data.Graph.Inductive.Query.BFS (esp)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph.Core (Graph(..), isFileNode, isConceptNode)
+import Data.Text.Short (toText)
 import Graphos.Domain.Graph.FGL (FGLGraph, FGLNodeLabel, FGLEdgeLabel)
 
 -- ───────────────────────────────────────────────
@@ -94,7 +95,7 @@ godNodes g topN =
   let degrees = [(nid, Set.size (neighbors' g nid), n) | (nid, n) <- Map.toList (gNodes g)]
       filtered = filter (\(_, deg, n) -> not (isFileNode g n) && not (isConceptNode n) && deg > 0) degrees
       sorted = sortOn (\(_, deg, _) -> negate deg) filtered
-  in take topN [GodNode { gnId = nid, gnLabel = nodeLabel n, gnEdges = deg }
+  in take topN [GodNode { gnId = nid, gnLabel = toText (nodeLabel n), gnEdges = deg }
                 | (nid, deg, n) <- sorted]
   where
     neighbors' g' nid =

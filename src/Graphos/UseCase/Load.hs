@@ -33,6 +33,7 @@ import qualified Data.Vector as V
 import Data.Map.Strict (Map, empty)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText)
 import System.Directory (doesFileExist)
 import System.FilePath (takeDirectory, (</>), isAbsolute)
 
@@ -245,7 +246,7 @@ parseNodeItem strict v =
       degree <- optionalInt "degree" km
       isBridge <- optionalBool "is_bridge" km
       extra <- optionalValue "extra" km
-      pure (Node nid label ft src lineStart lineEnd signature communityId kind degree isBridge extra, degraded)
+      pure (Node nid (fromText label) ft (fromText src) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra 0, degraded)
     _ -> Left $ "graph.json: node entry must be an object"
 
 -- | Parse one edge entry. Returns the edge plus whether its relation was

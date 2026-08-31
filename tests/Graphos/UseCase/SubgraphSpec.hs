@@ -5,6 +5,8 @@ import Data.Aeson (Value(..))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Maybe (isJust)
+import Data.Text.Short (ShortText, fromText)
+import Data.Word (Word64)
 import Test.Hspec
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -21,7 +23,7 @@ spec = do
       gNodes (extractSubgraph g config) `shouldBe` Map.empty
 
     it "extracts a single node as core if it matches patterns" $ do
-      let n1 = Node "n1" "module1" CodeFile "src/file1.hs" Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+      let n1 = Node "n1" (fromText "module1") CodeFile (fromText "src/file1.hs") (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           node1Id = nodeId n1
           g = LabeledGraph (Map.singleton node1Id n1) Map.empty Map.empty Map.empty
           config = SubgraphConfig [SubsystemConfig "core" ["src/file1.hs"]] 1 False
@@ -32,7 +34,7 @@ spec = do
         Nothing -> expectationFailure "node should be in subgraph"
 
     it "tags a core node with tier, subsystem and layer" $ do
-      let n1 = Node "n1" "module1" CodeFile "src/UseCase/Core.hs" Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+      let n1 = Node "n1" (fromText "module1") CodeFile (fromText "src/UseCase/Core.hs") (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           g = LabeledGraph (Map.singleton (nodeId n1) n1) Map.empty Map.empty Map.empty
           config = SubgraphConfig [SubsystemConfig "svc" ["src/UseCase/*"]] 1 False
           subgraph = extractSubgraph g config
@@ -49,9 +51,9 @@ spec = do
       -- a.ts imports './b.ts' (quoted); both files exist as nodes; no real edge.
       let fileA = "src/a.ts"
           fileB = "src/b.ts"
-          imp = Node "i1" "import { x } from './b.ts'" CodeFile fileA Nothing Nothing Nothing Nothing (Just "Import") Nothing Nothing Nothing
-          nodeA = Node "a" "A" CodeFile fileA Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-          nodeB = Node "b" "B" CodeFile fileB Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+          imp = Node "i1" (fromText "import { x } from './b.ts'") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Just (fromText "Import")) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
+          nodeA = Node "a" (fromText "A") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
+          nodeB = Node "b" (fromText "B") CodeFile (fromText fileB) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           g = LabeledGraph
                 (Map.fromList [(nodeId imp, imp), (nodeId nodeA, nodeA), (nodeId nodeB, nodeB)])
                 Map.empty Map.empty Map.empty
@@ -71,8 +73,8 @@ spec = do
 
     it "creates external nodes for package imports with no source file" $ do
       let fileA = "src/a.ts"
-          imp = Node "i1" "import { x } from 'pkg-lib'" CodeFile fileA Nothing Nothing Nothing Nothing (Just "Import") Nothing Nothing Nothing
-          nodeA = Node "a" "A" CodeFile fileA Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+          imp = Node "i1" (fromText "import { x } from 'pkg-lib'") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Just (fromText "Import")) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
+          nodeA = Node "a" (fromText "A") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           g = LabeledGraph
                 (Map.fromList [(nodeId imp, imp), (nodeId nodeA, nodeA)])
                 Map.empty Map.empty Map.empty
@@ -83,9 +85,9 @@ spec = do
     it "does not duplicate existing imports edges (derivation is idempotent)" $ do
       let fileA = "src/a.ts"
           fileB = "src/b.ts"
-          imp = Node "i1" "import { x } from './b.ts'" CodeFile fileA Nothing Nothing Nothing Nothing (Just "Import") Nothing Nothing Nothing
-          nodeA = Node "a" "A" CodeFile fileA Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-          nodeB = Node "b" "B" CodeFile fileB Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+          imp = Node "i1" (fromText "import { x } from './b.ts'") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Just (fromText "Import")) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
+          nodeA = Node "a" (fromText "A") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
+          nodeB = Node "b" (fromText "B") CodeFile (fromText fileB) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           edge = Edge (EdgeId "e1") (nodeId nodeA) (nodeId nodeB) Imports 1.0 (Confidence 1.0) Nothing
           g = LabeledGraph
                 (Map.fromList [(nodeId imp, imp), (nodeId nodeA, nodeA), (nodeId nodeB, nodeB)])
@@ -103,8 +105,8 @@ spec = do
     it "keeps the same import edge set with derivation disabled when real edges exist" $ do
       let fileA = "src/a.ts"
           fileB = "src/b.ts"
-          nodeA = Node "a" "A" CodeFile fileA Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-          nodeB = Node "b" "B" CodeFile fileB Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+          nodeA = Node "a" (fromText "A") CodeFile (fromText fileA) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
+          nodeB = Node "b" (fromText "B") CodeFile (fromText fileB) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           edge = Edge (EdgeId "e1") (nodeId nodeA) (nodeId nodeB) Imports 1.0 (Confidence 1.0) Nothing
           g = LabeledGraph
                 (Map.fromList [(nodeId nodeA, nodeA), (nodeId nodeB, nodeB)])

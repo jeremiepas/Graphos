@@ -2,10 +2,15 @@
 -- All types are defined in focused sub-modules; this module re-exports
 -- everything for backward compatibility.
 module Graphos.Domain.Types
-  ( -- * Node types
+  (     -- * Node types
     NodeId
   , Node(..)
   , FileType(..)
+  , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
+  , bitNodeCommunityId, bitNodeKind, bitNodeDegree
+  , bitNodeIsBridge, bitNodeExtra
+  , computePresentBits
+  , isFieldPresent, setFieldPresent, clearFieldPresent
 
     -- * Edge types
   , EdgeId(..)
@@ -100,7 +105,14 @@ module Graphos.Domain.Types
   , IncrementalWriter(..)
   ) where
 
-import Graphos.Domain.Types.Node (NodeId, Node(..), FileType(..))
+import Graphos.Domain.Types.Node
+  ( NodeId, Node(..), FileType(..)
+  , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
+  , bitNodeCommunityId, bitNodeKind, bitNodeDegree
+  , bitNodeIsBridge, bitNodeExtra
+  , computePresentBits
+  , isFieldPresent, setFieldPresent, clearFieldPresent
+  )
 import Graphos.Domain.Types.Writer (IncrementalWriter(..))
 import Graphos.Domain.Types.Edge (EdgeId(..), Edge(..), Relation(..), relationToText, textToRelation, Confidence(..))
 import Graphos.Domain.Types.GraphFile (graphFileSchemaVersion, graphFileTopLevelKeys, graphFileRequiredKeys)
