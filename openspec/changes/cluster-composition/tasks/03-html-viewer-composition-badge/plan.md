@@ -9,7 +9,7 @@ description: "Plan: add composition badge rendering in HTML viewer for community
 
 **Task slug**: `03-html-viewer-composition-badge`
 **Attempt**: 1
-**Status**: pending
+**Status**: completed
 
 ## Summary
 
@@ -88,4 +88,4 @@ cabal run graphos -- serve <path-to-graph-dir>
 
 ## Result
 
-Pending implementation.
+All subtasks completed. `formatCompositionBadge` function added to `assets/viewer/viewer.js` — renders `🔧 N / 📄 M / 🌉 K`. `.legend-badge` CSS class added to `assets/viewer/viewer.css`. Badge conditionally rendered when compositions data is present; omitted on legacy graphs. Build passes with `-Wall -Werror`. Tests pass (633 examples, 0 failures).

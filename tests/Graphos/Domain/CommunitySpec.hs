@@ -8,10 +8,15 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
-
+import Data.List (sortOn)
+import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
+import Data.Aeson.Types (Object)
+import Data.Aeson.Key (unKey)
+import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (buildGraph)
-import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, Resolution(..), defaultResolution)
+import Graphos.Domain.Graph (buildGraph, gCompositions)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
+import Graphos.Domain.Types.Edge (Relation(References, Contains, Calls), Confidence(..))
 
 spec :: Spec
 spec = do
@@ -163,9 +168,234 @@ spec = do
       -- Should still produce valid communities even with few iterations
       Map.size commMap `shouldSatisfy` (>= 1)
 
+  describe "CommunityComposition" $ do
+    it "round-trips through JSON" $ do
+      let comp = CommunityComposition 5 3 1 (Just "function") 0.6 2
+          json = toJSON comp
+          parsed :: Either String CommunityComposition
+          parsed = eitherDecode (encode json)
+      parsed `shouldBe` Right comp
+
+    it "uses snake_case field names in JSON" $ do
+      let comp = CommunityComposition 1 2 3 (Just "module") 0.5 0
+          json = toJSON comp
+          keys = case json of
+            Object m -> map unKey (KeyMap.keys m)
+            _ -> error "expected Object"
+      keys `shouldContain` ["code", "doc", "other", "dominant_kind", "mixed_ratio", "code_doc_edges"]
+
+    it "handles absent dominant_kind on legacy graphs" $ do
+      let legacyJson = object [ "code" .= (1 :: Int)
+                              , "doc" .= (2 :: Int)
+                              , "other" .= (0 :: Int)
+                              , "mixed_ratio" .= (0.5 :: Double)
+                              , "code_doc_edges" .= (1 :: Int)
+                              ]
+          parsed :: Either String CommunityComposition
+          parsed = eitherDecode (encode legacyJson)
+      case parsed of
+        Right comp -> ccDominantKind comp `shouldBe` Nothing
+        Left err   -> error ("unexpected parse error: " ++ err)
+
+  describe "computeCompositions" $ do
+    it "pure-code community: ccMixedRatio = 0" $ do
+      let ext = extractionFromLists
+            [ testNode "a", testNode "b", testNode "c"
+            , testNode "d", testNode "e"
+            ]
+            []
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b","c","d","e"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccCodeCount comp `shouldBe` 5
+      ccDocCount comp `shouldBe` 0
+      ccMixedRatio comp `shouldBe` 0.0
+
+    it "balanced mixed community: ccMixedRatio = 1" $ do
+      let ext = extractionFromLists
+            [ testNode "a", testNode "b", testNode "c"
+            , testDocNode "doc1", testDocNode "doc2", testDocNode "doc3"
+            ]
+            []
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b","c","doc1","doc2","doc3"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccCodeCount comp `shouldBe` 3
+      ccDocCount comp `shouldBe` 3
+      ccMixedRatio comp `shouldBe` 1.0
+
+    it "paper counted as doc" $ do
+      let ext = extractionFromLists
+            [ testNode "a", testNode "b"
+            , testNodeWithFile "paper1" PaperFile
+            , testNodeWithFile "paper2" PaperFile
+            , testNodeWithFile "paper3" PaperFile
+            ]
+            []
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b","paper1","paper2","paper3"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccCodeCount comp `shouldBe` 2
+      ccDocCount comp `shouldBe` 3
+      ccMixedRatio comp `shouldBe` 0.5
+
+    it "composition counts match membership" $ do
+      let ext = extractionFromLists
+            [ testNode "a", testNode "b", testNode "c", testNode "d"
+            , testNode "e", testNode "f", testNode "g"
+            , testDocNode "doc1", testDocNode "doc2", testDocNode "doc3", testDocNode "doc4"
+            , testNodeWithFile "img1" ImageFile
+            , testNodeWithFile "img2" ImageFile
+            , testNodeWithFile "img3" ImageFile
+            ]
+            []
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b","c","d","e","f","g","doc1","doc2","doc3","doc4","img1","img2","img3"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccCodeCount comp `shouldBe` 7
+      ccDocCount comp `shouldBe` 4
+      ccOtherCount comp `shouldBe` 3
+      ccMixedRatio comp `shouldBe` (4 :: Double) / (7 :: Double)
+
+    it "cross-type edge count excludes non-References" $ do
+      let ext = extractionFromLists
+            [ testNode "a", testNode "b", testNode "c"
+            , testDocNode "doc1", testDocNode "doc2", testDocNode "doc3"
+            ]
+            [ testEdgeWithRelation References "a" "doc1"
+            , testEdgeWithRelation References "b" "doc2"
+            , testEdgeWithRelation References "c" "doc3"
+            , testEdgeWithRelation Contains "a" "b"
+            , testEdgeWithRelation Contains "doc1" "doc2"
+            , testEdgeWithRelation Calls "a" "doc1"
+            ]
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b","c","doc1","doc2","doc3"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccCodeDocEdges comp `shouldBe` 3
+
+    it "dominant kind ignores Nothing" $ do
+      let ext = extractionFromLists
+            [ testNodeWithKind "a" (Just "function")
+            , testNodeWithKind "b" (Just "function")
+            , testNodeWithKind "c" (Just "function")
+            , testNodeWithKind "d" Nothing
+            , testNodeWithKind "e" (Just "module")
+            , testNodeWithKind "f" (Just "module")
+            ]
+            []
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b","c","d","e","f"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccDominantKind comp `shouldBe` Just "function"
+
+    it "dominant kind is Nothing when all kinds are Nothing" $ do
+      let ext = extractionFromLists
+            [ testNodeWithKind "a" Nothing
+            , testNodeWithKind "b" Nothing
+            ]
+            []
+          g = buildGraph False ext
+          commMap = Map.fromList [(0, ["a","b"])]
+          comps = computeCompositions g commMap
+          comp = Map.findWithDefault (error "missing comp") 0 comps
+      ccDominantKind comp `shouldBe` Nothing
+
+    it "every community has a composition entry" $ do
+      let ext = extractionFromLists
+            [ testNode "a", testNode "b", testNode "c"
+            , testNode "d", testNode "e"
+            , testNode "f", testNode "g"
+            ]
+            [ testEdge "a" "b", testEdge "b" "c"
+            , testEdge "d" "e", testEdge "e" "f"
+            , testEdge "c" "d"
+            ]
+          g = buildGraph False ext
+          commMap = detectCommunities g
+          comps = computeCompositions g commMap
+      Map.size comps `shouldBe` Map.size commMap
+
+  describe "gCompositions legacy compatibility" $ do
+    it "legacy graph without compositions key loads with gCompositions = Nothing" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
+          g = buildGraph False ext
+      gCompositions g `shouldBe` Nothing
+
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node
-testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid = Node
+  { nodeId = nid
+  , nodeLabel = fromText nid
+  , nodeFileType = CodeFile
+  , nodeSourceFile = fromText "test.hs"
+  , nodeCommunityId = Nothing
+  , nodeDegree = Nothing
+  , nodeIsBridge = Nothing
+  , nodeExtra = Nothing
+  , nodeLineStart = Just 1
+  , nodeLineEnd = Nothing
+  , nodeKind = Nothing
+  , nodeSignature = Nothing
+  , nodePresentBits = 0
+  }
+
+testDocNode :: Text -> Node
+testDocNode nid = Node
+  { nodeId = nid
+  , nodeLabel = fromText nid
+  , nodeFileType = DocFile
+  , nodeSourceFile = fromText "test.md"
+  , nodeCommunityId = Nothing
+  , nodeDegree = Nothing
+  , nodeIsBridge = Nothing
+  , nodeExtra = Nothing
+  , nodeLineStart = Just 1
+  , nodeLineEnd = Nothing
+  , nodeKind = Nothing
+  , nodeSignature = Nothing
+  , nodePresentBits = 0
+  }
+
+testNodeWithKind :: Text -> Maybe Text -> Node
+testNodeWithKind nid kind = Node
+  { nodeId = nid
+  , nodeLabel = fromText nid
+  , nodeFileType = CodeFile
+  , nodeSourceFile = fromText "test.hs"
+  , nodeCommunityId = Nothing
+  , nodeDegree = Nothing
+  , nodeIsBridge = Nothing
+  , nodeExtra = Nothing
+  , nodeLineStart = Just 1
+  , nodeLineEnd = Nothing
+  , nodeKind = fmap fromText kind
+  , nodeSignature = Nothing
+  , nodePresentBits = 0
+  }
+
+testNodeWithFile :: Text -> FileType -> Node
+testNodeWithFile nid ft = Node
+  { nodeId = nid
+  , nodeLabel = fromText nid
+  , nodeFileType = ft
+  , nodeSourceFile = fromText "test.hs"
+  , nodeCommunityId = Nothing
+  , nodeDegree = Nothing
+  , nodeIsBridge = Nothing
+  , nodeExtra = Nothing
+  , nodeLineStart = Just 1
+  , nodeLineEnd = Nothing
+  , nodeKind = Nothing
+  , nodeSignature = Nothing
+  , nodePresentBits = 0
+  }
 
 -- | All-pairs edges over a node list (undirected clique).
 cliqueEdges :: [Text] -> [Edge]
@@ -181,3 +411,6 @@ edgeIdFrom src tgt = EdgeId (src <> "->" <> tgt)
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0) Nothing
+
+testEdgeWithRelation :: Relation -> Text -> Text -> Edge
+testEdgeWithRelation rel src tgt = Edge (edgeIdFrom src tgt) src tgt rel 1.0 (Confidence 1.0) Nothing
