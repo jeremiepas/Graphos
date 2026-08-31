@@ -122,7 +122,7 @@ findAllFiles dir = findAllFilesWith dir allSupportedExtensions
 
 -- | Find all files recursively using config-driven extension map
 findAllFilesWith :: FilePath -> Map FileCategory [String] -> IO [FilePath]
-findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir dir (\_ _ -> False) dir extMap []
+findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir dir (\_ _ _ -> False) dir extMap []
 
 -- | Find all files recursively using config-driven extension map and ignore patterns.
 -- The first argument is the scan root (for root-anchored ignore matching); the second
@@ -130,7 +130,7 @@ findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir dir (\_ _ -> False) 
 findAllFilesWithAndIgnore
   :: FilePath            -- ^ scan root, used to anchor build-output directory names
   -> FilePath            -- ^ current directory being walked
-  -> ([AnnotatedPattern] -> FilePath -> Bool)
+  -> (FilePath -> [AnnotatedPattern] -> FilePath -> Bool)
   -> FilePath            -- ^ unused legacy parameter (kept for backward compatibility)
   -> Map FileCategory [String]
   -> [AnnotatedPattern]
@@ -144,7 +144,7 @@ findAllFilesWithAndIgnore scanRoot dir shouldIgnoreFn _ extMap ignorePatterns =
 findAllFilesWithExclusions
   :: FilePath
   -> FilePath
-  -> ([AnnotatedPattern] -> FilePath -> Bool)
+  -> (FilePath -> [AnnotatedPattern] -> FilePath -> Bool)
   -> Map FileCategory [String]
   -> [AnnotatedPattern]
   -> IO ([FilePath], ExclusionCounts)
@@ -160,9 +160,9 @@ findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = d
                (subFiles, subExc) <- findAllFilesWithExclusions scanRoot path shouldIgnoreFn extMap ignorePatterns
                pure (subFiles, subExc)
       else if isSupportedWith entry extMap
-              && not (shouldIgnoreFn ignorePatterns path)
-              then pure ([path], emptyExclusionCounts)
-              else pure ([], emptyExclusionCounts)
+               && not (shouldIgnoreFn scanRoot ignorePatterns path)
+               then pure ([path], emptyExclusionCounts)
+               else pure ([], emptyExclusionCounts)
     ) entries
   let (files, excs) = unzip results
       totalExc = foldr addExclusionCounts emptyExclusionCounts excs
@@ -173,23 +173,24 @@ findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = d
 -- per-class accounting in the run report.
 classifyExclusion
   :: FilePath
-  -> ([AnnotatedPattern] -> FilePath -> Bool)
+  -> (FilePath -> [AnnotatedPattern] -> FilePath -> Bool)
   -> String
   -> FilePath
   -> FilePath
   -> [AnnotatedPattern]
   -> ExclusionCounts
-classifyExclusion scanRoot _ entry parentPath entryPath ignorePatterns
+classifyExclusion scanRoot shouldIgnoreFn entry parentPath entryPath ignorePatterns
   | entry `elem` depthIndependentIgnoreDirs = emptyExclusionCounts { excDepthIndependent = 1 }
   | entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot = emptyExclusionCounts { excRootAnchored = 1 }
   | otherwise =
-      let gitMatch = any (\ap -> apPriority ap == 1 && matches entryPath (apPattern ap)) ignorePatterns
-          graphosMatch = any (\ap -> apPriority ap == 2 && matches entryPath (apPattern ap)) ignorePatterns
+      let relPath = relativize scanRoot entryPath
+          gitMatch = any (\ap -> apPriority ap == 1 && matches relPath (apPattern ap)) ignorePatterns
+          graphosMatch = any (\ap -> apPriority ap == 2 && matches relPath (apPattern ap)) ignorePatterns
       in if graphosMatch
-           then emptyExclusionCounts { excGraphosignore = 1 }
-           else if gitMatch
-                  then emptyExclusionCounts { excGitignore = 1 }
-                  else emptyExclusionCounts { excUnexplained = 1 }
+            then emptyExclusionCounts { excGraphosignore = 1 }
+            else if gitMatch
+                   then emptyExclusionCounts { excGitignore = 1 }
+                   else emptyExclusionCounts { excUnexplained = 1 }
 
 -- | Add two exclusion counts records element-wise.
 addExclusionCounts :: ExclusionCounts -> ExclusionCounts -> ExclusionCounts
@@ -261,7 +262,7 @@ hardcodedIgnoreDirNames = rootAnchoredIgnoreDirs ++ depthIndependentIgnoreDirs
 -- Defaults the scan root to "." and derives the parent directory from the
 -- entry path. Prefer 'isIgnoredEntryRoot' when the scan root is known.
 isIgnoredEntry
-  :: ([AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
+  :: (FilePath -> [AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
   -> String        -- ^ directory entry (basename)
   -> FilePath       -- ^ full path to the directory entry
   -> [AnnotatedPattern]
@@ -282,7 +283,7 @@ isIgnoredEntry shouldIgnoreFn entry entryPath ignorePatterns =
 -- existing priority order (hardcoded 0, gitignore 1, graphosignore 2).
 isIgnoredEntryRoot
   :: FilePath       -- ^ scan root
-  -> ([AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
+  -> (FilePath -> [AnnotatedPattern] -> FilePath -> Bool)  -- ^ file-based ignore matcher
   -> String        -- ^ directory entry (basename)
   -> FilePath       -- ^ path of the parent directory containing the entry
   -> FilePath       -- ^ full path to the directory entry
@@ -294,7 +295,7 @@ isIgnoredEntryRoot scanRoot shouldIgnoreFn entry parentPath entryPath ignorePatt
         || (entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot)
   in if hardcodedMatch
        then not (negationCovers scanRoot ignorePatterns entryPath)
-       else shouldIgnoreFn ignorePatterns entryPath
+       else shouldIgnoreFn scanRoot ignorePatterns entryPath
 
 -- | Check if any negation pattern in the list matches the given path, or
 -- covers a path inside it (i.e. the directory is an ancestor of the
