@@ -6,6 +6,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List (uncons)
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph.Score (ScoredNode(..))
 import Graphos.UseCase.Query.Refine
@@ -13,9 +14,9 @@ import Graphos.UseCase.Query.Refine
 testNode :: Text -> Text -> Maybe Int -> Text -> Node
 testNode nid lbl line src = Node
   { nodeId           = nid
-  , nodeLabel        = lbl
+  , nodeLabel        = fromText lbl
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = src
+  , nodeSourceFile   = fromText src
   , nodeCommunityId  = Nothing
   , nodeDegree       = Just 3
   , nodeIsBridge     = Nothing
@@ -24,6 +25,7 @@ testNode nid lbl line src = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 testScoredNode :: Text -> Text -> Text -> Double -> ScoredNode

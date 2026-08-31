@@ -26,12 +26,13 @@ import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..))
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..), bitNodeKind)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
@@ -95,6 +96,7 @@ extractAll appEnv config detection = do
   imageEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
   paperNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
   paperEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  runningRef <- newIORef emptyExtraction :: IO (IORef Extraction)
 
   let totalFiles = length codeFiles + length docFiles + length officeFiles + length imageFiles + length paperFiles
   progressRef <- newIORef 0 :: IO (IORef Int)
@@ -117,6 +119,9 @@ extractAll appEnv config detection = do
       accumulate nodeRef edgeRef ext = do
         accumulateNodes nodeRef (Map.elems (extractionNodes ext))
         accumulateEdges edgeRef (Map.elems (extractionEdges ext))
+
+      mergeIntoRunning :: Extraction -> IO ()
+      mergeIntoRunning ext = modifyIORef' runningRef $ \running -> mergeExtractions running ext
 
   let officeThreadCount = max 1 (min 4 numThreads)
   unless (null officeFiles) $
@@ -145,6 +150,7 @@ extractAll appEnv config detection = do
               ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
               epPushExtractionStreaming ep config ext
               accumulate codeNodeMapRef codeEdgeAccRef ext
+              mergeIntoRunning ext
               logProgress
               ) chunk
             else do
@@ -155,6 +161,7 @@ extractAll appEnv config detection = do
                 (do ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
                     epPushExtractionStreaming ep config ext
                     accumulate codeNodeMapRef codeEdgeAccRef ext
+                    mergeIntoRunning ext
                     logProgress
                 )) chunk
           n <- readIORef codeNodeMapRef >>= evaluate . Map.size
@@ -164,26 +171,22 @@ extractAll appEnv config detection = do
 
         let fileGroups = groupByLSPServer (epLanguageServerCommands ep) lspFiles
             numGroups = length fileGroups
-        logInfo $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (threads: " ++ show numThreads ++ ")"
+            lspConcurrency = cfgLspConcurrency config
+        logInfo $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (lsp-concurrency: " ++ show lspConcurrency ++ ")"
         if numThreads <= 1
           then mapM_ (\grp -> do
             exts <- extractGroup appEnv absRoot config grp
-            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) exts
+            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext >> mergeIntoRunning ext) exts
             mapM_ (\_ -> logProgress) grp
             ) fileGroups
-          else if numGroups <= numThreads
-            then do
-              results <- mapConcurrently (extractGroup appEnv absRoot config) fileGroups
-              mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
-              mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
-            else do
-              sem <- newQSemN numThreads
-              results <- mapConcurrently (\grp -> bracket_
-                (waitQSemN sem 1)
-                (signalQSemN sem 1)
-                (extractGroup appEnv absRoot config grp)) fileGroups
-              mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext) (concat results)
-              mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
+          else do
+            sem <- newQSemN lspConcurrency
+            results <- mapConcurrently (\grp -> bracket_
+              (waitQSemN sem 1)
+              (signalQSemN sem 1)
+              (extractGroup appEnv absRoot config grp)) fileGroups
+            mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext >> mergeIntoRunning ext) (concat results)
+            mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
         performGC
 
         mapM_ (\fp -> do
@@ -191,6 +194,7 @@ extractAll appEnv config detection = do
           let ext = extractionFromLists [makeStubNode fp] []
           epPushExtractionStreaming ep config ext
           accumulate codeNodeMapRef codeEdgeAccRef ext
+          mergeIntoRunning ext
           logProgress
           ) stubFiles
       )
@@ -212,7 +216,7 @@ extractAll appEnv config detection = do
                   (waitQSemN sem 1)
                   (signalQSemN sem 1)
                   (epExtractOfficeFile ep config fp)) chunk
-                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate officeNodeMapRef officeEdgeAccRef ext) results
+                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate officeNodeMapRef officeEdgeAccRef ext >> mergeIntoRunning ext) results
                 mapM_ (\_ -> logProgress) chunk
                 n <- readIORef officeNodeMapRef >>= evaluate . Map.size
                 _ <- evaluate n
@@ -239,7 +243,7 @@ extractAll appEnv config detection = do
                   (waitQSemN sem 1)
                   (signalQSemN sem 1)
                   (epExtractDocFile ep fp)) chunk
-                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext) results
+                mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext >> mergeIntoRunning ext) results
                 n <- readIORef docNodeMapRef >>= evaluate . Map.size
                 _ <- evaluate n
                 performGC
@@ -253,7 +257,10 @@ extractAll appEnv config detection = do
              let imageChunks = chunkList imageBatchSize allImageSources
              mapM_ (\chunk -> do
                results <- mapM (extractImageSource appEnv config) chunk
-               mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate imageNodeMapRef imageEdgeAccRef ext) results
+               mapM_ (\ext -> do
+                 epPushExtractionStreaming ep config ext
+                 accumulate imageNodeMapRef imageEdgeAccRef ext
+                 mergeIntoRunning ext) results
                n <- readIORef imageNodeMapRef >>= evaluate . Map.size
                _ <- evaluate n
                performGC
@@ -282,7 +289,7 @@ extractAll appEnv config detection = do
                     accumulate paperNodeMapRef paperEdgeAccRef ext
                     recordResult ext
                     ) paperFiles
-                  else do
+                   else do
                     sem <- newQSemN paperThreadCount
                     let chunks = chunkList 50 paperFiles
                     mapM_ (\chunk -> do
@@ -292,7 +299,7 @@ extractAll appEnv config detection = do
                          (do ext <- epExtractPdfFile ep config fp
                              recordResult ext
                              pure ext)) chunk
-                      mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext) results
+                      mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext >> mergeIntoRunning ext) results
                       n <- readIORef paperNodeMapRef >>= evaluate . Map.size
                       _ <- evaluate n
                       performGC
@@ -309,22 +316,8 @@ extractAll appEnv config detection = do
 
   logDebug "  [extract] Code + doc + office + image + paper extraction complete"
 
-  codeNodeMap <- readIORef codeNodeMapRef
-  codeEdgeAcc <- readIORef codeEdgeAccRef
-  docNodeMap <- readIORef docNodeMapRef
-  docEdgeAcc <- readIORef docEdgeAccRef
-  officeNodeMap <- readIORef officeNodeMapRef
-  officeEdgeAcc <- readIORef officeEdgeAccRef
-  imageNodeMap <- readIORef imageNodeMapRef
-  imageEdgeAcc <- readIORef imageEdgeAccRef
-  paperNodeMap <- readIORef paperNodeMapRef
-  paperEdgeAcc <- readIORef paperEdgeAccRef
-  let mergedNodeMap = codeNodeMap `Map.union` docNodeMap `Map.union` officeNodeMap `Map.union` imageNodeMap `Map.union` paperNodeMap
-      mergedEdgeList = codeEdgeAcc (docEdgeAcc (officeEdgeAcc (imageEdgeAcc (paperEdgeAcc []))))
-      merged = Extraction
-        { extractionNodes = mergedNodeMap
-        , extractionEdges = Map.fromList [(edgeId e, e) | e <- mergedEdgeList]
-        }
+  running <- readIORef runningRef
+  let merged = running
 
   logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges"
   pure merged
@@ -377,17 +370,18 @@ extractImageSource appEnv config (EmbeddedImage archivePath mediaPath) = do
     imageStubNode :: FilePath -> Node
     imageStubNode fp = Node
       { nodeId = T.pack fp
-      , nodeLabel = T.pack (takeFileName fp)
+      , nodeLabel = fromText (T.pack (takeFileName fp))
       , nodeFileType = ImageFile
-      , nodeSourceFile = T.pack fp
+      , nodeSourceFile = fromText (T.pack fp)
       , nodeLineStart = Nothing
       , nodeLineEnd = Nothing
       , nodeSignature = Nothing
       , nodeCommunityId = Nothing
-      , nodeKind = Just "Image"
+      , nodeKind = Just (fromText "Image")
       , nodeDegree = Nothing
       , nodeIsBridge = Nothing
       , nodeExtra = Nothing
+      , nodePresentBits = bitNodeKind
       }
 
 -- | Collect embedded image paths from PPTX and DOCX office files via port.

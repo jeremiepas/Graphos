@@ -18,6 +18,7 @@ import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Directory (createDirectoryIfMissing)
 import System.Mem (performGC)
@@ -38,6 +39,8 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
 import Graphos.UseCase.Extract (extractAll)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
+import Graphos.Domain.Graph (addEdges)
+
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
@@ -61,7 +64,7 @@ generateGraphEmbeddings llm cfg graph = do
   pure embs
   where
     genNodeEmbedding n = do
-      let inputText = nodeLabel n <> " " <> nodeSourceFile n
+      let inputText = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
       lpGenerateEmbedding llm cfg inputText
 
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
@@ -123,7 +126,8 @@ runPipeline appEnv config = catch (do
   lpLogInfo lp "Step 1: Detecting files..."
   detectStart <- getCurrentTime
   ignorePatterns <- fspLoadIgnorePatterns fsp (cfgInputPath configWithStreaming)
-  let fec = gcFileExtensions (cfgGraphosConfig configWithStreaming)
+  let allIgnorePatterns = cfgIgnorePatterns configWithStreaming ++ ignorePatterns
+      fec = gcFileExtensions (cfgGraphosConfig configWithStreaming)
       extMap = Map.fromList
         [ (CodeFiles, fecCode fec)
         , (DocFiles, fecDoc fec)
@@ -132,7 +136,8 @@ runPipeline appEnv config = catch (do
         , (VideoFiles, fecVideo fec)
         , (OfficeFiles, fecOffice fec)
         ]
-  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap ignorePatterns
+  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap allIgnorePatterns
+  lpLogInfo lp $ T.pack $ "Loaded " ++ show (length ignorePatterns) ++ " ignore patterns from " ++ cfgInputPath configWithStreaming
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   opIncCounter op "graphos_pipeline_steps_total" 1
@@ -145,6 +150,7 @@ runPipeline appEnv config = catch (do
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))
       let excs = detectionExclusions detection
           totalExcluded = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
+      lpLogInfo lp $ T.pack $ "Ignored " ++ show totalExcluded ++ " directories during detection"
       when (totalExcluded > 0) $ do
         lpLogInfo lp $ T.pack $ "  Excluded " ++ show totalExcluded ++ " directories:"
         when (excRootAnchored excs > 0) $
@@ -281,13 +287,11 @@ runPipeline appEnv config = catch (do
                 mode = semanticMode seCfg force graph
                 semanticEdges = inferSemanticEdgesForMode mode seCfg graph
                 allInferred = inferNonSemanticEdges (cfgEdgeDensity configWithStreaming) graph commMap ++ semanticEdges
-                enrichedGraph' = (if null allInferred
+                enrichedGraph' = if null allInferred
                   then graph
-                  else buildGraphFromExtractions (cfgDirected configWithStreaming)
-                        [extractionFromLists (Map.elems (gNodes graph))
-                                             (Map.elems (gEdges graph) ++ allInferred)])
-                  { gEmbeddings = gEmbeddings graph
-                  , gEmbeddingsPath = gEmbeddingsPath graph }
+                  else (addEdges graph allInferred)
+                    { gEmbeddings = gEmbeddings graph
+                    , gEmbeddingsPath = gEmbeddingsPath graph }
             enrichedGraph' `deepseq` pure ()
             logSemanticInference lp seCfg mode semanticEdges
             lpLogInfo lp $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity configWithStreaming) ++ ")"

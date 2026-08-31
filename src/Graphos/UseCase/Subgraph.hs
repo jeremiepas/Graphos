@@ -32,6 +32,7 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import GHC.Generics (Generic)
 import System.FilePath (takeDirectory, takeExtension, dropExtension, normalise, (</>))
 
@@ -147,7 +148,7 @@ normalizePath = T.intercalate "/" . collapseDots . T.splitOn "/" . stripDotSlash
 -- (leading @.\/@ stripped, segments collapsed).
 matchPath :: Text -> Node -> Bool
 matchPath pat n =
-  matchGlob (T.toLower pat) (T.toLower (normalizePath (nodeSourceFile n)))
+  matchGlob (T.toLower pat) (T.toLower (normalizePath (toText (nodeSourceFile n))))
 
 -- | Extract the module specifier out of an @Import@-kind node label:
 -- the last @from@ clause followed by a quoted string, or — for grammars whose
@@ -173,7 +174,7 @@ parseSpecifier label =
 containingFileNode :: Map NodeId Node -> Text -> Maybe Node
 containingFileNode nodeMap srcFile =
   let sameFile = [ n | n <- Map.elems nodeMap
-                 , normalizePath (nodeSourceFile n) == normalizePath srcFile ]
+                 , normalizePath (toText (nodeSourceFile n)) == normalizePath srcFile ]
       fileNodes = [ n | n <- sameFile, nodeKind n == Just "File" ]
   in case fileNodes of
        (n:_) -> Just n
@@ -226,9 +227,9 @@ resolveTarget nodeMap srcDir spec
 firstMatchingNode :: Map NodeId Node -> [FilePath] -> Maybe NodeId
 firstMatchingNode nodeMap candidates =
   let byFile = Map.fromList
-        [ (normalizePath (nodeSourceFile n), nid)
+        [ (normalizePath (toText (nodeSourceFile n)), nid)
         | (nid, n) <- Map.toList nodeMap
-        , not (T.null (nodeSourceFile n))
+        , not (T.null (toText (nodeSourceFile n)))
         ]
   in msum [ Map.lookup (normalizePath (T.pack c)) byFile | c <- candidates ]
 
@@ -236,17 +237,18 @@ firstMatchingNode nodeMap candidates =
 externalPackageNode :: Text -> Node
 externalPackageNode pkg = Node
   { nodeId         = "ext:" <> pkg
-  , nodeLabel      = pkg
+  , nodeLabel      = Data.Text.Short.fromText pkg
   , nodeFileType   = CodeFile
-  , nodeSourceFile = ""
+  , nodeSourceFile = Data.Text.Short.fromText ""
   , nodeLineStart  = Nothing
   , nodeLineEnd    = Nothing
   , nodeSignature  = Nothing
   , nodeCommunityId = Nothing
-  , nodeKind       = Just "ExternalPackage"
+  , nodeKind       = Just (Data.Text.Short.fromText "ExternalPackage")
   , nodeDegree     = Nothing
   , nodeIsBridge   = Nothing
   , nodeExtra      = Just (object [ "layer" .= ("external" :: Text) ])
+  , nodePresentBits = bitNodeKind
   }
 
 -- | Derive @imports@ edges from @Import@-kind nodes when the source graph has
@@ -271,10 +273,10 @@ deriveImports nodeMap edgeMap =
   in (derivedEdges, extraNodes)
   where
     deriveOne existingPairs n = do
-      spec <- parseSpecifier (nodeLabel n)
-      srcNode <- containingFileNode nodeMap (nodeSourceFile n)
+      spec <- parseSpecifier (toText (nodeLabel n))
+      srcNode <- containingFileNode nodeMap (toText (nodeSourceFile n))
       let srcId = nodeId srcNode
-          srcDir = takeDirectory (T.unpack (nodeSourceFile srcNode))
+          srcDir = takeDirectory (T.unpack (toText (nodeSourceFile srcNode)))
       tgtId <- case resolveTarget nodeMap srcDir spec of
         Right nid  -> Just nid
         Left  pkg  -> Just ("ext:" <> pkg)
@@ -372,12 +374,12 @@ extractSubgraph g config =
     nodeWithMetadata nid n =
       let tier = tierOf nid
           sub = if tier == CoreTier then findSubsystem nid else Nothing
-          layer = architecturalLayer (nodeSourceFile n)
+          layer = architecturalLayer (toText (nodeSourceFile n))
           obj = KM.fromList
-            [ (fromText "tier", toJSON tier)
-            , (fromText "subsystem", toJSON sub)
-            , (fromText "layer", toJSON layer)
-            ]
+             [ (Data.Aeson.Key.fromText "tier", toJSON tier)
+             , (Data.Aeson.Key.fromText "subsystem", toJSON sub)
+             , (Data.Aeson.Key.fromText "layer", toJSON layer)
+             ]
           base = case nodeExtra n of
             Just (Object km) -> km
             _                -> KM.empty
@@ -391,7 +393,7 @@ extractSubgraph g config =
 
     edgeWithProvenance e =
       let prov = if Map.member (edgeId e) derivedEdgesMap then Derived else SourceGraph
-          obj = KM.fromList [ (fromText "provenance", toJSON prov) ]
+          obj = KM.fromList [ (Data.Aeson.Key.fromText "provenance", toJSON prov) ]
           base = case edgeExtra e of
             Just (Object km) -> km
             _                -> KM.empty

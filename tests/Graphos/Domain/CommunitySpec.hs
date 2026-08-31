@@ -7,6 +7,7 @@ import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
@@ -164,7 +165,7 @@ spec = do
 
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node
-testNode nid = Node nid nid CodeFile "test.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 -- | All-pairs edges over a node list (undirected clique).
 cliqueEdges :: [Text] -> [Edge]

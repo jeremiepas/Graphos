@@ -19,6 +19,7 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import System.Directory (doesFileExist, createDirectoryIfMissing, removeFile, renameFile)
 import System.FilePath (takeFileName, (</>))
 
@@ -139,9 +140,9 @@ fileHash path root = do
 groupBySourceFile :: [Node] -> [Edge] -> Map FilePath ([Node], [Edge])
 groupBySourceFile nodes edges =
   let nodeSourceMap = Map.fromList [(nodeId n, nodeSourceFile n) | n <- nodes]
-      nodeMap  = foldl' (\m n -> Map.insertWith (\(a,b) (a',b') -> (a++a', b++b')) (T.unpack (nodeSourceFile n)) ([n], []) m) Map.empty nodes
+      nodeMap  = foldl' (\m n -> Map.insertWith (\(a,b) (a',b') -> (a++a', b++b')) (T.unpack (toText (nodeSourceFile n))) ([n], []) m) Map.empty nodes
       edgeMap  = foldl' (\m e -> let srcFile = Map.findWithDefault "" (edgeSource e) nodeSourceMap
-                                 in Map.insertWith (\(a,b) (a',b') -> (a++a', b++b')) (T.unpack srcFile) ([], [e]) m) nodeMap edges
+                                  in Map.insertWith (\(a,b) (a',b') -> (a++a', b++b')) (T.unpack (toText srcFile)) ([], [e]) m) nodeMap edges
   in edgeMap
 
 -- ───────────────────────────────────────────────

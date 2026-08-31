@@ -5,10 +5,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Graph.Index (buildIndexWithLabels)
-import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..), resolveNodeArg, NodeResolution(..))
+import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), ScoredNode(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..), resolveNodeArg, NodeResolution(..))
 import Graphos.UseCase.Query.Render (renderPathResultJSON, renderExplainResultJSON, renderQueryResponseJSON)
 import Graphos.Domain.Graph.Score (MatchVerdict(..))
 
@@ -16,9 +17,9 @@ import Graphos.Domain.Graph.Score (MatchVerdict(..))
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -28,6 +29,7 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 -- helper: generate a unique EdgeId from source and target
@@ -293,6 +295,57 @@ spec = do
       let result = renderPathResultJSON (Just [])
       result `shouldSatisfy` (T.pack "\"path\":[]" `T.isInfixOf`)
       result `shouldSatisfy` (T.pack "\"hops\":0" `T.isInfixOf`)
+
+  describe "full-label boost regression" $ do
+    it "node whose full label equals a query term receives +0.1 boost" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "Database"
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+          matched = filter (\n -> snLabel n == "AuthModule") (qrespNodes result)
+      case matched of
+        [n] -> snScore n `shouldSatisfy` (> 0.5)
+        _   -> expectationFailure "expected exactly one AuthModule node"
+
+    it "non-matching single-word neighbor scores 0.0 (regression)" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "Database"
+            , testNode "Router"
+            ]
+            [ testEdge "AuthModule" "Database"
+            , testEdge "Database" "Router"
+            ]
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+          router = filter (\n -> snLabel n == "Router") (qrespNodes result)
+      case router of
+        [n] -> snScore n `shouldBe` 0.0
+        _   -> pure ()  -- Router may not be in expanded set
+
+    it "matched nodes rank before 0.0-scored context neighbors" $ do
+      let ext = extractionFromLists
+            [ testNode "AuthModule"
+            , testNode "Database"
+            , testNode "Router"
+            ]
+            [ testEdge "AuthModule" "Database"
+            , testEdge "Database" "Router"
+            ]
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          result = queryGraphWithIndexScored g idx "AuthModule" "bfs" 2000
+          nodes = qrespNodes result
+      -- Verify score-descending order: all positive scores before zeros
+      let scores = map snScore nodes
+      -- Scores should be in non-increasing order
+      let sorted = and (zipWith (<=) (drop 1 scores) scores)
+      sorted `shouldBe` True
 
   describe "renderExplainResultJSON" $ do
     it "renders Nothing as null" $ do

@@ -36,6 +36,7 @@ import GHC.Conc (numCapabilities)
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
+import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
 
 -- | Pipeline configuration
 data PipelineConfig = PipelineConfig
@@ -86,7 +87,12 @@ data PipelineConfig = PipelineConfig
   , cfgTimeout        :: Maybe Int                     -- ^ Pipeline timeout in seconds (Nothing = unlimited)
   , cfgNoSemanticEdges    :: Bool                      -- ^ Disable semantic code↔doc edge inference (--no-semantic-edges)
   , cfgForceSemanticEdges :: Bool                      -- ^ Force semantic inference, bypass scale cap + auto-skip (--force-semantic-edges)
-  } deriving (Eq, Show)
+   , cfgIgnorePatterns     :: [AnnotatedPattern]        -- ^ CLI-provided --ignore patterns merged with .gitignore/.graphosignore
+   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
+   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
+   , cfgRtsApplied         :: Bool                      -- ^ Internal: set by parent to prevent re-execution
+   , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
+   } deriving (Eq, Show)
 
 -- | Edge density level for inference
 -- Controls how aggressively the pipeline infers additional edges between nodes.
@@ -164,6 +170,11 @@ defaultConfig = PipelineConfig
   , cfgTimeout        = Nothing
   , cfgNoSemanticEdges    = False
   , cfgForceSemanticEdges = False
+  , cfgIgnorePatterns     = []
+   , cfgRtsProfile         = False
+   , cfgMaxHeap            = Nothing
+   , cfgRtsApplied         = False
+   , cfgLspConcurrency     = 2
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

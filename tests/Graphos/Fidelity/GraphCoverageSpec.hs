@@ -17,6 +17,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Text (Text)
+import Data.Text.Short (fromText, toText)
 import Graphos.Domain.Types (FileType(CodeFile), Node(..))
 import Graphos.Domain.Types.Graph (LabeledGraph(..))
 import qualified Graphos.Domain.Graph as DG
@@ -72,7 +73,7 @@ listSourceFiles root = walk root root
 -- | Files referenced by the nodes of a graph, relative to the repository root.
 graphFilesFrom :: Map.Map Text Node -> Set.Set FilePath
 graphFilesFrom nodes = Set.fromList
-  [ normalise (T.unpack (nodeSourceFile n))
+  [ normalise (T.unpack (toText (nodeSourceFile n)))
   | n <- Map.elems nodes
   ]
 
@@ -110,8 +111,8 @@ groupMissing onDisk graphFiles' =
 -- | Build a graph containing the given (already normalised, root-relative) files.
 graphForFiles :: [FilePath] -> LabeledGraph
 graphForFiles files =
-  let node i f = Node (T.pack (show i)) (T.pack f) CodeFile (T.pack f)
-                        Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+  let node i f = Node (T.pack (show i)) (fromText (T.pack f)) CodeFile (fromText (T.pack f))
+                        Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
       nodes = Map.fromList [ (nodeId (node i f), node i f) | (i, f) <- zip [0 :: Int ..] files ]
   in LabeledGraph nodes Map.empty Map.empty Map.empty
 

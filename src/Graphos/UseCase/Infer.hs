@@ -22,6 +22,7 @@ import qualified Data.Set as Set
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
@@ -176,29 +177,29 @@ inferCodeDocEdges g =
 
       codeLabelIdx :: Map Text [NodeId]
       codeLabelIdx = boundedIdx $ Map.fromListWith (++)
-        [ (nodeLabel cn, [nid])
+        [ (toText (nodeLabel cn), [nid])
         | (nid, cn) <- codeNodes
         ]
 
       codeBaseIdx :: Map Text [NodeId]
       codeBaseIdx = boundedIdx $ Map.fromListWith (++)
-        [ (fileBaseName (nodeSourceFile cn), [nid])
+        [ (fileBaseName (toText (nodeSourceFile cn)), [nid])
         | (nid, cn) <- codeNodes
-        , not (T.null (nodeSourceFile cn))
+        , not (T.null (toText (nodeSourceFile cn)))
         ]
 
       nameAlignEdges =
         [ makeInferredEdge codeNid docNid References 0.7
         | (docNid, dn) <- docNodes
-        , codeNid <- Map.findWithDefault [] (nodeLabel dn) codeLabelIdx
+        , codeNid <- Map.findWithDefault [] (toText (nodeLabel dn)) codeLabelIdx
         , notEdgeAlready g docNid codeNid
         ]
 
       pathAlignEdges =
         [ makeInferredEdge codeNid docNid References 0.7
         | (docNid, dn) <- docNodes
-        , not (T.null (nodeSourceFile dn))
-        , let docBase = fileBaseName (nodeSourceFile dn)
+        , not (T.null (toText (nodeSourceFile dn)))
+        , let docBase = fileBaseName (toText (nodeSourceFile dn))
         , not (T.null docBase)
         , codeNid <- Map.findWithDefault [] docBase codeBaseIdx
         , notEdgeAlready g docNid codeNid

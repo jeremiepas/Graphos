@@ -9,6 +9,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, articulationPoints, biconnectedComponents)
@@ -62,7 +63,7 @@ communitiesSection commMap g mLabels =
       sep    = "|-----------|---------|----------|-----------|"
       rows   = [T.pack $ "| " ++ show cid ++ " | " ++ show (length members)
                        ++ " | " ++ fmtCohesion (cohesionScore g members)
-                       ++ " | " ++ intercalate ", " (take 3 [T.unpack (nodeLabel n) | nid <- members, Just n <- [Map.lookup nid (gNodes g)]])
+                       ++ " | " ++ intercalate ", " (take 3 [T.unpack (toText (nodeLabel n)) | nid <- members, Just n <- [Map.lookup nid (gNodes g)]])
                        ++ " |"
                 | (cid, members) <- Map.toList commMap]
       labelRows = case mLabels of

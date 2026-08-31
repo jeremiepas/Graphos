@@ -5,6 +5,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON)
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
@@ -14,9 +15,9 @@ import Graphos.Domain.Community (CommunityComposition(..))
 testNode :: Text -> Node
 testNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -25,14 +26,15 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 testDocNode :: Text -> Node
 testDocNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = DocFile
-  , nodeSourceFile   = "test.md"
+  , nodeSourceFile   = fromText "test.md"
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -41,6 +43,7 @@ testDocNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodePresentBits  = 0
   }
 
 spec :: Spec

@@ -7,6 +7,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Maybe (fromJust)
 import Data.Text (Text)
+import Data.Text.Short (fromText)
 import qualified Data.Text as T
 import qualified Data.Aeson.KeyMap as KM
 import System.IO.Temp (withSystemTempDirectory)
@@ -152,8 +153,8 @@ roundTripTest = withSystemTempDirectory "graphos-roundtrip" $ \dir -> do
   let path = dir </> "graph.json"
   iw <- Inc.openWriter path
   let nodes =
-        [ Node "a" "A" CodeFile "a.hs" Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-        , Node "b" "B" CodeFile "b.hs" Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+        [ Node "a" (fromText "A") CodeFile (fromText "a.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+        , Node "b" (fromText "B") CodeFile (fromText "b.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
         ]
       edges = [ Edge (EdgeId "e1") "a" "b" Calls 1.0 (Confidence 0.9) Nothing ]
       commMap = Map.fromList [(1, ["a", "b"])] :: CommunityMap
