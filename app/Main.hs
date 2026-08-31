@@ -7,7 +7,7 @@ import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
-import Control.Exception (SomeException, catch, try)
+import Control.Exception ()
 import Data.Maybe (isJust)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
