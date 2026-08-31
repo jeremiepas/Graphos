@@ -135,12 +135,14 @@ instance NFData QueryResponse
 
 instance ToJSON QueryResponse where
   toJSON r = object
-    [ "verdict"      .= qrespVerdict r
-    , "best_score"   .= qrespBestScore r
-    , "hash"         .= qrespHash r
-    , "nodes"        .= qrespNodes r
-    , "edges"        .= qrespEdges r
-    , "suggestions"  .= qrespSuggestions r
+    [ "verdict"           .= qrespVerdict r
+    , "best_score"        .= qrespBestScore r
+    , "hash"              .= qrespHash r
+    , "nodes"             .= qrespNodes r
+    , "edges"             .= qrespEdges r
+    , "suggestions"       .= qrespSuggestions r
+    , "omitted_nodes"     .= qrespOmittedNodes r
+    , "omitted_edges"     .= qrespOmittedEdges r
     ]
 
 -- | Normalize a raw match count to a 0-1 score.

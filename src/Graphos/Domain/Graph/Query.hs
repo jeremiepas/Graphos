@@ -60,17 +60,20 @@ breadthFirstSearchWithCached cfg start _maxDepth =
 
 -- | Depth-first search from a start node, returns visited node IDs
 -- Uses fgl's DFS algorithm internally
-depthFirstSearch :: Graph -> NodeId -> Int -> Set NodeId
-depthFirstSearch g start maxDepth = depthFirstSearchWithCached (toCachedFGL g) start maxDepth
+depthFirstSearch :: Graph -> NodeId -> Int -> Int -> Set NodeId
+depthFirstSearch g start maxDepth budget = depthFirstSearchWithCached (toCachedFGL g) start maxDepth budget
 
 -- | Depth-first search using a pre-built CachedFGL
-depthFirstSearchWithCached :: CachedFGL -> NodeId -> Int -> Set NodeId
-depthFirstSearchWithCached cfg start _maxDepth =
+depthFirstSearchWithCached :: CachedFGL -> NodeId -> Int -> Int -> Set NodeId
+depthFirstSearchWithCached cfg start _maxDepth budget =
   let gr = cfgGraph cfg
       nidMap = cfgNidMap cfg
-  in case cachedFindIdx cfg start of
-       Just startIdx -> Set.fromList [nidMap V.! idx | idx <- dfs [startIdx] gr]
-       Nothing -> Set.empty
+      result = case cachedFindIdx cfg start of
+                 Just startIdx -> Set.fromList [nidMap V.! idx | idx <- dfs [startIdx] gr]
+                 Nothing -> Set.empty
+  in if Set.size result > budget
+     then Set.fromList (take budget (Set.toList result))
+     else result
 
 -- | Shortest path between two nodes (BFS)
 -- Uses fgl's ESP (shortest path by edge count) algorithm internally

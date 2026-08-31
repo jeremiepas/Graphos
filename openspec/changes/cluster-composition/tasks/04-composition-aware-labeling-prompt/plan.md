@@ -9,7 +9,7 @@ description: "Plan: update labelPrompt to split nodes by type, add composition l
 
 **Task slug**: `04-composition-aware-labeling-prompt`
 **Attempt**: 1
-**Status**: pending
+**Status**: completed
 
 ## Summary
 
@@ -100,4 +100,4 @@ cabal test --test-options="-tag labeling"   # if tags used
 
 ## Result
 
-Pending implementation.
+All subtasks completed. `labelPrompt` updated to be composition-aware: splits nodes into "Top code nodes:" and "Top doc nodes:" sections, adds composition summary line, updates preamble to "code-and-knowledge architecture analyst" with concept-unifying instruction. Graceful fallback to flat format when compositions absent. Wiring in `labelCommunities`/`labelBatch` passes `gCompositions` from graph. Build passes with `-Wall -Werror`. Tests pass (633 examples, 0 failures).
