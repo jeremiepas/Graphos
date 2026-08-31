@@ -1,24 +1,20 @@
-**Status: Implementation complete (27/48 tasks done). Awaiting verification of Tasks 1-7 before proceeding with Task 8 integration test.**
+**Status: COMPLETE — Merged to main (commit c79b655).**
 
-**Branch:** `fix/runtime-ram-crash-final` — squashed commit `c5367c4` + checkbox corrections `fbc211f` pushed to origin.
+**Branch:** `fix/runtime-ram-crash-final` → `main` (PR #21)
 
 **Implementation summary:**
-- Task 1: RTS profiling/heap flags implemented (needs verification)
-- Task 2: Incremental LSP merge with GC implemented (needs verification)
-- Task 3: Batch extraction with GC implemented (needs verification)
-- Task 4: Bounded LSP concurrency implemented (needs verification)
-- Task 5: Bounded observability stores (tracerSpans, msHistograms, dtBuffer) implemented (needs verification)
-- Task 6: (duplicate of Task 5 in attempt history — same work)
-- Task 7: Compact Node representation with bit-field + ShortText implemented (needs verification)
-- Task 8: Integration test plan written (blocked by verification of Tasks 1-7)
-- Task 9: Transitive dependency cap implemented (verified)
+- Task 1: RTS profiling/heap flags — implemented ✓, verified ✓, merged ✓
+- Task 2: Incremental LSP merge with GC — implemented ✓, verified ✓, merged ✓
+- Task 3: Batch extraction with GC — implemented ✓, verified ✓, merged ✓
+- Task 4: Bounded LSP concurrency — implemented ✓, verified ✓, merged ✓
+- Task 5: In-place graph enrichment — implemented ✓, verified ✓, merged ✓
+- Task 6: Bounded observability stores — implemented ✓, verified ✓, merged ✓
+- Task 7: Compact Node representation — implemented ✓, verified ✓, merged ✓
+- Task 8: Integration test — plan written, verification done, merged ✓
+- Task 9: Transitive dependency cap — implemented ✓, verified ✓, merged ✓
 
-**Next steps:**
-1. haskelldev verifies Tasks 1.C, 1.A, 3.C, 3.A, 4.C, 4.A, 5.C, 5.A, 6.C, 6.A, 7.C, 7.A
-2. Once verified, haskelldev runs Task 8.D (50k+ file integration test)
-3. haskelldev completes Task 8.C, 8.A
-4. Create PR from `fix/runtime-ram-crash-final` to `main`
-5. Find reviewer for merge
+**Review:** Approved by CTO (AVI-173)
+**Parent issue:** AVI-170 (graphos piloting project) — done
 
 ## 1. Add RTS profiling and heap limit CLI flags
 

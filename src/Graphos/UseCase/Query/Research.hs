@@ -225,7 +225,7 @@ expandWithSeeds g idx union seeds =
         ])
       -- 1-hop BFS from matched nodes
       expanded :: Set NodeId
-      expanded = Set.union matched (bfsFromSet idx matched 1)
+      expanded = Set.union matched (bfsFromSet idx matched 1 10000)
   in expanded
 
 nub :: (Ord a) => [a] -> [a]

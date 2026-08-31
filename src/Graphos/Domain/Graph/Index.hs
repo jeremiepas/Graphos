@@ -236,12 +236,12 @@ bfsFrom idx start maxDepth = go Set.empty (Set.singleton start) 0
         frontier' = neighbors' `Set.difference` newVisited
 
 -- | BFS from multiple start nodes (for query traversal from several matches).
-bfsFromSet :: GraphIndex -> Set NodeId -> Int -> Set NodeId
-bfsFromSet idx starts maxDepth = go Set.empty starts 0
+bfsFromSet :: GraphIndex -> Set NodeId -> Int -> Int -> Set NodeId
+bfsFromSet idx starts maxDepth budget = go Set.empty starts 0
   where
     adj = giAdj idx
     go visited frontier depth
-      | depth >= maxDepth || Set.null frontier = visited `Set.union` frontier
+      | depth >= maxDepth || Set.null frontier || Set.size visited >= budget = visited `Set.union` frontier
       | otherwise = go newVisited frontier' (depth + 1)
       where
         newVisited = visited `Set.union` frontier
