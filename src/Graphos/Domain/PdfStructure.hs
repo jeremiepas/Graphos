@@ -44,7 +44,7 @@ import Data.Bits ((.|.))
 import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 
