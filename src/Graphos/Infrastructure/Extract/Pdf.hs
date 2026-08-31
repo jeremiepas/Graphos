@@ -16,7 +16,7 @@ import Control.Exception (SomeException, catch)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Bits ((.|.))
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (fromText)
 import System.Directory (doesFileExist)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
