@@ -29,7 +29,7 @@ module Graphos.CLI.Parser
 import Options.Applicative
 import Data.Text (Text)
 import GHC.Conc (numCapabilities)
-import Data.Char (toLower)
+
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
@@ -127,13 +127,14 @@ heapSizeReader :: String -> Either String Int
 heapSizeReader s = case span (`notElem` ['G','g','M','m']) s of
   (num, sfx@(_:_)) -> case reads num of
     [(n, "")] -> case sfx of
-      'G':_ -> Right (round (n * 1024 :: Double))
-      'g':_ -> Right (round (n * 1024 :: Double))
-      'M':_ -> Right (round n)
-      'm':_ -> Right (round n)
+      'G':_ -> Right (round (n * 1024 :: Double) :: Int)
+      'g':_ -> Right (round (n * 1024 :: Double) :: Int)
+      'M':_ -> Right (round n :: Int)
+      'm':_ -> Right (round n :: Int)
       _ -> Left $ "Cannot parse heap size: " ++ s
+    _ -> Left $ "Cannot parse heap size: " ++ s
   _ -> case reads s of
-    [(n, "")] -> Right (round n)
+    [(n, "")] -> Right (round (n :: Double) :: Int)
     _ -> Left $ "Cannot parse heap size: " ++ s ++ ". Expected a number with optional G/M suffix (e.g. 1G, 512M, 2048)"
 
 edgeModeReader :: ReadM EdgeMode

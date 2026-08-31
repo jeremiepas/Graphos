@@ -5,7 +5,7 @@ import Test.Hspec
 import qualified Data.Aeson as A
 import Data.Aeson.Types (parseMaybe)
 import qualified Data.Aeson.KeyMap as KM
-import Data.Aeson.Key (toText)
+import Data.Aeson.Key ()
 import qualified Data.ByteString.Lazy as BSL
 import Data.Foldable (toList)
 import qualified Data.Map.Strict as Map
