@@ -48,7 +48,7 @@ import qualified Graphos.Infrastructure.Export.CommunityGraph as CommunityGraph
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint )
-import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, shouldIgnore)
+import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, shouldIgnore, ignoreMatches, relativize)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
   ( docxExtractMediaPaths, pptxExtractMediaPaths, extractMediaFile )
 import Graphos.Infrastructure.Logging
@@ -126,7 +126,7 @@ productionFileSystemPort = FileSystemPort
   , fspSaveCheckpoint     = savePipelineCheckpoint
   , fspClearCheckpoint    = clearPipelineCheckpoint
   , fspLoadIgnorePatterns = loadIgnorePatterns
-  , fspShouldIgnore = shouldIgnore
+   , fspShouldIgnore = \scanRoot patterns path -> ignoreMatches scanRoot patterns path
   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.

@@ -16,6 +16,8 @@ module Graphos.Infrastructure.FileSystem.Ignore
   , shouldIgnore
   , matches
   , matchesAnnotated
+  , ignoreMatches
+  , relativize
 
     -- * Pattern merging
   , mergeIgnorePatterns
@@ -297,3 +299,21 @@ isCommentOrBlank :: String -> Bool
 isCommentOrBlank line =
   let trimmed = dropWhile (== ' ') line
   in null trimmed || case trimmed of ('#':_) -> True; _ -> False
+
+-- | Make a path relative to the scan root, stripping any leading @./@.
+relativize :: FilePath -> FilePath -> FilePath
+relativize root path
+  | root == "." = stripLeadingDotSlash path
+  | root `isPrefixOf` path = drop (length root + 1) path  -- +1 for the /
+  | otherwise = path
+  where
+    stripLeadingDotSlash ('.':'/':rest) = rest
+    stripLeadingDotSlash s = s
+
+-- | Check if a path should be ignored given patterns, relativizing the path
+-- to the scan root first. This is the core function for matching .graphosignore
+-- patterns against absolute or relative paths.
+ignoreMatches :: FilePath -> [AnnotatedPattern] -> FilePath -> Bool
+ignoreMatches scanRoot patterns path =
+  let relPath = relativize scanRoot path
+  in shouldIgnore patterns relPath
