@@ -31,6 +31,7 @@ import Data.Aeson (Value, ToJSON(..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import Data.Text.Short (toText)
 
 import Graphos.Domain.Types.Node (Node(..))
 import Graphos.Domain.Types.Edge (Edge(..), relationToText)
@@ -43,7 +44,7 @@ import Graphos.Domain.Types.Edge (Edge(..), relationToText)
 -- 'Nothing' when the node has no kind — such a node matches only
 -- unlabelled patterns.
 nodeCypherLabel :: Node -> Maybe Text
-nodeCypherLabel = nodeKind
+nodeCypherLabel = fmap toText . nodeKind
 
 -- | All queryable properties of a node.
 --

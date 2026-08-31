@@ -40,9 +40,11 @@ module Graphos.Domain.PdfStructure
   , makeContainsEdge
   ) where
 
+import Data.Bits ((.|.))
 import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 
 import Graphos.Domain.Types
 
@@ -357,20 +359,21 @@ makePdfFileNode filePath title =
       dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       nid = T.pack (show dirHash) <> "_paper_" <> name
-  in Node
-       { nodeId           = nid
-       , nodeLabel        = if T.null title then name else title
-       , nodeFileType     = PaperFile
-       , nodeSourceFile   = T.pack filePath
-       , nodeLineStart    = Just 1
-       , nodeLineEnd      = Nothing
-       , nodeSignature    = Nothing
-       , nodeCommunityId  = Nothing
-       , nodeDegree       = Nothing
-       , nodeIsBridge     = Nothing
-       , nodeExtra        = Nothing
-       , nodeKind         = Just "File"
-       }
+   in Node
+        { nodeId           = nid
+        , nodeLabel        = fromText (if T.null title then name else title)
+        , nodeFileType     = PaperFile
+        , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeLineStart    = Just 1
+        , nodeLineEnd      = Nothing
+        , nodeSignature    = Nothing
+        , nodeCommunityId  = Nothing
+        , nodeDegree       = Nothing
+        , nodeIsBridge     = Nothing
+        , nodeExtra        = Nothing
+        , nodeKind         = Just (fromText "File")
+        , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
+        }
 
 -- | Convert sections to nodes and edges
 convertSections :: FilePath -> [PdfSection] -> ([Node], [Edge])
@@ -413,20 +416,21 @@ makeSectionNode filePath section =
                    PdfItemLevel       -> "item"
       cleanTitle = T.filter (\c -> isAlphaNum c || c `elem` (" -'_/" :: String)) (psTitle section)
       nid = T.pack (show dirHash) <> "_" <> T.pack levelTag <> "_" <> cleanTitle
-  in Node
-       { nodeId           = nid
-       , nodeLabel        = psTitle section
-       , nodeFileType     = PaperFile
-       , nodeSourceFile   = T.pack filePath
-       , nodeLineStart    = Just (psLineNum section)
-       , nodeLineEnd      = Nothing
-       , nodeSignature    = Nothing
-       , nodeCommunityId  = Nothing
-       , nodeDegree       = Nothing
-       , nodeIsBridge     = Nothing
-       , nodeExtra        = Nothing
-       , nodeKind         = Just (T.pack levelTag)
-       }
+   in Node
+        { nodeId           = nid
+        , nodeLabel        = fromText (psTitle section)
+        , nodeFileType     = PaperFile
+        , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeLineStart    = Just (psLineNum section)
+        , nodeLineEnd      = Nothing
+        , nodeSignature    = Nothing
+        , nodeCommunityId  = Nothing
+        , nodeDegree       = Nothing
+        , nodeIsBridge     = Nothing
+        , nodeExtra        = Nothing
+        , nodeKind         = Just (fromText (T.pack levelTag))
+        , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
+        }
 
 -- | Convert paragraphs to nodes and edges
 convertParagraphs :: FilePath -> [PdfParagraph] -> Node -> ([Node], [Edge])
@@ -441,20 +445,21 @@ makeParagraphNode filePath para =
   let dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       nid = T.pack (show dirHash) <> "_para_" <> T.pack (show (ppLineStart para))
-  in Node
-       { nodeId           = nid
-       , nodeLabel        = T.take 80 (T.strip (ppText para))
-       , nodeFileType     = PaperFile
-       , nodeSourceFile   = T.pack filePath
-       , nodeLineStart    = Just (ppLineStart para)
-       , nodeLineEnd      = Just (ppLineEnd para)
-       , nodeSignature    = Nothing
-       , nodeCommunityId  = Nothing
-       , nodeDegree       = Nothing
-       , nodeIsBridge     = Nothing
-       , nodeExtra        = Nothing
-       , nodeKind         = Just "Paragraph"
-       }
+   in Node
+        { nodeId           = nid
+        , nodeLabel        = fromText (T.take 80 (T.strip (ppText para)))
+        , nodeFileType     = PaperFile
+        , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeLineStart    = Just (ppLineStart para)
+        , nodeLineEnd      = Just (ppLineEnd para)
+        , nodeSignature    = Nothing
+        , nodeCommunityId  = Nothing
+        , nodeDegree       = Nothing
+        , nodeIsBridge     = Nothing
+        , nodeExtra        = Nothing
+        , nodeKind         = Just (fromText "Paragraph")
+        , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
+        }
 
 -- | Create a Contains edge from parent to child
 makeContainsEdge :: Node -> Node -> Edge

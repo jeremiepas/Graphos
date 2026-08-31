@@ -10,6 +10,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph, gNodes, shortestPath)
@@ -40,9 +41,9 @@ nidB = T.pack (map chr [23, 13, 0, 7, 5, 18, 11, 4, 5, 20, 8, 6, 14])
 mkNode :: Text -> Node
 mkNode nid = Node
   { nodeId           = nid
-  , nodeLabel        = nid
+  , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = "test.hs"
+  , nodeSourceFile   = fromText "test.hs"
   , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing
@@ -51,6 +52,7 @@ mkNode nid = Node
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
+  , nodePresentBits  = 0
   }
 
 mkEdge :: Text -> Text -> Edge

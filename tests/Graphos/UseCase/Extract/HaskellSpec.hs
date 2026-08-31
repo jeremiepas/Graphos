@@ -6,6 +6,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
+import Data.Text.Short (fromText, toText)
 import Graphos.UseCase.Extract.Haskell
 import Graphos.Domain.Types
 
@@ -30,8 +31,8 @@ spec = do
             , "  "
             ]
           nodes = haskellStubNodes "src/Foo.hs" src
-          decls = filter (\n -> nodeKind n `notElem` [Just "Module"]) nodes
-      decls `shouldSatisfy` all (\n -> not (T.null (nodeLabel n)))
+          decls = filter (\n -> nodeKind n `notElem` [Just (fromText "Module")]) nodes
+      decls `shouldSatisfy` all (\n -> not (T.null (toText (nodeLabel n))))
       any (\n -> nodeLabel n == "|" || nodeLabel n == "}" || nodeLabel n == "where") decls `shouldBe` False
 
     it "does not emit 20-char truncated fragment labels" $ do
@@ -42,7 +43,7 @@ spec = do
             ]
           nodes = haskellStubNodes "src/Foo.hs" src
           labels = map nodeLabel nodes
-      any (`elem` labels) [T.pack "\"  - from: \" ++ T.un", T.pack "( NodeId, CommunityI"] `shouldBe` False
+      any (`elem` labels) [fromText "\"  - from: \" ++ T.un", fromText "( NodeId, CommunityI"] `shouldBe` False
 
     it "assigns kinds by declaration form" $ do
       let src = unlines
@@ -56,14 +57,13 @@ spec = do
             , "func x = x"
             ]
           nodes = haskellStubNodes "src/Foo.hs" src
-          kindOf lbl = nodeKind <$> find (\n -> nodeLabel n == T.pack lbl) nodes
-      kindOf "FooType" `shouldBe` Just (Just "Type")
-      kindOf "Bar" `shouldBe` Just (Just "Type")
-      kindOf "Baz" `shouldBe` Just (Just "Type")
-      kindOf "Quux" `shouldBe` Just (Just "Class")
-      -- instance can be many things; we just check it has a kind
-      kindOf "Int" `shouldSatisfy` (/= Just (Just "Type"))
-      kindOf "func" `shouldBe` Just (Just "Function")
+          kindOf lbl = nodeKind <$> find (\n -> nodeLabel n == fromText lbl) nodes
+      kindOf "FooType" `shouldBe` Just (Just (fromText "Type"))
+      kindOf "Bar" `shouldBe` Just (Just (fromText "Type"))
+      kindOf "Baz" `shouldBe` Just (Just (fromText "Type"))
+      kindOf "Quux" `shouldBe` Just (Just (fromText "Class"))
+      kindOf "Int" `shouldSatisfy` (/= Just (Just (fromText "Type")))
+      kindOf "func" `shouldBe` Just (Just (fromText "Function"))
 
     it "emits only imports edges from imports and contains edges from declarations" $ do
       let src = unlines
@@ -89,7 +89,7 @@ spec = do
             { extractionNodes = extractionNodes exA `Map.union` extractionNodes exB
             , extractionEdges = extractionEdges exA `Map.union` extractionEdges exB
             }
-          configNodeId = nodeId $ NE.head $ NE.fromList $ filter (\n -> nodeLabel n == T.pack "Graphos.Config") (Map.elems $ extractionNodes ex)
+          configNodeId = nodeId $ NE.head $ NE.fromList $ filter (\n -> nodeLabel n == fromText "Graphos.Config") (Map.elems $ extractionNodes ex)
           importEdges = filter (\e -> edgeRelation e == Imports) (Map.elems $ extractionEdges ex)
       any (\e -> edgeTarget e == configNodeId) importEdges `shouldBe` True
 
@@ -102,6 +102,6 @@ spec = do
             { extractionNodes = extractionNodes exA `Map.union` extractionNodes exB
             , extractionEdges = extractionEdges exA `Map.union` extractionEdges exB
             }
-          mainNodes = filter (\n -> nodeLabel n == T.pack "Main") (Map.elems $ extractionNodes ex)
+          mainNodes = filter (\n -> nodeLabel n == fromText "Main") (Map.elems $ extractionNodes ex)
       length mainNodes `shouldBe` 2
       length (nub $ map nodeId mainNodes) `shouldBe` 2

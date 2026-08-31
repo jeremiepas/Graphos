@@ -11,6 +11,7 @@ import Data.Foldable (toList)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Text.Short (fromText)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
@@ -37,17 +38,18 @@ import Graphos.Infrastructure.Export.HTML
 mkNode :: Text -> Text -> Text -> Maybe Text -> Node
 mkNode nid label srcFile mKind = Node
   { nodeId           = nid
-  , nodeLabel        = label
+  , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
-  , nodeSourceFile   = srcFile
+  , nodeSourceFile   = fromText srcFile
   , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing
   , nodeCommunityId  = Just 1
-  , nodeKind         = mKind
+  , nodeKind         = fmap fromText mKind
   , nodeDegree       = Just 2
   , nodeIsBridge     = Just False
   , nodeExtra        = Nothing
+  , nodePresentBits  = 0
   }
 
 mkEdge :: Text -> Text -> Relation -> Edge
@@ -277,7 +279,7 @@ spec = do
       case (A.decode (BSL.fromStrict (TE.encodeUtf8 jsonTxt)) :: Maybe A.Object) of
         Nothing -> expectationFailure "payload is not valid JSON"
         Just o -> do
-          let keys = L.sort (map toText (KM.keys o))
+          let keys = L.sort (map id (KM.keys o))
           keys `shouldBe` ["aggregates", "edges", "files", "kinds", "nodes", "relations", "strings"]
 
     it "carries a non-empty payload for a graph with nodes and edges" $ do

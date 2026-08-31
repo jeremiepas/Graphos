@@ -13,6 +13,7 @@ module Graphos.Domain.Graph.Core
   , buildGraph
   , mergeExtractions
   , mergeGraphs
+  , addEdges
 
     -- * Hashing
   , computeGraphHash
@@ -25,7 +26,7 @@ module Graphos.Domain.Graph.Core
 
 import Control.DeepSeq (NFData(..))
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
-import Data.Bits (xor, shiftR, (.&.))
+import Data.Bits (xor, shiftR, (.&.), (.|.))
 import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -33,6 +34,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import Data.Word (Word32)
 
 import Graphos.Domain.Types
@@ -159,6 +161,44 @@ mergeGraphs old new =
      , gEmbeddingsPath = gEmbeddingsPath old
      }
 
+-- | Add edges to an existing graph without creating a new Graph.
+-- Updates gEdges, gAdjFwd, and gAdjBack in place (via immutable Map updates).
+-- Preserves all other graph fields including embeddings and compositions.
+-- For undirected graphs, each edge updates both forward and backward adjacency
+-- in both directions. For directed graphs, source→target in fwd and target→source in back.
+-- Dangling edges (source or target not in gNodes) are silently dropped.
+addEdges :: Graph -> [Edge] -> Graph
+addEdges graph edges =
+  let nodes = gNodes graph
+      existingEdges = gEdges graph
+      directed = gDirected graph
+      -- Filter out dangling edges
+      validEdges = [e | e <- edges
+                      , Map.member (edgeSource e) nodes
+                      , Map.member (edgeTarget e) nodes]
+      -- Merge edge map
+      newEdgeMap = existingEdges `Map.union` Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
+      -- Update forward adjacency: source -> target
+      fwdUpdates = Map.fromListWith Set.union
+        [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
+      -- Update backward adjacency: target -> source
+      bwdUpdates = Map.fromListWith Set.union
+        [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+      -- For undirected graphs, also add reverse adjacency
+      (fwdAdj, bwdAdj) = if directed
+        then (Map.union (gAdjFwd graph) fwdUpdates, Map.union (gAdjBack graph) bwdUpdates)
+        else let revFwd = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+                 revBwd = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
+             in (Map.union (gAdjFwd graph) (fwdUpdates `Map.union` revFwd)
+                , Map.union (gAdjBack graph) (bwdUpdates `Map.union` revBwd))
+      newHash = computeGraphHash nodes newEdgeMap
+  in graph
+    { gEdges    = newEdgeMap
+    , gAdjFwd   = fwdAdj
+    , gAdjBack  = bwdAdj
+    , gHash     = newHash
+    }
+
 -- ───────────────────────────────────────────────
 -- Analysis helpers
 -- ───────────────────────────────────────────────
@@ -172,26 +212,27 @@ makeStubNode filePath =
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       hashPrefix = T.pack $ show dirHash
       nodeId' = hashPrefix <> T.pack "_" <> name
-  in Node
-    { nodeId           = nodeId'
-    , nodeLabel        = name
-    , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack filePath
-    , nodeLineStart    = Nothing
-    , nodeCommunityId  = Nothing
-    , nodeDegree       = Nothing
-    , nodeIsBridge     = Nothing
-    , nodeExtra        = Nothing
-    , nodeLineEnd      = Nothing
-    , nodeKind         = Nothing
-    , nodeSignature    = Nothing
-    }
+   in Node
+     { nodeId           = nodeId'
+     , nodeLabel        = fromText name
+     , nodeFileType     = CodeFile
+      , nodeSourceFile   = fromText (T.pack filePath)
+     , nodeLineStart    = Nothing
+     , nodeCommunityId  = Nothing
+     , nodeDegree       = Nothing
+     , nodeIsBridge     = Nothing
+     , nodeExtra        = Nothing
+     , nodeLineEnd      = Nothing
+     , nodeKind         = Nothing
+     , nodeSignature    = Nothing
+     , nodePresentBits  = 0
+     }
 
 -- | Check if a node is a file-level hub (synthetic AST node)
 isFileNode :: Graph -> Node -> Bool
 isFileNode g n =
-  let label = nodeLabel n
-      srcFile = nodeSourceFile n
+  let label = toText (nodeLabel n)
+      srcFile = toText (nodeSourceFile n)
       nid = nodeId n
       fwd = Map.findWithDefault Set.empty nid (gAdjFwd g)
       bwd = Map.findWithDefault Set.empty nid (gAdjBack g)
@@ -210,7 +251,7 @@ isFileNode g n =
 -- | Check if a node is a concept node (injected semantic annotation)
 isConceptNode :: Node -> Bool
 isConceptNode n =
-  let src = nodeSourceFile n
+  let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.

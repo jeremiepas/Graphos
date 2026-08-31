@@ -38,6 +38,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Text.Short (toText)
 import GHC.Generics (Generic)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -509,7 +510,7 @@ computeCompositions graph commMap =
                  { ccCodeCount    = codeCount
                  , ccDocCount     = docCount
                  , ccOtherCount   = otherCount
-                 , ccDominantKind = dom
+                  , ccDominantKind = fmap toText dom
                  , ccMixedRatio   = mixedRatio
                  , ccCodeDocEdges = codeDocEdges
                  }

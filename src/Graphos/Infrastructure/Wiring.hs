@@ -15,14 +15,14 @@ module Graphos.Infrastructure.Wiring
   ) where
 
 import Control.Monad (when)
-import Data.Dynamic (toDyn)
+import Data.Dynamic (Dynamic, toDyn, fromDynamic)
 import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Foreign.Ptr (Ptr)
-import Unsafe.Coerce (unsafeCoerce)
 
 
-import Graphos.Domain.Types (Extraction(..))
+import Graphos.Domain.Types (Extraction(..), extractionFromLists)
+import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
 import Graphos.Domain.Config.Extraction (Granularity(..))
 import Graphos.UseCase.AppEnv (AppEnv(..))
@@ -150,26 +150,36 @@ productionExtractionPort logEnv = ExtractionPort
           }
         Left err -> pure $ Left err
   , epDisconnectLSP = \(LSPHandle dynHandle _ _ _) ->
-      LSP.disconnectLSP (unsafeCoerce dynHandle :: LSP.LSPClient)
+      case fromDynamic dynHandle of
+        Just client -> LSP.disconnectLSP client
+        Nothing     -> putStrLn "[wiring] disconnectLSP: type mismatch" >> pure ()
   , epIsServerConnected = \(LSPHandle dynHandle _ _ _) ->
-      LSP.isServerConnected (unsafeCoerce dynHandle :: LSP.LSPClient)
+      case fromDynamic dynHandle of
+        Just client -> LSP.isServerConnected client
+        Nothing     -> pure False
   , epExtractViaLSP = \(LSPHandle dynHandle _ _ _) fp ->
-      LSP.extractViaLSP (unsafeCoerce dynHandle :: LSP.LSPClient) fp
+      case fromDynamic dynHandle of
+        Just client -> LSP.extractViaLSP client fp
+        Nothing     -> pure (extractionFromLists [makeStubNode fp] [])
   , epHasWorkspaceSymbols = \(LSPHandle dynHandle _ _ _) ->
-      pure $ LSPProtocol.scpWorkspaceSymbolProvider (LSP.lspServerCaps (unsafeCoerce dynHandle :: LSP.LSPClient))
+      case fromDynamic dynHandle of
+        Just client -> pure $ LSPProtocol.scpWorkspaceSymbolProvider (LSP.lspServerCaps client)
+        Nothing     -> pure False
   , epExtractWorkspaceSymbols = \(LSPHandle dynHandle _ _ _) -> do
-      let client = unsafeCoerce dynHandle :: LSP.LSPClient
-      result <- LSP.extractWorkspaceSymbols client
-      case result of
-        Right syms -> do
-          let fileMap = LSP.workspaceSymbolsToDocumentSymbols syms
-          pure $ Right $ Map.map
-            (\symbols -> SymbolResult
-              { srNodes = LSP.symbolToNodes "<workspace>" symbols
-              , srEdges = LSP.symbolTreeToEdges "<workspace>" symbols
-              }
-            ) fileMap
-        Left err -> pure $ Left err
+      case fromDynamic dynHandle of
+        Just client -> do
+          result <- LSP.extractWorkspaceSymbols client
+          case result of
+            Right syms -> do
+              let fileMap = LSP.workspaceSymbolsToDocumentSymbols syms
+              pure $ Right $ Map.map
+                (\symbols -> SymbolResult
+                  { srNodes = LSP.symbolToNodes "<workspace>" symbols
+                  , srEdges = LSP.symbolTreeToEdges "<workspace>" symbols
+                  }
+                ) fileMap
+            Left err -> pure $ Left err
+        Nothing -> pure $ Left "wiring: extractWorkspaceSymbols type mismatch"
   , epParseWithGrammar = \grammar filePath content ->
       case getGrammarPtr grammar of
         Nothing -> pure Nothing

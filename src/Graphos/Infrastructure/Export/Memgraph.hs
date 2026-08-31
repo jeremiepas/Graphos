@@ -31,6 +31,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import qualified Data.Text.IO as TIO
 import System.Exit (ExitCode(..))
 import System.Directory (getTemporaryDirectory, removeFile)
@@ -257,7 +258,7 @@ generateInlineEdgesForNodes g nodeIds =
 generateInlineNodeStatement :: Node -> Text
 generateInlineNodeStatement n =
   let baseProps = [ "id: " <> cypherQuote (nodeId n)
-                  , "label: " <> cypherQuote (nodeLabel n)
+                   , "label: " <> cypherQuote (toText (nodeLabel n))
                   , "file_type: " <> cypherQuote (T.pack (show (nodeFileType n)))
                   ]
       lineStartProp = maybe [] (\start -> ["line_start: " <> T.pack (show start)]) (nodeLineStart n)
@@ -346,7 +347,7 @@ generateCommunityEdgeInlineStatements g commMap =
          [ "MATCH (c1:Community {id: \"community_", T.pack (show c1), "\"}) "
          , "MATCH (c2:Community {id: \"community_", T.pack (show c2), "\"}) "
          , "MERGE (c1)-[:CONNECTED_TO {edge_count: ", T.pack (show count)
-         , ", bridge_nodes: ", cypherQuote (T.intercalate "," (map (\nid -> maybe nid nodeLabel (Map.lookup nid (gNodes g))) bridges))
+          , ", bridge_nodes: ", cypherQuote (T.intercalate "," (map (\nid -> maybe nid (toText . nodeLabel) (Map.lookup nid (gNodes g))) bridges))
          , "}]->(c2);"
          ]
      | ((c1, c2), (count, bridges)) <- Map.toList edgeCounts
@@ -365,7 +366,7 @@ chunkList n xs = take n xs : chunkList n (drop n xs)
 topMemberLabels :: Graph -> [NodeId] -> Int -> [Text]
 topMemberLabels g members n =
   let sortedByDegree = sortOn (\nid -> negate (fromIntegral (Set.size (neighbors g nid)) :: Double)) members
-  in take n [ nodeLabel nd | nid <- sortedByDegree, Just nd <- [Map.lookup nid (gNodes g)] ]
+   in take n [ toText (nodeLabel nd) | nid <- sortedByDegree, Just nd <- [Map.lookup nid (gNodes g)] ]
 
 -- | Escape a Cypher identifier by wrapping in backticks.
 escapeCypherId :: Text -> Text

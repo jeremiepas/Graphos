@@ -11,6 +11,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, degree)
 import qualified Data.Set as Set
@@ -31,7 +32,7 @@ suggestCommunityLabels g commMap =
 labelFromNodes :: Graph -> [NodeId] -> Text
 labelFromNodes g memberIds =
   let nodes = [n | nid <- memberIds, Just n <- [Map.lookup nid (gNodes g)]]
-      labels = map nodeLabel nodes
+      labels = map (toText . nodeLabel) nodes
       allWords = concatMap (T.words . T.toLower) labels
       filtered = filter (not . isStopWord) allWords
       wordCounts = Map.fromListWith (+) [(w, 1 :: Int) | w <- filtered]
@@ -63,7 +64,7 @@ wordFreqs g memberIds =
       -- Split each label into words, weight by node degree
       wordEntries = [(w, max 1 (fromIntegral deg / maxAvgDeg))
                     | (n, deg) <- nodes
-                    , w <- filter (not . isStopWord) (T.words (T.toLower (nodeLabel n)))
+                    , w <- filter (not . isStopWord) (T.words (T.toLower (toText (nodeLabel n))))
                     ]
       maxAvgDeg = if null nodes then 1.0 else max 1.0 (fromIntegral (sum (map snd nodes)) / fromIntegral (length nodes))
   in Map.fromListWith (+) wordEntries

@@ -24,6 +24,7 @@ import Control.Exception (SomeException, catch)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.Time (getCurrentTime, UTCTime, formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeExtension, (</>))
@@ -215,7 +216,7 @@ ingestFile appEnv config filePath = do
         else do
           -- Store metadata-only entries (no vector) for index lookups
           now <- getCurrentTime
-          let metaEmbs = [emptyIngestEmbedding (nodeId n) (nodeSourceFile n) now | n <- nodes]
+          let metaEmbs = [emptyIngestEmbedding (nodeId n) (toText (nodeSourceFile n)) now | n <- nodes]
               idx' = foldr addToIndex emptyIngestIndex metaEmbs
           pure (metaEmbs, idx')
 
@@ -255,7 +256,7 @@ generateEmbeddingsForNodes appEnv cfg nodes = do
 -- | Generate embedding for a single node.
 embedNode :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> Node -> IO IngestEmbedding
 embedNode appEnv cfg model ts node = do
-  let inputText = nodeLabel node <> " " <> nodeSourceFile node
+  let inputText = toText (nodeLabel node) <> " " <> toText (nodeSourceFile node)
   result <- lpGenerateEmbedding (llmPort appEnv) cfg inputText
   case result of
     Left _err ->
@@ -263,7 +264,7 @@ embedNode appEnv cfg model ts node = do
       pure IngestEmbedding
         { ieNodeId     = nodeId node
         , ieVector     = []
-        , ieSourceHash = nodeSourceFile node
+        , ieSourceHash = toText (nodeSourceFile node)
         , ieTimestamp  = ts
         , ieModel      = model
         }
@@ -271,7 +272,7 @@ embedNode appEnv cfg model ts node = do
       pure IngestEmbedding
         { ieNodeId     = nodeId node
         , ieVector     = vec
-        , ieSourceHash = nodeSourceFile node
+        , ieSourceHash = toText (nodeSourceFile node)
         , ieTimestamp  = ts
         , ieModel      = model
         }

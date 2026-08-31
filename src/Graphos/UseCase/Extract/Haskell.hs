@@ -16,7 +16,9 @@ module Graphos.UseCase.Extract.Haskell
 import Control.Exception (SomeException, catch)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.List (find, isPrefixOf)
+import Data.Bits ((.|.))
 import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (makeStubNode)
@@ -56,49 +58,52 @@ haskellStubNodes filePath content =
           let mnText = T.pack mn
           in [ Node
                { nodeId           = canonicalModuleId mnText filePath
-               , nodeLabel        = mnText
+               , nodeLabel        = fromText mnText
                , nodeFileType     = CodeFile
-               , nodeSourceFile   = T.pack filePath
+        , nodeSourceFile   = fromText (T.pack filePath)
                , nodeLineStart    = Just 1
                , nodeCommunityId  = Nothing
                , nodeDegree       = Nothing
                , nodeIsBridge     = Nothing
                , nodeExtra        = Nothing
                , nodeLineEnd      = Nothing
-               , nodeKind         = Just "Module"
+               , nodeKind         = Just (fromText "Module")
                , nodeSignature    = Nothing
+               , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
                }
-             ]
+              ]
         Nothing -> []
       impNodes = [ Node
         { nodeId           = canonicalModuleId (T.pack imp) filePath
-        , nodeLabel        = T.pack imp
+        , nodeLabel        = fromText (T.pack imp)
         , nodeFileType     = CodeFile
-        , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
+        , nodeSourceFile   = fromText (T.pack filePath)
+   , nodeLineStart    = Nothing
+   , nodeCommunityId  = Nothing
+   , nodeDegree       = Nothing
+   , nodeIsBridge     = Nothing
+   , nodeExtra        = Nothing
         , nodeLineEnd      = Nothing
-        , nodeKind         = Just "Module"
+        , nodeKind         = Just (fromText "Module")
         , nodeSignature    = Nothing
+        , nodePresentBits  = bitNodeKind
         }
         | imp <- imports
         ]
       declNodes = [ Node
         { nodeId           = hashPrefix <> T.pack "_" <> T.pack declName
-        , nodeLabel        = T.pack declName
+        , nodeLabel        = fromText (T.pack declName)
         , nodeFileType     = CodeFile
-        , nodeSourceFile   = T.pack filePath
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
+        , nodeSourceFile   = fromText (T.pack filePath)
+   , nodeLineStart    = Nothing
+   , nodeCommunityId  = Nothing
+   , nodeDegree       = Nothing
+   , nodeIsBridge     = Nothing
+   , nodeExtra        = Nothing
         , nodeLineEnd      = Nothing
-        , nodeKind         = Just declKind'
+        , nodeKind         = Just (fromText declKind')
         , nodeSignature    = Nothing
+        , nodePresentBits  = bitNodeKind
         }
         | (declName, declKind') <- decls
         ]
