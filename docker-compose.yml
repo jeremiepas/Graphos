@@ -39,7 +39,7 @@ services:
     environment:
       # ── Authentication ──────────────────────────────────────────
       # Format: username/password. Use "none" to disable auth (dev only).
-      - NEO4J_AUTH=neo4j/graphos_dev
+      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/graphos_dev}
 
       # ── Memory (tuned for development) ─────────────────────────
       # Default heap/pagecache are only 512M each — too small for real use.

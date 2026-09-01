@@ -31,3 +31,4 @@ monitoring/grafana/data/
 .direnv/
 .devenv/
 .aider*
+.env
