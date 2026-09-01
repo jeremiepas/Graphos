@@ -42,12 +42,24 @@ in
   tasks = {
     # cabal update is required before configure: a clean-slate CI runner has
     # no Hackage index, so dependency resolution (e.g. zip-archive) fails with
-    # "unknown package" without it. Guarded best-effort: if update fails but a
-    # cached index exists, fall back to the cache; only fail the task when
-    # update fails AND no cached index exists. The index lives under
-    # ~/.cache/cabal (cabal >= 3.10) or ~/.cabal (older cabal).
+    # "unknown package" without it. Best-effort update with retries; always
+    # proceed to build even if update fails (cached index may suffice).
     "ci:build" = {
-      exec = ''{ cabal update || { echo "cabal update failed, retrying in 10s..."; sleep 10; cabal update; } || { echo "cabal update failed, retrying in 20s..."; sleep 20; cabal update; }; } || { { test -d ~/.cache/cabal/packages/hackage.haskell.org || test -d ~/.cabal/packages/hackage.haskell.org; } && echo "cabal update failed; using cached index"; } || { echo "cabal update failed and no cached index"; exit 1; } && cabal configure --enable-tests --flag dev -j4 && cabal build all -j4'';
+      exec = ''
+        set -e
+        echo "=== cabal update (best-effort) ==="
+        for i in 1 2 3; do
+          if cabal update 2>&1; then
+            echo "cabal update succeeded on attempt $i"
+            break
+          fi
+          echo "cabal update attempt $i failed, retrying in $((i * 10))s..."
+          sleep $((i * 10))
+        done
+        echo "=== proceeding to build ==="
+        cabal configure --enable-tests --flag dev -j4
+        cabal build all -j4
+      '';
     };
     "ci:test" = {
       exec = "cabal test all";
@@ -57,9 +69,23 @@ in
       exec = "cabal haddock all";
       after = [ "ci:build@succeeded" ];
     };
-    # Same guarded cabal update as ci:build (clean-slate CI has no Hackage index).
+    # Best-effort cabal update with retries; always proceed to build.
     "ci:release-build" = {
-      exec = ''{ cabal update || { echo "cabal update failed, retrying in 10s..."; sleep 10; cabal update; } || { echo "cabal update failed, retrying in 20s..."; sleep 20; cabal update; }; } || { { test -d ~/.cache/cabal/packages/hackage.haskell.org || test -d ~/.cabal/packages/hackage.haskell.org; } && echo "cabal update failed; using cached index"; } || { echo "cabal update failed and no cached index"; exit 1; } && cabal configure --enable-tests && cabal build all'';
+      exec = ''
+        set -e
+        echo "=== cabal update (best-effort) ==="
+        for i in 1 2 3; do
+          if cabal update 2>&1; then
+            echo "cabal update succeeded on attempt $i"
+            break
+          fi
+          echo "cabal update attempt $i failed, retrying in $((i * 10))s..."
+          sleep $((i * 10))
+        done
+        echo "=== proceeding to build ==="
+        cabal configure --enable-tests
+        cabal build all
+      '';
     };
     "ci:release-test" = {
       exec = "cabal test all";

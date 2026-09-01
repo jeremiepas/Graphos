@@ -179,7 +179,7 @@ classifyExclusion
   -> FilePath
   -> [AnnotatedPattern]
   -> ExclusionCounts
-classifyExclusion scanRoot shouldIgnoreFn entry parentPath entryPath ignorePatterns
+classifyExclusion scanRoot _shouldIgnoreFn entry parentPath entryPath ignorePatterns
   | entry `elem` depthIndependentIgnoreDirs = emptyExclusionCounts { excDepthIndependent = 1 }
   | entry `elem` rootAnchoredIgnoreDirs && parentPath == scanRoot = emptyExclusionCounts { excRootAnchored = 1 }
   | otherwise =
