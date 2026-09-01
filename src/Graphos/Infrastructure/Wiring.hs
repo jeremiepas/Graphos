@@ -48,7 +48,7 @@ import qualified Graphos.Infrastructure.Export.CommunityGraph as CommunityGraph
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint )
-import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, shouldIgnore, ignoreMatches, relativize)
+import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, ignoreMatches)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
   ( docxExtractMediaPaths, pptxExtractMediaPaths, extractMediaFile )
 import Graphos.Infrastructure.Logging

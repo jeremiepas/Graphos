@@ -8,16 +8,14 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
-import Data.List (sort, sortOn)
+import Data.List (sort)
 import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
-import Data.Aeson.Types (Object)
+
 import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
 import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
-import Graphos.Domain.Types.Edge (Relation(References, Contains, Calls), Confidence(..))
-
 spec :: Spec
 spec = do
   describe "detectCommunities" $ do
