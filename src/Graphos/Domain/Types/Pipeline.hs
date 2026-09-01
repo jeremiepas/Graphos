@@ -36,7 +36,6 @@ import GHC.Conc (numCapabilities)
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
-import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
 
 -- | Pipeline configuration
 data PipelineConfig = PipelineConfig
@@ -67,6 +66,7 @@ data PipelineConfig = PipelineConfig
   , cfgMinCommSize  :: Int          -- ^ minimum community size; smaller ones get merged (default: 3)
   , cfgMaxLeidenIterations :: Int   -- ^ max Leiden iterations before stopping (default: 50, lower for large graphs)
   , cfgThreads      :: Int          -- ^ number of parallel extraction threads (default: numCapabilities)
+  , cfgLspConcurrency :: Int        -- ^ number of parallel LSP server groups (default: numCapabilities)
   , cfgCommunityGraph :: Bool      -- ^ export community-level graph JSON for LLM navigation
   , cfgGraphosConfig :: GraphosConfig  -- ^ LSP servers, language IDs, file extensions (config-driven)
   , cfgNeo4jStreaming :: Maybe Neo4jStreamingConfig  -- ^ Push nodes to Neo4j during extraction (streaming)
@@ -87,12 +87,8 @@ data PipelineConfig = PipelineConfig
   , cfgTimeout        :: Maybe Int                     -- ^ Pipeline timeout in seconds (Nothing = unlimited)
   , cfgNoSemanticEdges    :: Bool                      -- ^ Disable semantic code↔doc edge inference (--no-semantic-edges)
   , cfgForceSemanticEdges :: Bool                      -- ^ Force semantic inference, bypass scale cap + auto-skip (--force-semantic-edges)
-   , cfgIgnorePatterns     :: [AnnotatedPattern]        -- ^ CLI-provided --ignore patterns merged with .gitignore/.graphosignore
-   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
-   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
-   , cfgRtsApplied         :: Bool                      -- ^ Internal: set by parent to prevent re-execution
-   , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
-   } deriving (Eq, Show)
+  , cfgIgnorePatterns     :: [Text]                    -- ^ Additional ignore patterns from --ignore CLI flag
+  } deriving (Eq, Show)
 
 -- | Edge density level for inference
 -- Controls how aggressively the pipeline infers additional edges between nodes.
@@ -170,11 +166,6 @@ defaultConfig = PipelineConfig
   , cfgTimeout        = Nothing
   , cfgNoSemanticEdges    = False
   , cfgForceSemanticEdges = False
-  , cfgIgnorePatterns     = []
-   , cfgRtsProfile         = False
-   , cfgMaxHeap            = Nothing
-   , cfgRtsApplied         = False
-   , cfgLspConcurrency     = 2
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
