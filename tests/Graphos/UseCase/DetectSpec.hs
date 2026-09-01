@@ -92,7 +92,7 @@ spec = do
       let tmpDir = "/tmp/graphos-test-detect-spec-2"
       withTestTree tmpDir $ do
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         isIgnoredEntryRoot tmpDir matcher "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
           `shouldBe` False
 
@@ -100,7 +100,7 @@ spec = do
       let tmpDir = "/tmp/graphos-test-detect-spec-3"
       withTestTree tmpDir $ do
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         isIgnoredEntryRoot tmpDir matcher "build" tmpDir (tmpDir </> "build") patterns
           `shouldBe` True
 
@@ -112,7 +112,7 @@ spec = do
         touch (tmpDir </> "dist" </> "keep") "a.ts"
         writeFile (tmpDir </> ".graphosignore") "!dist/keep/**\n"
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         -- The nested dist/keep dir is NOT pruned by the root-anchored check
         -- because a negation pattern matches it.
         isIgnoredEntryRoot tmpDir matcher "dist" tmpDir (tmpDir </> "dist") patterns
@@ -124,7 +124,7 @@ spec = do
         mkSubdirs tmpDir [ "dist" ]
         touch (tmpDir </> "dist") "bundle.js"
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         isIgnoredEntryRoot tmpDir matcher "dist" tmpDir (tmpDir </> "dist") patterns
           `shouldBe` True
 
@@ -134,7 +134,7 @@ spec = do
         mkSubdirs tmpDir [ "src" </> "domain" </> "build" ]
         writeFile (tmpDir </> ".graphosignore") "!src/**/build/**\n"
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         -- A nested build dir: root-anchored check doesn't prune it (parent /= root),
         -- and the negation pattern ensures it stays included even if a positive
         -- pattern tried to match.
@@ -149,7 +149,7 @@ spec = do
         touch (tmpDir </> "build") "output.js"
         touch (tmpDir </> "src" </> "domain") "app.ts"
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         isIgnoredEntryRoot tmpDir matcher "build" tmpDir (tmpDir </> "build") patterns
           `shouldBe` True
         -- classifyExclusion should categorize root build as root-anchored
@@ -161,6 +161,6 @@ spec = do
       withTestTree tmpDir $ do
         mkSubdirs tmpDir [ "node_modules", "src" ]
         patterns <- loadIgnorePatterns tmpDir
-        let matcher _ patterns path = shouldIgnore patterns path
+        let matcher _ ps path = shouldIgnore ps path
         isIgnoredEntryRoot tmpDir matcher "node_modules" tmpDir (tmpDir </> "node_modules") patterns
           `shouldBe` True

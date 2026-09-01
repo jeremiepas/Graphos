@@ -145,7 +145,8 @@ defaultConfig = PipelineConfig
   , cfgResolution   = 1.0
   , cfgMinCommSize  = 3
   , cfgMaxLeidenIterations = 50
-  , cfgThreads      = numCapabilities
+  , cfgThreads        = numCapabilities
+  , cfgLspConcurrency = numCapabilities
   , cfgCommunityGraph = False
   , cfgGraphosConfig = defaultGraphosConfig
   , cfgNeo4jStreaming = Nothing
@@ -166,6 +167,7 @@ defaultConfig = PipelineConfig
   , cfgTimeout        = Nothing
   , cfgNoSemanticEdges    = False
   , cfgForceSemanticEdges = False
+  , cfgIgnorePatterns     = []
   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
