@@ -95,9 +95,9 @@ resolveDots p = T.unpack (T.intercalate "/" (go (T.splitOn "/" (T.pack p)) []))
     go (x : rest) acc
       | x == "."   = go rest acc
       | x == ".."  = case acc of
-           [] -> go rest acc
-           ("" : _) -> go rest acc
-           (_ : restAcc) -> go rest restAcc
+          [] -> go rest acc
+          ("" : _) -> go rest acc
+          (_ : restAcc) -> go rest restAcc
       | otherwise  = go rest (x : acc)
 
 scanGroundTruth :: FilePath -> IO (Set.Set (FilePath, FilePath))

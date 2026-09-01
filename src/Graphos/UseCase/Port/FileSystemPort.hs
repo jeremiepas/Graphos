@@ -23,5 +23,6 @@ data FileSystemPort = FileSystemPort
     -- | Load ignore patterns from config and .gitignore
   , fspLoadIgnorePatterns :: FilePath -> IO [AnnotatedPattern]
     -- | Check if a path should be ignored given patterns (pure)
-  , fspShouldIgnore      :: [AnnotatedPattern] -> FilePath -> Bool
+    -- First arg is the scan root for relativizing paths against ignore patterns
+  , fspShouldIgnore      :: FilePath -> [AnnotatedPattern] -> FilePath -> Bool
     }

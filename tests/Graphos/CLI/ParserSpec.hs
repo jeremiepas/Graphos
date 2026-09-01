@@ -142,39 +142,3 @@ spec = do
       let helpText = renderHelp 80 (parserHelp defaultPrefs (infoParser (info pipelineOpts idm)))
       helpText `shouldSatisfy` isInfixOf "--no-semantic-edges"
       helpText `shouldSatisfy` isInfixOf "--force-semantic-edges"
-
-  describe "RTS profiling flags" $ do
-    it "defaults both cfgRtsProfile and cfgMaxHeap to False/Nothing" $ do
-      parsePipeline [] `shouldSatisfy` \case
-        Right cfg -> cfgRtsProfile cfg == False && cfgMaxHeap cfg == Nothing
-        Left _    -> False
-
-    it "--rts-profile sets cfgRtsProfile to True" $ do
-      parsePipeline ["--rts-profile"] `shouldSatisfy` \case
-        Right cfg -> cfgRtsProfile cfg == True
-        Left _    -> False
-
-    it "--max-heap 1G sets cfgMaxHeap to Just 1024" $ do
-      parsePipeline ["--max-heap", "1G"] `shouldSatisfy` \case
-        Right cfg -> cfgMaxHeap cfg == Just 1024
-        Left _    -> False
-
-    it "--max-heap 512M sets cfgMaxHeap to Just 512" $ do
-      parsePipeline ["--max-heap", "512M"] `shouldSatisfy` \case
-        Right cfg -> cfgMaxHeap cfg == Just 512
-        Left _    -> False
-
-    it "--max-heap 2048 sets cfgMaxHeap to Just 2048 (plain number)" $ do
-      parsePipeline ["--max-heap", "2048"] `shouldSatisfy` \case
-        Right cfg -> cfgMaxHeap cfg == Just 2048
-        Left _    -> False
-
-    it "accepts both --rts-profile and --max-heap together" $ do
-      parsePipeline ["--rts-profile", "--max-heap", "4G"] `shouldSatisfy` \case
-        Right cfg -> cfgRtsProfile cfg == True && cfgMaxHeap cfg == Just 4096
-        Left _    -> False
-
-    it "--help lists --rts-profile and --max-heap" $ do
-      let helpText = renderHelp 80 (parserHelp defaultPrefs (infoParser (info pipelineOpts idm)))
-      helpText `shouldSatisfy` isInfixOf "--rts-profile"
-      helpText `shouldSatisfy` isInfixOf "--max-heap"

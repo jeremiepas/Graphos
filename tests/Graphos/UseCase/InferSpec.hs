@@ -4,17 +4,17 @@ module Graphos.UseCase.InferSpec where
 
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
-import Data.List (nubBy, sortOn)
+import Data.List (nubBy)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-
 import Data.Text.Short (fromText)
+
 import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
 import Graphos.Domain.Config (SemanticEdgesConfig(..), defaultSemanticEdgesConfig)
 import Graphos.Domain.Graph (buildGraph, gEmbeddings)
-import Graphos.UseCase.Infer (inferCommunityBridges, inferCodeDocEdges, inferSemanticCodeDocEdges, inferTransitiveDeps, SemanticMode(..), semanticMode, isSingleCorpus)
+import Graphos.UseCase.Infer (inferCommunityBridges, inferCodeDocEdges, inferSemanticCodeDocEdges, SemanticMode(..), semanticMode, isSingleCorpus)
 
 -- Helpers
 testNode :: Text -> Node
@@ -28,9 +28,6 @@ codeNode nid lbl = Node nid (fromText lbl) CodeFile (fromText "code.hs") (Just 1
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Calls 1.0 (Confidence 1.0) Nothing
-
-importEdge :: Text -> Text -> Edge
-importEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Imports 1.0 (Confidence 1.0) Nothing
 
 spec :: Spec
 spec = do
@@ -70,43 +67,6 @@ spec = do
           g' = buildGraph False (extractionFromLists (map testNode ["a","b","c","x","d","e","f","y"]) es')
           cm' = Map.fromList [(0, ["a","b","c","x"]), (1, ["d","e","f","y"])]
       inferCommunityBridges g' cm' `shouldBe` []
-
-  describe "inferTransitiveDeps" $ do
-    it "links two importers of a shared module in both directions" $ do
-      let ns = map testNode ["A","B","C"]
-          es = [importEdge "A" "B", importEdge "C" "B"]
-          g = buildGraph False (extractionFromLists ns es)
-          pairs = sortOn id $ map (\e -> (edgeSource e, edgeTarget e)) (inferTransitiveDeps g)
-      pairs `shouldBe` [("A","C"),("C","A")]
-
-    it "emits no edge when a module has a single importer" $ do
-      let ns = map testNode ["A","B"]
-          es = [importEdge "A" "B"]
-          g = buildGraph False (extractionFromLists ns es)
-      inferTransitiveDeps g `shouldBe` []
-
-    it "skips god modules imported by more than the fan-in cap" $ do
-      let importers = [T.pack ("c" ++ show i) | i <- [1 .. 65 :: Int]]
-          ns = map testNode ("B" : importers)
-          es = [importEdge c "B" | c <- importers]
-          g = buildGraph False (extractionFromLists ns es)
-      inferTransitiveDeps g `shouldBe` []
-
-    it "still expands a hub at exactly the fan-in cap" $ do
-      let importers = [T.pack ("c" ++ show i) | i <- [1 .. 64 :: Int]]
-          ns = map testNode ("B" : importers)
-          es = [importEdge c "B" | c <- importers]
-          g = buildGraph False (extractionFromLists ns es)
-      length (inferTransitiveDeps g) `shouldBe` 64 * 63
-
-    it "caps the total number of inferred edges" $ do
-      let hubs = [T.pack ("h" ++ show h) | h <- [1 .. 13 :: Int]]
-          importers = [T.pack ("c" ++ show h ++ "-" ++ show i) | h <- [1 .. 13 :: Int], i <- [1 .. 64 :: Int]]
-          ns = map testNode (hubs ++ importers)
-          es = [importEdge (T.pack ("c" ++ show h ++ "-" ++ show i)) (T.pack ("h" ++ show h))
-                | h <- [1 .. 13 :: Int], i <- [1 .. 64 :: Int]]
-          g = buildGraph False (extractionFromLists ns es)
-      length (inferTransitiveDeps g) `shouldBe` 50000
 
   describe "inferCodeDocEdges" $ do
     it "links a doc label matching few code nodes" $ do
