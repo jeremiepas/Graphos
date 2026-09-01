@@ -33,6 +33,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (ShortText, fromText, toText)
 import Data.Word (Word32)
 
 import Graphos.Domain.Types
@@ -174,9 +175,9 @@ makeStubNode filePath =
       nodeId' = hashPrefix <> T.pack "_" <> name
   in Node
     { nodeId           = nodeId'
-    , nodeLabel        = name
+    , nodeLabel        = fromText name
     , nodeFileType     = CodeFile
-    , nodeSourceFile   = T.pack filePath
+    , nodeSourceFile   = fromText (T.pack filePath)
     , nodeLineStart    = Nothing
     , nodeCommunityId  = Nothing
     , nodeDegree       = Nothing
@@ -185,13 +186,14 @@ makeStubNode filePath =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
+    , nodePresentBits  = 0
     }
 
 -- | Check if a node is a file-level hub (synthetic AST node)
 isFileNode :: Graph -> Node -> Bool
 isFileNode g n =
-  let label = nodeLabel n
-      srcFile = nodeSourceFile n
+  let label = toText (nodeLabel n)
+      srcFile = toText (nodeSourceFile n)
       nid = nodeId n
       fwd = Map.findWithDefault Set.empty nid (gAdjFwd g)
       bwd = Map.findWithDefault Set.empty nid (gAdjBack g)
@@ -201,16 +203,16 @@ isFileNode g n =
      -- Low-degree function stub
      || (not (T.null label) && T.last label == ')' && deg <= 1)
      -- Label matches source filename
-     || (not (T.null srcFile) && not (T.null label) && label == T.pack (takeFileName (T.unpack srcFile)))
+     || (not (T.null srcFile) && not (T.null label) && label == takeFileName srcFile)
   where
-    takeFileName path = case T.breakOnEnd "/" (T.pack path) of
+    takeFileName path = case T.breakOnEnd "/" path of
       (_, "") -> path
-      (_, name) -> T.unpack $ T.dropWhile (== '/') name
+      (_, name) -> T.dropWhile (== '/') name
 
 -- | Check if a node is a concept node (injected semantic annotation)
 isConceptNode :: Node -> Bool
 isConceptNode n =
-  let src = nodeSourceFile n
+  let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.

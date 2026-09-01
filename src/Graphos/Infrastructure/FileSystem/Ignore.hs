@@ -12,6 +12,9 @@ module Graphos.Infrastructure.FileSystem.Ignore
   , loadGitignore
   , loadIgnorePatterns
 
+    -- * Pattern parsing
+  , parseGitignoreLine
+
     -- * Pattern matching
   , shouldIgnore
   , matches
