@@ -28,6 +28,7 @@ module Graphos.CLI.Parser
 
 import Options.Applicative
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Conc (numCapabilities)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
@@ -86,7 +87,8 @@ pipelineOpts = PipelineConfig
   <*> option auto (long "resolution" <> value 1.0 <> help "Community resolution: higher = fewer larger communities (default: 1.0, try 0.3-0.5 for 100k+ nodes)")
    <*> option auto (long "min-comm-size" <> value 3 <> help "Minimum community size; smaller get merged (default: 3, try 10-20 for 100k+ nodes)")
    <*> option auto (long "max-leiden-iterations" <> value 50 <> help "Max Leiden iterations (default: 50, try 10-20 for 100k+ nodes)")
-    <*> option auto (long "threads" <> short 'j' <> value (fromIntegral numCapabilities) <> help "Number of parallel extraction threads (default: numCapabilities)")
+     <*> option auto (long "threads" <> short 'j' <> value (fromIntegral numCapabilities) <> help "Number of parallel extraction threads (default: numCapabilities)")
+     <*> option auto (long "lsp-concurrency" <> value (fromIntegral numCapabilities) <> help "Number of parallel LSP server groups (default: numCapabilities)")
    <*> switch (long "community-graph" <> help "Export community-level graph JSON for LLM navigation")
     <*> pure defaultGraphosConfig
     <*> pure Nothing
@@ -108,6 +110,7 @@ pipelineOpts = PipelineConfig
        <*> optional (option auto (long "timeout" <> help "Pipeline timeout in seconds (e.g. 300)"))
        <*> switch (long "no-semantic-edges" <> help "Disable semantic code↔doc edge inference (literal-name only)")
        <*> switch (long "force-semantic-edges" <> help "Force semantic inference, bypassing scale cap and single-corpus auto-skip")
+       <*> fmap (map T.pack) (many (option str (long "ignore" <> metavar "GLOB" <> help "Additional ignore pattern (repeatable)")))
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of
@@ -301,7 +304,8 @@ renderCommandReference = unlines $
   , "  --verbose, -v / --debug"
   , "  --granularity LEVEL           fine|function|file"
   , "  --threads, -j N / --edge-density MODE"
-  , "  --resolution FLOAT / --mcp GRAPH_JSON"
+  , "  --resolution FLOAT / --lsp-concurrency N / --mcp GRAPH_JSON"
+  , "  --ignore GLOB                 Additional ignore pattern (repeatable)"
   , ""
   , "graphos query QUESTION          Query the knowledge graph"
   , "  --dfs / --budget N / --graph FILE"
