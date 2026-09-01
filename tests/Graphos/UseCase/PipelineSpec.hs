@@ -5,7 +5,6 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
-import Data.Text.Short (fromText)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 
@@ -59,7 +58,7 @@ spec = do
 -- ───────────────────────────────────────────────
 
 testNode :: NodeId -> Text -> Text -> Node
-testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid label src = Node nid label CodeFile src Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 testGraph :: [Node] -> Graph
 testGraph ns = Graph
