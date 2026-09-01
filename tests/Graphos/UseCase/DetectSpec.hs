@@ -48,19 +48,19 @@ spec = do
       hardcodedIgnoreDirNames `shouldBe` rootAnchoredIgnoreDirs ++ depthIndependentIgnoreDirs
 
     it "./build/output.js is pruned when the scan root is ." $ do
-      isIgnoredEntryRoot "." (\_ _ -> False) "build" "." "./build" []
+      isIgnoredEntryRoot "." (\_ _ _ -> False) "build" "." "./build" []
         `shouldBe` True
 
     it "src/domain/build/build-ledger.ts is NOT pruned (build nested in source tree)" $ do
-      isIgnoredEntryRoot "." (\_ _ -> False) "build" "./src/domain" "./src/domain/build" []
+      isIgnoredEntryRoot "." (\_ _ _ -> False) "build" "./src/domain" "./src/domain/build" []
         `shouldBe` False
 
     it "src/services/phase/build/build-pipeline-executor.ts is NOT pruned" $ do
-      isIgnoredEntryRoot "." (\_ _ -> False) "build" "./src/services/phase" "./src/services/phase/build" []
+      isIgnoredEntryRoot "." (\_ _ _ -> False) "build" "./src/services/phase" "./src/services/phase/build" []
         `shouldBe` False
 
     it "packages/app/node_modules/left-pad/index.js is still pruned (depth-independent)" $ do
-      isIgnoredEntryRoot "." (\_ _ -> False) "node_modules" "./packages/app" "./packages/app/node_modules" []
+      isIgnoredEntryRoot "." (\_ _ _ -> False) "node_modules" "./packages/app" "./packages/app/node_modules" []
         `shouldBe` True
 
   describe "detectFiles (integration with real filesystem)" $ do
@@ -77,14 +77,14 @@ spec = do
         touch (tmpDir </> "build") "output.js"
         touch (tmpDir </> "src" </> "lib" </> "build") "build-helper.ts"
         -- Nested build dirs are NOT pruned (parentPath /= scanRoot).
-        isIgnoredEntryRoot tmpDir (\_ _ -> False) "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") []
+        isIgnoredEntryRoot tmpDir (\_ _ _ -> False) "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") []
           `shouldBe` False
-        isIgnoredEntryRoot tmpDir (\_ _ -> False) "build" (tmpDir </> "src" </> "services" </> "phase") (tmpDir </> "src" </> "services" </> "phase" </> "build") []
+        isIgnoredEntryRoot tmpDir (\_ _ _ -> False) "build" (tmpDir </> "src" </> "services" </> "phase") (tmpDir </> "src" </> "services" </> "phase" </> "build") []
           `shouldBe` False
-        isIgnoredEntryRoot tmpDir (\_ _ -> False) "build" (tmpDir </> "src" </> "lib") (tmpDir </> "src" </> "lib" </> "build") []
+        isIgnoredEntryRoot tmpDir (\_ _ _ -> False) "build" (tmpDir </> "src" </> "lib") (tmpDir </> "src" </> "lib" </> "build") []
           `shouldBe` False
         -- Top-level build IS pruned (parentPath == scanRoot).
-        isIgnoredEntryRoot tmpDir (\_ _ -> False) "build" tmpDir (tmpDir </> "build") []
+        isIgnoredEntryRoot tmpDir (\_ _ _ -> False) "build" tmpDir (tmpDir </> "build") []
           `shouldBe` True
 
   describe "full pattern path agrees with root-anchoring (fix-treesitter-graph-fidelity)" $ do
@@ -92,14 +92,16 @@ spec = do
       let tmpDir = "/tmp/graphos-test-detect-spec-2"
       withTestTree tmpDir $ do
         patterns <- loadIgnorePatterns tmpDir
-        isIgnoredEntryRoot tmpDir shouldIgnore "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
+        let matcher _ patterns path = shouldIgnore patterns path
+        isIgnoredEntryRoot tmpDir matcher "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
           `shouldBe` False
 
     it "top-level build dir IS pruned when real ignore patterns are loaded" $ do
       let tmpDir = "/tmp/graphos-test-detect-spec-3"
       withTestTree tmpDir $ do
         patterns <- loadIgnorePatterns tmpDir
-        isIgnoredEntryRoot tmpDir shouldIgnore "build" tmpDir (tmpDir </> "build") patterns
+        let matcher _ patterns path = shouldIgnore patterns path
+        isIgnoredEntryRoot tmpDir matcher "build" tmpDir (tmpDir </> "build") patterns
           `shouldBe` True
 
   describe "negation-first evaluation (fix-treesitter-graph-fidelity task 5)" $ do
@@ -110,9 +112,10 @@ spec = do
         touch (tmpDir </> "dist" </> "keep") "a.ts"
         writeFile (tmpDir </> ".graphosignore") "!dist/keep/**\n"
         patterns <- loadIgnorePatterns tmpDir
+        let matcher _ patterns path = shouldIgnore patterns path
         -- The nested dist/keep dir is NOT pruned by the root-anchored check
         -- because a negation pattern matches it.
-        isIgnoredEntryRoot tmpDir shouldIgnore "dist" tmpDir (tmpDir </> "dist") patterns
+        isIgnoredEntryRoot tmpDir matcher "dist" tmpDir (tmpDir </> "dist") patterns
           `shouldBe` False
 
     it "without negation, ./dist/bundle.js remains excluded" $ do
@@ -121,7 +124,8 @@ spec = do
         mkSubdirs tmpDir [ "dist" ]
         touch (tmpDir </> "dist") "bundle.js"
         patterns <- loadIgnorePatterns tmpDir
-        isIgnoredEntryRoot tmpDir shouldIgnore "dist" tmpDir (tmpDir </> "dist") patterns
+        let matcher _ patterns path = shouldIgnore patterns path
+        isIgnoredEntryRoot tmpDir matcher "dist" tmpDir (tmpDir </> "dist") patterns
           `shouldBe` True
 
     it ".graphosignore !src/**/build/** re-includes nested build dirs" $ do
@@ -130,10 +134,11 @@ spec = do
         mkSubdirs tmpDir [ "src" </> "domain" </> "build" ]
         writeFile (tmpDir </> ".graphosignore") "!src/**/build/**\n"
         patterns <- loadIgnorePatterns tmpDir
+        let matcher _ patterns path = shouldIgnore patterns path
         -- A nested build dir: root-anchored check doesn't prune it (parent /= root),
         -- and the negation pattern ensures it stays included even if a positive
         -- pattern tried to match.
-        isIgnoredEntryRoot tmpDir shouldIgnore "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
+        isIgnoredEntryRoot tmpDir matcher "build" (tmpDir </> "src" </> "domain") (tmpDir </> "src" </> "domain" </> "build") patterns
           `shouldBe` False
 
   describe "per-class exclusion accounting (fix-treesitter-graph-fidelity task 5)" $ do
@@ -144,7 +149,8 @@ spec = do
         touch (tmpDir </> "build") "output.js"
         touch (tmpDir </> "src" </> "domain") "app.ts"
         patterns <- loadIgnorePatterns tmpDir
-        isIgnoredEntryRoot tmpDir shouldIgnore "build" tmpDir (tmpDir </> "build") patterns
+        let matcher _ patterns path = shouldIgnore patterns path
+        isIgnoredEntryRoot tmpDir matcher "build" tmpDir (tmpDir </> "build") patterns
           `shouldBe` True
         -- classifyExclusion should categorize root build as root-anchored
         let exc = emptyExclusionCounts { excRootAnchored = 1 }
@@ -155,5 +161,6 @@ spec = do
       withTestTree tmpDir $ do
         mkSubdirs tmpDir [ "node_modules", "src" ]
         patterns <- loadIgnorePatterns tmpDir
-        isIgnoredEntryRoot tmpDir shouldIgnore "node_modules" tmpDir (tmpDir </> "node_modules") patterns
+        let matcher _ patterns path = shouldIgnore patterns path
+        isIgnoredEntryRoot tmpDir matcher "node_modules" tmpDir (tmpDir </> "node_modules") patterns
           `shouldBe` True

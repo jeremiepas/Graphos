@@ -514,7 +514,7 @@ function renderGraph() {
     drilldownEdgesDataset = new vis.DataSet(styledEdges(filtered.edges));
     mountNetwork(drilldownNodesDataset, drilldownEdgesDataset, getNetworkOptions(), true);
     var lbl = commLabel[cid] || ('Community ' + cid);
-    updatePhaseHint('Exploring ' + lbl + ' — ' + dData.nodes.length + ' nodes');
+    updatePhaseHint('Exploring ' + lbl + ' — ' + dData.nodes.length + ' nodes' + compositionBadgeHtml(cid));
     return;
   }
 
@@ -681,6 +681,7 @@ function renderLegend() {
       + '<div class="legend-dot" style="background:' + c.color + '"></div>'
       + '<span class="legend-label">' + escHtml(c.label) + '</span>'
       + '<span class="legend-count">' + c.member_count + '</span>'
+      + compositionBadgeHtml(c.id)
       + '</div>';
   });
 
@@ -729,7 +730,7 @@ function showNodeDetail(nodeId) {
   var commEl = document.getElementById('selectedCommunity');
   if (commEl) {
     var lbl = commLabel[node.community_id] || ('Community ' + node.community_id);
-    commEl.textContent = lbl;
+    commEl.innerHTML = escHtml(lbl) + compositionBadgeHtml(node.community_id);
   }
 
   var detailEl = document.getElementById('selectedDetail');
