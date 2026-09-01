@@ -8,6 +8,7 @@ import Data.List (nubBy)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
@@ -17,13 +18,13 @@ import Graphos.UseCase.Infer (inferCommunityBridges, inferCodeDocEdges, inferSem
 
 -- Helpers
 testNode :: Text -> Node
-testNode nid = Node nid nid CodeFile "test.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 docNode :: Text -> Text -> Node
-docNode nid lbl = Node nid lbl DocFile "doc.md" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+docNode nid lbl = Node nid (fromText lbl) DocFile (fromText "doc.md") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 codeNode :: Text -> Text -> Node
-codeNode nid lbl = Node nid lbl CodeFile "code.hs" (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+codeNode nid lbl = Node nid (fromText lbl) CodeFile (fromText "code.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Calls 1.0 (Confidence 1.0) Nothing

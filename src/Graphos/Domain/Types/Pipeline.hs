@@ -66,6 +66,7 @@ data PipelineConfig = PipelineConfig
   , cfgMinCommSize  :: Int          -- ^ minimum community size; smaller ones get merged (default: 3)
   , cfgMaxLeidenIterations :: Int   -- ^ max Leiden iterations before stopping (default: 50, lower for large graphs)
   , cfgThreads      :: Int          -- ^ number of parallel extraction threads (default: numCapabilities)
+  , cfgLspConcurrency :: Int        -- ^ number of parallel LSP server groups (default: numCapabilities)
   , cfgCommunityGraph :: Bool      -- ^ export community-level graph JSON for LLM navigation
   , cfgGraphosConfig :: GraphosConfig  -- ^ LSP servers, language IDs, file extensions (config-driven)
   , cfgNeo4jStreaming :: Maybe Neo4jStreamingConfig  -- ^ Push nodes to Neo4j during extraction (streaming)
@@ -86,6 +87,7 @@ data PipelineConfig = PipelineConfig
   , cfgTimeout        :: Maybe Int                     -- ^ Pipeline timeout in seconds (Nothing = unlimited)
   , cfgNoSemanticEdges    :: Bool                      -- ^ Disable semantic code↔doc edge inference (--no-semantic-edges)
   , cfgForceSemanticEdges :: Bool                      -- ^ Force semantic inference, bypass scale cap + auto-skip (--force-semantic-edges)
+  , cfgIgnorePatterns     :: [Text]                    -- ^ Additional ignore patterns from --ignore CLI flag
   } deriving (Eq, Show)
 
 -- | Edge density level for inference

@@ -18,6 +18,7 @@ import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Short (toText)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Directory (createDirectoryIfMissing)
 import System.Mem (performGC)
@@ -33,6 +34,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
+import Graphos.Infrastructure.FileSystem.Ignore (parseGitignoreLine)
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
@@ -61,7 +63,7 @@ generateGraphEmbeddings llm cfg graph = do
   pure embs
   where
     genNodeEmbedding n = do
-      let inputText = nodeLabel n <> " " <> nodeSourceFile n
+      let inputText = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
       lpGenerateEmbedding llm cfg inputText
 
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
@@ -123,6 +125,9 @@ runPipeline appEnv config = catch (do
   lpLogInfo lp "Step 1: Detecting files..."
   detectStart <- getCurrentTime
   ignorePatterns <- fspLoadIgnorePatterns fsp (cfgInputPath configWithStreaming)
+  let cliPatterns = map (parseGitignoreLine 3) (map T.unpack (cfgIgnorePatterns configWithStreaming))
+      allIgnorePatterns = ignorePatterns ++ cliPatterns
+  lpLogInfo lp $ T.pack $ "Loaded " ++ show (length allIgnorePatterns) ++ " ignore patterns"
   let fec = gcFileExtensions (cfgGraphosConfig configWithStreaming)
       extMap = Map.fromList
         [ (CodeFiles, fecCode fec)
@@ -132,7 +137,7 @@ runPipeline appEnv config = catch (do
         , (VideoFiles, fecVideo fec)
         , (OfficeFiles, fecOffice fec)
         ]
-  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap ignorePatterns
+  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap allIgnorePatterns
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   opIncCounter op "graphos_pipeline_steps_total" 1
@@ -140,11 +145,12 @@ runPipeline appEnv config = catch (do
   if null (allFiles detection)
     then pure $ Left "No supported files found"
     else do
+      let excs = detectionExclusions detection
+          totalExcluded = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
+      lpLogInfo lp $ T.pack $ "Ignored " ++ show totalExcluded ++ " files/directories"
       lpLogInfo lp $ T.pack $ "  Found " ++ show (detectionTotalFiles detection) ++ " files"
       lpLogDebug lp $ T.pack $ "  File categories: " ++ show (Map.keys (detectionFiles detection))
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))
-      let excs = detectionExclusions detection
-          totalExcluded = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
       when (totalExcluded > 0) $ do
         lpLogInfo lp $ T.pack $ "  Excluded " ++ show totalExcluded ++ " directories:"
         when (excRootAnchored excs > 0) $
