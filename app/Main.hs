@@ -2,7 +2,7 @@
 module Main where
 
 import Options.Applicative
-import System.Exit (exitWith, ExitCode(..), exitSuccess)
+import System.Exit (exitWith, ExitCode(..))
 import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
@@ -12,11 +12,10 @@ import Data.Maybe (isJust)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
-import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
+import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
-import System.Process (createProcess, proc)
-import System.Environment (getArgs, getExecutablePath, withArgs)
+import System.Environment (getArgs, withArgs)
 
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
@@ -89,39 +88,6 @@ parseHeapSize s = case reads s of
   _ -> Nothing
   where lower = map toLower s
 
-stripRTSFlags :: [String] -> ([String], Bool, Maybe String)
-stripRTSFlags args = go args False Nothing
-  where
-    go :: [String] -> Bool -> Maybe String -> ([String], Bool, Maybe String)
-    go [] profile heap = ( [], profile, heap )
-    go (a:as) profile heap = case a of
-      "--rts-profile" -> go as True heap
-      "--max-heap" -> case as of
-        h:rest -> go rest profile (Just h)
-        _      -> go as profile heap
-      other -> let (rest, p, h) = go as profile heap
-               in (other : rest, p, h)
-
-reexecWithRTS :: Bool -> Maybe String -> IO ()
-reexecWithRTS profile heapStr = do
-  originalArgs <- getArgs
-  exePath <- getExecutablePath
-  let rtsFlags = concat
-        [ if profile then "-s -hT" else ""
-        , if profile && isJust heapStr then " " else ""
-        , maybe "" (\sz -> "-M" ++ sz) heapStr
-        ]
-  case rtsFlags of
-    "" -> pure ()
-    _ -> do
-      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ rtsFlags
-      hFlush stderr
-      let (cleanArgs, _, _) = stripRTSFlags originalArgs
-          finalArgs = words ("+RTS " ++ rtsFlags ++ " --") ++ cleanArgs
-      let spec = proc exePath finalArgs
-      _ <- createProcess spec
-      exitSuccess
-
 main :: IO ()
 main = do
   rawArgs <- getArgs
@@ -129,14 +95,9 @@ main = do
   let args = case break (== "--") rawArgs of
         (_, []) -> rawArgs  -- No "--" found, use all args
         (_, _:rest) -> rest  -- Drop RTS flags and "--", keep rest
-  -- Check if re-executed by parent (skip re-execution if already applied)
-  let rtsApplied = "--rts-applied" `elem` rawArgs
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
-      let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
-      when (not rtsApplied && (cfgRtsProfile config || isJust (cfgMaxHeap config))) $
-        reexecWithRTS (cfgRtsProfile config) heapStr
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg
