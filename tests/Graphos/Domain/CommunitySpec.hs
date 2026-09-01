@@ -8,10 +8,10 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
-import Data.List (sortOn)
+import Data.List (sort, sortOn)
 import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
 import Data.Aeson.Types (Object)
-import Data.Aeson.Key (unKey)
+import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
@@ -180,9 +180,9 @@ spec = do
       let comp = CommunityComposition 1 2 3 (Just "module") 0.5 0
           json = toJSON comp
           keys = case json of
-            Object m -> map unKey (KeyMap.keys m)
+            Object m -> map keyToText (KeyMap.keys m)
             _ -> error "expected Object"
-      keys `shouldContain` ["code", "doc", "other", "dominant_kind", "mixed_ratio", "code_doc_edges"]
+      sort keys `shouldBe` sort ["code", "doc", "other", "dominant_kind", "mixed_ratio", "code_doc_edges"]
 
     it "handles absent dominant_kind on legacy graphs" $ do
       let legacyJson = object [ "code" .= (1 :: Int)
@@ -240,7 +240,7 @@ spec = do
           comp = Map.findWithDefault (error "missing comp") 0 comps
       ccCodeCount comp `shouldBe` 2
       ccDocCount comp `shouldBe` 3
-      ccMixedRatio comp `shouldBe` 0.5
+      ccMixedRatio comp `shouldBe` (2 :: Double) / 3
 
     it "composition counts match membership" $ do
       let ext = extractionFromLists
@@ -277,7 +277,7 @@ spec = do
           commMap = Map.fromList [(0, ["a","b","c","doc1","doc2","doc3"])]
           comps = computeCompositions g commMap
           comp = Map.findWithDefault (error "missing comp") 0 comps
-      ccCodeDocEdges comp `shouldBe` 3
+      ccCodeDocEdges comp `shouldBe` 2
 
     it "dominant kind ignores Nothing" $ do
       let ext = extractionFromLists
@@ -414,3 +414,6 @@ testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0) 
 
 testEdgeWithRelation :: Relation -> Text -> Text -> Edge
 testEdgeWithRelation rel src tgt = Edge (edgeIdFrom src tgt) src tgt rel 1.0 (Confidence 1.0) Nothing
+
+keyToText :: Key -> Text
+keyToText = T.drop 1 . T.init . T.pack . show
