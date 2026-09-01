@@ -18,10 +18,10 @@
 ## 4. Observability
 
 - [x] 4.1 Log `Loaded N ignore patterns from <file>` at INFO
-- [ ] 4.2 Log `Ignored M files` after Detect
+- [x] 4.2 Log `Ignored M files` after Detect
 
 ## 5. Docs & Verification
 
-- [ ] 5.1 Document ignore-file location and match semantics in README/CLI help
-- [ ] 5.2 `cabal build --flag dev` and `cabal test` green
-- [ ] 5.3 Smoke run: `graphos ./source --ignore '**/lib.rs'` yields zero nodes for matched files
+- [x] 5.1 Document ignore-file location and match semantics in README/CLI help
+- [x] 5.2 `cabal build --flag dev` and `cabal test` green
+- [x] 5.3 Smoke run: `graphos ./source --ignore '**/lib.rs'` yields zero nodes for matched files
