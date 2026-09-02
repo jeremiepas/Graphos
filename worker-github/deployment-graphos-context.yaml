@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runner-graphos-context
+  namespace: worker-github
+  labels:
+    app: runner-graphos-context
+    runner: "graphos-context"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: runner-graphos-context
+      runner: "graphos-context"
+  template:
+    metadata:
+      labels:
+        app: runner-graphos-context
+        runner: "graphos-context"
+    spec:
+      containers:
+        - name: runner
+          image: ghcr.io/actions/runner-actions-ubuntu-jammy:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ACTIONS_RUNNER_DEPENDENCY_TRACKING
+              value: "false"
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "graphos-context-secret"
+                  key: github-token
+            - name: RUNNER_GROUP
+              value: "Default"
+            - name: RUNNER_WORKDIR
+              value: "/home/runner/work"
+          volumeMounts:
+            - name: data
+              mountPath: /home/runner/_work
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "8Gi"
+              cpu: "4000m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: runner-data-graphos-context
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: runner-data-graphos-context
+  namespace: worker-github
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: runner-graphos-context
+  namespace: worker-github
+spec:
+  selector:
+    app: runner-graphos-context
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
