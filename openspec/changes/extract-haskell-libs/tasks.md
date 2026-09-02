@@ -1,7 +1,7 @@
 ## 1. Phase A — Template + scaffolding (homelab)
 
 - [ ] 1.1 Create `templates/haskell-lib-template/` in homelab with: `template.cabal` (Cabal 3.0, library-only, `NAME`/`VERSION` placeholders), `cabal.project` (`packages: .`), `devenv.nix` (GHC 9.10 + cabal + HLS + hspec-discover), `devenv.yaml`, `.envrc`, MIT `LICENSE`, `README.md` (badges + scaffold doc), `CHANGELOG.md` (keep-a-changelog), `.gitignore` (`dist-newstyle/`, `.devenv/`, `.direnv/`), `src/MyLib.hs` (minimal exposed module), `tests/Spec.hs` (hspec-discover entry)
-- [ ] 1.2 Create `.github/workflows/ci.yml` in template: `runs-on: [self-hosted, kubernetes]`, steps: checkout, `devenv shell` (or nix-shell), `cabal build`, `cabal test`
+- [x] 1.2 Create `.github/workflows/ci.yml` in template: `runs-on: [self-hosted, kubernetes]`, steps: checkout, `devenv shell` (or nix-shell), `cabal build`, `cabal test`
 - [ ] 1.3 Create `.github/workflows/hackage.yml` in template: trigger on tag `v*`, steps: `cabal sdist`, `cabal upload --publish` (using `HACKAGE_USERNAME`/`HACKAGE_PASSWORD` secrets)
 - [ ] 1.4 Create `scripts/create-haskell-lib.sh` in homelab: args `<name> <description>`, copies template to `../<name>/`, replaces `NAME`→name / `VERSION`→0.1.0.0 / `DESCRIPTION`→description, `git init`, `gh repo create jeremiepas/<name> --public --source=. --push`, prints next steps
 - [ ] 1.5 Verify: run `scripts/create-haskell-lib.sh test-lib "Test"` in a temp dir, confirm repo builds with `devenv shell -c 'cabal build && cabal test'`, then delete test repo via `gh repo delete jeremiepas/test-lib --yes`
