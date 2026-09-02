@@ -1,0 +1,28 @@
+name: Hackage
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: [self-hosted, kubernetes]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build source distribution
+        run: |
+          devenv shell --command cabal sdist
+
+      - name: Upload to Hackage
+        uses: hackage/cabal-to-gher@v3
+        with:
+          cabal-file: template.cabal
+          gpg-sign: false
+          publish: true
+        env:
+          HACKAGE_USERNAME: ${{ secrets.HACKAGE_USERNAME }}
+          HACKAGE_PASSWORD: ${{ secrets.HACKAGE_PASSWORD }}
