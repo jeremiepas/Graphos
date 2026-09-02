@@ -5,7 +5,7 @@
 - [ ] 1.3 Create `.github/workflows/hackage.yml` in template: trigger on tag `v*`, steps: `cabal sdist`, `cabal upload --publish` (using `HACKAGE_USERNAME`/`HACKAGE_PASSWORD` secrets)
 - [ ] 1.4 Create `scripts/create-haskell-lib.sh` in homelab: args `<name> <description>`, copies template to `../<name>/`, replaces `NAME`→name / `VERSION`→0.1.0.0 / `DESCRIPTION`→description, `git init`, `gh repo create jeremiepas/<name> --public --source=. --push`, prints next steps
 - [ ] 1.5 Verify: run `scripts/create-haskell-lib.sh test-lib "Test"` in a temp dir, confirm repo builds with `devenv shell -c 'cabal build && cabal test'`, then delete test repo via `gh repo delete jeremiepas/test-lib --yes`
-- [ ] 1.6 Deploy 6 K3s runners via `scripts/create-runner.sh`: `graphos-types`, `graphos-leiden`, `graphos-cypher`, `graphos-context`, `graphos-lsp-extract`, `graphos-graph-export` (each gets `deployment-<name>.yaml` + `<name>-secret` + HPA under `worker-github/`)
+- [x] 1.6 Deploy 6 K3s runners via `scripts/create-runner.sh`: `graphos-types`, `graphos-leiden`, `graphos-cypher`, `graphos-context`, `graphos-lsp-extract`, `graphos-graph-export` (each gets `deployment-<name>.yaml` + `<name>-secret` + HPA under `worker-github/`)
 
 ## 2. Phase B — graphos-types (foundation)
 
