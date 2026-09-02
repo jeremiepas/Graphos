@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: [self-hosted, kubernetes]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          devenv shell --command cabal build all
+          devenv shell --command cabal test
