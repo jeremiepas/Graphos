@@ -32,8 +32,14 @@ spec = do
     it "parses exact patterns (build)" $ do
       parsePattern "build" `shouldBe` ExactPattern "build"
 
-    it "parses leading-slash patterns (/absolute)" $ do
-      parsePattern "/absolute" `shouldBe` ExactPattern "/absolute"
+    it "parses leading-slash patterns (/absolute) as anchored" $ do
+      parsePattern "/absolute" `shouldBe` AnchoredPattern "absolute"
+
+    it "parses anchored wildcard patterns (/foo/*)" $ do
+      parsePattern "/foo/*" `shouldBe` AnchoredWildcardPattern "foo/*"
+
+    it "parses anchored directory patterns (/build/)" $ do
+      parsePattern "/build/" `shouldBe` AnchoredPattern "build"
 
     it "parses wildcard patterns with star in middle (.ghc.environment.*)" $ do
       parsePattern ".ghc.environment.*" `shouldBe` WildcardPattern ".ghc.environment.*"
@@ -162,6 +168,72 @@ spec = do
                      ]
       shouldIgnore patterns ".opencode/agent/core/openagent.md" `shouldBe` False
       shouldIgnore patterns ".opencode/config.json" `shouldBe` True
+
+    it "double-star prefix matches root-level file (zero directories)" $ do
+      -- **/lib.rs must match a top-level lib.rs, not only nested ones.
+      let patterns = [AnnotatedPattern (WildcardPattern "**/lib.rs") False 2]
+      shouldIgnore patterns "lib.rs" `shouldBe` True
+      shouldIgnore patterns "src/lib.rs" `shouldBe` True
+      shouldIgnore patterns "a/b/lib.rs" `shouldBe` True
+      shouldIgnore patterns "src/main.rs" `shouldBe` False
+
+    it "double-star matches nested file per spec (edr/wsc/.../lib.rs)" $ do
+      let patterns = [AnnotatedPattern (WildcardPattern "**/wsc_sdk/src/lib.rs") False 2]
+      shouldIgnore patterns "edr/wsc/wsc-registration-rust/wsc_sdk/src/lib.rs" `shouldBe` True
+      shouldIgnore patterns "edr/wsc/wsc-registration-rust/wsc_sdk/src/main.rs" `shouldBe` False
+
+  -- ───────────────────────────────────────────────
+  -- Anchored (leading /) pattern matching
+  -- ───────────────────────────────────────────────
+
+  describe "AnchoredPattern matching (leading /)" $ do
+    it "matches only top-level file, not nested" $ do
+      let patterns = [AnnotatedPattern (AnchoredPattern "lib.rs") False 2]
+      shouldIgnore patterns "lib.rs" `shouldBe` True
+      shouldIgnore patterns "src/lib.rs" `shouldBe` False
+      shouldIgnore patterns "a/b/lib.rs" `shouldBe` False
+
+    it "anchored directory pattern matches root dir and contents" $ do
+      let patterns = [AnnotatedPattern (AnchoredPattern "build") False 2]
+      shouldIgnore patterns "build" `shouldBe` True
+      shouldIgnore patterns "build/output.o" `shouldBe` True
+      shouldIgnore patterns "src/build" `shouldBe` False
+      shouldIgnore patterns "src/build/output.o" `shouldBe` False
+
+    it "anchored wildcard matches at root only" $ do
+      let patterns = [AnnotatedPattern (AnchoredWildcardPattern "foo/*") False 2]
+      shouldIgnore patterns "foo/bar" `shouldBe` True
+      shouldIgnore patterns "foo/bar/baz" `shouldBe` True
+      shouldIgnore patterns "src/foo/bar" `shouldBe` False
+
+    it "anchored pattern parsed from /lib.rs matches top-level only" $ do
+      let patterns = [AnnotatedPattern (parsePattern "/lib.rs") False 2]
+      shouldIgnore patterns "lib.rs" `shouldBe` True
+      shouldIgnore patterns "src/lib.rs" `shouldBe` False
+
+  -- ───────────────────────────────────────────────
+  -- Windows separator normalization
+  -- ───────────────────────────────────────────────
+
+  describe "Windows separator normalization" $ do
+    it "normalizes backslash paths for exact patterns" $ do
+      let patterns = [AnnotatedPattern (ExactPattern "node_modules") False 0]
+      shouldIgnore patterns "src\\node_modules" `shouldBe` True
+      shouldIgnore patterns "src\\node_modules\\pkg" `shouldBe` True
+
+    it "normalizes backslash paths for wildcard patterns" $ do
+      let patterns = [AnnotatedPattern (WildcardPattern "*.log") False 0]
+      shouldIgnore patterns "app\\debug.log" `shouldBe` True
+
+    it "normalizes backslash paths for double-star" $ do
+      let patterns = [AnnotatedPattern (WildcardPattern "**/lib.rs") False 2]
+      shouldIgnore patterns "a\\b\\lib.rs" `shouldBe` True
+      shouldIgnore patterns "lib.rs" `shouldBe` True
+
+    it "normalizes backslash paths for anchored patterns" $ do
+      let patterns = [AnnotatedPattern (AnchoredPattern "lib.rs") False 2]
+      shouldIgnore patterns "lib.rs" `shouldBe` True
+      shouldIgnore patterns "src\\lib.rs" `shouldBe` False
 
   describe "loadGraphosignore" $ do
     it "returns empty list when .graphosignore does not exist" $ do

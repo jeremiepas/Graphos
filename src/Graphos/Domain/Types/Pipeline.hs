@@ -187,11 +187,12 @@ data ExclusionCounts = ExclusionCounts
   , excGitignore        :: !Int  -- ^ pruned by a .gitignore pattern
   , excGraphosignore    :: !Int  -- ^ pruned by a .graphosignore pattern
   , excUnexplained      :: !Int  -- ^ pruned by an unknown mechanism
+  , excIgnoredFiles     :: !Int  -- ^ individual files excluded by an ignore pattern
   } deriving (Eq, Show)
 
 -- | A zero-filled exclusion counts record.
 emptyExclusionCounts :: ExclusionCounts
-emptyExclusionCounts = ExclusionCounts 0 0 0 0 0
+emptyExclusionCounts = ExclusionCounts 0 0 0 0 0 0
 
 -- | File detection result
 data Detection = Detection
