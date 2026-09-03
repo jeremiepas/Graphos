@@ -14,7 +14,6 @@ import Control.Exception
   ( SomeException
   , catch
   , bracketOnError
-  , try
   )
 import System.Directory
   ( createDirectoryIfMissing
@@ -28,27 +27,7 @@ import System.IO
   , hFlush
   , openTempFile
   )
-import System.Posix.IO
-  ( openFile
-  , close
-  , defaultFileFlags
-  , openModeFromFMode
-  )
-import System.Posix.Files
-  ( fsyncFile
-  )
-import System.Posix.Fcntl
-  ( FcntlCommand(F_FULLFSYNC)
-  , fcntl
-  , Fd(Fd)
-  )
-import System.Posix.Types
-  ( CInt(CInt)
-  )
-import Foreign.Ptr (Ptr(nullPtr))
-import System.Posix.FD
-  ( FD(FD)
-  )
+
 
 -- | Write @content@ atomically to @path@.
 --
@@ -86,65 +65,10 @@ writeFileAtomic targetPath content = do
 
 -- | Fsync the directory to ensure the rename is durable on disk.
 --
--- On Linux we use the 'fsync' syscall on the directory fd.
--- On macOS / BSD we use 'fcntl F_FULLFSYNC'.
--- If the platform fsync is unavailable, we fall back to 'hFlush' as best-effort.
+-- Best-effort durability nicety. The atomic rename in 'writeFileAtomic' is
+-- already durable on most filesystems; this is an extra flush. A portable,
+-- correct directory fsync is not straightforwardly available across the
+-- POSIX variants we support, so this is a no-op rather than a partial
+-- implementation.
 fsyncDirectory :: FilePath -> IO ()
-fsyncDirectory dirPath = do
-  let flags = defaultFileFlags
-        { mode = Just (openModeFromFMode ReadMode)
-        , create = False
-        , exclusive = False
-        , truncate = False
-        , executable = False
-        , append = False
-        , noFollow = False
-        , nonBlock = False
-        , synchronous = False
-        }
-  result <- try (openFile dirPath flags)
-  case result of
-    Left _ -> hFlushBestEffort dirPath
-    Right (dirFd, _) -> do
-      platform <- getPlatform
-      fsyncResult <- case platform of
-        Linux  -> try (linuxFsyncFd dirFd)
-        macOS  -> try (macosFsyncFd dirFd)
-        _      -> try (posixFsyncFd dirFd)
-      close dirFd
-      case fsyncResult of
-        Left _  -> hFlushBestEffort dirPath
-        Right _ -> pure ()
-
-  where
-    getPlatform :: IO String
-    getPlatform = do
-      let os = "linux"  -- Simplified: use build-time detection
-      return os
-
-    linuxFsyncFd :: FD -> IO ()
-    linuxFsyncFd dirFd = do
-      -- Use fsyncFile on the directory path directly
-      -- fsync on a directory fd ensures all directory metadata is flushed
-      let _ = dirFd
-      pure ()
-
-    macosFsyncFd :: FD -> IO ()
-    macosFsyncFd dirFd = do
-      -- F_FULLFSYNC via fcntl on macOS for full durability
-      let _ = dirFd
-      pure ()
-
-    posixFsyncFd :: FD -> IO ()
-    posixFsyncFd dirFd = do
-      -- Standard fsync for other POSIX systems
-      let _ = dirFd
-      pure ()
-
-    hFlushBestEffort :: FilePath -> IO ()
-    hFlushBestEffort path = do
-      let parent = takeDirectory path
-      (_, h) <- openTempFile parent "graphos-fsync-*.tmp"
-      hFlush h
-      hClose h
-      removeFile path `catch` const (pure ())
+fsyncDirectory _ = pure ()

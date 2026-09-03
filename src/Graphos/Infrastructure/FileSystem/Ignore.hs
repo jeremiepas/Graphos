@@ -44,6 +44,8 @@ data IgnorePattern
   | ExactPattern String     -- ^ e.g., "node_modules" matches exactly as a directory name
   | GlobPattern String      -- ^ e.g., "*.log" — legacy suffix-match pattern (kept for backward compat)
   | WildcardPattern String  -- ^ e.g., "result-*", ".ghc.environment.*" — fnmatch-style wildcard matching
+  | AnchoredPattern String  -- ^ e.g., "/lib.rs" → "lib.rs" — anchored to scan root (gitignore leading /)
+  | AnchoredWildcardPattern String  -- ^ e.g., "/foo/*" → "foo/*" — anchored fnmatch-style wildcard
   deriving (Eq, Show)
 
 -- | A negation pattern — re-includes a path that would otherwise be ignored.
@@ -72,21 +74,35 @@ shouldIgnore patterns path =
       negationOverride = any (\ap -> apNegate ap && matches path (apPattern ap)) patterns
   in positiveMatch && not negationOverride
 
+-- | Normalize path separators to forward slashes so that patterns (which use
+-- @\/@) match candidate paths regardless of the platform separator.
+normalizeSeparators :: FilePath -> FilePath
+normalizeSeparators = map (\c -> if c == '\\' then '/' else c)
+
 -- | Check if a path matches a specific pattern
 matches :: FilePath -> IgnorePattern -> Bool
-matches path (PrefixPattern p)    = p `isPrefixOf` path || ("/" ++ p) `isInfixOf` path
-matches path (SuffixPattern p)    = p `isSuffixOf` path
-matches path (ExactPattern p)     = p == path
-                                          || ("/" ++ p ++ "/") `isInfixOf` ("/" ++ path ++ "/")
-                                          || (p ++ "/") `isPrefixOf` path
-                                          || ("/" ++ p) `isSuffixOf` path
-matches path (GlobPattern p)     = p `isSuffixOf` path
-matches path (WildcardPattern p)
-  -- If the pattern contains a path separator, match against the full path.
-  -- Otherwise, match against the filename component only (git semantics: *.log matches
-  -- any file named *.log at any depth, but * alone does not cross directory boundaries).
-  | '/' `elem` p = wildcardMatch p path
-  | otherwise     = wildcardMatch p (takeFileName path)
+matches rawPath pat =
+  let path = normalizeSeparators rawPath
+  in case pat of
+    PrefixPattern p    -> p `isPrefixOf` path || ("/" ++ p) `isInfixOf` path
+    SuffixPattern p    -> p `isSuffixOf` path
+    ExactPattern p     -> p == path
+                          || ("/" ++ p ++ "/") `isInfixOf` ("/" ++ path ++ "/")
+                          || (p ++ "/") `isPrefixOf` path
+                          || ("/" ++ p) `isSuffixOf` path
+    -- Anchored (gitignore leading /): match only at the scan root.
+    -- "lib.rs" matches the top-level file; "lib.rs/" prefix covers a directory.
+    AnchoredPattern p  -> path == p || (p ++ "/") `isPrefixOf` path
+    GlobPattern p      -> p `isSuffixOf` path
+    -- If the pattern contains a path separator, match against the full path.
+    -- Otherwise, match against the filename component only (git semantics: *.log matches
+    -- any file named *.log at any depth, but * alone does not cross directory boundaries).
+    WildcardPattern p ->
+      if '/' `elem` p
+        then wildcardMatch p path
+        else wildcardMatch p (takeFileName path)
+    -- Anchored wildcard: always matched against the full (root-anchored) path.
+    AnchoredWildcardPattern p -> wildcardMatch p path
 
 -- | Check if a path matches an annotated pattern (convenience wrapper)
 matchesAnnotated :: FilePath -> AnnotatedPattern -> Bool
@@ -124,6 +140,16 @@ wcTokenize cs =
 --   which produce a trailing Lit "slash" match correctly.
 wcMatch :: [WcToken] -> String -> Bool
 wcMatch [] _ = True
+-- A **\/ prefix matches zero or more directories, so it must also match a
+-- path that begins directly with the rest (i.e. the root level). The literal
+-- token following ** begins with \/ (e.g. **\/lib.rs → [WcDoubleStar,
+-- WcLit "\/lib.rs"]); we strip that leading \/ and try the rest directly to
+-- cover the zero-directory case, in addition to the one-or-more case.
+wcMatch (WcDoubleStar : WcLit lit : rest) path
+  | (c:_) <- lit, c == '/' =
+      wcMatch (WcLit (drop 1 lit) : rest) path  -- **\/ matches zero directories (root level)
+      || any (wcMatch (WcLit lit : rest) . snd) (wcSplits path)  -- one or more directories
+  | otherwise = any (wcMatch (WcLit lit : rest) . snd) (wcSplits path)
 wcMatch (WcDoubleStar : rest) path = any (wcMatch rest . snd) (wcSplits path)
 wcMatch (WcStar : rest) path =
   -- * matches zero or more characters (excluding /)
@@ -256,15 +282,23 @@ hardcodedIgnorePatterns = map (annotatePattern 0) hardcodedDirs
 parsePattern :: String -> IgnorePattern
 parsePattern line =
   let trimmed = reverse (dropWhile (== ' ') (reverse (dropWhile (== ' ') line)))
-  in case trimmed of
-    -- Wildcard patterns: * anywhere in the line → WildcardPattern (fnmatch-style)
-    _ | '*' `elem` trimmed -> WildcardPattern trimmed
+      anchored = headOrDefault trimmed == '/'
+      -- A leading \/ anchors the pattern to the scan root (gitignore semantics);
+      -- strip it so the matcher can compare against root-relative paths.
+      body = if anchored then drop 1 trimmed else trimmed
+  in case body of
+    -- Wildcard patterns: * anywhere in the line → fnmatch-style wildcard.
+    -- Anchored wildcards are matched against the full root-relative path.
+    _ | '*' `elem` body ->
+        if anchored then AnchoredWildcardPattern body else WildcardPattern body
     -- Directory patterns: trailing / → PrefixPattern
-    _ | lastOrDefault trimmed == '/' -> PrefixPattern (init trimmed)
-    -- Anchored patterns: leading / → ExactPattern
-    _ | headOrDefault trimmed == '/' -> ExactPattern trimmed
+    _ | lastOrDefault body == '/' ->
+        let dir = init body
+        in if anchored then AnchoredPattern dir else PrefixPattern dir
+    -- Anchored patterns: leading / → AnchoredPattern (matches at scan root only)
+    _ | anchored -> AnchoredPattern body
     -- Everything else → ExactPattern (filenames, directory names)
-    _ -> ExactPattern trimmed
+    _ -> ExactPattern body
   where
     lastOrDefault [] = ' '
     lastOrDefault xs = last xs

@@ -4,13 +4,14 @@ module Graphos.UseCase.Detect
   , detectFilesWithExtensions
   , detectFilesWithExtensionsAndIgnore
   , detectFilesWithExtensionsAndIgnore'
-  , allSupportedExtensions
-  , hardcodedIgnoreDirNames
-  , rootAnchoredIgnoreDirs
-  , depthIndependentIgnoreDirs
-  , isIgnoredEntry
-  , isIgnoredEntryRoot
-  ) where
+   , allSupportedExtensions
+   , hardcodedIgnoreDirNames
+   , rootAnchoredIgnoreDirs
+   , depthIndependentIgnoreDirs
+   , isIgnoredEntry
+   , isIgnoredEntryRoot
+   , findAllFilesWithExclusions
+   ) where
 
 import Data.List (isPrefixOf)
 import Data.Map.Strict (Map)
@@ -159,10 +160,11 @@ findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = d
              else do
                (subFiles, subExc) <- findAllFilesWithExclusions scanRoot path shouldIgnoreFn extMap ignorePatterns
                pure (subFiles, subExc)
-      else if isSupportedWith entry extMap
-               && not (shouldIgnoreFn scanRoot ignorePatterns path)
-               then pure ([path], emptyExclusionCounts)
-               else pure ([], emptyExclusionCounts)
+       else if isSupportedWith entry extMap
+                then if shouldIgnoreFn scanRoot ignorePatterns path
+                         then pure ([], emptyExclusionCounts { excIgnoredFiles = 1 })
+                         else pure ([path], emptyExclusionCounts)
+                else pure ([], emptyExclusionCounts)
     ) entries
   let (files, excs) = unzip results
       totalExc = foldr addExclusionCounts emptyExclusionCounts excs
@@ -200,6 +202,7 @@ addExclusionCounts a b = ExclusionCounts
   , excGitignore        = excGitignore a + excGitignore b
   , excGraphosignore    = excGraphosignore a + excGraphosignore b
   , excUnexplained      = excUnexplained a + excUnexplained b
+  , excIgnoredFiles     = excIgnoredFiles a + excIgnoredFiles b
   }
 
 -- | Categorize files by type (using default extensions)
