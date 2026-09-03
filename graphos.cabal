@@ -152,7 +152,6 @@ library
                       Graphos.Infrastructure.FileSystem.Manifest
                       Graphos.Infrastructure.FileSystem.OfficeConvert
                        Graphos.Infrastructure.FileSystem.Conversation
-                       Graphos.Infrastructure.FileSystem.AtomicWrite
                        -- Infrastructure - Security
                      Graphos.Infrastructure.Security
                        -- Infrastructure - LLM
