@@ -19,6 +19,7 @@ module Graphos.Infrastructure.FileSystem.Ignore
   , shouldIgnore
   , matches
   , matchesAnnotated
+  , matchingPattern
   , ignoreMatches
   , relativize
 
@@ -34,6 +35,7 @@ module Graphos.Infrastructure.FileSystem.Ignore
     ) where
 
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf)
+import Data.Maybe (listToMaybe)
 import System.Directory (doesFileExist)
 import System.FilePath (takeFileName)
 
@@ -71,6 +73,16 @@ shouldIgnore patterns path =
       -- Check if any negation pattern with higher priority overrides
       negationOverride = any (\ap -> apNegate ap && matches path (apPattern ap)) patterns
   in positiveMatch && not negationOverride
+
+-- | Return the first positive (non-negated) pattern that matches the given
+-- (already relativized) path, if any. Used for debug logging so a per-file
+-- ignore decision can be attributed to the pattern that caused it.
+-- Returns 'Nothing' when no positive pattern matches the path.
+matchingPattern :: [AnnotatedPattern] -> FilePath -> Maybe AnnotatedPattern
+matchingPattern patterns path =
+  listToMaybe [ ap | ap <- patterns
+                  , not (apNegate ap)
+                  , matches path (apPattern ap) ]
 
 -- | Check if a path matches a specific pattern
 matches :: FilePath -> IgnorePattern -> Bool

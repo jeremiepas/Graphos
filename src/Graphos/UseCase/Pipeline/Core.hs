@@ -34,7 +34,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
-import Graphos.Infrastructure.FileSystem.Ignore (parseGitignoreLine)
+import Graphos.Infrastructure.FileSystem.Ignore (parseGitignoreLine, apPriority)
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
@@ -127,7 +127,13 @@ runPipeline appEnv config = catch (do
   ignorePatterns <- fspLoadIgnorePatterns fsp (cfgInputPath configWithStreaming)
   let cliPatterns = map (parseGitignoreLine 3) (map T.unpack (cfgIgnorePatterns configWithStreaming))
       allIgnorePatterns = ignorePatterns ++ cliPatterns
-  lpLogInfo lp $ T.pack $ "Loaded " ++ show (length allIgnorePatterns) ++ " ignore patterns"
+      inputRoot = cfgInputPath configWithStreaming
+      gitignoreCount = length (filter (\ap -> apPriority ap == 1) ignorePatterns)
+      graphosignoreCount = length (filter (\ap -> apPriority ap == 2) ignorePatterns)
+      cliCount = length cliPatterns
+  lpLogInfo lp $ T.pack $ "Loaded " ++ show gitignoreCount ++ " ignore patterns from " ++ inputRoot ++ "/.gitignore"
+  lpLogInfo lp $ T.pack $ "Loaded " ++ show graphosignoreCount ++ " ignore patterns from " ++ inputRoot ++ "/.graphosignore"
+  lpLogInfo lp $ T.pack $ "Loaded " ++ show cliCount ++ " ignore patterns from --ignore"
   let fec = gcFileExtensions (cfgGraphosConfig configWithStreaming)
       extMap = Map.fromList
         [ (CodeFiles, fecCode fec)
@@ -137,7 +143,7 @@ runPipeline appEnv config = catch (do
         , (VideoFiles, fecVideo fec)
         , (OfficeFiles, fecOffice fec)
         ]
-  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap allIgnorePatterns
+  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   opIncCounter op "graphos_pipeline_steps_total" 1
@@ -147,7 +153,8 @@ runPipeline appEnv config = catch (do
     else do
       let excs = detectionExclusions detection
           totalExcluded = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
-      lpLogInfo lp $ T.pack $ "Ignored " ++ show totalExcluded ++ " files/directories"
+          ignoredFiles = excIgnoredFiles excs
+      lpLogInfo lp $ T.pack $ "Ignored " ++ show ignoredFiles ++ " files"
       lpLogInfo lp $ T.pack $ "  Found " ++ show (detectionTotalFiles detection) ++ " files"
       lpLogDebug lp $ T.pack $ "  File categories: " ++ show (Map.keys (detectionFiles detection))
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))

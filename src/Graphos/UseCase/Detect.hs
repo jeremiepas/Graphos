@@ -21,7 +21,7 @@ import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
-import Graphos.Infrastructure.FileSystem.Ignore (matches)
+import Graphos.Infrastructure.FileSystem.Ignore (matches, matchingPattern)
 
 -- | All supported file extensions organized by category
 -- Prefer using config-driven extensions from GraphosConfig when available.
@@ -77,20 +77,20 @@ detectFiles root = do
 
 -- | Detect files in a directory using config-driven extension categories.
 detectFilesWithExtensions :: FileSystemPort -> FilePath -> Map FileCategory [String] -> IO Detection
-detectFilesWithExtensions fsp root extMap = detectFilesWithExtensionsAndIgnore fsp root extMap
+detectFilesWithExtensions fsp root extMap = detectFilesWithExtensionsAndIgnore fsp root extMap (const (pure ()))
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- This is the primary entry point for the pipeline — it applies .gitignore and .graphosignore
 -- patterns in addition to hardcoded directory ignores.
-detectFilesWithExtensionsAndIgnore :: FileSystemPort -> FilePath -> Map FileCategory [String] -> IO Detection
-detectFilesWithExtensionsAndIgnore fsp root extMap = do
+detectFilesWithExtensionsAndIgnore :: FileSystemPort -> FilePath -> Map FileCategory [String] -> (T.Text -> IO ()) -> IO Detection
+detectFilesWithExtensionsAndIgnore fsp root extMap logDebug = do
   ignorePatterns <- fspLoadIgnorePatterns fsp root
-  detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns
+  detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- Internal version that takes pre-loaded ignore patterns.
-detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> IO Detection
-detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns = do
+detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> (T.Text -> IO ()) -> IO Detection
+detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -102,7 +102,7 @@ detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns = do
       , detectionExclusions   = emptyExclusionCounts
       }
     else do
-      (files, excs) <- findAllFilesWithExclusions root root (fspShouldIgnore fsp) extMap ignorePatterns
+      (files, excs) <- findAllFilesWithExclusions root root (fspShouldIgnore fsp) extMap ignorePatterns logDebug
       let categorized = categorizeFilesWith files extMap
           totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
@@ -122,7 +122,7 @@ findAllFiles dir = findAllFilesWith dir allSupportedExtensions
 
 -- | Find all files recursively using config-driven extension map
 findAllFilesWith :: FilePath -> Map FileCategory [String] -> IO [FilePath]
-findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir dir (\_ _ _ -> False) dir extMap []
+findAllFilesWith dir extMap = findAllFilesWithAndIgnore dir dir (\_ _ _ -> False) dir extMap [] (const (pure ()))
 
 -- | Find all files recursively using config-driven extension map and ignore patterns.
 -- The first argument is the scan root (for root-anchored ignore matching); the second
@@ -134,9 +134,10 @@ findAllFilesWithAndIgnore
   -> FilePath            -- ^ unused legacy parameter (kept for backward compatibility)
   -> Map FileCategory [String]
   -> [AnnotatedPattern]
+  -> (T.Text -> IO ())
   -> IO [FilePath]
-findAllFilesWithAndIgnore scanRoot dir shouldIgnoreFn _ extMap ignorePatterns =
-  fst <$> findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns
+findAllFilesWithAndIgnore scanRoot dir shouldIgnoreFn _ extMap ignorePatterns logDebug =
+  fst <$> findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns logDebug
 
 -- | Like 'findAllFilesWithAndIgnore' but also returns per-class exclusion counts.
 -- A directory is counted once per class that excluded it. The counts let the
@@ -147,8 +148,9 @@ findAllFilesWithExclusions
   -> (FilePath -> [AnnotatedPattern] -> FilePath -> Bool)
   -> Map FileCategory [String]
   -> [AnnotatedPattern]
+  -> (T.Text -> IO ())
   -> IO ([FilePath], ExclusionCounts)
-findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = do
+findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns logDebug = do
   entries <- listDirectory dir
   results <- mapM (\entry -> do
     let path = dir </> entry
@@ -157,16 +159,29 @@ findAllFilesWithExclusions scanRoot dir shouldIgnoreFn extMap ignorePatterns = d
       then if isIgnoredEntryRoot scanRoot shouldIgnoreFn entry dir path ignorePatterns
              then pure ([], classifyExclusion scanRoot shouldIgnoreFn entry dir path ignorePatterns)
              else do
-               (subFiles, subExc) <- findAllFilesWithExclusions scanRoot path shouldIgnoreFn extMap ignorePatterns
+               (subFiles, subExc) <- findAllFilesWithExclusions scanRoot path shouldIgnoreFn extMap ignorePatterns logDebug
                pure (subFiles, subExc)
       else if isSupportedWith entry extMap
-               && not (shouldIgnoreFn scanRoot ignorePatterns path)
-               then pure ([path], emptyExclusionCounts)
-               else pure ([], emptyExclusionCounts)
+             then if shouldIgnoreFn scanRoot ignorePatterns path
+                    then do
+                      logIgnoredFile scanRoot ignorePatterns path logDebug
+                      pure ([], emptyExclusionCounts { excIgnoredFiles = 1 })
+                    else pure ([path], emptyExclusionCounts)
+             else pure ([], emptyExclusionCounts)
     ) entries
   let (files, excs) = unzip results
       totalExc = foldr addExclusionCounts emptyExclusionCounts excs
   pure (concat files, totalExc)
+
+-- | Log a per-file ignore decision at DEBUG: the file path and the pattern
+-- that caused it to be ignored.
+logIgnoredFile :: FilePath -> [AnnotatedPattern] -> FilePath -> (T.Text -> IO ()) -> IO ()
+logIgnoredFile scanRoot ignorePatterns path logDebug =
+  let relPath = relativize scanRoot path
+      mPat = matchingPattern ignorePatterns relPath
+  in case mPat of
+    Just ap -> logDebug $ T.pack $ "Ignored " ++ path ++ " (matched pattern: " ++ show (apPattern ap) ++ ")"
+    Nothing -> logDebug $ T.pack $ "Ignored " ++ path
 
 -- | Classify a pruned directory into an exclusion class.
 -- Determines which rule class caused the directory to be pruned, for
@@ -200,6 +215,7 @@ addExclusionCounts a b = ExclusionCounts
   , excGitignore        = excGitignore a + excGitignore b
   , excGraphosignore    = excGraphosignore a + excGraphosignore b
   , excUnexplained      = excUnexplained a + excUnexplained b
+  , excIgnoredFiles     = excIgnoredFiles a + excIgnoredFiles b
   }
 
 -- | Categorize files by type (using default extensions)
