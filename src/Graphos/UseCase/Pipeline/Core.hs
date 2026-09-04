@@ -34,7 +34,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
-import Graphos.Infrastructure.FileSystem.Ignore (parseGitignoreLine)
+import Graphos.Infrastructure.FileSystem.Ignore (parseGitignoreLine, apPriority)
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
@@ -124,10 +124,20 @@ runPipeline appEnv config = catch (do
 
   lpLogInfo lp "Step 1: Detecting files..."
   detectStart <- getCurrentTime
-  ignorePatterns <- fspLoadIgnorePatterns fsp (cfgInputPath configWithStreaming)
+  let scanRoot = cfgInputPath configWithStreaming
+  ignorePatterns <- fspLoadIgnorePatterns fsp scanRoot
   let cliPatterns = map (parseGitignoreLine 3) (map T.unpack (cfgIgnorePatterns configWithStreaming))
       allIgnorePatterns = ignorePatterns ++ cliPatterns
+      countByPriority p = length (filter (\ap -> apPriority ap == p) ignorePatterns)
+      gitignoreFile = scanRoot ++ "/.gitignore"
+      graphosignoreFile = scanRoot ++ "/.graphosignore"
   lpLogInfo lp $ T.pack $ "Loaded " ++ show (length allIgnorePatterns) ++ " ignore patterns"
+  when (countByPriority 1 > 0) $
+    lpLogInfo lp $ T.pack $ "Loaded " ++ show (countByPriority 1) ++ " ignore patterns from " ++ gitignoreFile
+  when (countByPriority 2 > 0) $
+    lpLogInfo lp $ T.pack $ "Loaded " ++ show (countByPriority 2) ++ " ignore patterns from " ++ graphosignoreFile
+  when (not (null cliPatterns)) $
+    lpLogInfo lp $ T.pack $ "Loaded " ++ show (length cliPatterns) ++ " ignore patterns from --ignore"
   let fec = gcFileExtensions (cfgGraphosConfig configWithStreaming)
       extMap = Map.fromList
         [ (CodeFiles, fecCode fec)
@@ -146,13 +156,15 @@ runPipeline appEnv config = catch (do
     then pure $ Left "No supported files found"
     else do
       let excs = detectionExclusions detection
-          totalExcluded = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
+          excludedDirs = excRootAnchored excs + excDepthIndependent excs + excGitignore excs + excGraphosignore excs + excUnexplained excs
+          totalExcluded = excludedDirs + excIgnoredFiles excs
       lpLogInfo lp $ T.pack $ "Ignored " ++ show totalExcluded ++ " files/directories"
       lpLogInfo lp $ T.pack $ "  Found " ++ show (detectionTotalFiles detection) ++ " files"
       lpLogDebug lp $ T.pack $ "  File categories: " ++ show (Map.keys (detectionFiles detection))
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))
       when (totalExcluded > 0) $ do
-        lpLogInfo lp $ T.pack $ "  Excluded " ++ show totalExcluded ++ " directories:"
+        when (excludedDirs > 0) $
+          lpLogInfo lp $ T.pack $ "  Excluded " ++ show excludedDirs ++ " directories:"
         when (excRootAnchored excs > 0) $
           lpLogInfo lp $ T.pack $ "    root-anchored build output: " ++ show (excRootAnchored excs)
         when (excDepthIndependent excs > 0) $
@@ -163,6 +175,8 @@ runPipeline appEnv config = catch (do
           lpLogInfo lp $ T.pack $ "    .graphosignore: " ++ show (excGraphosignore excs)
         when (excUnexplained excs > 0) $
           lpLogInfo lp $ T.pack $ "    unexplained: " ++ show (excUnexplained excs)
+        when (excIgnoredFiles excs > 0) $
+          lpLogInfo lp $ T.pack $ "  Ignored " ++ show (excIgnoredFiles excs) ++ " files by pattern"
 
       now <- getCurrentTime
       let pipelineId = T.pack $ show now
