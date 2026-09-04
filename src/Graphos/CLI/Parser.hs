@@ -33,6 +33,7 @@ import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
+import Graphos.Domain.Graph.Score (defaultMaxLabelChars)
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
@@ -151,9 +152,11 @@ commonQueryOptsP = CommonQueryOpts
   <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
   <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
   <*> switch (long "json" <> help "Output as JSON")
-  <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
-  <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
-  <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
+   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
+   <*> option auto (long "max-label-chars" <> value defaultMaxLabelChars <> help "Max label length in compact node output (default: 120)")
+   <*> option auto (long "max-nodes" <> value 0 <> help "Hard cap on returned nodes (0 = unlimited)")
+   <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
+   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -184,12 +187,14 @@ researchOpts = do
     <*> optional (strOption (long "label" <> metavar "TEXT" <> help "Label for output file (default: timestamp)"))
     <*> optional (strOption (long "mode" <> value "default" <> metavar "MODE" <> help "Research mode (default, deep, etc.)"))
     <*> pure (CommonQueryOpts
-          { cqoGraphPath   = graphPath
-          , cqoBudget      = 2000
-          , cqoJson        = False
-          , cqoLabelWidth  = 120
-          , cqoEdges       = Semantic
-          , cqoStrictGraph = False
+          { cqoGraphPath     = graphPath
+          , cqoBudget        = 2000
+          , cqoJson          = False
+          , cqoLabelWidth    = 120
+          , cqoMaxLabelChars = defaultMaxLabelChars
+          , cqoMaxNodes      = 0
+          , cqoEdges         = Semantic
+          , cqoStrictGraph   = False
           })
 
 symbolsOpts :: Parser Command

@@ -26,37 +26,45 @@ module Graphos.UseCase.Query.Render
   , truncateOutput
   , estimateTokens
   , encodeText
+
+    -- * Response budget
+  , enforceResponseBudget
   ) where
 
 import Data.Aeson (toJSON, object, (.=), Value(..), encode)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL (decodeUtf8)
 
-import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict)
+import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict, defaultMaxLabelChars, truncateLabel, enforceByteBudget)
 import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 
 data CommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath   :: !FilePath
-  , cqoBudget      :: !Int
-  , cqoJson        :: !Bool
-  , cqoLabelWidth  :: !Int
-  , cqoEdges       :: !EdgeMode
-  , cqoStrictGraph :: !Bool
+  { cqoGraphPath    :: !FilePath
+  , cqoBudget       :: !Int
+  , cqoJson         :: !Bool
+  , cqoLabelWidth   :: !Int
+  , cqoMaxLabelChars :: !Int
+  , cqoMaxNodes     :: !Int
+  , cqoEdges        :: !EdgeMode
+  , cqoStrictGraph  :: !Bool
   } deriving (Eq, Show)
 
 defaultCommonQueryOpts :: CommonQueryOpts
 defaultCommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath   = "graphos-out/graph.json"
-  , cqoBudget      = 2000
-  , cqoJson        = False
-  , cqoLabelWidth  = 120
-  , cqoEdges       = Semantic
-  , cqoStrictGraph = False
+  { cqoGraphPath     = "graphos-out/graph.json"
+  , cqoBudget        = 2000
+  , cqoJson          = False
+  , cqoLabelWidth    = 120
+  , cqoMaxLabelChars = defaultMaxLabelChars
+  , cqoMaxNodes      = 0
+  , cqoEdges         = Semantic
+  , cqoStrictGraph   = False
   }
 
 -- | Estimate token count from character count (rough: chars / 4).
@@ -159,6 +167,36 @@ takeLinesFromTop _ [] = []
 takeLinesFromTop remaining (l:ls)
   | estimateTokens l > remaining = []
   | otherwise = l : takeLinesFromTop (remaining - estimateTokens l) ls
+
+-- | Enforce a serialized-size budget on a query response.
+--
+-- Caps the node list to `maxNodes` (when > 0), then keeps the highest-scoring
+-- nodes whose compact serialized size fits within `budget` bytes, dropping the
+-- lowest-ranked results first. Edges incident to dropped nodes are dropped too,
+-- and omitted counts are reported on the response.
+--
+-- Nodes are expected to already carry label-truncated text (the CLI/API refine
+-- pipeline elides labels to `cqoMaxLabelChars`); this function also elides them
+-- defensively so the byte accounting stays correct.
+enforceResponseBudget :: Int -> Int -> Int -> QueryResponse -> QueryResponse
+enforceResponseBudget maxChars budget maxNodes resp =
+  let originalNodes = qrespNodes resp
+      cappedNodes   = if maxNodes > 0 then take maxNodes originalNodes else originalNodes
+      (keptNodes, _) = enforceByteBudget maxChars budget cappedNodes
+      keptIds       = Set.fromList (map snNodeId keptNodes)
+      allEdges      = qrespEdges resp
+      keptEdges     = [ e | e <- allEdges, let (s, t, _, _) = e, s `Set.member` keptIds && t `Set.member` keptIds ]
+   in resp
+      { qrespNodes        = map (elideLabelTo maxChars) keptNodes
+      , qrespEdges        = keptEdges
+      , qrespOmittedNodes = length originalNodes - length keptNodes
+      , qrespOmittedEdges = length allEdges - length keptEdges
+      }
+
+-- | Elide a scored node's label to at most n characters (defensive copy of the
+-- pipeline's label truncation, so response-budget output never carries full text).
+elideLabelTo :: Int -> ScoredNode -> ScoredNode
+elideLabelTo n sn = sn { snLabel = truncateLabel n (snLabel sn) }
 
 -- | Encode a JSON value to Text (compact, no spaces).
 encodeText :: Value -> Text

@@ -41,7 +41,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, enforceResponseBudget, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
@@ -264,16 +264,17 @@ main = do
       logInfo env $ "Query: " <> question <> " (" <> mode <> ", budget=" <> T.pack (show budget) <> ")"
       loadResult <- loadGraphOpt (cqoStrictGraph qopts) graphPath
       case loadResult of
-        Left err -> (if cqoJson qopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
-        Right loaded -> do
-          let g = lrGraph loaded
-              idx = lrIndex loaded
-              scoredResp = queryGraphWithIndexScored g idx question mode budget
-              refineCfg = RefineConfig { rcEdgeMode = cqoEdges qopts, rcLabelWidth = cqoLabelWidth qopts }
-              refinedResp = refineResponse refineCfg (gNodes g) scoredResp
-          if cqoJson qopts
-            then putStrLn $ T.unpack $ renderQueryResponseJSON refinedResp
-            else putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
+         Left err -> (if cqoJson qopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
+         Right loaded -> do
+           let g = lrGraph loaded
+               idx = lrIndex loaded
+               scoredResp = queryGraphWithIndexScored g idx question mode budget
+               refineCfg = RefineConfig { rcEdgeMode = cqoEdges qopts, rcLabelWidth = cqoLabelWidth qopts }
+               refinedResp = refineResponse refineCfg (gNodes g) scoredResp
+               budgetResp = enforceResponseBudget (cqoMaxLabelChars qopts) budget (cqoMaxNodes qopts) refinedResp
+           if cqoJson qopts
+             then putStrLn $ T.unpack $ renderQueryResponseJSON budgetResp
+             else putStrLn $ T.unpack $ renderQueryResponseText budget budgetResp
 
     CypherCmd queryText allowWrite copts -> do
       env <- defaultLogEnv (if cqoJson copts then LogError else LogInfo)

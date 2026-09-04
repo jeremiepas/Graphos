@@ -33,9 +33,10 @@ testScoredNode nid lbl src score = ScoredNode
   { snNodeId      = nid
   , snLabel       = lbl
   , snScore       = score
-  , snSourceFile  = src
-  , snCommunityId = Nothing
-  }
+   , snSourceFile  = src
+   , snKind        = ""
+   , snCommunityId = Nothing
+   }
 
 spec :: Spec
 spec = do
