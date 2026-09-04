@@ -28,16 +28,20 @@ import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..))
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
-import Graphos.Domain.Query.Cypher.Parser (parseQuery)
-import Graphos.Domain.Query.Cypher.Eval (evaluate)
+import Graphos.Domain.Query.Cypher.Parser (parseStatement)
+import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
+import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
+import qualified Graphos.Domain.Query.Cypher.Eval as MutEval (mrGraph)
 import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
 import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
+import qualified Graphos.UseCase.Merge as Merge (mrGraph)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors, degree)
 import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderCypherResultText, renderCypherResultJSON)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
+import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
@@ -258,7 +262,7 @@ main = do
             then putStrLn $ T.unpack $ renderQueryResponseJSON refinedResp
             else putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
 
-    CypherCmd queryText copts -> do
+    CypherCmd queryText allowWrite copts -> do
       env <- defaultLogEnv (if cqoJson copts then LogError else LogInfo)
       let graphPath = cqoGraphPath copts
           budget    = cqoBudget copts
@@ -269,13 +273,27 @@ main = do
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-          case parseQuery queryText of
+          case parseStatement queryText of
             Left err -> (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Cypher error: " ++ T.unpack err
-            Right q -> do
-              let result = evaluate budget q g idx
-              if cqoJson copts
-                then putStrLn $ T.unpack $ renderCypherResultJSON result
-                else putStrLn $ T.unpack $ renderCypherResultText budget result
+            Right st -> case st of
+              MutStatement _ | not allowWrite -> do
+                let msg = "Write statements require --write (or cypher_mutate MCP / POST /api/cypher/mutate); this surface is read-only"
+                (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Cypher error: " ++ msg
+              _ -> case evaluateStatement budget st g idx of
+                Left err -> (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Cypher error: " ++ T.unpack err
+                Right mr -> do
+                  if cqoJson copts
+                    then putStrLn $ T.unpack $ renderMutationResultJSON mr
+                    else putStrLn $ T.unpack $ renderMutationResultText budget mr
+                  when allowWrite $ case st of
+                    MutStatement _ -> do
+                      res <- persistMutatedGraph graphPath loaded (MutEval.mrGraph mr)
+                      case res of
+                        Left err -> hPutStrLn stderr $ "Persist error: " ++ T.unpack err
+                        Right backup -> do
+                          putStrLn $ "Persisted to " ++ graphPath ++ " (backup: " ++ backup ++ ")"
+                          putStrLn "Note: the next extraction run overwrites graph.json and discards mutations."
+                    _ -> pure ()
 
     PathCmd from to popts -> do
       env <- defaultLogEnv (if cqoJson popts then LogError else LogInfo)
@@ -525,7 +543,7 @@ main = do
                                    , resMergeInto = MergeToNeighbor
                                    , resMaxIterations = maxLeidenIterations }
                   mergeResult = mergeGraphsAndAnalyze (lrGraph graphA) (lrGraph graphB) density res (gcSemanticEdges defaultGraphosConfig) False
-                  mergedGraph = mrGraph mergeResult
+                  mergedGraph = Merge.mrGraph mergeResult
                   commMap = mrCommunities mergeResult
               logInfo env $ T.pack $ "[merge] Merged graph: " ++ show (Map.size (gNodes mergedGraph)) ++ " nodes, " ++ show (Map.size (gEdges mergedGraph)) ++ " edges"
               logInfo env $ T.pack $ "[merge] Communities: " ++ show (Map.size commMap)

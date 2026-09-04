@@ -1,6 +1,7 @@
 module Graphos.Infrastructure.Server.MCPQuerySpec where
 
 import Test.Hspec
+import Data.IORef (newIORef, readIORef)
 import Data.Aeson (Value(..), Object)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
@@ -11,7 +12,7 @@ import Data.Text.Short (fromText)
 import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..)
                             , Relation(..), Confidence(..)
                             , extractionFromLists)
-import Graphos.Domain.Graph (Graph, buildGraph)
+import Graphos.Domain.Graph (Graph, buildGraph, gNodes)
 import Graphos.Domain.Graph.Index (buildIndex)
 import Graphos.Infrastructure.Server.MCP
 
@@ -110,9 +111,33 @@ spec = describe "MCP query handler JSON shape" $ do
         Left err -> err `shouldBe` "Missing required argument: query"
         Right _  -> expectationFailure "expected Left"
 
-    it "reports a parse error for out-of-subset queries" $ do
+    it "rejects write clauses with a mutation-surface hint" $ do
       let args = mkArgs [("query", String "CREATE (a)")]
       result <- handleCypherQuery queryGraph idx args
       case result of
-        Left err -> T.isInfixOf "Cypher parse error" err `shouldBe` True
+        Left err -> T.isInfixOf "cypher_mutate" err `shouldBe` True
         Right _  -> expectationFailure "expected Left"
+
+  describe "handleCypherMutate" $ do
+    it "applies a mutation in memory and returns the summary" $ do
+      ref <- newIORef (emptyMcpState queryGraph)
+      let args = mkArgs [("query", String "MERGE (m:Module {id: 'm9'})")]
+      result <- handleCypherMutate ref idx args
+      case result of
+        Left err -> expectationFailure (T.unpack err)
+        Right (Object obj) -> do
+          KM.lookup (Key.fromText "summary") obj `shouldSatisfy` \case
+            Just (Object sm) -> KM.lookup (Key.fromText "nodes_created") sm == Just (Number 1)
+            _ -> False
+          st <- readIORef ref
+          Map.member "m9" (gNodes (mcpGraph st)) `shouldBe` True
+        Right _ -> expectationFailure "expected JSON object"
+
+    it "rejects an invalid statement" $ do
+      ref <- newIORef (emptyMcpState queryGraph)
+      let args = mkArgs [("query", String "WITH x RETURN x")]
+      result <- handleCypherMutate ref idx args
+      case result of
+        Left err -> T.isInfixOf "parse error" err `shouldBe` True
+        Right _  -> expectationFailure "expected Left"
+

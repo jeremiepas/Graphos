@@ -2,13 +2,19 @@ module Graphos.Domain.Query.Cypher.ParserSpec where
 
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
 import Test.Hspec
 
 import Graphos.Domain.Query.Cypher.AST
-import Graphos.Domain.Query.Cypher.Parser (parseQuery)
+import Graphos.Domain.Query.Cypher.Parser (parseQuery, parseStatement)
 
 spec :: Spec
 spec = describe "Cypher Parser" $ do
+  parserSpec
+  mutationSpec
+
+parserSpec :: Spec
+parserSpec = describe "read grammar" $ do
   describe "node patterns" $ do
     it "parses a bare node" $ do
       parseQuery "MATCH (a) RETURN a" `shouldBe`
@@ -261,16 +267,16 @@ spec = describe "Cypher Parser" $ do
           (ReturnClause False [RIExpr (EVar "a") (Just "node")] [] Nothing Nothing))
 
   describe "error handling" $ do
-    it "rejects CREATE" $ do
+    it "rejects CREATE (read-only entry point)" $ do
       parseQuery "CREATE (a)" `shouldSatisfy` isLeft
 
-    it "rejects MERGE" $ do
+    it "rejects MERGE (read-only entry point)" $ do
       parseQuery "MERGE (a)" `shouldSatisfy` isLeft
 
-    it "rejects SET" $ do
+    it "rejects SET (read-only entry point)" $ do
       parseQuery "SET a.x = 1" `shouldSatisfy` isLeft
 
-    it "rejects DELETE" $ do
+    it "rejects DELETE (read-only entry point)" $ do
       parseQuery "DELETE a" `shouldSatisfy` isLeft
 
     it "rejects empty input" $ do
@@ -283,3 +289,123 @@ spec = describe "Cypher Parser" $ do
     isLeft :: Either Text CypherQuery -> Bool
     isLeft (Left _)  = True
     isLeft (Right _) = False
+
+-- Mutation statement parsing (opencypher-write-mutations).
+mutationSpec :: Spec
+mutationSpec = describe "Cypher Mutation Parser" $ do
+  describe "CREATE" $ do
+    it "parses a node create" $ do
+      parseStatement "CREATE (a:Module {id: 'm1'})" `shouldBe`
+        Right (MutStatement (Mut Nothing
+          [MCreate [NodePatE (NodePat "a" ["Module"] (Map.singleton "id" (EStr "m1")))]]
+          Nothing))
+
+    it "parses a node and relationship create" $ do
+      parseStatement "CREATE (a {id: 'x'}), (b {id: 'y'}), (a)-[:Calls]->(b)" `shouldBe`
+        Right (MutStatement (Mut Nothing
+          [ MCreate
+              [ NodePatE (NodePat "a" [] (Map.singleton "id" (EStr "x")))
+              , NodePatE (NodePat "b" [] (Map.singleton "id" (EStr "y")))
+              , NodePatE (NodePat "a" [] Map.empty)
+              , RelPatE (RelPat "a" "b" Nothing ["Calls"] DirRight (HopRange 1 1) Map.empty)
+              , NodePatE (NodePat "b" [] Map.empty)
+              ]
+          ]
+          Nothing))
+
+  describe "MERGE" $ do
+    it "parses a node merge" $ do
+      parseStatement "MERGE (n:Module {id: 'm1'})" `shouldBe`
+        Right (MutStatement (Mut Nothing
+          [MMerge (NodePatE (NodePat "n" ["Module"] (Map.singleton "id" (EStr "m1")))) []]
+          Nothing))
+
+    it "parses ON CREATE SET and ON MATCH SET" $ do
+      parseStatement "MERGE (n:Module {id: 'm1'}) ON CREATE SET n.created = true ON MATCH SET n.seen = 1" `shouldBe`
+        Right (MutStatement (Mut Nothing
+          [MMerge
+            (NodePatE (NodePat "n" ["Module"] (Map.singleton "id" (EStr "m1"))))
+            [ OnCreate [SetProp "n" "created" (EBool True)]
+            , OnMatch  [SetProp "n" "seen" (ENum 1)]
+            ]]
+          Nothing))
+
+  describe "SET" $ do
+    it "parses a property set" $ do
+      parseStatement "SET n.status = 'ok'" `shouldBe`
+        Right (MutStatement (Mut Nothing [MSet [SetProp "n" "status" (EStr "ok")]] Nothing))
+
+    it "parses a label set" $ do
+      parseStatement "SET n:Deprecated" `shouldBe`
+        Right (MutStatement (Mut Nothing [MSet [SetLabel "n" "Deprecated"]] Nothing))
+
+    it "parses multiple set items" $ do
+      parseStatement "SET n.a = 1, n.b = 'x', n:Cool" `shouldBe`
+        Right (MutStatement (Mut Nothing
+          [MSet [ SetProp "n" "a" (ENum 1)
+                , SetProp "n" "b" (EStr "x")
+                , SetLabel "n" "Cool"
+                ]]
+          Nothing))
+
+  describe "REMOVE" $ do
+    it "parses a property remove" $ do
+      parseStatement "REMOVE n.status" `shouldBe`
+        Right (MutStatement (Mut Nothing [MRemove [RemoveProp "n" "status"]] Nothing))
+
+    it "parses a label remove" $ do
+      parseStatement "REMOVE n:Deprecated" `shouldBe`
+        Right (MutStatement (Mut Nothing [MRemove [RemoveLabel "n" "Deprecated"]] Nothing))
+
+  describe "DELETE" $ do
+    it "parses a delete" $ do
+      parseStatement "DELETE a, b" `shouldBe`
+        Right (MutStatement (Mut Nothing [MDelete False ["a", "b"]] Nothing))
+
+    it "parses a detach delete" $ do
+      parseStatement "DETACH DELETE a" `shouldBe`
+        Right (MutStatement (Mut Nothing [MDelete True ["a"]] Nothing))
+
+  describe "MATCH + write" $ do
+    it "parses match then set with return" $ do
+      parseStatement "MATCH (n:Function) WHERE n.source_file = 'x' SET n.status = 1 RETURN n" `shouldBe`
+        Right (MutStatement (Mut
+          (Just (CypherQuery
+            [NodePatE (NodePat "n" ["Function"] Map.empty)]
+            (Just (PCompare (PropRef "n" "source_file") OpEq (EStr "x")))
+            (ReturnClause False [RIExpr ENull Nothing] [] Nothing Nothing)))
+          [MSet [SetProp "n" "status" (ENum 1)]]
+          (Just (ReturnClause False [RIExpr (EVar "n") Nothing] [] Nothing Nothing))))
+
+    it "parses match then delete" $ do
+      parseStatement "MATCH (n:Temp) DETACH DELETE n" `shouldBe`
+        Right (MutStatement (Mut
+          (Just (CypherQuery [NodePatE (NodePat "n" ["Temp"] Map.empty)] Nothing
+                 (ReturnClause False [RIExpr ENull Nothing] [] Nothing Nothing)))
+          [MDelete True ["n"]]
+          Nothing))
+
+  describe "out-of-subset" $ do
+    it "rejects WITH" $ do
+      parseStatement "MATCH (a) WITH a RETURN a" `shouldSatisfy` isLeftSt
+
+    it "rejects UNWIND" $ do
+      parseStatement "UNWIND [1,2] AS x RETURN x" `shouldSatisfy` isLeftSt
+
+    it "rejects SET var += {..}" $ do
+      parseStatement "SET n.props += {a: 1}" `shouldSatisfy` isLeftSt
+
+    it "rejects unknown relationship type in CREATE" $ do
+      case parseStatement "CREATE (a)-[:Collabs]->(b)" of
+        Left err -> err `shouldSatisfy` T.isInfixOf "Collabs"
+        Right _  -> expectationFailure "expected unknown-type error"
+    it "rejects MERGE with multiple patterns" $ do
+      parseStatement "MERGE (a), (b)" `shouldSatisfy` isLeftSt
+
+    it "rejects empty input" $ do
+      parseStatement "" `shouldSatisfy` isLeftSt
+
+  where
+    isLeftSt :: Either Text CypherStatement -> Bool
+    isLeftSt (Left _)  = True
+    isLeftSt (Right _) = False

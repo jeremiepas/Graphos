@@ -2,6 +2,9 @@
 module Graphos.Infrastructure.Server.QueryAPISpec where
 
 import Test.Hspec
+import Data.Aeson (Value(..), eitherDecode)
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Map.Strict as Map
@@ -12,7 +15,7 @@ import qualified Data.ByteString.Char8 as BS8
 
 import Network.Wai
 import Network.Wai.Internal (ResponseReceived(..))
-import Network.HTTP.Types (Status, ResponseHeaders, Method, status200, status404, status405, methodGet, methodOptions, methodPost, decodePathSegments, parseQuery)
+import Network.HTTP.Types (Status, ResponseHeaders, Method, status200, status404, status405, methodGet, methodOptions, methodPost, status400, decodePathSegments, parseQuery)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as BSL
@@ -124,6 +127,34 @@ runApi method path = do
     return ResponseReceived
   readIORef ref >>= maybe (fail "no response") pure
 
+-- | Like 'runApi', with a request body (for POST routes).
+runApiWithBody :: Method -> ByteString -> BSL.ByteString -> IO (Status, ResponseHeaders, BSL.ByteString)
+runApiWithBody method path body = do
+  let (rawPath, rawQuery) = BS8.break (== '?') path
+      chunks = BSL.toChunks body ++ []
+      req = defaultRequest
+        { requestMethod = method
+        , rawPathInfo   = rawPath
+        , pathInfo      = decodePathSegments rawPath
+        , queryString   = parseQuery (BS8.drop 1 rawQuery)
+        }
+  -- Serve the fixed body chunks through setRequestBodyChunks.
+  chunksRef <- newIORef chunks
+  let req' = setRequestBodyChunks (do
+        cs <- readIORef chunksRef
+        case cs of
+          []      -> pure BS8.empty
+          (c:cs') -> do writeIORef chunksRef cs'; pure c) req
+  ref <- newIORef Nothing
+  _ <- apiApp fixtureLoadResult req' $ \resp -> do
+    let (status, headers, withStream) = responseToStream resp
+    bodyRef <- newIORef []
+    withStream $ \stream -> stream (\builder -> modifyIORef bodyRef (B.toLazyByteString builder :)) (return ())
+    responseBody <- BSL.concat . reverse <$> readIORef bodyRef
+    writeIORef ref (Just (status, headers, responseBody))
+    return ResponseReceived
+  readIORef ref >>= maybe (fail "no response") pure
+
 -- | Encode a Text JSON rendering to a lazy bytestring for comparison.
 encodeExpected :: T.Text -> BSL.ByteString
 encodeExpected = BSL.fromStrict . TE.encodeUtf8
@@ -134,6 +165,7 @@ encodeExpected = BSL.fromStrict . TE.encodeUtf8
 
 spec :: Spec
 spec = do
+  mutateRouteSpec
   describe "apiApp" $ do
     it "GET /api/query returns the same JSON as the CLI renderer" $ do
       let g = fixtureGraph
@@ -250,3 +282,41 @@ spec = do
       parityQuery "Auth"    -- strong match: "Auth" matches AuthModule, AuthLogin, AuthSession
       parityQuery "NotEx"   -- weak match: partial match
       parityQuery "zzzznonexistent"  -- none match: no terms found
+
+-- POST /api/cypher/mutate (opencypher-write-mutations).
+mutateRouteSpec :: Spec
+mutateRouteSpec = describe "POST /api/cypher/mutate" $ do
+  let mutateBody :: T.Text -> BSL.ByteString
+      mutateBody q = BSL.fromStrict (TE.encodeUtf8 ("{\"query\":\"" <> q <> "\"}" :: T.Text))
+      asObj :: Value -> KM.KeyMap Value
+      asObj (Object o) = o
+      asObj _          = KM.empty
+
+  it "applies a mutation and returns the summary" $ do
+    (status, _headers, body) <- runApiWithBody methodPost "/api/cypher/mutate"
+      (mutateBody "MERGE (m:Module {id: 'm9'})")
+    status `shouldBe` status200
+    case eitherDecode body of
+      Right v -> do
+        let sm = asObj v
+        case KM.lookup (Key.fromText "summary") sm of
+          Just (Object s') ->
+            KM.lookup (Key.fromText "nodes_created") s' `shouldBe` Just (Number 1)
+          _ -> expectationFailure "expected summary object"
+        KM.member (Key.fromText "columns") sm `shouldBe` True
+      Left err -> expectationFailure err
+
+  it "returns 400 for a parse error" $ do
+    (status, _headers, body) <- runApiWithBody methodPost "/api/cypher/mutate"
+      (mutateBody "WITH x RETURN x")
+    status `shouldBe` status400
+    case eitherDecode body of
+      Right v -> KM.member (Key.fromText "error") (asObj v) `shouldBe` True
+      Left _  -> expectationFailure "expected error JSON"
+
+  it "reads reflect the mutated in-memory graph" $ do
+    _ <- runApiWithBody methodPost "/api/cypher/mutate"
+      (mutateBody "MERGE (m:Module {id: 'm9'})")
+    (status, _headers, body) <- runApi methodGet "/api/explain?node=m9"
+    status `shouldBe` status200
+    BSL.length body `shouldSatisfy` (> 0)

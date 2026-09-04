@@ -1,8 +1,18 @@
--- | Parser for the supported read-only openCypher/GQL subset.
+-- | Parser for the supported openCypher/GQL subset.
 --
--- Grammar (frozen in openspec change opencypher-gql-query, design.md):
+-- Grammar (read subset frozen in openspec change opencypher-gql-query,
+-- design.md; write subset added by opencypher-write-mutations):
 --
---   query        := MATCH patternList [WHERE predicate] RETURN returnClause
+--   statement    := readQuery | mutStatement
+--   readQuery    := MATCH patternList [WHERE predicate] RETURN returnClause
+--   mutStatement := [MATCH patternList [WHERE predicate]]
+--                   ( create | merge | set | remove | delete )+
+--                   [RETURN returnClause]
+--   create       := CREATE patternList
+--   merge        := MERGE patternElem [onClause] [ON MATCH SET setItems]
+--   set          := SET setItems
+--   remove       := REMOVE removeItems
+--   delete       := [DETACH] DELETE varList
 --   patternList  := patternElem (',' patternElem)*
 --   patternElem  := nodePat (relPat nodePat)*
 --   nodePat      := '(' varName [':' labelName]* ['{' props '}'] ')'
@@ -22,8 +32,13 @@
 --
 -- Keywords are case-insensitive. Anything outside the subset is a parse
 -- error with position, not a silent fallback.
+--
+-- The parser is mode-free: write clauses parse into 'MutStatement' and are
+-- permitted or rejected at the command layer (read-only surfaces reject
+-- them; see the cypher-mutation capability).
 module Graphos.Domain.Query.Cypher.Parser
   ( parseQuery
+  , parseStatement
   ) where
 
 import Control.Applicative (optional, (<|>))
@@ -51,6 +66,7 @@ import Text.Megaparsec.Char (char, space)
 import Text.Megaparsec.Error (errorBundlePretty)
 
 import Graphos.Domain.Query.Cypher.AST
+import Graphos.Domain.Types.Edge (textToRelation)
 
 -- ───────────────────────────────────────────────
 -- Entry point
@@ -58,13 +74,21 @@ import Graphos.Domain.Query.Cypher.AST
 
 type Parser = Parsec Void Text
 
--- | Parse a query. Returns the query or a human-readable error message
--- (position + unexpected/expected tokens).
+-- | Parse a read query (back-compat entry point). A mutation statement is
+-- a parse error here; use 'parseStatement' to accept both.
 parseQuery :: Text -> Either Text CypherQuery
 parseQuery input =
-  case parse (query <?> "query") "query" input of
+  case parse (readQueryP <?> "query") "query" input of
     Left bundle  -> Left (T.pack (errorBundlePretty bundle))
     Right q      -> Right q
+
+-- | Parse a full statement: a read query or a mutation. The parser is
+-- mode-free; callers decide whether a 'MutStatement' is permitted.
+parseStatement :: Text -> Either Text CypherStatement
+parseStatement input =
+  case parse (statement <?> "statement") "statement" input of
+    Left bundle  -> Left (T.pack (errorBundlePretty bundle))
+    Right st     -> Right st
 
 -- ───────────────────────────────────────────────
 -- Lexing helpers
@@ -148,8 +172,9 @@ natural = do
 -- Query
 -- ───────────────────────────────────────────────
 
-query :: Parser CypherQuery
-query = do
+-- | A MATCH/RETURN read query.
+readQueryP :: Parser CypherQuery
+readQueryP = do
   ws
   keyword "match"
   ws
@@ -167,6 +192,204 @@ query = do
   ws
   eof
   pure (CypherQuery pats wh rc)
+
+-- | A full statement: read query or mutation.
+statement :: Parser CypherStatement
+statement = do
+  ws
+  st <- try (ReadStatement <$> readQueryBody) <|> mutStatement
+  ws
+  eof
+  pure st
+
+-- | A read query body (shared by 'readQueryP' and 'statement').
+readQueryBody :: Parser CypherQuery
+readQueryBody = do
+  keyword "match"
+  ws
+  pats <- patternList
+  ws
+  wh <- optional $ do
+    try (keyword "where")
+    ws
+    p <- predicate
+    ws
+    pure p
+  keyword "return"
+  ws
+  rc <- returnClause
+  ws
+  pure (CypherQuery pats wh rc)
+
+-- | A mutation statement: optional MATCH prefix, one or more write
+-- operations, optional trailing RETURN.
+mutStatement :: Parser CypherStatement
+mutStatement = do
+  mPrefix <- optional $ do
+    try (keyword "match" *> ws)
+    pats <- patternList
+    ws
+    wh <- optional $ do
+      try (keyword "where")
+      ws
+      p <- predicate
+      ws
+      pure p
+    pure (CypherQuery pats wh emptyReturn)
+  ops <- some mutOp
+  ws
+  mrc <- optional $ do
+    try (keyword "return")
+    ws
+    rc <- returnClause
+    ws
+    pure rc
+  pure (MutStatement (Mut mPrefix ops mrc))
+  where
+    emptyReturn = ReturnClause False [RIExpr ENull Nothing] [] Nothing Nothing
+
+-- | One write operation.
+mutOp :: Parser MutOp
+mutOp =
+      createOp
+  <|> mergeOp
+  <|> setOp
+  <|> removeOp
+  <|> deleteOp
+
+createOp :: Parser MutOp
+createOp = do
+  keyword "create"
+  ws
+  pats <- patternList
+  ws
+  mapM_ checkWriteRelTypes pats
+  pure (MCreate pats)
+
+mergeOp :: Parser MutOp
+mergeOp = do
+  keyword "merge"
+  ws
+  pats <- patternList
+  case pats of
+    [single] -> do
+      ws
+      ons <- many onClause
+      ws
+      checkWriteRelTypes single
+      pure (MMerge single ons)
+    _ -> fail "MERGE supports a single node or relationship pattern"
+
+-- | In write patterns, relationship types must name a supported relation
+-- (the closed vocabulary); unknown types are a parse error naming the
+-- type and the vocabulary. Matching follows the read engine: types are
+-- compared case-insensitively, so both \"Calls\" and \"calls\" resolve.
+checkWriteRelTypes :: PatternElem -> Parser ()
+checkWriteRelTypes (RelPatE rp) =
+  case [t | t <- rpTypes rp, isNothing (textToRelation (T.toLower t))] of
+    []    -> pure ()
+    (t:_) -> fail
+      (  "unknown relationship type: " ++ T.unpack t
+      ++ " (supported: " ++ T.unpack (T.intercalate ", " relationVocabulary) ++ ")" )
+checkWriteRelTypes (NodePatE _) = pure ()
+
+-- | The supported relationship type vocabulary (the closed 'Relation'
+-- enum, lowercased).
+relationVocabulary :: [Text]
+relationVocabulary =
+  [ "calls", "imports", "extends", "implements"
+  , "references", "contains", "depends_on", "inferred"
+  ]
+
+-- | Nothing for a Nothing value (local helper).
+isNothing :: Maybe a -> Bool
+isNothing Nothing  = True
+isNothing (Just _) = False
+
+onClause :: Parser OnClause
+onClause =
+      do
+        try (keyword "on" *> ws *> keyword "create" *> ws *> keyword "set" *> ws)
+        items <- setItems
+        ws
+        pure (OnCreate items)
+  <|> do
+        try (keyword "on" *> ws *> keyword "match" *> ws *> keyword "set" *> ws)
+        items <- setItems
+        ws
+        pure (OnMatch items)
+
+setOp :: Parser MutOp
+setOp = do
+  keyword "set"
+  ws
+  items <- setItems
+  ws
+  pure (MSet items)
+
+-- | SET items: @var.prop = expr@ or @var:Label@, comma-separated.
+setItems :: Parser [SetItem]
+setItems = sepBy1 setItem (try (ws *> char ',' <* ws))
+
+setItem :: Parser SetItem
+setItem =
+      try (do
+        v <- varName
+        ws
+        void (char ':')
+        ws
+        l <- labelName
+        pure (SetLabel v l))
+  <|> do
+        v <- varName
+        ws
+        void (char '.')
+        ws
+        p <- ident
+        ws
+        void (char '=')
+        -- Reject '+=' (map merge) explicitly: outside the subset.
+        plus <- optional (char '+')
+        case plus of
+          Just _  -> fail "SET var += {...} is outside the supported subset"
+          Nothing -> pure ()
+        ws
+        e <- expr
+        pure (SetProp v p e)
+
+removeOp :: Parser MutOp
+removeOp = do
+  keyword "remove"
+  ws
+  items <- sepBy1 removeItem (try (ws *> char ',' <* ws))
+  ws
+  pure (MRemove items)
+
+removeItem :: Parser RemoveItem
+removeItem =
+      try (do
+        v <- varName
+        ws
+        void (char ':')
+        ws
+        l <- labelName
+        pure (RemoveLabel v l))
+  <|> do
+        v <- varName
+        ws
+        void (char '.')
+        ws
+        p <- ident
+        pure (RemoveProp v p)
+
+deleteOp :: Parser MutOp
+deleteOp = do
+  detach <- (try (keyword "detach" *> ws *> pure True) <|> pure False)
+  keyword "delete"
+  ws
+  vs <- sepBy1 varName (try (ws *> char ',' <* ws))
+  ws
+  pure (MDelete detach vs)
 
 -- ───────────────────────────────────────────────
 -- Patterns
@@ -207,8 +430,7 @@ nodePat = do
 
 nodePatInner :: Parser NodePat
 nodePatInner = do
-  v <- varName
-  ws
+  v <- optional (varName <* ws)
   labels <- many (char ':' *> ws *> labelName <* ws)
   props <- optional $ do
     void (char '{')
@@ -217,7 +439,7 @@ nodePatInner = do
     ws
     void (char '}')
     pure ps
-  pure (NodePat v labels (fromMaybe Map.empty props))
+  pure (NodePat (fromMaybe "#anon" v) labels (fromMaybe Map.empty props))
 
 -- | Parse a relationship pattern following the source node `cur`.
 -- Consumes `- [ ... ] dir ( target )` and returns the relationship plus

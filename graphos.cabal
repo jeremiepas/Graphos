@@ -64,6 +64,7 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
+                    Graphos.Domain.Graph.Mutation
                      Graphos.Domain.Graph.Score
                      Graphos.Domain.Query.Research
                      Graphos.Domain.Query.Cypher.Mapping
@@ -169,6 +170,7 @@ library
                       Graphos.Infrastructure.Export.SVG
                      Graphos.Infrastructure.Export.Report
                       Graphos.Infrastructure.Export.IncrementalJSON
+                      Graphos.Infrastructure.Export.PersistMutation
                       -- Infrastructure - Server
                       Graphos.Infrastructure.Server.MCP
                       Graphos.Infrastructure.Server.Static
@@ -345,6 +347,7 @@ test-suite graphos-test
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
+    Graphos.Infrastructure.Export.PersistMutationSpec
     Graphos.UseCase.SubgraphSpec
     Graphos.UseCase.DetectSpec
     Graphos.Fidelity.ImportEdgesSpec
