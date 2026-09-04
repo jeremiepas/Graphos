@@ -112,7 +112,9 @@ pipelineOpts = PipelineConfig
           <*> (map (\s -> AnnotatedPattern (parsePattern s) False 3) <$> many (strOption (long "ignore" <> metavar "GLOB" <> help "Additional gitignore-style ignore pattern (can be specified multiple times)")))
          <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
           <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
-         <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
+          <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
+          <*> fmap not (switch (long "no-strict-graph" <> help "Disable strict startup graph validation (tolerant load on corrupt graph.json)"))
+
 
 granularityReader :: ReadM Granularity
 granularityReader = eitherReader $ \s -> case s of

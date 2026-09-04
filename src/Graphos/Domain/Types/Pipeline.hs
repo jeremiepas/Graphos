@@ -90,8 +90,9 @@ data PipelineConfig = PipelineConfig
    , cfgIgnorePatterns     :: [AnnotatedPattern]        -- ^ CLI-provided --ignore patterns merged with .gitignore/.graphosignore
   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
-  , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
-   } deriving (Eq, Show)
+   , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
+   , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
+    } deriving (Eq, Show)
 
 -- | Edge density level for inference
 -- Controls how aggressively the pipeline infers additional edges between nodes.
@@ -172,8 +173,9 @@ defaultConfig = PipelineConfig
   , cfgIgnorePatterns     = []
   , cfgRtsProfile         = False
   , cfgMaxHeap            = Nothing
-  , cfgLspConcurrency     = 2
-  }
+   , cfgLspConcurrency     = 2
+   , cfgStrictGraph        = True
+   }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
 -- When provided, each file's extraction is pushed to Neo4j immediately

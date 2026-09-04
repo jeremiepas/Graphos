@@ -26,7 +26,7 @@ import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
-import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..))
+import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
@@ -162,7 +162,16 @@ main = do
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
                             }
-      -- Initialize observability (tracing, metrics, debug trace)
+       -- Fail-fast on a corrupt existing graph.json before doing any work.
+       -- Strict by default; pass --no-strict-graph for tolerant loading.
+       when (cfgStrictGraph config') $ do
+         let graphFile = cfgOutputDir config' </> "graph.json"
+         validateGraphFile graphFile >>= \case
+           Left err -> do
+             hPutStrLn stderr $ "[graphos] " ++ T.unpack (corruptGraphMessage graphFile err)
+             exitWith (ExitFailure 1)
+           Right () -> pure ()
+       -- Initialize observability (tracing, metrics, debug trace)
       let logLevel = if cfgDebug config || obsDebug obsCfg then LogTrace
                       else if cfgVerbose config then LogDebug
                       else LogInfo
