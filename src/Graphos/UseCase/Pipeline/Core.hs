@@ -26,7 +26,7 @@ import System.Mem (performGC)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Config (FileExtensionConfig(..), SemanticEdgesConfig(..))
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
 import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
@@ -296,9 +296,7 @@ runPipeline appEnv config = catch (do
                 allInferred = inferNonSemanticEdges (cfgEdgeDensity configWithStreaming) graph commMap ++ semanticEdges
                 enrichedGraph' = (if null allInferred
                   then graph
-                  else buildGraphFromExtractions (cfgDirected configWithStreaming)
-                        [extractionFromLists (Map.elems (gNodes graph))
-                                             (Map.elems (gEdges graph) ++ allInferred)])
+                  else addEdges graph allInferred)
                   { gEmbeddings = gEmbeddings graph
                   , gEmbeddingsPath = gEmbeddingsPath graph }
             enrichedGraph' `deepseq` pure ()

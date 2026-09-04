@@ -16,6 +16,7 @@ import qualified Data.Text.IO as TIO
 import System.IO (stderr)
 import System.Process (createProcess, proc)
 import System.Environment (getArgs, getExecutablePath, withArgs)
+import System.FilePath ((</>))
 
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
@@ -26,7 +27,7 @@ import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
-import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..))
+import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
@@ -110,17 +111,17 @@ reexecWithRTS profile heapStr = do
   originalArgs <- getArgs
   exePath <- getExecutablePath
   let rtsFlags = concat
-        [ if profile then "+RTS -s -hT" else ""
-        , if not (null rtsFlags) && isJust heapStr then " " else ""
-        , maybe "" (\sz -> "+RTS -M " ++ sz) heapStr
+        [ if profile then "-s -hT" else ""
+        , if profile && isJust heapStr then " " else ""
+        , maybe "" (\sz -> "-M" ++ sz) heapStr
         ]
   case rtsFlags of
     "" -> pure ()
     _ -> do
-      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: " ++ rtsFlags
+      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ rtsFlags
       hFlush stderr
       let (cleanArgs, _, _) = stripRTSFlags originalArgs
-          finalArgs = filter (not . null) (words rtsFlags) ++ ["--"] ++ cleanArgs
+          finalArgs = words ("+RTS " ++ rtsFlags ++ " --") ++ cleanArgs
       let spec = proc exePath finalArgs
       _ <- createProcess spec
       exitSuccess
@@ -128,11 +129,14 @@ reexecWithRTS profile heapStr = do
 main :: IO ()
 main = do
   rawArgs <- getArgs
-  let args = dropWhile (/= "--") rawArgs
+  -- Strip RTS flags passed by parent process (+RTS ... --) but preserve CLI flags
+  let args = case break (== "--") rawArgs of
+        (_, []) -> rawArgs  -- No "--" found, use all args
+        (_, _:rest) -> rest  -- Drop RTS flags and "--", keep rest
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
-      let heapStr = fmap (\mb -> show mb ++ "M") (cfgMaxHeap config)
+      let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
       when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
         reexecWithRTS (cfgRtsProfile config) heapStr
       -- Load graphos.yaml config and merge with CLI defaults
@@ -162,6 +166,15 @@ main = do
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
                             }
+      -- Fail-fast on a corrupt existing graph.json before doing any work.
+      -- Strict by default; pass --no-strict-graph for tolerant loading.
+      when (cfgStrictGraph config') $ do
+        let graphFile = cfgOutputDir config' </> "graph.json"
+        validateGraphFile graphFile >>= \case
+          Left err -> do
+            hPutStrLn stderr $ "[graphos] " ++ T.unpack (corruptGraphMessage graphFile err)
+            exitWith (ExitFailure 1)
+          Right () -> pure ()
       -- Initialize observability (tracing, metrics, debug trace)
       let logLevel = if cfgDebug config || obsDebug obsCfg then LogTrace
                       else if cfgVerbose config then LogDebug

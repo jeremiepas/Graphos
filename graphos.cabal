@@ -326,6 +326,7 @@ test-suite graphos-test
     Graphos.UseCase.FormatContextHintsSpec
     Graphos.UseCase.ConversationSpec
     Graphos.UseCase.LoadSpec
+    Graphos.UseCase.StartupValidationSpec
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec
     Graphos.Domain.Graph.CollisionSpec
