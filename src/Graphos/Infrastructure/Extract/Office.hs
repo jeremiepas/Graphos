@@ -10,7 +10,7 @@ import Control.Exception (SomeException, catch)
 import Data.Char (toLower)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (fromText)
 import System.FilePath (takeExtension, takeFileName)
 
 import Graphos.Domain.Types

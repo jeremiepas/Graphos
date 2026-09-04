@@ -18,7 +18,7 @@ import Data.Char (isAlphaNum, isSpace)
 import Data.List (nub)
 import Data.Bits ((.|.))
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (fromText)
 import System.IO (withFile, IOMode(ReadMode), hGetContents')
 
 import Graphos.Domain.Types
