@@ -46,6 +46,9 @@ graphos query QUESTION          Query the knowledge graph
 graphos cypher QUERY            Read-only openCypher/GQL query
   --graph FILE / --budget N / --json
 
+graphos cypher QUERY            Read-only openCypher/GQL query
+  --graph FILE / --budget N / --json
+
 graphos path FROM TO             Find shortest path
   --graph FILE / --budget N / --json
   --label-width N / --edges MODE
