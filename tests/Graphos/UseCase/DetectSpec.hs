@@ -13,10 +13,14 @@ import Graphos.UseCase.Detect
   , depthIndependentIgnoreDirs
   , hardcodedIgnoreDirNames
   , isIgnoredEntryRoot
+  , findAllFilesWithExclusions
+  , allSupportedExtensions
   )
 import Graphos.Infrastructure.FileSystem.Ignore
   ( loadIgnorePatterns
   , shouldIgnore
+  , ignoreMatches
+  , parseGitignoreLine
   )
 import Graphos.Domain.Types (emptyExclusionCounts, ExclusionCounts(..))
 
@@ -164,3 +168,27 @@ spec = do
         let matcher _ ps path = shouldIgnore ps path
         isIgnoredEntryRoot tmpDir matcher "node_modules" tmpDir (tmpDir </> "node_modules") patterns
           `shouldBe` True
+
+  describe "individual file ignore accounting (honor-graphosignore)" $ do
+    it "a supported file matching an ignore pattern is counted in excIgnoredFiles and excluded" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-file-1"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "src" ]
+        touch (tmpDir </> "src") "lib.rs"
+        touch (tmpDir </> "src") "main.rs"
+        let patterns = [ parseGitignoreLine 2 "**/lib.rs" ]
+        (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns
+        excIgnoredFiles excs `shouldBe` 1
+        length files `shouldBe` 1
+        (tmpDir </> "src" </> "lib.rs") `notElem` files `shouldBe` True
+
+    it "no ignored files are counted when no pattern matches" $ do
+      let tmpDir = "/tmp/graphos-test-detect-spec-file-2"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir [ "src" ]
+        touch (tmpDir </> "src") "lib.rs"
+        touch (tmpDir </> "src") "main.rs"
+        let patterns = [ parseGitignoreLine 2 "**/nope.rs" ]
+        (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns
+        excIgnoredFiles excs `shouldBe` 0
+        length files `shouldBe` 2
