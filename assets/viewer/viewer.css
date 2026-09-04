@@ -14,8 +14,9 @@ header .stats { font-size: 11px; color: #888; margin-top: 2px; }
 .depth-selector { display: flex; align-items: center; gap: 8px; }
 .depth-selector select { background: #252540; border: 1px solid #3a3a5e; border-radius: 6px; padding: 7px 10px; color: #e0e0e0; font-size: 13px; outline: none; }
 .depth-selector select:focus { border-color: #7dd3fc; }
-.depth-selector .hops-input { width: 52px; background: #252540; border: 1px solid #3a3a5e; border-radius: 6px; padding: 7px 8px; color: #e0e0e0; font-size: 13px; text-align: center; outline: none; }
-.depth-selector .hops-input:focus { border-color: #7dd3fc; }
+.depth-selector .neighborhood-input { width: 52px; background: #252540; border: 1px solid #3a3a5e; border-radius: 6px; padding: 7px 8px; color: #e0e0e0; font-size: 13px; text-align: center; outline: none; display: none; }
+.depth-selector .neighborhood-input.active { display: inline-block; }
+.depth-selector .neighborhood-input:focus { border-color: #7dd3fc; }
 
 .layout { display: flex; flex: 1; min-height: 0; }
 #graph { flex: 1; position: relative; }
