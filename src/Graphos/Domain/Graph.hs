@@ -11,7 +11,6 @@ module Graphos.Domain.Graph
   , buildGraph
   , mergeExtractions
   , mergeGraphs
-  , addEdges
   
     -- * Queries
   , godNodes
@@ -37,7 +36,7 @@ module Graphos.Domain.Graph
   , graphDiff
   ) where
 
-import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, makeStubNode)
+import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, isFileNode, isConceptNode, makeStubNode)
 import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, breadthFirstSearch, depthFirstSearch, subgraph)
 import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness)
 import Graphos.Domain.Graph.Diff (graphDiff)
