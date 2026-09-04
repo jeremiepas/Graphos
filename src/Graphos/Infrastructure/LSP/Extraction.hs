@@ -26,7 +26,7 @@ import Data.Maybe (mapMaybe)
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 import qualified Data.Text.IO as TIO
 import System.Timeout (timeout)
 

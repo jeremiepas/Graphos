@@ -14,7 +14,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 import System.FilePath (takeFileName)
 
 import Graphos.Domain.Types

@@ -333,6 +333,7 @@ spec = do
       let n = testNodeWithFile "func" CodeFile "model.py"
       isConceptNode n `shouldBe` False
 
+<<<<<<< HEAD
   -- describe "addEdges" $ do  -- SKIPPED: addEdges function not implemented
     -- it "returns the same graph when given an empty list" $ do
     --   let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
@@ -342,3 +343,94 @@ spec = do
     --   gEdges g' `shouldBe` gEdges g
     --   gAdjFwd g' `shouldBe` gAdjFwd g
     --   gAdjBack g' `shouldBe` gAdjBack g
+=======
+  describe "addEdges" $ do
+    it "returns the same graph when given an empty list" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          g' = addEdges g []
+      gNodes g' `shouldBe` gNodes g
+      gEdges g' `shouldBe` gEdges g
+      gAdjFwd g' `shouldBe` gAdjFwd g
+      gAdjBack g' `shouldBe` gAdjBack g
+
+    it "adds a single edge to the graph" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          newEdge = testEdge "b" "c"
+          g' = addEdges g [newEdge]
+      Map.size (gEdges g') `shouldBe` 2
+      Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
+      Set.member "b" (Map.findWithDefault Set.empty "c" (gAdjBack g')) `shouldBe` True
+
+    it "adds multiple edges to the graph" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c", testNode "d"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          edges = [testEdge "b" "c", testEdge "c" "d"]
+          g' = addEdges g edges
+      Map.size (gEdges g') `shouldBe` 3
+      Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
+      Set.member "d" (Map.findWithDefault Set.empty "c" (gAdjFwd g')) `shouldBe` True
+
+    it "handles duplicate edges (same source and target)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          e1 = testEdge "a" "b"
+          e2 = testEdgeWithConfidence "a" "b" (Confidence 0.5)
+          g' = addEdges g [e1, e2]
+      Map.size (gEdges g') `shouldBe` 1
+      -- The second edge (e2) should overwrite e1 since Map.insert uses Ord on keys
+      edgeConfidence (Map.findWithDefault (error "missing") ("a", "b") (gEdges g')) `shouldBe` Confidence 0.5
+
+    it "drops dangling edges (source not in graph)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          danglingEdge = testEdge "z" "a"
+          g' = addEdges g [danglingEdge]
+      Map.size (gEdges g') `shouldBe` 0
+      Map.size (gAdjFwd g') `shouldBe` 0
+
+    it "drops dangling edges (target not in graph)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          danglingEdge = testEdge "a" "z"
+          g' = addEdges g [danglingEdge]
+      Map.size (gEdges g') `shouldBe` 0
+      Map.size (gAdjFwd g') `shouldBe` 0
+
+    it "updates adjacency correctly for directed graphs" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph True ext
+          newEdge = testEdge "a" "b"
+          g' = addEdges g [newEdge]
+      Set.member "b" (Map.findWithDefault Set.empty "a" (gAdjFwd g')) `shouldBe` True
+      Set.member "a" (Map.findWithDefault Set.empty "b" (gAdjBack g')) `shouldBe` True
+      Set.size (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` 0
+      Set.size (Map.findWithDefault Set.empty "a" (gAdjBack g')) `shouldBe` 0
+
+    it "updates adjacency bidirectionally for undirected graphs" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+          newEdge = testEdge "a" "b"
+          g' = addEdges g [newEdge]
+      Set.member "b" (Map.findWithDefault Set.empty "a" (gAdjFwd g')) `shouldBe` True
+      Set.member "a" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
+      Set.member "b" (Map.findWithDefault Set.empty "a" (gAdjBack g')) `shouldBe` True
+      Set.member "a" (Map.findWithDefault Set.empty "b" (gAdjBack g')) `shouldBe` True
+
+    it "preserves existing edges and nodes" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          newEdge = testEdge "b" "c"
+          g' = addEdges g [newEdge]
+      Map.size (gNodes g') `shouldBe` 3
+      Map.member ("a", "b") (gEdges g') `shouldBe` True
+      edgeRelation (Map.findWithDefault (error "missing") ("a", "b") (gEdges g')) `shouldBe` Calls
+
+    it "preserves graph metadata (directed, embeddings)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph True ext
+          g' = addEdges g [testEdge "a" "b"]
+      gDirected g' `shouldBe` True
+      gEmbeddings g' `shouldBe` gEmbeddings g
+>>>>>>> fix/unused-aeson-import

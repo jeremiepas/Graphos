@@ -151,9 +151,8 @@ library
                      Graphos.Infrastructure.FileSystem.Sensitive
                       Graphos.Infrastructure.FileSystem.Manifest
                       Graphos.Infrastructure.FileSystem.OfficeConvert
-                       Graphos.Infrastructure.FileSystem.Conversation
-                       Graphos.Infrastructure.FileSystem.AtomicWrite
-                       -- Infrastructure - Security
+                      Graphos.Infrastructure.FileSystem.Conversation
+                      -- Infrastructure - Security
                      Graphos.Infrastructure.Security
                        -- Infrastructure - LLM
                        Graphos.Infrastructure.LLM.OpenAI
@@ -261,10 +260,9 @@ library
      , xml-types             >= 0.3
      , base16-bytestring     >= 1.0
     , base64-bytestring     >= 1.0
-     , cryptohash-sha256     >= 0.11
-     , file-embed            >= 0.0.15
+    , cryptohash-sha256     >= 0.11
+    , file-embed            >= 0.0.15
     , text-short            >= 0.1
-    , unix                  >= 2.8
 
 -- ───────────────────────────────────────────────
 -- Executable
