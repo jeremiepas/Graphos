@@ -46,7 +46,7 @@ Read-only openCypher / GQL (ISO/IEC 39075) subset over the in-memory property gr
 | `WHERE` | `=`, `<>`, `<`, `>`, `<=`, `>=`, `IN`, `STARTS WITH`, `CONTAINS`, `=~` (regex), `AND` / `OR` / `NOT`, `IS NULL` |
 | `RETURN` | Expressions, `DISTINCT`, `ORDER BY`, `SKIP`, `LIMIT`, `count()` |
 
-Write clauses (`CREATE`, `MERGE`, `SET`, `DELETE`, …) are **rejected** with an error naming the unsupported construct. The graph is never mutated.
+Write clauses (`CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`) are **recognized** openCypher grammar but **rejected on this read-only surface** with an error pointing at the mutation surface. The graph is never mutated here. See [18 — Cypher Write](18-cypher-write.md) for the manipulation subset.
 
 ---
 

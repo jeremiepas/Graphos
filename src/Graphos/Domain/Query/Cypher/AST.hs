@@ -1,14 +1,30 @@
--- | AST for the supported read-only openCypher/GQL subset.
+-- | AST for the supported openCypher/GQL subset.
 --
--- The subset is frozen in the spec (openspec change opencypher-gql-query):
+-- The read subset is frozen in the spec (openspec change opencypher-gql-query):
 --   * MATCH with node and relationship patterns (incl. variable-length)
 --   * WHERE with comparison / membership / string / regex predicates
 --   * RETURN projection with DISTINCT, ORDER BY, SKIP, LIMIT, count
 --
+-- The write subset (openspec change opencypher-write-mutations) adds:
+--   * CREATE / MERGE (with ON CREATE SET / ON MATCH SET)
+--   * SET / REMOVE (properties, labels)
+--   * DELETE / DETACH DELETE
+--   * optional trailing RETURN
+--
 -- Anything outside this subset is a parse error, not a silent fallback.
 module Graphos.Domain.Query.Cypher.AST
-  ( -- * Query
-    CypherQuery(..)
+  ( -- * Statement
+    CypherStatement(..)
+  , Mut(..)
+
+    -- * Mutation operations
+  , MutOp(..)
+  , OnClause(..)
+  , SetItem(..)
+  , RemoveItem(..)
+
+    -- * Query
+  , CypherQuery(..)
 
     -- * Patterns
   , PatternElem(..)
@@ -33,6 +49,69 @@ module Graphos.Domain.Query.Cypher.AST
 
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+
+-- ───────────────────────────────────────────────
+-- Statement
+-- ───────────────────────────────────────────────
+
+-- | A parsed Cypher statement: either a read-only query or a mutation.
+--
+-- The parser itself is mode-free; whether a 'MutStatement' is permitted is
+-- decided at the command layer (read-only surfaces reject it).
+data CypherStatement
+  = ReadStatement CypherQuery
+  | MutStatement Mut
+  deriving (Eq, Show)
+
+-- | A mutation statement: optional MATCH/WHERE prefix, the write
+-- operations, and an optional trailing RETURN.
+data Mut = Mut
+  { mMatch   :: Maybe CypherQuery
+    -- ^ The MATCH/WHERE prefix selecting bindings to mutate. Its RETURN
+    -- clause is unused (always empty when parsed).
+  , mOps     :: [MutOp]
+    -- ^ The write operations, applied left-to-right over each matched
+    -- binding (or once, with no bindings, when there is no MATCH).
+  , mReturn  :: Maybe ReturnClause
+    -- ^ Optional RETURN evaluated against the post-mutation graph.
+  } deriving (Eq, Show)
+
+-- | A single write operation.
+data MutOp
+  = MCreate [PatternElem]
+    -- ^ @CREATE (a:Kind {..}), (a)-[:REL]->(b), ...@
+  | MMerge PatternElem [OnClause]
+    -- ^ @MERGE (n:Kind {id: x}) [ON CREATE SET ..] [ON MATCH SET ..]@;
+    -- the pattern is a single node or a single relationship path.
+  | MSet [SetItem]
+    -- ^ @SET n.prop = expr, n:Label, ...@
+  | MRemove [RemoveItem]
+    -- ^ @REMOVE n.prop, n:Label, ...@
+  | MDelete Bool [Text]
+    -- ^ @DELETE vars@ / @DETACH DELETE vars@; Bool = detach.
+  deriving (Eq, Show)
+
+-- | An @ON CREATE SET@ / @ON MATCH SET@ suffix of a MERGE clause.
+data OnClause
+  = OnCreate [SetItem]
+  | OnMatch [SetItem]
+  deriving (Eq, Show)
+
+-- | A single SET item: @var.prop = expr@ or @var:Label@.
+data SetItem
+  = SetProp Text Text Expr
+    -- ^ @var.prop = expr@
+  | SetLabel Text Text
+    -- ^ @var:Label@ (adds an extra label)
+  deriving (Eq, Show)
+
+-- | A single REMOVE item: @var.prop@ or @var:Label@.
+data RemoveItem
+  = RemoveProp Text Text
+    -- ^ @var.prop@ (removes the property)
+  | RemoveLabel Text Text
+    -- ^ @var:Label@ (removes an extra label, or clears the primary kind)
+  deriving (Eq, Show)
 
 -- ───────────────────────────────────────────────
 -- Query

@@ -16,11 +16,11 @@ import System.IO (hPutStrLn, stderr)
 import System.Exit (exitWith, ExitCode(..))
 import qualified Data.Map.Strict as Map
 import Control.Exception (catch, SomeException(..))
-import Data.IORef (IORef, newIORef, readIORef)
+import Data.IORef (IORef, newIORef)
 
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo)
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult)
-import Graphos.Infrastructure.Server.QueryAPI (apiApp)
+import Graphos.Infrastructure.Server.QueryAPI (apiAppRef, SharedLoad(..))
 
 mimeTypes :: Map.Map String BS8.ByteString
 mimeTypes = Map.fromList
@@ -87,23 +87,24 @@ startServeServer dir graphPath port apiOnly noApi = do
       exitWith (ExitFailure 1)
     Right lr -> do
       ref <- newIORef lr
-      let app = serveApp dir ref apiOnly noApi
+      let app = serveApp dir graphPath ref apiOnly noApi
           warpSettings = setPort port
                        $ setHost "0.0.0.0"
                        $ setBeforeMainLoop (logInfo env $ T.pack $ "Serving " ++ dir ++ " + API on http://localhost:" ++ show port)
                        $ defaultSettings
       runSettings warpSettings app
 
-serveApp :: FilePath -> IORef LoadResult -> Bool -> Bool -> Application
-serveApp dir ref apiOnly noApi req respond
-  | apiOnly   = apiAppHandler ref req respond
+serveApp :: FilePath -> FilePath -> IORef LoadResult -> Bool -> Bool -> Application
+serveApp dir graphPath ref apiOnly noApi req respond
+  | apiOnly   = apiAppHandler graphPath ref req respond
   | noApi     = staticApp dir req respond
   | otherwise =
       case pathInfo req of
-        ("api":_) -> apiAppHandler ref req respond
+        ("api":_) -> apiAppHandler graphPath ref req respond
         _         -> staticApp dir req respond
 
-apiAppHandler :: IORef LoadResult -> Application
-apiAppHandler ref req respond = do
-  lr <- readIORef ref
-  apiApp lr req respond
+-- | The API surface over the shared mutable load state: reads serve the
+-- live graph; /api/cypher/mutate replaces it in memory (and persists back
+-- to graphPath when requested).
+apiAppHandler :: FilePath -> IORef LoadResult -> Application
+apiAppHandler graphPath ref = apiAppRef (SharedLoadRef ref graphPath)

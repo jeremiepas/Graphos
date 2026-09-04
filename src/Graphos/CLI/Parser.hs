@@ -41,7 +41,7 @@ import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), parsePatt
 data Command
   = Run PipelineConfig
   | QueryCmd Text Text CommonQueryOpts
-  | CypherCmd Text CommonQueryOpts
+  | CypherCmd Text Bool CommonQueryOpts
   | ResearchCmd [Text] [Text] FilePath Bool Bool (Maybe FilePath) (Maybe FilePath) (Maybe Text) CommonQueryOpts
   | PathCmd Text Text CommonQueryOpts
   | ExplainCmd Text CommonQueryOpts
@@ -162,7 +162,12 @@ queryOpts = QueryCmd
 cypherOpts :: Parser Command
 cypherOpts = CypherCmd
   <$> argument str (metavar "QUERY")
+  <*> writeFlag
   <*> commonQueryOptsP
+  where
+    writeFlag = switch
+      ( long "write"
+     <> help "Permit openCypher write clauses (CREATE/MERGE/SET/REMOVE/DELETE); persist graph.json when set" )
 
 researchOpts :: Parser Command
 researchOpts = do
@@ -264,7 +269,7 @@ subgraphOpts = SubgraphCmd
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
-  <> command "cypher" (info cypherOpts (progDesc "Run a read-only openCypher/GQL query"))
+  <> command "cypher" (info cypherOpts (progDesc "Run an openCypher/GQL query (read-only unless --write)"))
   <> command "path"  (info (pathOpts <**> helper) (progDesc "Find shortest path between two nodes"))
   <> command "explain" (info (explainOpts <**> helper) (progDesc "Explain a node"))
   <> command "symbols" (info (symbolsOpts <**> helper) (progDesc "Look up an exact symbol by name"))
@@ -327,7 +332,7 @@ renderCommandReference = unlines $
   , "  --dfs / --budget N / --graph FILE"
   , "  --json / --label-width N / --edges MODE"
   , ""
-  , "graphos cypher QUERY            Read-only openCypher/GQL query"
+  , "graphos cypher QUERY [--write]  openCypher/GQL query; --write permits/persists mutations"
   , "  --graph FILE / --budget N / --json"
   , ""
   , "graphos path FROM TO             Find shortest path"

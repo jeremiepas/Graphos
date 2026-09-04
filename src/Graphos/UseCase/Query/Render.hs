@@ -15,6 +15,8 @@ module Graphos.UseCase.Query.Render
   , renderExplainResultJSON
   , renderCypherResultText
   , renderCypherResultJSON
+  , renderMutationResultText
+  , renderMutationResultJSON
   , renderAmbiguousText
   , renderAmbiguousJSON
   , renderNotFoundText
@@ -23,6 +25,7 @@ module Graphos.UseCase.Query.Render
     -- * Truncation
   , truncateOutput
   , estimateTokens
+  , encodeText
   ) where
 
 import Data.Aeson (toJSON, object, (.=), Value(..), encode)
@@ -32,7 +35,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL (decodeUtf8)
 
 import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict)
-import Graphos.Domain.Query.Cypher.Eval (CypherResult(..))
+import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
@@ -200,6 +203,57 @@ renderCypherResultJSON cr = encodeText $ object
   , "rows"      .= crRows cr
   , "truncated" .= crTruncated cr
   ]
+
+-- | Render a MutationResult as human-readable text: a summary line of
+-- non-zero counts, then any RETURN rows.
+renderMutationResultText :: Int -> MutationResult -> Text
+renderMutationResultText budget mr =
+  let s = mrSummary mr
+      counts =
+        [ ("nodes created", msNodesCreated s)
+        , ("rels created", msRelsCreated s)
+        , ("rels upserted", msRelsUpserted s)
+        , ("properties set", msPropertiesSet s)
+        , ("properties removed", msPropertiesRemoved s)
+        , ("nodes deleted", msNodesDeleted s)
+        , ("rels deleted", msRelsDeleted s)
+        ]
+      nonzero = [ (lbl, n) | (lbl, n) <- counts, n > 0 ]
+      summaryLine = case nonzero of
+        [] -> "OK (no changes)"
+        _  -> T.intercalate ", " [ lbl <> ": " <> T.pack (show n) | (lbl, n) <- nonzero ]
+      cr = mrResult mr
+      rowsPart = case crColumns cr of
+        [] -> ""
+        _  ->
+          let header = T.intercalate "  " (crColumns cr)
+              rowLines = [ T.intercalate "  " (map encodeText row) | row <- crRows cr ]
+          in "\n" <> header <> "\n"
+             <> (if null rowLines then "(no rows)" else T.unlines rowLines)
+      -- The caveat only matters when something actually changed.
+      caveat = if null nonzero
+                 then ""
+                 else "\nNote: persisted mutations are overwritten by the next extraction run."
+  in truncateOutput budget (summaryLine <> rowsPart <> caveat)
+
+-- | Render a MutationResult as a single JSON document:
+-- @{"summary":{...},"columns":[...],"rows":[[...]],"truncated":bool}@.
+renderMutationResultJSON :: MutationResult -> Text
+renderMutationResultJSON mr = encodeText $ object
+  [ "summary"   .= object
+      [ "nodes_created"      .= msNodesCreated s
+      , "rels_created"       .= msRelsCreated s
+      , "rels_upserted"      .= msRelsUpserted s
+      , "properties_set"     .= msPropertiesSet s
+      , "properties_removed" .= msPropertiesRemoved s
+      , "nodes_deleted"      .= msNodesDeleted s
+      , "rels_deleted"       .= msRelsDeleted s
+      ]
+  , "columns"   .= crColumns (mrResult mr)
+  , "rows"      .= crRows (mrResult mr)
+  , "truncated" .= crTruncated (mrResult mr)
+  ]
+  where s = mrSummary mr
 
 -- | Render an ambiguous node-argument resolution as text: list every candidate
 -- with its id and source location so the caller can re-run with a node id.

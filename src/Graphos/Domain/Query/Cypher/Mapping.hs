@@ -2,12 +2,15 @@
 -- property-graph model exposed by the openCypher/GQL query surface.
 --
 -- The mapping is fixed and documented (see openspec change
--- opencypher-gql-query, design.md):
+-- opencypher-gql-query, design.md; extended for writes by
+-- opencypher-write-mutations):
 --
---   * Cypher node label          <- nodeKind
+--   * Cypher node label          <- nodeKind (+ nodeExtra.extra_labels)
 --   * Cypher relationship type   <- edgeRelation (via relationToText)
 --   * node properties            <- the remaining node fields
+--                                   + the nodeExtra object (writes)
 --   * relationship properties    <- the remaining edge fields
+--                                   + the edgeExtra object (writes)
 --
 -- A property that a node/edge does not declare resolves to null: the
 -- accessors below return 'Nothing' for unknown keys, and the evaluator
@@ -27,7 +30,9 @@ module Graphos.Domain.Query.Cypher.Mapping
   , edgeProperty
   ) where
 
-import Data.Aeson (Value, ToJSON(..))
+import Data.Aeson (Value(..), ToJSON(..))
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -72,10 +77,14 @@ nodeProperties n =
       Just s  -> Map.singleton "text" (toJSON s)
       Nothing -> Map.empty
 
--- | Look up a single node property. 'Nothing' when the property is not
--- declared (resolves to null in the evaluator).
+-- | Look up a single node property. Model fields first, then the
+-- extra object (SET-written properties). 'Nothing' when neither
+-- declares the key (resolves to null in the evaluator).
 nodeProperty :: Node -> Text -> Maybe Value
-nodeProperty n k = Map.lookup k (nodeProperties n)
+nodeProperty n k =
+  case Map.lookup k (nodeProperties n) of
+    Just v  -> Just v
+    Nothing -> extraLookup (nodeExtra n) k
 
 -- ───────────────────────────────────────────────
 -- Edge mapping
@@ -97,7 +106,18 @@ edgeProperties e =
     , ("confidence", toJSON (edgeConfidence e))
     ]
 
--- | Look up a single edge property. 'Nothing' when the property is not
--- declared (resolves to null in the evaluator).
+-- | Look up a single edge property. Model fields first, then the
+-- extra object (SET-written properties).
 edgeProperty :: Edge -> Text -> Maybe Value
-edgeProperty e k = Map.lookup k (edgeProperties e)
+edgeProperty e k =
+  case Map.lookup k (edgeProperties e) of
+    Just v  -> Just v
+    Nothing -> extraLookup (edgeExtra e) k
+
+-- | Resolve a key inside an extra JSON object (the write surface's
+-- extension store).
+extraLookup :: Maybe Value -> Text -> Maybe Value
+extraLookup mv k = do
+  case mv of
+    Just (Object km) -> KM.lookup (Key.fromText k) km
+    _                -> Nothing

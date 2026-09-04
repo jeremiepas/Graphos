@@ -5,6 +5,7 @@ import Data.List (isInfixOf)
 import Options.Applicative
 import Options.Applicative.Help (renderHelp, parserHelp)
 
+import Graphos.UseCase.Query.Render (defaultCommonQueryOpts)
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..))
 
@@ -96,6 +97,15 @@ spec = do
       parseWith neighborsOpts ["Some.Display.Name", "--depth", "1"] `shouldSatisfy` isRight
     it "cypher accepts a positional query plus --json / --budget" $ do
       parseWith cypherOpts ["MATCH (n) RETURN n", "--json", "--budget", "100"] `shouldSatisfy` isRight
+
+  describe "cypherOpts --write (opencypher-write-mutations)" $ do
+    it "parses --write" $ do
+      parseWith cypherOpts ["MERGE (n)", "--write"] `shouldBe`
+        Right (CypherCmd "MERGE (n)" True defaultCommonQueryOpts)
+
+    it "defaults to read-only" $ do
+      parseWith cypherOpts ["MATCH (n) RETURN n"] `shouldBe`
+        Right (CypherCmd "MATCH (n) RETURN n" False defaultCommonQueryOpts)
 
   describe "serveOpts" $ do
     it "parses default serve command" $ do

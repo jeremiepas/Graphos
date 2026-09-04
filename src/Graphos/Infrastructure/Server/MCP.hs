@@ -9,6 +9,9 @@ module Graphos.Infrastructure.Server.MCP
   , handleQueryGraph
   , handleSelectContext
   , handleCypherQuery
+  , handleCypherMutate
+  , McpState(..)
+  , emptyMcpState
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:), (.:?), (.!=), withObject, encode, eitherDecode)
@@ -24,6 +27,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Vector (toList)
 import System.IO (hFlush, stdout, isEOF)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
  
 import Graphos.Domain.Types
@@ -32,17 +36,20 @@ import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
                                , chatCommunityId, enrichWithChatHistory)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndexCached, QueryResponse(..))
-import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL)
+import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL, LoadResult(..))
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
 import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextTokens
                                       , EdgeMode(..), filterAndRankEdges
                                       , formatExpansionHintsBudgeted)
 import Graphos.UseCase.Conversation (queryConversationsFromCommunity, summarizeConversation)
-import Graphos.Domain.Graph.Index (GraphIndex)
+import Graphos.Domain.Graph.Index (GraphIndex, buildIndex)
+import Graphos.Domain.Graph.Analysis (toCachedFGL)
 import Graphos.Domain.Graph.Analysis (CachedFGL, articulationPointsWithCached)
-import Graphos.Domain.Query.Cypher.Parser (parseQuery)
-import Graphos.Domain.Query.Cypher.Eval (evaluate, CypherResult(..))
+import Graphos.Domain.Query.Cypher.Parser (parseStatement)
+import Graphos.Domain.Query.Cypher.AST (CypherStatement(..), CypherQuery(..), ReturnClause(..))
+import Graphos.Domain.Query.Cypher.Eval (evaluate, evaluateStatement, CypherResult(..), MutationResult(..), MutationSummary(..))
 import Graphos.Infrastructure.FileSystem.Conversation (saveConversationToFile, loadConversationsFromDir)
+import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 
 
 -- | Start MCP server from a graph file
@@ -53,27 +60,57 @@ startMCPServerFromFile path = do
     Left err -> BSLC.putStrLn $ "Error loading graph: " `BSL.append` BSL.fromStrict (TE.encodeUtf8 err)
     Right loaded -> do
       let g = lrGraph loaded
-          commMap = lrCommunities loaded
           cohesion = lrCohesion loaded
           idx = lrIndex loaded
           cfg = lrCachedFGL loaded
       -- Load chat history from disk and enrich community map
       diskConvs <- loadConversationsFromDir "graphos-out/memory"
-      let enrichedCommMap = enrichWithChatHistory commMap diskConvs
+      let enrichedCommMap = enrichWithChatHistory (lrCommunities loaded) diskConvs
           analysis = analyze g enrichedCommMap cohesion
-      startMCPServer g idx cfg enrichedCommMap analysis
+      startMCPServerWith (Just path) loaded g idx cfg enrichedCommMap analysis
 
 -- | Start an MCP stdio server with a pre-loaded graph, community data, and analysis
 startMCPServer :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
 startMCPServer g idx cfg commMap analysis = do
-  requestLoop g idx cfg commMap analysis
+  ref <- newIORef (McpState (emptyLoadResult g idx cfg) g Nothing)
+  requestLoop ref idx cfg commMap analysis
+
+-- | An empty LoadResult wrapping the given warm graph state, for callers
+-- that did not load from a file (persistence unavailable).
+emptyLoadResult :: Graph -> GraphIndex -> CachedFGL -> LoadResult
+emptyLoadResult g idx cfg = LoadResult
+  g idx cfg Map.empty Map.empty [] Map.empty Nothing [] 0 0 0 0
+
+-- | Like 'startMCPServer', with the source LoadResult + graph.json path
+-- threaded so @cypher_mutate persist@ can write the mutated graph back.
+-- The IORef holds the (possibly mutated) live graph.
+startMCPServerWith :: Maybe FilePath -> LoadResult -> Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
+startMCPServerWith mPath lr g idx cfg commMap analysis = do
+  ref <- newIORef (McpState lr g mPath)
+  requestLoop ref idx cfg commMap analysis
+
+-- | Live MCP server state: the original LoadResult (for persistence
+-- carry-over), the live (possibly mutated) graph, and the source path.
+data McpState = McpState
+  { mcpLoadResult :: LoadResult
+  , mcpGraph      :: Graph
+  , mcpGraphPath  :: Maybe FilePath
+  }
+
+-- | A test-friendly McpState with an empty LoadResult for the given
+-- graph (persistence unavailable).
+emptyMcpState :: Graph -> McpState
+emptyMcpState g = McpState (emptyLoadResult g emptyIdx emptyCfg) g Nothing
+  where
+    emptyIdx = buildIndex g Map.empty
+    emptyCfg = toCachedFGL g
 
 -- ───────────────────────────────────────────────
 -- Request loop
 -- ───────────────────────────────────────────────
 
-requestLoop :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
-requestLoop g idx cfg commMap analysis = do
+requestLoop :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
+requestLoop stRef idx cfg commMap analysis = do
   eof <- isEOF
   if eof
     then pure ()
@@ -82,30 +119,32 @@ requestLoop g idx cfg commMap analysis = do
       case eitherDecode (BSL.fromStrict (TE.encodeUtf8 (T.pack line))) of
         Left err -> do
           sendError (-32700) ("Parse error: " <> T.pack err) Nothing
-          requestLoop g idx cfg commMap analysis
+          requestLoop stRef idx cfg commMap analysis
         Right req -> do
-          handleRequest g idx cfg commMap analysis req
-          requestLoop g idx cfg commMap analysis
+          handleRequest stRef idx cfg commMap analysis req
+          requestLoop stRef idx cfg commMap analysis
 
 -- ───────────────────────────────────────────────
 -- Request handling
 -- ───────────────────────────────────────────────
 
-handleRequest :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> MCPRequest -> IO ()
-handleRequest g idx cfg commMap analysis req =
+handleRequest :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> MCPRequest -> IO ()
+handleRequest stRef idx cfg commMap analysis req =
   case rqpMethod req of
     "initialize" -> sendBSL (encode (initializeResponse (rqpId req)))
     "tools/list" -> sendBSL (encode (toolsListResponse (rqpId req)))
-    "tools/call" -> handleToolCall g idx cfg commMap analysis (rqpId req) (rqpParams req)
+    "tools/call" -> handleToolCall stRef idx cfg commMap analysis (rqpId req) (rqpParams req)
     _ -> sendError (-32601) ("Method not found: " <> rqpMethod req) (Just (rqpId req))
 
 -- ───────────────────────────────────────────────
 -- Tool dispatch
 -- ───────────────────────────────────────────────
 
-handleToolCall :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> Value -> KM.KeyMap Value -> IO ()
-handleToolCall g idx cfg commMap analysis reqId params = do
-  let toolName = case KM.lookup (Key.fromText "name") params of
+handleToolCall :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> Value -> KM.KeyMap Value -> IO ()
+handleToolCall stRef idx cfg commMap analysis reqId params = do
+  st <- readIORef stRef
+  let g = mcpGraph st
+      toolName = case KM.lookup (Key.fromText "name") params of
                    Just (String s) -> s
                    _ -> "unknown"
       args = case KM.lookup (Key.fromText "arguments") params of
@@ -114,6 +153,7 @@ handleToolCall g idx cfg commMap analysis reqId params = do
   result <- case toolName of
     "query_graph"        -> handleQueryGraph g idx args
     "cypher_query"       -> handleCypherQuery g idx args
+    "cypher_mutate"      -> handleCypherMutate stRef idx args
     "get_node"           -> handleGetNode g args
     "get_neighbors"      -> handleGetNeighbors g args
     "get_community"      -> handleGetCommunity g commMap args
@@ -165,22 +205,80 @@ handleQueryGraph g idx args = do
 
 -- | Run a read-only openCypher/GQL query against the warm graph + index.
 -- Reuses the loaded graph (no per-call rebuild). Returns columns, rows, and a
--- truncated flag.
+-- truncated flag. Mutation statements are rejected: this tool is read-only;
+-- use 'cypher_mutate'.
 handleCypherQuery :: Graph -> GraphIndex -> KM.KeyMap Value -> IO (Either Text Value)
 handleCypherQuery g idx args = do
   let query = textArg args "query"
       budget = fromMaybe 2000 (intArgMaybe args "budget")
   if T.null query
     then pure (Left "Missing required argument: query")
-    else case parseQuery query of
+    else case parseStatement query of
       Left err -> pure (Left ("Cypher parse error: " <> err))
-      Right q -> do
-        let result = evaluate budget q g idx
-        pure (Right (object
-          [ "columns"   .= crColumns result
-          , "rows"      .= crRows result
-          , "truncated" .= crTruncated result
-          ]))
+      Right st -> case st of
+        MutStatement _ ->
+          pure (Left ("Write statements require the cypher_mutate tool; cypher_query is read-only"))
+        _ -> do
+          let result = evaluate budget (readStatementQuery st) g idx
+          pure (Right (object
+            [ "columns"   .= crColumns result
+            , "rows"      .= crRows result
+            , "truncated" .= crTruncated result
+            ]))
+
+-- | Evaluate an openCypher statement against the warm graph, applying
+-- mutations in memory. With @persist@ set, the mutated graph is written
+-- back to the loaded graph.json with a timestamped backup.
+handleCypherMutate :: IORef McpState -> GraphIndex -> KM.KeyMap Value -> IO (Either Text Value)
+handleCypherMutate stRef idx args = do
+  st <- readIORef stRef
+  let g = mcpGraph st
+      query = textArg args "query"
+      budget = fromMaybe 2000 (intArgMaybe args "budget")
+      persist = boolArg args "persist"
+  if T.null query
+    then pure (Left "Missing required argument: query")
+    else case parseStatement query of
+      Left err -> pure (Left ("Cypher parse error: " <> err))
+      Right st' -> case evaluateStatement budget st' g idx of
+        Left err -> pure (Left ("Cypher error: " <> err))
+        Right mr -> do
+          backupMsg <- case (persist, mcpGraphPath st) of
+            (True, Just path) -> do
+              res <- persistMutatedGraph path (mcpLoadResult st) (mrGraph mr)
+              case res of
+                Left err  -> pure (Just (T.unpack err))
+                Right bak -> pure (Just bak)
+            _ -> pure Nothing
+          writeIORef stRef st { mcpGraph = mrGraph mr }
+          pure (Right (object
+            ([ "summary"   .= mutationSummaryJSON (mrSummary mr)
+             , "columns"   .= crColumns (mrResult mr)
+             , "rows"      .= crRows (mrResult mr)
+             , "truncated" .= crTruncated (mrResult mr)
+             ] ++ maybe [] (\b -> ["backup" .= b]) backupMsg)))
+
+-- | Extract the MATCH-less query from a read statement (total function
+-- for statements that parsed as read).
+readStatementQuery :: CypherStatement -> CypherQuery
+readStatementQuery (ReadStatement q) = q
+readStatementQuery _ = emptyReadQuery
+
+-- | The canonical empty read query (MATCH nothing, RETURN nothing).
+emptyReadQuery :: CypherQuery
+emptyReadQuery = CypherQuery [] Nothing (ReturnClause False [] [] Nothing Nothing)
+
+-- | Summary as a JSON object.
+mutationSummaryJSON :: MutationSummary -> Value
+mutationSummaryJSON s = object
+  [ "nodes_created"      .= msNodesCreated s
+  , "rels_created"       .= msRelsCreated s
+  , "rels_upserted"      .= msRelsUpserted s
+  , "properties_set"     .= msPropertiesSet s
+  , "properties_removed" .= msPropertiesRemoved s
+  , "nodes_deleted"      .= msNodesDeleted s
+  , "rels_deleted"       .= msRelsDeleted s
+  ]
 
 handleGetNode :: Graph -> KM.KeyMap Value -> IO (Either Text Value)
 handleGetNode g args = do
@@ -431,7 +529,8 @@ toolsListResponse reqId = object
 allTools :: [(Text, Text, [(Text, Text, Bool)])]
 allTools =
   [ ("query_graph", "Query the knowledge graph using BFS or DFS traversal. Returns verdict, best_score, hash, ranked nodes/edges, and omitted counts. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything.", [("question", "The search question", True), ("mode", "bfs or dfs", False), ("budget", "Token budget", False), ("edges", "semantic or all", False)])
-  , ("cypher_query", "Run a read-only openCypher/GQL query (MATCH/WHERE/RETURN) against the graph. Returns columns, rows, and a truncated flag. Labels map to node kind, relationship types to edge relation, properties to node/edge fields.", [("query", "The Cypher query", True), ("budget", "Row budget (default: 2000)", False)])
+  , ("cypher_query", "Run a read-only openCypher/GQL query (MATCH/WHERE/RETURN) against the graph. Returns columns, rows, and a truncated flag. Labels map to node kind, relationship types to edge relation, properties to node/edge fields. Write clauses are rejected; use cypher_mutate.", [("query", "The Cypher query", True), ("budget", "Row budget (default: 2000)", False)])
+  , ("cypher_mutate", "Run an openCypher statement that may mutate the graph (CREATE/MERGE/SET/REMOVE/DELETE, optionally with MATCH). Mutations apply in memory; set persist=true to write graph.json back (a timestamped backup is kept; the next extraction run discards mutations). Returns a mutation summary and any RETURN rows.", [("query", "The Cypher statement", True), ("budget", "Row budget (default: 2000)", False), ("persist", "Write the mutated graph back to graph.json (default: false)", False)])
   , ("get_node", "Get details of a specific node", [("node_id", "Node ID to look up", True)])
   , ("get_neighbors", "Get all neighbors of a node", [("node_id", "Node ID", True)])
   , ("get_community", "Get community membership for a node", [("node_id", "Node ID", True)])
@@ -473,6 +572,12 @@ intArgMaybe :: KM.KeyMap Value -> Text -> Maybe Int
 intArgMaybe args key = case KM.lookup (Key.fromText key) args of
   Just (Number n) -> Just (round n)
   _ -> Nothing
+
+-- | Extract a boolean argument (default false).
+boolArg :: KM.KeyMap Value -> Text -> Bool
+boolArg args key = case KM.lookup (Key.fromText key) args of
+  Just (Bool b) -> b
+  _ -> False
 
 -- | Extract a list of text values from an array argument
 textListArg :: KM.KeyMap Value -> Text -> [Text]

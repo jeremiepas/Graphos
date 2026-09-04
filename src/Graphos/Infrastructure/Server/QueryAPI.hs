@@ -1,19 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | HTTP API for the query family.
 --
--- Routes: /api/query, /api/path, /api/explain, /api/symbols, /api/neighbors
+-- Routes: /api/query, /api/path, /api/explain, /api/symbols, /api/neighbors,
+-- /api/cypher/mutate (POST; explicit write surface, opencypher-write-mutations).
 -- All responses: Content-Type application/json; charset=utf-8 + CORS header.
--- OPTIONS -> 200; non-GET (except OPTIONS) -> 405; unknown /api/* -> 404.
+-- OPTIONS -> 200; unknown /api/* -> 404; reads are GET, the mutation route is POST.
 module Graphos.Infrastructure.Server.QueryAPI
   ( apiApp
+  , apiAppRef
+  , SharedLoad(..)
   , startQueryServer
   ) where
 
 import Network.Wai
 import Network.Wai.Handler.Warp (runSettings, setPort, setHost, defaultSettings)
+import qualified Data.ByteString.Lazy as BSL
 import Network.HTTP.Types
   ( Status
   , status200
+  , status400
   , status404
   , status405
   , hContentType
@@ -22,12 +27,18 @@ import Network.HTTP.Types
   )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
-import qualified Data.ByteString.Lazy as BSL
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 
+import Data.Aeson (object, (.=), (.:), (.:?), (.!=), eitherDecode, withObject, FromJSON(..))
+import Data.IORef (IORef, readIORef, writeIORef)
 import Graphos.Domain.Graph (gNodes)
+import Graphos.Domain.Graph.Mutation (MutationSummary(..))
+import Graphos.Domain.Query.Cypher.Parser (parseStatement)
+import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
+import Graphos.Domain.Query.Cypher.Eval (evaluateStatement, MutationResult(..), CypherResult(..))
+import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.UseCase.Load (LoadResult(..))
 import Graphos.UseCase.Query
   ( queryGraphWithIndexScored
@@ -43,24 +54,51 @@ import Graphos.UseCase.Query.Render
   , renderNeighborsResultJSON
   , renderPathResultJSON
   , renderExplainResultJSON
+  , encodeText
   )
+
+-- | Shared mutable load state. Pure-read deployments hold a constant;
+-- mutations replace the in-memory graph for subsequent reads.
+data SharedLoad
+  = SharedLoad LoadResult
+  | SharedLoadRef (IORef LoadResult) FilePath
+
+readShared :: SharedLoad -> IO LoadResult
+readShared (SharedLoad lr)   = pure lr
+readShared (SharedLoadRef r _) = readIORef r
+
+sharedGraphPath :: SharedLoad -> Maybe FilePath
+sharedGraphPath (SharedLoad _)     = Nothing
+sharedGraphPath (SharedLoadRef _ p) = Just p
+
+replaceSharedGraph :: SharedLoad -> LoadResult -> IO ()
+replaceSharedGraph (SharedLoadRef r _) lr' = writeIORef r lr'
+replaceSharedGraph (SharedLoad _) _        = pure ()
 
 -- | Application serving the query API from a pre-loaded LoadResult.
 apiApp :: LoadResult -> Application
-apiApp lr req respond = do
+apiApp lr = apiAppRef (SharedLoad lr)
+
+-- | Mutable view over the shared load state: mutations via
+-- /api/cypher/mutate replace the in-memory graph for subsequent reads.
+apiAppRef :: SharedLoad -> Application
+apiAppRef shared req respond = do
   let method = requestMethod req
       path   = pathInfo req
   if method == methodOptions
     then respond $ corsResponse status200 ""
-    else if method /= methodGet
-      then respond $ corsResponse status405 "Method not allowed"
-      else case path of
-        ["api", "query"]    -> handleQuery lr req respond
-        ["api", "path"]     -> handlePath lr req respond
-        ["api", "explain"]  -> handleExplain lr req respond
-        ["api", "symbols"]  -> handleSymbols lr req respond
-        ["api", "neighbors"] -> handleNeighbors lr req respond
-        _ -> respond $ corsResponse status404 "Not found"
+    else case path of
+      ["api", "cypher", "mutate"] -> handleCypherMutate shared req respond
+      _ | method /= methodGet -> respond $ corsResponse status405 "Method not allowed"
+        | otherwise -> do
+            lr <- readShared shared
+            case path of
+              ["api", "query"]    -> handleQuery lr req respond
+              ["api", "path"]     -> handlePath lr req respond
+              ["api", "explain"]  -> handleExplain lr req respond
+              ["api", "symbols"]  -> handleSymbols lr req respond
+              ["api", "neighbors"] -> handleNeighbors lr req respond
+              _ -> respond $ corsResponse status404 "Not found"
 
 -- | GET /api/query?q=<question>&mode=bfs|dfs&budget=<n>
 handleQuery :: LoadResult -> Application
@@ -122,6 +160,74 @@ handleNeighbors lr req respond = do
       body = renderNeighborsResultJSON result
   respond $ jsonResponse body
 
+-- | POST /api/cypher/mutate — body {"query": ..., "persist": false}.
+-- Evaluates an openCypher statement against the shared in-memory graph;
+-- mutations replace the graph for subsequent reads. With persist=true,
+-- the mutated graph is written back to the loaded graph.json (with a
+-- timestamped backup).
+-- | Read the full request body (chunked).
+fullBody :: Request -> IO BSL.ByteString
+fullBody req = go []
+  where
+    go acc = do
+      chunk <- getRequestBodyChunk req
+      if BS.null chunk
+        then pure (BSL.fromChunks (reverse acc))
+        else go (chunk : acc)
+
+handleCypherMutate :: SharedLoad -> Application
+handleCypherMutate shared req respond = do
+  body <- fullBody req
+  case eitherDecode body :: Either String MutateBody of
+    Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Invalid JSON body: " ++ err :: String)]))
+    Right mb -> case parseStatement (mubQuery mb) of
+      Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Cypher parse error: " <> err :: Text)]))
+      Right st -> do
+        lr <- readShared shared
+        let g = lrGraph lr
+            idx = lrIndex lr
+        case evaluateStatement 2000 st g idx of
+          Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= err]))
+          Right mr -> do
+            let lr' = lr { lrGraph = mrGraph mr }
+            replaceSharedGraph shared lr'
+            backupMsg <- case (mubPersist mb, mMutationOf st, sharedGraphPath shared) of
+              (True, Just _, Just path) -> do
+                res <- persistMutatedGraph path (mcpLoadResultFor lr') (mrGraph mr)
+                pure (either (Just . T.unpack) Just res)
+              _ -> pure Nothing
+            respond $ jsonResponse $ encodeText $ object $
+              [ "summary"   .= object
+                  [ "nodes_created"      .= msNodesCreated (mrSummary mr)
+                  , "rels_created"       .= msRelsCreated (mrSummary mr)
+                  , "rels_upserted"      .= msRelsUpserted (mrSummary mr)
+                  , "properties_set"     .= msPropertiesSet (mrSummary mr)
+                  , "properties_removed" .= msPropertiesRemoved (mrSummary mr)
+                  , "nodes_deleted"      .= msNodesDeleted (mrSummary mr)
+                  , "rels_deleted"       .= msRelsDeleted (mrSummary mr)
+                  ]
+              , "columns"   .= crColumns (mrResult mr)
+              , "rows"      .= crRows (mrResult mr)
+              , "truncated" .= crTruncated (mrResult mr)
+              ] ++ maybe [] (\b -> ["backup" .= b]) backupMsg
+
+-- | Decoded POST body for the mutation route.
+data MutateBody = MutateBody { mubQuery :: Text, mubPersist :: Bool }
+
+instance FromJSON MutateBody where
+  parseJSON = withObject "MutateBody" $ \v -> MutateBody
+    <$> v .:  "query"
+    <*> v .:? "persist" .!= False
+
+-- | Whether the statement mutates (Nothing = read-only).
+mMutationOf :: CypherStatement -> Maybe ()
+mMutationOf (MutStatement _) = Just ()
+mMutationOf (ReadStatement _) = Nothing
+
+-- | LoadResult for persistence carry-over.
+mcpLoadResultFor :: LoadResult -> LoadResult
+mcpLoadResultFor = id
+
 -- | Start a query API server on the given port.
 startQueryServer :: Int -> LoadResult -> IO ()
 startQueryServer port lr = do
@@ -160,8 +266,12 @@ readIntParam def key params =
 
 -- | Build a JSON response with CORS headers.
 jsonResponse :: Text -> Response
-jsonResponse body =
-  responseLBS status200
+jsonResponse = jsonResponseWithStatus status200
+
+-- | Build a JSON response with an explicit status and CORS headers.
+jsonResponseWithStatus :: Status -> Text -> Response
+jsonResponseWithStatus status body =
+  responseLBS status
     [ (hContentType, "application/json; charset=utf-8")
     , ("Access-Control-Allow-Origin", "*")
     ]
