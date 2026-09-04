@@ -18,7 +18,7 @@ import qualified Data.Set as Set
 import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 
 import Graphos.Domain.Types
   ( NodeId, Node(..)
@@ -225,7 +225,7 @@ expandWithSeeds g idx union seeds =
         ])
       -- 1-hop BFS from matched nodes
       expanded :: Set NodeId
-      expanded = Set.union matched (bfsFromSet idx matched 1 10000)
+      expanded = Set.union matched (bfsFromSet idx matched 1)
   in expanded
 
 nub :: (Ord a) => [a] -> [a]

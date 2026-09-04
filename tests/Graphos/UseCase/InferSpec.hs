@@ -10,6 +10,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
 
+import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
 import Graphos.Domain.Config (SemanticEdgesConfig(..), defaultSemanticEdgesConfig)

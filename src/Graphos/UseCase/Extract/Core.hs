@@ -26,7 +26,7 @@ import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)

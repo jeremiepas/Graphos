@@ -28,7 +28,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
 import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 import Data.Maybe (fromMaybe)
 import Data.Aeson (toJSON)
 

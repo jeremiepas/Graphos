@@ -44,15 +44,12 @@ graphos [PATH]                  Build the knowledge graph (default: .)
   --verbose, -v / --debug
   --granularity LEVEL           fine|function|file
   --threads, -j N / --edge-density MODE
-  --resolution FLOAT / --lsp-concurrency N / --mcp GRAPH_JSON
+  --resolution FLOAT / --mcp GRAPH_JSON
   --ignore GLOB                 Additional ignore pattern (repeatable)
 
 graphos query QUESTION          Query the knowledge graph
   --dfs / --budget N / --graph FILE
   --json / --label-width N / --edges MODE
-
-graphos cypher QUERY            Read-only openCypher/GQL query
-  --graph FILE / --budget N / --json
 
 graphos cypher QUERY            Read-only openCypher/GQL query
   --graph FILE / --budget N / --json

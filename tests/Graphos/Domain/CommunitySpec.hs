@@ -8,8 +8,11 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
+<<<<<<< HEAD
 import Data.List (sort)
 import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
+=======
+>>>>>>> fix/unused-aeson-import
 
 import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -328,6 +331,7 @@ spec = do
 
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node
+<<<<<<< HEAD
 testNode nid = Node
   { nodeId = nid
   , nodeLabel = fromText nid
@@ -394,6 +398,9 @@ testNodeWithFile nid ft = Node
   , nodeSignature = Nothing
   , nodePresentBits = 0
   }
+=======
+testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+>>>>>>> fix/unused-aeson-import
 
 -- | All-pairs edges over a node list (undirected clique).
 cliqueEdges :: [Text] -> [Edge]
