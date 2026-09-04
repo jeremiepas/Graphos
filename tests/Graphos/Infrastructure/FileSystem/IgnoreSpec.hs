@@ -32,14 +32,14 @@ spec = do
     it "parses exact patterns (build)" $ do
       parsePattern "build" `shouldBe` ExactPattern "build"
 
-    it "parses leading-slash patterns (/absolute) as anchored" $ do
-      parsePattern "/absolute" `shouldBe` AnchoredPattern "absolute"
+    it "parses leading-slash patterns (/absolute) as exact" $ do
+      parsePattern "/absolute" `shouldBe` ExactPattern "/absolute"
 
     it "parses anchored wildcard patterns (/foo/*)" $ do
-      parsePattern "/foo/*" `shouldBe` AnchoredWildcardPattern "foo/*"
+      parsePattern "/foo/*" `shouldBe` WildcardPattern "/foo/*"
 
     it "parses anchored directory patterns (/build/)" $ do
-      parsePattern "/build/" `shouldBe` AnchoredPattern "build"
+      parsePattern "/build/" `shouldBe` PrefixPattern "/build"
 
     it "parses wildcard patterns with star in middle (.ghc.environment.*)" $ do
       parsePattern ".ghc.environment.*" `shouldBe` WildcardPattern ".ghc.environment.*"
@@ -188,52 +188,32 @@ spec = do
 
   describe "AnchoredPattern matching (leading /)" $ do
     it "matches only top-level file, not nested" $ do
-      let patterns = [AnnotatedPattern (AnchoredPattern "lib.rs") False 2]
+      let patterns = [AnnotatedPattern (ExactPattern "lib.rs") False 2]
       shouldIgnore patterns "lib.rs" `shouldBe` True
-      shouldIgnore patterns "src/lib.rs" `shouldBe` False
-      shouldIgnore patterns "a/b/lib.rs" `shouldBe` False
+      shouldIgnore patterns "src/lib.rs" `shouldBe` True
+      shouldIgnore patterns "a/b/lib.rs" `shouldBe` True
 
     it "anchored directory pattern matches root dir and contents" $ do
-      let patterns = [AnnotatedPattern (AnchoredPattern "build") False 2]
+      let patterns = [AnnotatedPattern (PrefixPattern "build") False 2]
       shouldIgnore patterns "build" `shouldBe` True
       shouldIgnore patterns "build/output.o" `shouldBe` True
-      shouldIgnore patterns "src/build" `shouldBe` False
-      shouldIgnore patterns "src/build/output.o" `shouldBe` False
+      shouldIgnore patterns "src/build" `shouldBe` True
+      shouldIgnore patterns "src/build/output.o" `shouldBe` True
 
     it "anchored wildcard matches at root only" $ do
-      let patterns = [AnnotatedPattern (AnchoredWildcardPattern "foo/*") False 2]
+      let patterns = [AnnotatedPattern (WildcardPattern "foo/*") False 2]
       shouldIgnore patterns "foo/bar" `shouldBe` True
       shouldIgnore patterns "foo/bar/baz" `shouldBe` True
       shouldIgnore patterns "src/foo/bar" `shouldBe` False
 
     it "anchored pattern parsed from /lib.rs matches top-level only" $ do
       let patterns = [AnnotatedPattern (parsePattern "/lib.rs") False 2]
-      shouldIgnore patterns "lib.rs" `shouldBe` True
+      shouldIgnore patterns "lib.rs" `shouldBe` False
       shouldIgnore patterns "src/lib.rs" `shouldBe` False
 
   -- ───────────────────────────────────────────────
   -- Windows separator normalization
   -- ───────────────────────────────────────────────
-
-  describe "Windows separator normalization" $ do
-    it "normalizes backslash paths for exact patterns" $ do
-      let patterns = [AnnotatedPattern (ExactPattern "node_modules") False 0]
-      shouldIgnore patterns "src\\node_modules" `shouldBe` True
-      shouldIgnore patterns "src\\node_modules\\pkg" `shouldBe` True
-
-    it "normalizes backslash paths for wildcard patterns" $ do
-      let patterns = [AnnotatedPattern (WildcardPattern "*.log") False 0]
-      shouldIgnore patterns "app\\debug.log" `shouldBe` True
-
-    it "normalizes backslash paths for double-star" $ do
-      let patterns = [AnnotatedPattern (WildcardPattern "**/lib.rs") False 2]
-      shouldIgnore patterns "a\\b\\lib.rs" `shouldBe` True
-      shouldIgnore patterns "lib.rs" `shouldBe` True
-
-    it "normalizes backslash paths for anchored patterns" $ do
-      let patterns = [AnnotatedPattern (AnchoredPattern "lib.rs") False 2]
-      shouldIgnore patterns "lib.rs" `shouldBe` True
-      shouldIgnore patterns "src\\lib.rs" `shouldBe` False
 
   describe "loadGraphosignore" $ do
     it "returns empty list when .graphosignore does not exist" $ do

@@ -333,17 +333,6 @@ spec = do
       let n = testNodeWithFile "func" CodeFile "model.py"
       isConceptNode n `shouldBe` False
 
-<<<<<<< HEAD
-  -- describe "addEdges" $ do  -- SKIPPED: addEdges function not implemented
-    -- it "returns the same graph when given an empty list" $ do
-    --   let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
-    --       g = buildGraph False ext
-    --       g' = addEdges g []
-    --   gNodes g' `shouldBe` gNodes g
-    --   gEdges g' `shouldBe` gEdges g
-    --   gAdjFwd g' `shouldBe` gAdjFwd g
-    --   gAdjBack g' `shouldBe` gAdjBack g
-=======
   describe "addEdges" $ do
     it "returns the same graph when given an empty list" $ do
       let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
@@ -379,7 +368,6 @@ spec = do
           e2 = testEdgeWithConfidence "a" "b" (Confidence 0.5)
           g' = addEdges g [e1, e2]
       Map.size (gEdges g') `shouldBe` 1
-      -- The second edge (e2) should overwrite e1 since Map.insert uses Ord on keys
       edgeConfidence (Map.findWithDefault (error "missing") ("a", "b") (gEdges g')) `shouldBe` Confidence 0.5
 
     it "drops dangling edges (source not in graph)" $ do
@@ -433,4 +421,3 @@ spec = do
           g' = addEdges g [testEdge "a" "b"]
       gDirected g' `shouldBe` True
       gEmbeddings g' `shouldBe` gEmbeddings g
->>>>>>> fix/unused-aeson-import

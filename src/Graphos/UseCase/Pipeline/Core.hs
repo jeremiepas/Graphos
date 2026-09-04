@@ -34,7 +34,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
-import Graphos.Infrastructure.FileSystem.Ignore (parseGitignoreLine, apPriority)
+import Graphos.Infrastructure.FileSystem.Ignore (apPriority)
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
@@ -125,7 +125,7 @@ runPipeline appEnv config = catch (do
   lpLogInfo lp "Step 1: Detecting files..."
   detectStart <- getCurrentTime
   ignorePatterns <- fspLoadIgnorePatterns fsp (cfgInputPath configWithStreaming)
-  let cliPatterns = map (parseGitignoreLine 3) (map T.unpack (cfgIgnorePatterns configWithStreaming))
+  let cliPatterns = cfgIgnorePatterns configWithStreaming
       allIgnorePatterns = ignorePatterns ++ cliPatterns
       inputRoot = cfgInputPath configWithStreaming
       gitignoreCount = length (filter (\ap -> apPriority ap == 1) ignorePatterns)

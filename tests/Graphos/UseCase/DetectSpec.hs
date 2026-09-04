@@ -177,7 +177,7 @@ spec = do
         touch (tmpDir </> "src") "lib.rs"
         touch (tmpDir </> "src") "main.rs"
         let patterns = [ parseGitignoreLine 2 "**/lib.rs" ]
-        (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns
+        (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns (\_ -> pure ())
         excIgnoredFiles excs `shouldBe` 1
         length files `shouldBe` 1
         (tmpDir </> "src" </> "lib.rs") `notElem` files `shouldBe` True
@@ -189,6 +189,6 @@ spec = do
         touch (tmpDir </> "src") "lib.rs"
         touch (tmpDir </> "src") "main.rs"
         let patterns = [ parseGitignoreLine 2 "**/nope.rs" ]
-        (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns
+        (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns (\_ -> pure ())
         excIgnoredFiles excs `shouldBe` 0
         length files `shouldBe` 2

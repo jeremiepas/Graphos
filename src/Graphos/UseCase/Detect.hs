@@ -10,6 +10,7 @@ module Graphos.UseCase.Detect
   , depthIndependentIgnoreDirs
   , isIgnoredEntry
   , isIgnoredEntryRoot
+  , findAllFilesWithExclusions
   ) where
 
 import Data.List (isPrefixOf)
