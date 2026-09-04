@@ -32,3 +32,9 @@ monitoring/grafana/data/
 .devenv/
 .aider*
 .env
+
+# Personal machine config (contains private IPs / local LLM endpoints)
+opencode.json
+opencode.jsonc
+*.heapsnapshot
+__pycache__/
