@@ -173,6 +173,7 @@ queryGraphWithIndexScoredCached g idx cfg query mode budget =
             , snLabel       = toText (nodeLabel n)
             , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoostForTerms terms (toText (nodeLabel n))
             , snSourceFile  = toText (nodeSourceFile n)
+            , snKind        = case nodeKind n of Just k -> toText k; Nothing -> ""
             , snCommunityId = nodeCommunityId n
             }
         | nid <- Set.toList expanded
@@ -334,10 +335,11 @@ symbolLookup name g idx =
                         { snNodeId      = nid
                         , snLabel       = toText (nodeLabel n)
                         , snScore       = if null exactHits then 0.5 else 1.0
-                        , snSourceFile  = toText (nodeSourceFile n)
-                        , snCommunityId = nodeCommunityId n
-                        }
-                    | nid <- allHitIds
+                         , snSourceFile  = toText (nodeSourceFile n)
+                         , snKind        = case nodeKind n of Just k -> toText k; Nothing -> ""
+                         , snCommunityId = nodeCommunityId n
+                         }
+                     | nid <- allHitIds
                     , Just n <- [Map.lookup nid nodeMap]
                     ]
       isNotFound = null allHitIds
@@ -385,10 +387,11 @@ neighborhoodExpansion startId depth g idx =
                                        { snNodeId      = nid
                                        , snLabel       = toText (nodeLabel n)
                                        , snScore       = proximityScore startId nid idx
-                                        , snSourceFile  = toText (nodeSourceFile n)
-                                       , snCommunityId = nodeCommunityId n
-                                       }
-                                    | nid <- Set.toList expanded
+                                         , snSourceFile  = toText (nodeSourceFile n)
+                                         , snKind        = case nodeKind n of Just k -> toText k; Nothing -> ""
+                                        , snCommunityId = nodeCommunityId n
+                                        }
+                                     | nid <- Set.toList expanded
                                     , Just n <- [Map.lookup nid nodeMap]
                                     ]
                      nodeLblMap = Map.fromList [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]

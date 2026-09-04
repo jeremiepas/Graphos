@@ -49,13 +49,15 @@ import Graphos.UseCase.Query
   )
 import Graphos.UseCase.Query.Refine (defaultRefineConfig, refineResponse)
 import Graphos.UseCase.Query.Render
-  ( renderQueryResponseJSON
-  , renderSymbolResultJSON
-  , renderNeighborsResultJSON
-  , renderPathResultJSON
-  , renderExplainResultJSON
-  , encodeText
-  )
+   ( renderQueryResponseJSON
+   , renderSymbolResultJSON
+   , renderNeighborsResultJSON
+   , renderPathResultJSON
+   , renderExplainResultJSON
+   , encodeText
+   , enforceResponseBudget
+   )
+import Graphos.Domain.Graph.Score (defaultMaxLabelChars)
 
 -- | Shared mutable load state. Pure-read deployments hold a constant;
 -- mutations replace the in-memory graph for subsequent reads.
@@ -107,11 +109,14 @@ handleQuery lr req respond = do
       q = paramValue "q" params
       mode = paramValueWithDefault "mode" "bfs" params
       budget = readIntParam 2000 "budget" params
+      maxLabelChars = readIntParam defaultMaxLabelChars "max_label_chars" params
+      maxNodes = readIntParam 0 "max_nodes" params
       g = lrGraph lr
       idx = lrIndex lr
       resp = queryGraphWithIndexScored g idx q mode budget
       refined = refineResponse defaultRefineConfig (gNodes g) resp
-      body = renderQueryResponseJSON refined
+      budgeted = enforceResponseBudget maxLabelChars budget maxNodes refined
+      body = renderQueryResponseJSON budgeted
   respond $ jsonResponse body
 
 -- | GET /api/path?from=<a>&to=<b>

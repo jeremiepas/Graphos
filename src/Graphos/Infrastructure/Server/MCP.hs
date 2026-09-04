@@ -36,6 +36,8 @@ import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
                                , chatCommunityId, enrichWithChatHistory)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndexCached, QueryResponse(..))
+import Graphos.UseCase.Query.Render (enforceResponseBudget)
+import Graphos.Domain.Graph.Score (defaultMaxLabelChars)
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL, LoadResult(..))
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
 import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextTokens
@@ -180,28 +182,39 @@ handleQueryGraph g idx args = do
       budget = fromMaybe 2000 (intArgMaybe args "budget")
   if T.null question
     then pure (Left "Missing required argument: question")
-    else do
-      let resp = queryGraphWithIndexScored g idx question mode budget
-          allNodes = qrespNodes resp
-          allEdges = qrespEdges resp
-          -- Apply a simple budget cap to the scored result set (the formatter is not
-          -- used for the JSON path; we just count what would be dropped).
-          nodesOut = take budget allNodes
-          edgesOut = take budget allEdges
-          omittedNodes = length allNodes - length nodesOut
-          omittedEdges = length allEdges - length edgesOut
-      pure $ Right $ object
-        [ "verdict"      .= qrespVerdict resp
-        , "best_score"   .= qrespBestScore resp
-        , "hash"         .= qrespHash resp
-        , "nodes"        .= nodesOut
-        , "edges"        .= edgesOut
-        , "omitted"      .= object [ "nodes" .= omittedNodes
-                                   , "edges" .= omittedEdges
-                                   ]
-        , "suggestions"  .= qrespSuggestions resp
-        , "traverse"     .= mode
-        ]
+     else do
+        let resp = queryGraphWithIndexScored g idx question mode budget
+            allNodes = qrespNodes resp
+            allEdges = qrespEdges resp
+            qresp = QueryResponse
+              { qrespVerdict      = qrespVerdict resp
+              , qrespBestScore    = qrespBestScore resp
+              , qrespHash         = qrespHash resp
+              , qrespNodes        = allNodes
+              , qrespEdges        = allEdges
+              , qrespOmittedNodes = 0
+              , qrespOmittedEdges = 0
+              , qrespSuggestions = qrespSuggestions resp
+              }
+            maxLabelChars = fromMaybe defaultMaxLabelChars (intArgMaybe args "max_label_chars")
+            maxNodes = fromMaybe 0 (intArgMaybe args "max_nodes")
+            budgeted = enforceResponseBudget maxLabelChars budget maxNodes qresp
+            nodesOut = qrespNodes budgeted
+            edgesOut = qrespEdges budgeted
+            omittedNodes = qrespOmittedNodes budgeted
+            omittedEdges = qrespOmittedEdges budgeted
+        pure $ Right $ object
+          [ "verdict"      .= qrespVerdict resp
+          , "best_score"   .= qrespBestScore resp
+          , "hash"         .= qrespHash resp
+          , "nodes"        .= nodesOut
+          , "edges"        .= edgesOut
+          , "omitted"      .= object [ "nodes" .= omittedNodes
+                                     , "edges" .= omittedEdges
+                                     ]
+          , "suggestions"  .= qrespSuggestions resp
+          , "traverse"     .= mode
+          ]
 
 -- | Run a read-only openCypher/GQL query against the warm graph + index.
 -- Reuses the loaded graph (no per-call rebuild). Returns columns, rows, and a

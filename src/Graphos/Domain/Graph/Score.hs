@@ -16,6 +16,12 @@ module Graphos.Domain.Graph.Score
   , ScoredNode(..)
   , scoredNodeLabel
 
+    -- * Compact serialization + budget
+  , defaultMaxLabelChars
+  , truncateLabel
+  , scoredNodeBytes
+  , enforceByteBudget
+
     -- * Query response
   , QueryResponse(..)
 
@@ -33,7 +39,8 @@ module Graphos.Domain.Graph.Score
   , boundedDL
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withText, encode)
+import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -98,6 +105,7 @@ data ScoredNode = ScoredNode
   , snLabel       :: !Text
   , snScore       :: !Double
   , snSourceFile  :: !Text
+  , snKind        :: !Text
   , snCommunityId :: !(Maybe Int)
   } deriving (Eq, Show, Generic)
 
@@ -105,11 +113,12 @@ instance NFData ScoredNode
 
 instance ToJSON ScoredNode where
   toJSON n = object
-    [ "id"         .= snNodeId n
-    , "label"      .= snLabel n
-    , "score"      .= snScore n
+    [ "id"          .= snNodeId n
+    , "label"       .= snLabel n
+    , "score"       .= snScore n
     , "source_file" .= snSourceFile n
-    , "community"  .= snCommunityId n
+    , "kind"        .= snKind n
+    , "community"   .= snCommunityId n
     ]
 
 -- | Get the label text of a scored node.
@@ -145,8 +154,53 @@ instance ToJSON QueryResponse where
     , "omitted_edges"     .= qrespOmittedEdges r
     ]
 
+-- | Default maximum label length in compact node serialization.
+defaultMaxLabelChars :: Int
+defaultMaxLabelChars = 120
+
+-- | Bytes reserved for the non-node parts of a query response (verdict, best
+-- score, hash, edges, suggestions, array framing). Reserving headroom keeps the
+-- whole serialized response within the requested byte budget.
+responseHeaderOverhead :: Int
+responseHeaderOverhead = 512
+
+-- | Truncate a node label for compact list responses. Never returns a string
+-- longer than n characters; appends an ellipsis marker when truncation occurs.
+truncateLabel :: Int -> Text -> Text
+truncateLabel n t
+  | n <= 0         = t
+  | T.length t <= n = t
+  | otherwise      = T.take (n - 1) t <> T.pack "\8230"
+
+-- | Compact serialized size (in bytes) of one scored node's list entry, with the
+-- label truncated to `maxChars`. Used both to count toward the budget and to emit.
+scoredNodeBytes :: Int -> ScoredNode -> Int
+scoredNodeBytes maxChars sn =
+  fromIntegral (BSL.length (encode (object
+    [ "id"          .= snNodeId sn
+    , "score"       .= snScore sn
+    , "source_file" .= snSourceFile sn
+    , "kind"        .= snKind sn
+    , "label"       .= truncateLabel maxChars (snLabel sn)
+    ])))
+
+-- | Keep the highest-scoring nodes whose compact serialized size fits within
+-- `budget`. Input must be sorted score-descending (as produced by the query use
+-- case). Drops the lowest-ranked results first and reports how many were omitted.
+enforceByteBudget :: Int -> Int -> [ScoredNode] -> ([ScoredNode], Int)
+enforceByteBudget maxChars budget nodes
+  | budget <= responseHeaderOverhead = ([], length nodes)
+  | otherwise = go (budget - responseHeaderOverhead) nodes
+  where
+    go :: Int -> [ScoredNode] -> ([ScoredNode], Int)
+    go _ [] = ([], 0)
+    go remaining (n:ns)
+      | scoredNodeBytes maxChars n > remaining = ([], length (n:ns))
+      | otherwise = let (kept, dropped) = go (remaining - scoredNodeBytes maxChars n) ns
+                    in (n : kept, dropped)
+
 -- | Normalize a raw match count to a 0-1 score.
--- normalized = matchedTerms / queryTerms
+-- normalized = matchedTerms / query-terms
 normalizeScore :: Int -> Int -> Double
 normalizeScore matched queryTotal
   | queryTotal == 0 = 0
