@@ -136,6 +136,10 @@ wcTokenize cs =
 --   which produce a trailing Lit "slash" match correctly.
 wcMatch :: [WcToken] -> String -> Bool
 wcMatch [] _ = True
+wcMatch (WcDoubleStar : WcLit ('/' : lit) : rest) path =
+  -- **/pat: double-star consumes zero or more dirs; when zero, skip the /
+  wcMatch (WcLit lit : rest) path
+  || any (wcMatch (WcLit ('/' : lit) : rest) . snd) (wcSplits path)
 wcMatch (WcDoubleStar : rest) path = any (wcMatch rest . snd) (wcSplits path)
 wcMatch (WcStar : rest) path =
   -- * matches zero or more characters (excluding /)
