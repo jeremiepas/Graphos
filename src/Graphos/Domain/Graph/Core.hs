@@ -26,7 +26,7 @@ module Graphos.Domain.Graph.Core
 
 import Control.DeepSeq (NFData(..))
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
-import Data.Bits (xor, shiftR, (.&.), (.|.))
+import Data.Bits (xor, shiftR, (.&.))
 import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
