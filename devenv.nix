@@ -90,6 +90,23 @@ in
     "ci:release-test" = {
       exec = "cabal test all";
     };
+    # Print the built graphos executable path (single source of truth for
+    # locating the binary in workflows). Fails when the binary has not
+    # been built yet. Run: devenv tasks run ci:bin
+    "ci:bin" = {
+      exec = ''
+        set -e
+        BIN=$(cabal list-bin graphos 2>/dev/null) || {
+          echo "graphos binary not built yet - run ci:build (or ci:release-build) first" >&2
+          exit 1
+        }
+        if [ ! -f "$BIN" ]; then
+          echo "graphos binary not built yet - run ci:build (or ci:release-build) first" >&2
+          exit 1
+        fi
+        echo "$BIN"
+      '';
+    };
 
 
 
