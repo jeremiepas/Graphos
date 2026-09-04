@@ -22,6 +22,9 @@ module Graphos.UseCase.Load
   , loadGraphFromFileStrict
   , LoadResult(..)
   , supportedMajorVersions
+  , validateGraphFile
+  , validateMinimalShape
+  , corruptGraphMessage
   ) where
 
 import Control.Monad (when)
@@ -121,6 +124,46 @@ loadEmbeddingsSidecar graphPath lr =
               pure lr
             Right embs ->
               pure $ lr { lrGraph = (lrGraph lr) { gEmbeddings = Just embs } }
+
+-- ───────────────────────────────────────────────
+-- Startup validation (fail-fast on corrupt graph.json)
+-- ───────────────────────────────────────────────
+
+-- | Validate an existing graph.json at startup before running the pipeline.
+-- Returns Right () when the file is absent (nothing to validate) or when it
+-- parses and has the expected minimal shape. Returns Left with a descriptive
+-- message on parse failure or structural corruption.
+validateGraphFile :: FilePath -> IO (Either Text ())
+validateGraphFile path = do
+  exists <- doesFileExist path
+  if not exists
+    then pure (Right ())
+    else do
+      bs <- BSL.readFile path
+      case eitherDecode bs of
+        Left err -> pure $ Left $ "failed to parse graph JSON: " <> T.pack err
+        Right root -> pure (validateMinimalShape root)
+
+-- | Minimal shape check: a top-level JSON object containing a "nodes" array
+-- and an "edges" array. Catches the common corruption cases (non-JSON,
+-- non-object, missing or malformed core sections).
+validateMinimalShape :: Value -> Either Text ()
+validateMinimalShape (Object km) =
+  case KM.lookup (Key.fromText "nodes") km of
+    Just (Array _) -> case KM.lookup (Key.fromText "edges") km of
+      Just (Array _) -> Right ()
+      _              -> Left $ "graph.json: missing required \"edges\" array"
+    _ -> Left $ "graph.json: missing required \"nodes\" array"
+validateMinimalShape _ =
+  Left $ "graph.json: top-level value must be a JSON object"
+
+-- | Human-readable failure message surfaced on startup validation errors,
+-- including the offending path and a recovery hint.
+corruptGraphMessage :: FilePath -> Text -> Text
+corruptGraphMessage path msg =
+  "Startup graph validation failed for " <> T.pack path
+  <> ". The file is invalid:\n  " <> msg
+  <> "\nRecovery: restore from checkpoint or rebuild (run 'graphos <path>' again, deleting the invalid graph.json first)."
 
 -- ───────────────────────────────────────────────
 -- Top-level parsing

@@ -380,7 +380,7 @@ initObservability :: LogLevel -> OtelConfig -> Maybe Int -> FilePath -> IO Obser
 initObservability logLevel otelCfg metricsPort debugDir = do
   logEnv <- defaultLogEnv logLevel
   metrics <- newMetricsStore
-  debugTrace <- newDebugTraceEnv (logLevel >= LogDebug) debugDir
+  debugTrace <- newDebugTraceEnv (logLevel <= LogDebug) debugDir
 
   mProvider <- if otelEnabled otelCfg
     then do
