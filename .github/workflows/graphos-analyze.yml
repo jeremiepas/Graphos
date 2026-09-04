@@ -8,7 +8,7 @@ on:
         required: true
         default: 'https://github.com/Effect-TS/core,https://github.com/Effect-TS/cli'
       graphos_version:
-        description: 'Graphos version tag (e.g., v0.1.0) or "latest"'
+        description: 'Graphos version tag (e.g., v0.1.0) or "latest". Resolution order: matching/latest release asset → latest successful main CI artifact → source build'
         required: false
         default: 'latest'
       deep_mode:
@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   prepare:
@@ -68,34 +69,93 @@ jobs:
       - name: Checkout Graphos (for source build fallback)
         uses: actions/checkout@v4
 
+      - name: Get graphos binary
+        id: getbin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p dist/release
+
+          # (1) Release asset matching the resolved tag
+          if [ -n "$GRAPHOS_TAG" ]; then
+            echo "Trying release asset for $GRAPHOS_TAG"
+            if gh release download "$GRAPHOS_TAG" \
+                 --repo "${{ github.repository }}" \
+                 --pattern 'graphos-linux-x86_64' \
+                 --output dist/release/graphos-linux-x86_64 \
+                 --clobber; then
+              chmod +x dist/release/graphos-linux-x86_64
+              echo "Downloaded release asset $GRAPHOS_TAG"
+              echo "found=release" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "No release asset for $GRAPHOS_TAG; trying CI artifact"
+          else
+            echo "No release available; trying CI artifact"
+          fi
+
+          # (2) graphos-bin artifact of the latest successful main build
+          RUN_ID=$(gh run list --repo "${{ github.repository }}" \
+                     --workflow haskell.yml --branch main --status success \
+                     --limit 20 --json databaseId --jq '.[0].databaseId')
+          if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+            if gh run download "$RUN_ID" --repo "${{ github.repository }}" \
+                 --name graphos-bin --output dist/release/; then
+              chmod +x dist/release/graphos-linux-x86_64
+              echo "Downloaded CI artifact from run $RUN_ID"
+              echo "found=artifact" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "No graphos-bin artifact on run $RUN_ID; falling back to source build"
+          else
+            echo "No successful main CI run found; falling back to source build"
+          fi
+
+          echo "found=" >> "$GITHUB_OUTPUT"
+
       - name: Setup Nix
+        if: steps.getbin.outputs.found == ''
         uses: cachix/install-nix-action@v31
 
       - name: Setup Cachix
+        if: steps.getbin.outputs.found == ''
         uses: cachix/cachix-action@v16
         with:
           name: devenv
 
       - name: Install devenv.sh
+        if: steps.getbin.outputs.found == ''
         run: nix profile add nixpkgs#devenv
 
-      - name: Get graphos binary
+      - name: Restore cabal store cache (source build fallback)
+        if: steps.getbin.outputs.found == ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/state/cabal/store
+            ~/.cabal/store
+            dist-newstyle
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-${{ github.sha }}
+          restore-keys: |
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
+            cabal-${{ runner.os }}-ghc910-
+
+      - name: Build from source (fallback)
+        if: steps.getbin.outputs.found == ''
         run: |
-          if [ -n "$GRAPHOS_TAG" ]; then
-            echo "Trying prebuilt binary for $GRAPHOS_TAG"
-            if curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$GRAPHOS_TAG/graphos-linux-x86_64" -o graphos; then
-              chmod +x graphos
-              echo "Downloaded prebuilt binary $GRAPHOS_TAG"
-              exit 0
-            fi
-            echo "Prebuilt binary download failed; falling back to source build"
-          else
-            echo "No release available; building from source"
-          fi
           devenv tasks run ci:build
-          GRAPHOS_BIN=$(devenv shell -- cabal list-bin graphos)
-          cp "$GRAPHOS_BIN" graphos
-          chmod +x graphos
+          devenv tasks run ci:bin
+          BIN_PATH=$(devenv shell -- cabal list-bin graphos)
+          cp "$BIN_PATH" dist/release/graphos-linux-x86_64
+          chmod +x dist/release/graphos-linux-x86_64
+
+      - name: Verify binary
+        run: |
+          test -f dist/release/graphos-linux-x86_64 || { echo "graphos binary missing after acquisition" >&2; exit 1; }
+          test -x dist/release/graphos-linux-x86_64 || { echo "graphos binary is not executable" >&2; exit 1; }
+          ./dist/release/graphos-linux-x86_64 --help >/dev/null 2>&1 || true
+          echo "Using binary: $(ls -l dist/release/graphos-linux-x86_64 | awk '{print $5}') bytes"
 
       - name: Clone target repo
         run: |
@@ -115,7 +175,7 @@ jobs:
           if [ "$DEEP" = "true" ]; then DEEP_FLAG="--deep"; fi
 
           /usr/bin/time -v -o "${OUTPUT_DIR}/time-memory.txt" \
-            ./graphos "$REPO_NAME" \
+            ./dist/release/graphos-linux-x86_64 "$REPO_NAME" \
             -o "$OUTPUT_DIR" \
             --no-viz $DEEP_FLAG
 
