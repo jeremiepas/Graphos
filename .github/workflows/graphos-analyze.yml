@@ -8,7 +8,7 @@ on:
         required: true
         default: 'https://github.com/Effect-TS/core,https://github.com/Effect-TS/cli'
       graphos_version:
-        description: 'Graphos version tag (e.g., v0.1.0, main branch)'
+        description: 'Graphos version tag (e.g., v0.1.0) or "latest"'
         required: false
         default: 'latest'
       deep_mode:
@@ -21,75 +21,136 @@ permissions:
   contents: read
 
 jobs:
-  analyze:
+  prepare:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        repo: ${{ fromJSON(github.event.inputs.repo_urls || '[]') }}
+    outputs:
+      repos: ${{ steps.split.outputs.repos }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout
+      - name: Split repo list into JSON array
+        id: split
+        env:
+          REPO_URLS: ${{ inputs.repo_urls }}
+        run: |
+          REPOS=$(printf '%s' "$REPO_URLS" | jq -Rsc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          echo "repos=$REPOS" >> "$GITHUB_OUTPUT"
+          echo "Matrix: $REPOS"
+
+      - name: Resolve graphos version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.graphos_version }}
+        run: |
+          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = "latest" ]; then
+            TAG=$(curl -fsSL "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name // empty' || true)
+            if [ -z "$TAG" ]; then
+              echo "No releases found; will build from source"
+            else
+              echo "Latest release: $TAG"
+            fi
+          else
+            TAG="$REQUESTED"
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+  analyze:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.repos) }}
+    env:
+      REPO_URL: ${{ matrix.repo }}
+      GRAPHOS_TAG: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout Graphos (for source build fallback)
         uses: actions/checkout@v4
 
-      - name: Setup Nix (for fallback build)
+      - name: Setup Nix
         uses: cachix/install-nix-action@v31
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
 
-      - name: Download graphos binary
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
+
+      - name: Get graphos binary
         run: |
-          if [ "${{ github.event.inputs.graphos_version }}" = "latest" ]; then
-            TAG=$(curl -s https://api.github.com/repos/Graphos/graphos/releases/latest | jq -r .tag_name)
+          if [ -n "$GRAPHOS_TAG" ]; then
+            echo "Trying prebuilt binary for $GRAPHOS_TAG"
+            if curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$GRAPHOS_TAG/graphos-linux-x86_64" -o graphos; then
+              chmod +x graphos
+              echo "Downloaded prebuilt binary $GRAPHOS_TAG"
+              exit 0
+            fi
+            echo "Prebuilt binary download failed; falling back to source build"
           else
-            TAG="${{ github.event.inputs.graphos_version }}"
+            echo "No release available; building from source"
           fi
-          echo "Downloading graphos $TAG"
-          if curl -sL "https://github.com/Graphos/graphos/releases/download/$TAG/graphos-linux-x86_64" \
-            -o graphos 2>/dev/null && chmod +x graphos; then
-            echo "Downloaded prebuilt binary"
-          else
-            echo "Prebuilt binary download failed, building from source via Nix..."
-            nix-shell --run "cabal update && cabal build -j4" --pure
-            GRAPHOS_BIN=$(nix-shell --run "cabal list-bin graphos" --pure)
-            cp "$GRAPHOS_BIN" graphos
-            chmod +x graphos
-          fi
+          devenv tasks run ci:build
+          GRAPHOS_BIN=$(devenv shell -- cabal list-bin graphos)
+          cp "$GRAPHOS_BIN" graphos
+          chmod +x graphos
 
       - name: Clone target repo
         run: |
-          REPO_URL="${{ matrix.repo }}"
-          REPO_NAME=$(basename "$REPO_URL" | sed 's/\.git$//')
-          git clone "$REPO_URL" "$REPO_NAME"
+          REPO_NAME=$(basename "$REPO_URL" .git)
+          git clone --depth 1 "$REPO_URL" "$REPO_NAME"
+          echo "REPO_NAME=$REPO_NAME" >> "$GITHUB_ENV"
+          echo "Cloned $REPO_URL as $REPO_NAME"
 
       - name: Run graphos + measure time & memory
+        env:
+          DEEP: ${{ inputs.deep_mode }}
         run: |
-          REPO_NAME=$(basename "${{ matrix.repo }}" | sed 's/\.git$//')
           OUTPUT_DIR="graphos-out-$REPO_NAME"
           mkdir -p "$OUTPUT_DIR"
+
+          DEEP_FLAG=""
+          if [ "$DEEP" = "true" ]; then DEEP_FLAG="--deep"; fi
 
           /usr/bin/time -v -o "${OUTPUT_DIR}/time-memory.txt" \
             ./graphos "$REPO_NAME" \
             -o "$OUTPUT_DIR" \
-            --no-viz \
-            ${{ github.event.inputs.deep_mode == true && '--deep' || '' }}
+            --no-viz $DEEP_FLAG
 
           echo "Results in $OUTPUT_DIR/"
 
       - name: Upload results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: graphos-results-${{ github.run_number }}-${{ matrix.repo }}
+          name: graphos-results-${{ github.run_number }}-${{ env.REPO_NAME }}
           path: graphos-out-*/
+          if-no-files-found: ignore
 
       - name: Output metrics
+        if: always()
         run: |
-          REPO_NAME=$(basename "${{ matrix.repo }}" | sed 's/\.git$//')
           OUTPUT_DIR="graphos-out-$REPO_NAME"
-          echo "## Graphos Analysis Results"
-          echo "### $REPO_NAME"
-          echo ""
-          echo "**Execution Time:** $(grep 'Elapsed (wall clock)' "${OUTPUT_DIR}/time-memory.txt" | cut -d: -f2- | tr -d ' ')"
-          echo "**Max Resident Memory:** $(grep 'Maximum resident' "${OUTPUT_DIR}/time-memory.txt" | cut -d: -f2- | tr -d ' ') KB"
-          echo ""
-          echo "**Graph nodes:** $(jq '.stats.nodes // 0' "${OUTPUT_DIR}/graph.json")"
-          echo "**Graph edges:** $(jq '.stats.edges // 0' "${OUTPUT_DIR}/graph.json")"
-          echo "**Communities:** $(jq '.stats.communities // 0' "${OUTPUT_DIR}/graph.json")"
+          {
+            echo "## Graphos Analysis Results"
+            echo ""
+            echo "### $REPO_NAME"
+            echo ""
+            if [ -f "$OUTPUT_DIR/time-memory.txt" ]; then
+              echo "**Execution Time:** $(awk -F': ' '/Elapsed \(wall clock\)/ {print $2}' "$OUTPUT_DIR/time-memory.txt")"
+              echo "**Max Resident Memory:** $(awk -F': ' '/Maximum resident/ {print $2}' "$OUTPUT_DIR/time-memory.txt") KB"
+            else
+              echo "**Execution Time:** n/a (graphos failed)"
+              echo "**Max Resident Memory:** n/a (graphos failed)"
+            fi
+            echo ""
+            if [ -f "$OUTPUT_DIR/graph.json" ]; then
+              echo "**Graph nodes:** $(jq '(.nodes // []) | length' "$OUTPUT_DIR/graph.json")"
+              echo "**Graph edges:** $(jq '(.edges // []) | length' "$OUTPUT_DIR/graph.json")"
+              echo "**Communities:** $(jq '(.communities // {}) | length' "$OUTPUT_DIR/graph.json")"
+            else
+              echo "**Graph:** no graph.json produced"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
