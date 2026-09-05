@@ -29,6 +29,7 @@ module Graphos.Infrastructure.Observability.SDK
 
     -- * Metrics
   , MetricsStore
+  , newMetricsStore
   , CounterName
   , GaugeName
   , HistogramName
@@ -44,9 +45,19 @@ module Graphos.Infrastructure.Observability.SDK
     -- * Debug tracing (Graphos-specific, not OTel)
   , DebugTraceEnv
   , newDebugTraceEnv
+  , newDebugTraceEnvAt
   , debugTraceEvent
   , debugTraceSpan
   , flushDebugTrace
+  , debugBufferLen
+  , defaultDebugTraceCapacity
+
+    -- * Bounded span store (Graphos-specific, not OTel)
+  , SpanStore(..)
+  , SpanRecord(..)
+  , newSpanStore
+  , insertSpan
+  , readSpans
 
     -- * OTLP config (simplified: most fields now come from OTEL_* env vars)
   , OtelConfig(..)
@@ -57,9 +68,9 @@ module Graphos.Infrastructure.Observability.SDK
   ) where
 
 import Control.Concurrent.Async (Async, async, cancel)
-import Control.Concurrent.MVar (MVar, newMVar, swapMVar, modifyMVar)
+import Control.Concurrent.MVar (MVar, newMVar, swapMVar, modifyMVar, readMVar)
 import Control.Exception (SomeException, catch)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import System.Timeout (timeout)
 import System.IO (hPutStrLn, stderr)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
@@ -126,6 +137,7 @@ data ObservabilityEnv = ObservabilityEnv
   , otelMetrics    :: MetricsStore        -- ^ Graphos metrics (Prometheus format)
   , otelConfig     :: OtelConfig
   , otelDebugTrace :: DebugTraceEnv       -- ^ Graphos-specific JSONL trace
+  , otelSpans      :: SpanStore          -- ^ Bounded in-memory span store (keep last N)
   , otelLogEnv     :: LogEnv              -- ^ Console logging + OTLP log bridge
   , otelProvider   :: Maybe TracerProvider -- ^ SDK provider (for shutdown), Nothing if disabled
   , otelServerThread :: Maybe (Async ())   -- ^ Metrics server thread (for clean shutdown)
@@ -261,23 +273,80 @@ renderPrometheusMetrics ms = do
 -- Debug tracing (structured JSON events, Graphos-specific)
 -- ───────────────────────────────────────────────
 
--- | Maximum number of debug trace events to buffer in memory before flushing to disk.
-debugTraceCapacity :: Int
-debugTraceCapacity = 10000
+-- | Default number of spans retained by a freshly created span store.
+defaultSpanCapacity :: Int
+defaultSpanCapacity = 1000
+
+-- | Default maximum number of debug trace events held in memory before
+-- flushing to disk.
+defaultDebugTraceCapacity :: Int
+defaultDebugTraceCapacity = 10000
+
+-- | A recorded span: a timed, attributed unit of work.
+data SpanRecord
+  = SpanRecord
+      { srName    :: !Text            -- ^ Logical span name
+      , srStart   :: !UTCTime         -- ^ Span start
+      , srEnd     :: !UTCTime         -- ^ Span end
+      , srAttrs   :: !(Map Text Text) -- ^ Free-form attributes
+      }
+
+-- | Bounded in-memory ring of recently recorded spans. Keeps at most the last
+-- 'spanCapacity' records, evicting the oldest when the cap is reached, so span
+-- accumulation during long pipeline runs cannot grow memory without bound.
+data SpanStore
+  = SpanStore
+      { spanCapacity :: !Int            -- ^ Maximum retained spans
+      , spanBuffer   :: MVar [SpanRecord] -- ^ Live ring buffer of spans
+      }
+
+-- | Create a bounded span store retaining at most the given number of spans.
+newSpanStore :: Int -> IO SpanStore
+newSpanStore cap = SpanStore cap <$> newMVar []
+
+-- | Record a span, evicting the oldest spans if the capacity is exceeded.
+insertSpan :: SpanStore -> SpanRecord -> IO ()
+insertSpan st rec = modifyMVar (spanBuffer st) $ \buf ->
+  let buf' = buf ++ [rec]
+  in if length buf' > spanCapacity st
+       then pure (drop (length buf' - spanCapacity st) buf', ())
+       else pure (buf', ())
+
+-- | Snapshot of the currently retained spans (oldest first).
+readSpans :: SpanStore -> IO [SpanRecord]
+readSpans st = readMVar (spanBuffer st)
 
 -- | Debug trace environment for local structured event logging.
 -- Retained from custom implementation — this writes JSONL files for
 -- offline analysis, not OTLP.
--- Buffer is bounded: when capacity is reached, events are flushed to disk.
+-- Both the debug-event buffer and the span store are bounded, so neither can
+-- grow memory without bound during long pipeline runs.
 data DebugTraceEnv = DebugTraceEnv
-  { dtEnabled :: Bool
-  , dtPath    :: FilePath
-  , dtBuffer  :: MVar [Text]
-  }
+  { dtEnabled  :: Bool
+  , dtPath     :: FilePath
+  , dtCapacity :: !Int              -- ^ Max debug events held in memory before flush
+  , dtSpanCap  :: !Int              -- ^ Max spans retained by the span store (<= 0 disables)
+   , dtSpans    :: SpanStore         -- ^ Bounded in-memory span store (keep last N)
+   , dtBuffer   :: MVar [Text]
+   , dtSeq      :: IORef Integer     -- ^ Monotonic counter for unique flush filenames
+   }
 
+-- | Create a debug trace environment with default capacities.
 newDebugTraceEnv :: Bool -> FilePath -> IO DebugTraceEnv
-newDebugTraceEnv enabled tracePath =
-  DebugTraceEnv enabled tracePath <$> newMVar []
+newDebugTraceEnv p q = newDebugTraceEnvAt p q defaultDebugTraceCapacity
+
+-- | Create a debug trace environment with an explicit in-memory debug-event
+-- buffer capacity. The span store defaults to 'defaultSpanCapacity'.
+newDebugTraceEnvAt :: Bool -> FilePath -> Int -> IO DebugTraceEnv
+newDebugTraceEnvAt enabled tracePath eventCap = do
+  spans <- newSpanStore defaultSpanCapacity
+  buf   <- newMVar []
+  seq0 <- newIORef 0
+  pure (DebugTraceEnv enabled tracePath eventCap defaultSpanCapacity spans buf seq0)
+
+-- | Current number of debug events held in memory (test / introspection helper).
+debugBufferLen :: DebugTraceEnv -> IO Int
+debugBufferLen env = length <$> readMVar (dtBuffer env)
 
 -- | Emit a structured debug trace event.
 -- When the in-memory buffer reaches capacity, events are flushed to disk automatically.
@@ -289,14 +358,14 @@ debugTraceEvent env name attrs
       let ts = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S.%3qZ" now
           attrsJson = T.intercalate "," $ map (\(k,v) -> "\"" <> k <> "\":\"" <> v <> "\"") (Map.toList attrs)
           line = "{\"timestamp\":\"" <> ts <> "\",\"event\":\"" <> name <> "\"," <> attrsJson <> "}"
-      modifyMVar (dtBuffer env) $ \buf -> do
-        let buf' = buf ++ [line]
-        if length buf' >= debugTraceCapacity
+      modifyMVar (dtBuffer env) $ \buf ->
+        if length buf >= dtCapacity env
           then do
-            let eventsToFlush = buf
-            flushEventsToDisk env eventsToFlush
-            pure (buf', ())
-          else pure (buf', ())
+            -- Buffer is full: write all buffered events to disk, clear the
+            -- buffer, then add only the new event so in-memory size stays bounded.
+            flushEventsToDisk env buf
+            pure ([line], ())
+          else pure (buf ++ [line], ())
 
 -- | Record a span start/end as a trace event.
 debugTraceSpan :: DebugTraceEnv -> Text -> UTCTime -> UTCTime -> Map Text Text -> IO ()
@@ -305,6 +374,8 @@ debugTraceSpan env name start end attrs
   | otherwise = do
       let dur = realToFrac (diffUTCTime end start) :: Double
       debugTraceEvent env ("span_" <> name) (Map.insert "duration_s" (T.pack $ show dur) attrs)
+      when (dtSpanCap env > 0) $
+        insertSpan (dtSpans env) (SpanRecord name start end attrs)
 
 -- | Write buffered events to a JSONL file on disk.
 -- Creates the trace directory if needed. Errors are silently ignored to avoid
@@ -313,11 +384,11 @@ flushEventsToDisk :: DebugTraceEnv -> [Text] -> IO ()
 flushEventsToDisk env events
   | null events = pure ()
   | otherwise = do
-      createDirectoryIfMissing True (dtPath env) `catch` (\(_ :: SomeException) -> pure ())
-      now <- getCurrentTime
-      let filename = formatTime defaultTimeLocale "%Y%m%d_%H%M%S" now ++ ".jsonl"
-          filepath = dtPath env ++ "/" ++ filename
-      TIO.writeFile filepath (T.unlines events) `catch` (\(_ :: SomeException) -> pure ())
+       createDirectoryIfMissing True (dtPath env) `catch` (\(_ :: SomeException) -> pure ())
+       seqNum <- atomicModifyIORef' (dtSeq env) $ \n -> (n + 1, n + 1)
+       let filename = "trace_" ++ show seqNum ++ ".jsonl"
+           filepath = dtPath env ++ "/" ++ filename
+       TIO.writeFile filepath (T.unlines events) `catch` (\(_ :: SomeException) -> pure ())
 
 -- | Flush buffered trace events to disk.
 -- The trace directory is created lazily here, only when tracing is enabled and
@@ -331,11 +402,11 @@ flushDebugTrace env
       case events of
         [] -> pure ()
         _  -> do
-          createDirectoryIfMissing True (dtPath env)
-          now <- getCurrentTime
-          let filename = formatTime defaultTimeLocale "%Y%m%d_%H%M%S" now ++ ".jsonl"
-              filepath = dtPath env ++ "/" ++ filename
-          TIO.writeFile filepath (T.unlines events) `catch` (\(_ :: SomeException) -> pure ())
+           createDirectoryIfMissing True (dtPath env)
+           seqNum <- atomicModifyIORef' (dtSeq env) $ \n -> (n + 1, n + 1)
+           let filename = "trace_" ++ show seqNum ++ ".jsonl"
+               filepath = dtPath env ++ "/" ++ filename
+           TIO.writeFile filepath (T.unlines events) `catch` (\(_ :: SomeException) -> pure ())
 
 -- ───────────────────────────────────────────────
 -- Prometheus metrics HTTP endpoint
@@ -434,6 +505,7 @@ initObservability logLevel otelCfg metricsPort debugDir = do
     , otelMetrics = metrics
     , otelConfig = otelCfg
     , otelDebugTrace = debugTrace
+    , otelSpans = dtSpans debugTrace
     , otelLogEnv = logEnv
     , otelProvider = mProvider
     , otelServerThread = serverThread
