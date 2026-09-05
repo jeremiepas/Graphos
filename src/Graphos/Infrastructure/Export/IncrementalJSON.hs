@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.Infrastructure.Export.IncrementalJSON
   ( IncrementalWriter
   , openWriter
@@ -23,10 +24,14 @@ import Data.Map.Strict (Map, empty)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
-import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
+import Control.Exception (SomeException, catch, throwIO)
+import System.Directory (removeFile)
+import System.IO (hFlush, hClose, hPutStr)
 
 import Graphos.Domain.Types
 import qualified Graphos.Domain.Types.Writer as W
+import Graphos.Infrastructure.FileSystem.AtomicWrite
+  (openAtomicTemp, placeAtomicStreamed)
 
 -- | Sanitize JSON bytes: replace invalid UTF-8 sequences with replacement char.
 -- This prevents pipeline crashes when source files contain mixed encodings.
@@ -36,12 +41,20 @@ sanitizeUtf8 bs =
     Right _ -> bs  -- already valid UTF-8, pass through unchanged
     Left _  -> BSL.fromStrict (TE.encodeUtf8 (TE.decodeUtf8With TEE.lenientDecode (BSL.toStrict bs)))
 
+-- | Open an incremental JSON writer that streams into a same-directory temp
+-- file. The complete document is placed atomically at @path@ by 'closeWriter'
+-- (fsync + rename), so an interrupted write never leaves a truncated graph.
 openWriter :: FilePath -> IO W.IncrementalWriter
 openWriter path = do
-  h <- openFile path WriteMode
+  (tmpPath, h) <- openAtomicTemp path
   firstRef <- newIORef True
   hPutStr h "{\n"
-  let iw = W.IncrementalWriter { W.iwHandle = h, W.iwFirst = firstRef }
+  let iw = W.IncrementalWriter
+        { W.iwHandle = h
+        , W.iwFirst = firstRef
+        , W.iwTmp = tmpPath
+        , W.iwTarget = path
+        }
   writeKey iw "\"schema_version\""
   safePut iw (encode (graphFileSchemaVersion :: Text))
   pure iw
@@ -51,6 +64,11 @@ closeWriter iw = do
   hPutStr (W.iwHandle iw) "\n}\n"
   hFlush (W.iwHandle iw)
   hClose (W.iwHandle iw)
+  let tmp = W.iwTmp iw
+      tgt = W.iwTarget iw
+  placeAtomicStreamed tmp tgt `catch` \(e :: SomeException) -> do
+    removeFile tmp `catch` \(_ :: SomeException) -> pure ()
+    throwIO e
 
 flushWriter :: W.IncrementalWriter -> IO ()
 flushWriter iw = hFlush (W.iwHandle iw)

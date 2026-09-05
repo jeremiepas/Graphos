@@ -25,6 +25,7 @@ import System.FilePath (takeFileName, (</>))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
 -- | Get the cache directory path
 cacheDir :: FilePath -> FilePath
@@ -153,15 +154,11 @@ groupBySourceFile nodes edges =
 checkpointPath :: FilePath -> FilePath
 checkpointPath outputDir = outputDir </> "pipeline.checkpoint.json"
 
--- | Save a pipeline checkpoint to disk.
--- Uses atomic write (write to tmp, then rename) to avoid corruption.
+-- | Save a pipeline checkpoint to disk atomically (temp + rename) so an
+-- interrupted write never leaves a truncated checkpoint behind.
 savePipelineCheckpoint :: FilePath -> PipelineCheckpoint -> IO ()
-savePipelineCheckpoint outputDir chk = do
-  createDirectoryIfMissing True outputDir
-  let path = checkpointPath outputDir
-      tmp  = path ++ ".tmp"
-  BSL.writeFile tmp (encode chk)
-  renameFile tmp path
+savePipelineCheckpoint outputDir chk =
+  writeFileAtomic (checkpointPath outputDir) (BSL.toStrict (encode chk))
 
 -- | Load a pipeline checkpoint from disk.
 -- Returns Nothing if no checkpoint exists (first run or after cleanup).

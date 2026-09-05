@@ -347,6 +347,7 @@ test-suite graphos-test
     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
     Graphos.Infrastructure.FileSystem.IgnoreSpec
     Graphos.Infrastructure.FileSystem.AtomicWriteSpec
+    Graphos.Infrastructure.Export.IncrementalJSONAtomicSpec
     Graphos.Infrastructure.Scaffold.WriterSpec
     Graphos.Domain.ScaffoldSpec
     Graphos.UseCase.ScaffoldSpec

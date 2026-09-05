@@ -3,6 +3,7 @@ module Main where
 
 import Options.Applicative
 import System.Exit (exitWith, ExitCode(..), exitSuccess)
+import System.FilePath ((</>))
 import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
@@ -162,15 +163,15 @@ main = do
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
                             }
-       -- Fail-fast on a corrupt existing graph.json before doing any work.
-       -- Strict by default; pass --no-strict-graph for tolerant loading.
-       when (cfgStrictGraph config') $ do
-         let graphFile = cfgOutputDir config' </> "graph.json"
-         validateGraphFile graphFile >>= \case
-           Left err -> do
-             hPutStrLn stderr $ "[graphos] " ++ T.unpack (corruptGraphMessage graphFile err)
-             exitWith (ExitFailure 1)
-           Right () -> pure ()
+      -- Fail-fast on a corrupt existing graph.json before doing any work.
+      -- Strict by default; pass --no-strict-graph for tolerant loading.
+      when (cfgStrictGraph config') $ do
+        let graphFile = cfgOutputDir config' </> "graph.json"
+        validateGraphFile graphFile >>= \case
+          Left err -> do
+            hPutStrLn stderr $ "[graphos] " ++ T.unpack (corruptGraphMessage graphFile err)
+            exitWith (ExitFailure 1)
+          Right () -> pure ()
        -- Initialize observability (tracing, metrics, debug trace)
       let logLevel = if cfgDebug config || obsDebug obsCfg then LogTrace
                       else if cfgVerbose config then LogDebug

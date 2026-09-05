@@ -4,8 +4,12 @@ module Graphos.Infrastructure.Export.Report
   ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
 
--- | Write report to file
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
+
+-- | Write the markdown report to disk atomically (temp + rename), so an
+-- interrupted write never leaves a truncated GRAPH_REPORT.md behind.
 exportReport :: Text -> FilePath -> IO ()
-exportReport reportContent path = writeFile path (T.unpack reportContent)
+exportReport reportContent path =
+  writeFileAtomic path (encodeUtf8 reportContent)
