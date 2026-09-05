@@ -1,20 +1,31 @@
--- | Atomic file write primitive — write to temp, flush, rename, fsync directory.
--- Guarantees that a concurrent reader never sees a partially-written file.
+-- | Crash-safe atomic writes for Graphos output artifacts.
 --
--- On POSIX systems, this fsyncs the parent directory after renaming the temp file
--- to ensure the rename entry is durable on disk. On Linux this uses 'fsync',
--- on macOS / BSD it uses 'fcntl F_FULLFSYNC'. If the platform fsync is unavailable
--- the function falls back to 'hFlush' as best-effort.
+-- The single entry point, 'writeFileAtomic', writes content to a temporary file
+-- in the target directory, flushes and fsyncs both the file and its parent
+-- directory, then renames the temp file into place. A reader therefore never
+-- observes a partially written artifact: the final path is always either the
+-- previous version or the complete new version, never a truncation.
+--
+-- Every temp file is created in the target directory, so it shares the target
+-- filesystem and the rename is atomic. If the temp file ever ends up on a
+-- different filesystem the write logs a warning, because a cross-filesystem
+-- rename would not be atomic.
+--
+-- All platform-specific durability (directory @fsync@ on Linux,
+-- @fcntl(F_FULLFSYNC)@ on macOS / BSD, and filesystem detection) is hidden
+-- behind the FFI helpers in "Graphos.Infrastructure.FileSystem.AtomicWrite.C".
+{-# LANGUAGE BlockArguments #-}
+
 module Graphos.Infrastructure.FileSystem.AtomicWrite
   ( writeFileAtomic
+  , AtomicWriteFailure(..)
   ) where
 
 import qualified Data.ByteString as BS
-import Control.Exception
-  ( SomeException
-  , catch
-  , bracketOnError
-  )
+import Control.Exception (Exception, SomeException, catch, bracketOnError, displayException, throwIO)
+import Control.Monad (when)
+import qualified Data.IORef as IORef
+import System.IO.Unsafe (unsafePerformIO)
 import System.Directory
   ( createDirectoryIfMissing
   , makeAbsolute
@@ -22,26 +33,58 @@ import System.Directory
   , removeFile
   )
 import System.FilePath (takeDirectory)
-import System.IO
-  ( hClose
-  , hFlush
-  , openTempFile
-  )
+import System.Posix.Process (getProcessID)
+import Foreign.C.String (CString, withCString)
+import Foreign.C.Types (CInt(..), CLong(..))
 
+-- | @fsync@ a path read-only. @True@ selects the directory open flag and the
+-- macOS / BSD @F_FULLFSYNC@ behaviour; returns 0 on success, -1 on failure.
+foreign import ccall unsafe "hs_graphos_fsync_path"
+  hsFsyncPath :: CString -> Bool -> IO CInt
+
+-- | The @st_dev@ id of @path@, or -1 when @path@ cannot be stat'd.
+foreign import ccall unsafe "hs_graphos_device_of"
+  hsDeviceOf :: CString -> IO CLong
+
+-- | Raised when an atomic write cannot guarantee crash-safe placement.
+-- The message describes the step that failed (typically a filesystem flush).
+data AtomicWriteFailure = AtomicWriteFailure !String
+
+instance Show AtomicWriteFailure where
+  show (AtomicWriteFailure m) = "AtomicWriteFailure: " ++ m
+
+instance Exception AtomicWriteFailure
+
+-- | Abort a write with a descriptive 'AtomicWriteFailure'.
+raiseAtomicWriteFailure :: String -> IO a
+raiseAtomicWriteFailure = throwIO . AtomicWriteFailure
+
+-- WARNING (unsafePerformIO): tmpCounter is a module-local mutable counter used
+-- only to make temp-file names unique. unsafePerformIO is safe here because the
+-- IORef is created exactly once and only ever incremented; atomicModifyIORef'
+-- hands out distinct values even under intra-process concurrency, so no caller
+-- observes a value that depends on cross-thread ordering. Its only effect is a
+-- unique suffix in a temporary filename, which has no externally observable
+-- side effect.
+tmpCounter :: IORef.IORef Integer
+tmpCounter = unsafePerformIO (IORef.newIORef 0)
+
+-- | Build a unique temp file path inside @dir@.
+nextTempName :: FilePath -> String -> IO FilePath
+nextTempName dir prefix = do
+  pid <- getProcessID
+  n   <- IORef.atomicModifyIORef' tmpCounter (\c -> (c + 1, c))
+  return (dir ++ "/" ++ prefix ++ "-" ++ show pid ++ "-" ++ show n ++ ".tmp")
 
 -- | Write @content@ atomically to @path@.
 --
 -- The sequence is:
 --
--- 1. Create the parent directory if missing.
--- 2. Open a temporary file in the same directory as the target.
--- 3. Write @content@ and flush the handle.
--- 4. Close the temp file handle.
--- 5. Rename the temp file to the target path (atomic on same filesystem).
--- 6. Fsync the parent directory to make the rename durable.
+-- > create parent dir -> write temp file in the target dir
+-- > fsync the file -> rename into place -> fsync the directory
 --
--- If any step fails, the temp file is removed and the target (if it exists)
--- is left untouched.
+-- If any step fails, the temp file is removed and the target (if it already
+-- exists) is left untouched with its previous contents intact.
 writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
 writeFileAtomic targetPath content = do
   let parentDir = takeDirectory targetPath
@@ -51,24 +94,42 @@ writeFileAtomic targetPath content = do
   let absParent = takeDirectory absTarget
 
   bracketOnError
-    (openTempFile absParent "graphos-atomic-*.tmp")
-    (\(tmpPath, h) -> hClose h `catch` handler >> removeFile tmpPath `catch` handler)
-    (\(tmpPath, h) -> do
-        BS.hPut h content
-        hFlush h
-        hClose h
-        renameFile tmpPath absTarget
-        fsyncDirectory absParent)
-  where
-    handler :: SomeException -> IO ()
-    handler _ = pure ()
+    (do
+        tmpPath <- nextTempName absParent "graphos-atomic"
+        BS.writeFile tmpPath content
+        return tmpPath)
+    (\tmpPath -> removeFile tmpPath `catch` ignoreException)
+    \(tmpPath) -> do
+        checkSameFs tmpPath absParent
+        fsyncFile tmpPath
+        renameFile tmpPath absTarget `catch` (handlePlaceFailure ("writeFileAtomic: failed to place file at " ++ absTarget))
+        fsyncDirectory absParent
 
--- | Fsync the directory to ensure the rename is durable on disk.
---
--- Best-effort durability nicety. The atomic rename in 'writeFileAtomic' is
--- already durable on most filesystems; this is an extra flush. A portable,
--- correct directory fsync is not straightforwardly available across the
--- POSIX variants we support, so this is a no-op rather than a partial
--- implementation.
-fsyncDirectory :: FilePath -> IO ()
-fsyncDirectory _ = pure ()
+  where
+    ignoreException :: SomeException -> IO ()
+    ignoreException _ = pure ()
+
+    handlePlaceFailure :: String -> SomeException -> IO ()
+    handlePlaceFailure msg e = raiseAtomicWriteFailure (msg ++ ": " ++ displayException e)
+
+    checkSameFs :: FilePath -> FilePath -> IO ()
+    checkSameFs tmpPath absParent = withCString tmpPath $ \ct ->
+      withCString absParent $ \cp -> do
+        tmpDev  <- hsDeviceOf ct
+        parentDev <- hsDeviceOf cp
+        when (isCrossFs tmpDev parentDev) $
+          putStrLn
+            "writeFileAtomic: warning: temp file is on a different filesystem than the target directory; the rename may not be atomic"
+
+    fsyncFile :: FilePath -> IO ()
+    fsyncFile path = withCString path $ \ct -> do
+      ok <- hsFsyncPath ct False
+      when (ok /= 0) (raiseAtomicWriteFailure ("writeFileAtomic: failed to fsync file " ++ path))
+
+    fsyncDirectory :: FilePath -> IO ()
+    fsyncDirectory dir = withCString dir $ \ct -> do
+      ok <- hsFsyncPath ct True
+      when (ok /= 0) (raiseAtomicWriteFailure ("writeFileAtomic: failed to fsync directory " ++ dir))
+
+    isCrossFs :: CLong -> CLong -> Bool
+    isCrossFs a b = a /= -1 && b /= -1 && a /= b

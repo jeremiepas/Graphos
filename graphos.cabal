@@ -153,7 +153,8 @@ library
                       Graphos.Infrastructure.FileSystem.Manifest
                       Graphos.Infrastructure.FileSystem.OfficeConvert
                        Graphos.Infrastructure.FileSystem.Conversation
-                       -- Infrastructure - Security
+                       Graphos.Infrastructure.FileSystem.AtomicWrite
+                        -- Infrastructure - Security
                      Graphos.Infrastructure.Security
                        -- Infrastructure - LLM
                        Graphos.Infrastructure.LLM.OpenAI
@@ -207,6 +208,9 @@ library
   other-modules:
                     Graphos.Domain.HexColor
                     Paths_graphos
+
+  c-sources:
+                 src/Graphos/Infrastructure/FileSystem/c/atomic_write_dirfsync.c
 
   build-depends:
       aeson                >= 2.0
@@ -342,6 +346,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Server.QueryAPISpec
     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
     Graphos.Infrastructure.FileSystem.IgnoreSpec
+    Graphos.Infrastructure.FileSystem.AtomicWriteSpec
     Graphos.Infrastructure.Scaffold.WriterSpec
     Graphos.Domain.ScaffoldSpec
     Graphos.UseCase.ScaffoldSpec
