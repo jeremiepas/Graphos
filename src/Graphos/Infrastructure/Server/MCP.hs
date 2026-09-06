@@ -36,6 +36,7 @@ import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
                                , chatCommunityId, enrichWithChatHistory)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndexCached, QueryResponse(..))
+import Graphos.UseCase.Query.Render (BudgetCtl(..), defaultBudgetCtl, boundedNodes, capLabel)
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL, LoadResult(..))
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
 import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextTokens
@@ -181,14 +182,21 @@ handleQueryGraph g idx args = do
   if T.null question
     then pure (Left "Missing required argument: question")
     else do
-      let resp = queryGraphWithIndexScored g idx question mode budget
+      let ctl = defaultBudgetCtl { bcByteBudget = budget }
+          resp = queryGraphWithIndexScored g idx question mode budget
           allNodes = qrespNodes resp
           allEdges = qrespEdges resp
-          -- Apply a simple budget cap to the scored result set (the formatter is not
-          -- used for the JSON path; we just count what would be dropped).
-          nodesOut = take budget allNodes
+          -- Apply an optional label-width cap, then a node-count cap, then the
+          -- serialized byte budget. Nodes are already score-ranked, so the byte
+          -- counter keeps the most relevant nodes first.
+          labelled = case intArgMaybe args "max_label_chars" of
+                       Just w -> map (capLabel (ctl { bcMaxLabelChars = w })) allNodes
+                       Nothing -> allNodes
+          capped = case intArgMaybe args "max_nodes" of
+                     Just n -> take n labelled
+                     Nothing -> labelled
+          (nodesOut, omittedNodes) = boundedNodes ctl capped
           edgesOut = take budget allEdges
-          omittedNodes = length allNodes - length nodesOut
           omittedEdges = length allEdges - length edgesOut
       pure $ Right $ object
         [ "verdict"      .= qrespVerdict resp
@@ -528,7 +536,7 @@ toolsListResponse reqId = object
 
 allTools :: [(Text, Text, [(Text, Text, Bool)])]
 allTools =
-  [ ("query_graph", "Query the knowledge graph using BFS or DFS traversal. Returns verdict, best_score, hash, ranked nodes/edges, and omitted counts. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything.", [("question", "The search question", True), ("mode", "bfs or dfs", False), ("budget", "Token budget", False), ("edges", "semantic or all", False)])
+  [ ("query_graph", "Query the knowledge graph using BFS or DFS traversal. Returns verdict, best_score, hash, ranked nodes/edges, and omitted counts. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything. Set max_nodes to cap returned nodes; set budget (bytes) to cap serialized node size; set max_label_chars to truncate labels.", [("question", "The search question", True), ("mode", "bfs or dfs", False), ("budget", "Byte budget for serialized nodes (default: 2000)", False), ("edges", "semantic or all", False), ("max_nodes", "Cap on returned nodes (0 = unlimited)", False), ("max_label_chars", "Max label length before truncation (0 = default 120)", False)])
   , ("cypher_query", "Run a read-only openCypher/GQL query (MATCH/WHERE/RETURN) against the graph. Returns columns, rows, and a truncated flag. Labels map to node kind, relationship types to edge relation, properties to node/edge fields. Write clauses are rejected; use cypher_mutate.", [("query", "The Cypher query", True), ("budget", "Row budget (default: 2000)", False)])
   , ("cypher_mutate", "Run an openCypher statement that may mutate the graph (CREATE/MERGE/SET/REMOVE/DELETE, optionally with MATCH). Mutations apply in memory; set persist=true to write graph.json back (a timestamped backup is kept; the next extraction run discards mutations). Returns a mutation summary and any RETURN rows.", [("query", "The Cypher statement", True), ("budget", "Row budget (default: 2000)", False), ("persist", "Write the mutated graph back to graph.json (default: false)", False)])
   , ("get_node", "Get details of a specific node", [("node_id", "Node ID to look up", True)])

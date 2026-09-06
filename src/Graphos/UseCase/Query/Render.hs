@@ -22,11 +22,17 @@ module Graphos.UseCase.Query.Render
   , renderNotFoundText
   , renderNotFoundJSON
 
-    -- * Truncation
-  , truncateOutput
-  , estimateTokens
-  , encodeText
-  ) where
+     -- * Truncation
+   , truncateOutput
+   , estimateTokens
+   , encodeText
+
+     -- * Budget-aware serialization
+   , BudgetCtl(..)
+   , defaultBudgetCtl
+   , boundedNodes
+   , capLabel
+   ) where
 
 import Data.Aeson (toJSON, object, (.=), Value(..), encode)
 import Data.Text (Text)
@@ -38,25 +44,29 @@ import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdic
 import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
-import Graphos.UseCase.Query.Refine (EdgeMode(..))
+import Graphos.UseCase.Query.Refine (EdgeMode(..), elideLabel)
 
 data CommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath   :: !FilePath
-  , cqoBudget      :: !Int
-  , cqoJson        :: !Bool
-  , cqoLabelWidth  :: !Int
-  , cqoEdges       :: !EdgeMode
-  , cqoStrictGraph :: !Bool
+  { cqoGraphPath     :: !FilePath
+  , cqoBudget        :: !Int
+  , cqoJson          :: !Bool
+  , cqoLabelWidth    :: !Int
+  , cqoEdges         :: !EdgeMode
+  , cqoStrictGraph   :: !Bool
+  , cqoMaxNodes      :: Maybe Int
+  , cqoMaxLabelChars :: Maybe Int
   } deriving (Eq, Show)
 
 defaultCommonQueryOpts :: CommonQueryOpts
 defaultCommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath   = "graphos-out/graph.json"
-  , cqoBudget      = 2000
-  , cqoJson        = False
-  , cqoLabelWidth  = 120
-  , cqoEdges       = Semantic
-  , cqoStrictGraph = False
+  { cqoGraphPath     = "graphos-out/graph.json"
+  , cqoBudget        = 2000
+  , cqoJson          = False
+  , cqoLabelWidth    = 120
+  , cqoEdges         = Semantic
+  , cqoStrictGraph   = False
+  , cqoMaxNodes      = Nothing
+  , cqoMaxLabelChars = Nothing
   }
 
 -- | Estimate token count from character count (rough: chars / 4).
@@ -163,6 +173,52 @@ takeLinesFromTop remaining (l:ls)
 -- | Encode a JSON value to Text (compact, no spaces).
 encodeText :: Value -> Text
 encodeText = TL.toStrict . TL.decodeUtf8 . encode
+
+-- | Controls for compact, byte-budget-aware serialization of query results.
+--
+-- 'bcByteBudget' caps the serialized node list via a running byte counter;
+-- 'bcMaxNodes' caps the number of returned nodes (-1 = unbounded);
+-- 'bcMaxLabelChars' caps the label width before elision (0 = use default 120).
+data BudgetCtl = BudgetCtl
+  { bcByteBudget      :: !Int
+  , bcMaxNodes        :: !Int
+  , bcMaxLabelChars   :: !Int
+  } deriving (Eq, Show)
+
+defaultBudgetCtl :: BudgetCtl
+defaultBudgetCtl = BudgetCtl
+  { bcByteBudget      = 2000
+  , bcMaxNodes        = -1
+  , bcMaxLabelChars   = 120
+  }
+
+-- | Byte length of a scored node's compact JSON encoding.
+nodeJsonBytes :: ScoredNode -> Int
+nodeJsonBytes n = T.length (encodeText (toJSON n))
+
+-- | Truncate a scored node's label to 'bcMaxLabelChars' (word-boundary aware).
+-- A non-positive cap leaves the label untouched.
+capLabel :: BudgetCtl -> ScoredNode -> ScoredNode
+capLabel bc n
+  | bcMaxLabelChars bc <= 0 = n
+  | otherwise = n { snLabel = elideLabel (bcMaxLabelChars bc) (snLabel n) }
+
+-- | Greedily retain scored nodes (already score-ranked) until their cumulative
+-- serialized byte size would exceed 'bcByteBudget'. Returns the kept nodes and
+-- the count of dropped (omitted) nodes. Highest scores are retained first, so a
+-- response that fits always keeps the most relevant nodes.
+boundedNodes :: BudgetCtl -> [ScoredNode] -> ([ScoredNode], Int)
+boundedNodes bc nodes =
+  let cap = if bcMaxNodes bc < 0
+              then length nodes
+              else min (bcMaxNodes bc) (length nodes)
+      capped = take cap nodes
+      go _ acc [] = (reverse acc, 0)
+      go rem acc (n : ns)
+        | not (null acc) && nodeJsonBytes n > rem = (reverse acc, length ns)
+        | otherwise = go (rem - nodeJsonBytes n) (n : acc) ns
+      (kept, dropped) = go (max 0 (bcByteBudget bc)) [] capped
+  in (kept, dropped)
 
 -- | Render a path result as JSON.
 -- Nothing yields {"path":null}; Just ids yields {"path":[...],"hops":n} where hops = length ids - 1.
