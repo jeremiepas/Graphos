@@ -579,6 +579,7 @@ main = do
                         , detectionNeedsGraph = True
                         , detectionWarning = Nothing
                         , detectionFiles = Map.empty
+                        , detectionClassification = Map.empty
                         , detectionExclusions = emptyExclusionCounts
                         }
               logInfo env "[merge] Exporting..."

@@ -185,13 +185,14 @@ ingestFile appEnv config filePath = do
 
       -- Build a mini-detection for the single file
       let detection = Detection
-            { detectionTotalFiles = 1
-            , detectionTotalWords  = 0
-            , detectionNeedsGraph = True
-            , detectionWarning     = Nothing
-            , detectionFiles       = Map.singleton category [filePath]
-            , detectionExclusions   = emptyExclusionCounts
-            }
+             { detectionTotalFiles = 1
+             , detectionTotalWords  = 0
+             , detectionNeedsGraph = True
+             , detectionWarning     = Nothing
+             , detectionFiles       = Map.singleton category [filePath]
+             , detectionClassification = Map.empty
+             , detectionExclusions   = emptyExclusionCounts
+             }
 
       -- Extract entities from the single file
       extraction <- Extract.extractAll appEnv config detection
