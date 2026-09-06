@@ -30,9 +30,10 @@ import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline
-  ( FileClass(..), DetectionConfig(..)
-  , defaultDetectionConfig, FileMeta(..)
+  ( FileClass(..), FileMeta(..)
   , isSourceClass )
+import Graphos.Domain.Config.Detection
+  ( DetectionConfig(..), defaultDetectionConfig )
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
 import Graphos.Infrastructure.FileSystem.Ignore (matches, matchingPattern)
 
@@ -61,8 +62,8 @@ allSupportedExtensions = Map.fromList
     officeExts = [".docx", ".pptx", ".xlsx", ".doc", ".ppt"]
 
 -- | Detect files in a directory
-detectFiles :: FilePath -> IO Detection
-detectFiles root = do
+detectFiles :: DetectionConfig -> FilePath -> IO Detection
+detectFiles cfg root = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -76,7 +77,7 @@ detectFiles root = do
       }
     else do
       files <- findAllFiles root
-      (categorized, classification) <- categorizeFilesWithConfig files allSupportedExtensions defaultDetectionConfig
+      (categorized, classification) <- categorizeFilesWithConfig files allSupportedExtensions cfg
       let totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
         { detectionTotalFiles       = totalFiles
@@ -91,21 +92,21 @@ detectFiles root = do
         }
 
 -- | Detect files in a directory using config-driven extension categories.
-detectFilesWithExtensions :: FileSystemPort -> FilePath -> Map FileCategory [String] -> IO Detection
-detectFilesWithExtensions fsp root extMap = detectFilesWithExtensionsAndIgnore fsp root extMap (const (pure ()))
+detectFilesWithExtensions :: FileSystemPort -> DetectionConfig -> FilePath -> Map FileCategory [String] -> IO Detection
+detectFilesWithExtensions fsp cfg root extMap = detectFilesWithExtensionsAndIgnore fsp cfg root extMap (const (pure ()))
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- This is the primary entry point for the pipeline — it applies .gitignore and .graphosignore
 -- patterns in addition to hardcoded directory ignores.
-detectFilesWithExtensionsAndIgnore :: FileSystemPort -> FilePath -> Map FileCategory [String] -> (T.Text -> IO ()) -> IO Detection
-detectFilesWithExtensionsAndIgnore fsp root extMap logDebug = do
+detectFilesWithExtensionsAndIgnore :: FileSystemPort -> DetectionConfig -> FilePath -> Map FileCategory [String] -> (T.Text -> IO ()) -> IO Detection
+detectFilesWithExtensionsAndIgnore fsp cfg root extMap logDebug = do
   ignorePatterns <- fspLoadIgnorePatterns fsp root
-  detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug
+  detectFilesWithExtensionsAndIgnore' fsp cfg root extMap ignorePatterns logDebug
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- Internal version that takes pre-loaded ignore patterns.
-detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> (T.Text -> IO ()) -> IO Detection
-detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug = do
+detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> DetectionConfig -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> (T.Text -> IO ()) -> IO Detection
+detectFilesWithExtensionsAndIgnore' fsp cfg root extMap ignorePatterns logDebug = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -119,7 +120,7 @@ detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug = do
       }
     else do
       (files, excs) <- findAllFilesWithExclusions root root (fspShouldIgnore fsp) extMap ignorePatterns logDebug
-      (categorized, classification) <- categorizeFilesWithConfig files extMap defaultDetectionConfig
+      (categorized, classification) <- categorizeFilesWithConfig files extMap cfg
       let totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
         { detectionTotalFiles       = totalFiles
