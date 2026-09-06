@@ -16,6 +16,7 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
+import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
@@ -143,7 +144,7 @@ runPipeline appEnv config = catch (do
         , (VideoFiles, fecVideo fec)
         , (OfficeFiles, fecOffice fec)
         ]
-  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
+  detection <- detectFilesWithExtensionsAndIgnore' fsp (gcDetection (cfgGraphosConfig configWithStreaming)) (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   opIncCounter op "graphos_pipeline_steps_total" 1
@@ -156,6 +157,9 @@ runPipeline appEnv config = catch (do
           ignoredFiles = excIgnoredFiles excs
       lpLogInfo lp $ T.pack $ "Ignored " ++ show ignoredFiles ++ " files"
       lpLogInfo lp $ T.pack $ "  Found " ++ show (detectionTotalFiles detection) ++ " files"
+      lpLogInfo lp $ T.pack $ "  Detected (classification): " ++
+        intercalate ", " [show (length fs) ++ " " ++ show c
+         | (c, fs) <- Map.toList (detectionClassification detection), not (null fs)]
       lpLogDebug lp $ T.pack $ "  File categories: " ++ show (Map.keys (detectionFiles detection))
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))
       when (totalExcluded > 0) $ do
