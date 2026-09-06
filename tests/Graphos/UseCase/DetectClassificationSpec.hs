@@ -11,6 +11,7 @@ import Test.Hspec
 import Test.QuickCheck (Property, property)
 
 import Graphos.Domain.Types.Pipeline
+import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig, validDetectionConfig)
 import Graphos.UseCase.Detect
 
 spec :: Spec
