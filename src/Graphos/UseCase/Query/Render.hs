@@ -214,9 +214,9 @@ boundedNodes bc nodes =
               else min (bcMaxNodes bc) (length nodes)
       capped = take cap nodes
       go _ acc [] = (reverse acc, 0)
-      go rem acc (n : ns)
-        | not (null acc) && nodeJsonBytes n > rem = (reverse acc, length ns)
-        | otherwise = go (rem - nodeJsonBytes n) (n : acc) ns
+      go remaining acc (n : ns)
+        | not (null acc) && nodeJsonBytes n > remaining = (reverse acc, length ns)
+        | otherwise = go (remaining - nodeJsonBytes n) (n : acc) ns
       (kept, dropped) = go (max 0 (bcByteBudget bc)) [] capped
   in (kept, dropped)
 

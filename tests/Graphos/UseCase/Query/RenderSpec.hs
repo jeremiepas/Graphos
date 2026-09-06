@@ -2,6 +2,9 @@ module Graphos.UseCase.Query.RenderSpec where
 
 import Test.Hspec
 import Data.Aeson (Value(..), toJSON)
+import qualified Data.List as L
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import Data.Text (Text)
 
@@ -97,9 +100,11 @@ renderBudgetSpec = describe "budget-aware serialization" $ do
         , snCommunityId = Nothing
         , snKind = Just "Function"
         }
-      ranked = [ node (T.pack ("fn-" ++ show i)) (1.0 - 0.5 * fromIntegral i) | i <- [0 .. 2] ]
+      ranked = [ node (T.pack ("fn-" ++ show i)) (1.0 - 0.5 * fromIntegral i) | i <- ([0 :: Int .. 2]) ]
       generous = defaultBudgetCtl { bcByteBudget = 100000 }
-      oneNodeBytes = T.length (encodeText (toJSON (head ranked)))
+      oneNodeBytes = case ranked of
+        (h : _) -> T.length (encodeText (toJSON h))
+        []      -> 0
 
   describe "capLabel" $ do
     it "leaves a label untouched when the cap is non-positive" $ do
@@ -147,3 +152,18 @@ renderBudgetSpec = describe "budget-aware serialization" $ do
           (kept, dropped) = boundedNodes ctl ranked
       map snScore kept `shouldBe` [1.0, 0.5]
       dropped `shouldBe` 0
+
+  describe "compact node JSON shape" $ do
+    it "emits exactly id, label, score, source_file, kind, preview" $ do
+      case toJSON (node "some-identifier" 0.9) of
+        Object obj ->
+          (L.sort (KM.keys obj)) `shouldBe` L.sort [Key.fromText "id", Key.fromText "label", Key.fromText "score", Key.fromText "source_file", Key.fromText "kind", Key.fromText "preview"]
+        _ -> expectationFailure "node is not a JSON object"
+
+    it "never leaks the raw label when it is long (preview is truncated)" $ do
+      case toJSON (node (T.replicate 500 "x") 0.9) of
+        Object obj ->
+          KM.lookup (Key.fromText "preview") obj `shouldSatisfy` \case
+            Just (String p) -> T.length p < 500
+            _               -> False
+        _ -> expectationFailure "node is not a JSON object"
