@@ -1,10 +1,12 @@
 module Graphos.UseCase.Query.RenderSpec where
 
 import Test.Hspec
-import Data.Aeson (Value(..))
+import Data.Aeson (Value(..), toJSON)
 import qualified Data.Text as T
+import Data.Text (Text)
 
-import Graphos.UseCase.Query.Render (renderCypherResultText, renderCypherResultJSON, renderMutationResultText, renderMutationResultJSON)
+import Graphos.UseCase.Query.Render (renderCypherResultText, renderCypherResultJSON, renderMutationResultText, renderMutationResultJSON, BudgetCtl(..), defaultBudgetCtl, boundedNodes, capLabel, encodeText)
+import Graphos.Domain.Graph.Score (ScoredNode(..))
 import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 
 mkResult :: CypherResult
@@ -18,6 +20,7 @@ spec :: Spec
 spec = do
   mutationRenderSpec
   cypherRenderSpec
+  renderBudgetSpec
 
 cypherRenderSpec :: Spec
 cypherRenderSpec = describe "renderCypherResult" $ do
@@ -81,3 +84,66 @@ mutationRenderSpec = describe "renderMutationResult" $ do
     it "renders summary, columns, rows, and truncated" $ do
       renderMutationResultJSON mr `shouldBe`
         "{\"columns\":[\"n.status\"],\"rows\":[[7]],\"summary\":{\"nodes_created\":1,\"nodes_deleted\":0,\"properties_removed\":1,\"properties_set\":3,\"rels_created\":0,\"rels_deleted\":0,\"rels_upserted\":2},\"truncated\":false}"
+
+-- * Budget-aware serialization helpers
+renderBudgetSpec :: Spec
+renderBudgetSpec = describe "budget-aware serialization" $ do
+  let node :: Text -> Double -> ScoredNode
+      node lbl sc = ScoredNode
+        { snNodeId = lbl
+        , snLabel  = lbl
+        , snScore  = sc
+        , snSourceFile = "graphos-out/graph.json"
+        , snCommunityId = Nothing
+        , snKind = Just "Function"
+        }
+      ranked = [ node (T.pack ("fn-" ++ show i)) (1.0 - 0.5 * fromIntegral i) | i <- [0 .. 2] ]
+      generous = defaultBudgetCtl { bcByteBudget = 100000 }
+      oneNodeBytes = T.length (encodeText (toJSON (head ranked)))
+
+  describe "capLabel" $ do
+    it "leaves a label untouched when the cap is non-positive" $ do
+      let out = capLabel defaultBudgetCtl { bcMaxLabelChars = 0 } (node "short" 0.9)
+          result = snLabel out
+      result `shouldBe` "short"
+
+    it "leaves a short label untouched under the default cap" $ do
+      let out = capLabel defaultBudgetCtl (node "short" 0.9)
+          result = snLabel out
+      result `shouldBe` "short"
+
+    it "applies word-boundary truncation through the budget cap" $ do
+      let ctl = defaultBudgetCtl { bcMaxLabelChars = 5 }
+          out = capLabel ctl (node "this-is-a-very-long-label" 0.9)
+          result = snLabel out
+      T.isSuffixOf "…" result `shouldBe` True
+      T.length result `shouldSatisfy` (\l -> l < 23)
+
+  describe "boundedNodes" $ do
+    it "returns an empty result with zero omitted for empty input" $ do
+      let (kept, dropped) = boundedNodes defaultBudgetCtl []
+      kept `shouldBe` ([] :: [ScoredNode])
+      dropped `shouldBe` 0
+
+    it "keeps every node when the byte budget is generous" $ do
+      let (kept, dropped) = boundedNodes generous ranked
+      length kept `shouldBe` 3
+      dropped `shouldBe` 0
+
+    it "caps the returned node count via bcMaxNodes without inflating omitted" $ do
+      let (kept, dropped) = boundedNodes (generous { bcMaxNodes = 2 }) ranked
+      length kept `shouldBe` 2
+      dropped `shouldBe` 0
+
+    it "drops lowest-scoring nodes once the byte budget is exhausted" $ do
+      let ctl = defaultBudgetCtl { bcByteBudget = oneNodeBytes }
+          (kept, dropped) = boundedNodes ctl ranked
+      length kept `shouldBe` 1
+      dropped `shouldBe` 1
+
+    it "retains the highest-scoring prefix when scores are already ranked" $ do
+      let sizes = map (\n -> T.length (encodeText (toJSON n))) ranked
+          ctl = defaultBudgetCtl { bcByteBudget = sum (take 2 sizes) }
+          (kept, dropped) = boundedNodes ctl ranked
+      map snScore kept `shouldBe` [1.0, 0.5]
+      dropped `shouldBe` 0

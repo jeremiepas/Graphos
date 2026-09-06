@@ -99,17 +99,33 @@ data ScoredNode = ScoredNode
   , snScore       :: !Double
   , snSourceFile  :: !Text
   , snCommunityId :: !(Maybe Int)
+  , snKind        :: Maybe Text
   } deriving (Eq, Show, Generic)
 
 instance NFData ScoredNode
 
+-- | Default width (in characters) for the 'preview' snippet emitted with each
+-- scored node. Kept small so list responses stay compact under a byte budget.
+previewWidth :: Int
+previewWidth = 100
+
+-- | Compute the 'preview' snippet for a scored node's label: a short prefix
+-- of the label with a trailing ellipsis when it is longer than 'previewWidth'.
+-- The full text blob remains available via 'explain' / 'get_node', so this
+-- truncated form never loses information that callers cannot otherwise reach.
+previewOf :: Text -> Text
+previewOf t
+  | T.length t <= previewWidth = t
+  | otherwise = T.take (previewWidth - 1) t <> "…"
+
 instance ToJSON ScoredNode where
   toJSON n = object
-    [ "id"         .= snNodeId n
-    , "label"      .= snLabel n
-    , "score"      .= snScore n
+    [ "id"          .= snNodeId n
+    , "label"       .= snLabel n
+    , "score"       .= snScore n
     , "source_file" .= snSourceFile n
-    , "community"  .= snCommunityId n
+    , "kind"        .= snKind n
+    , "preview"     .= previewOf (snLabel n)
     ]
 
 -- | Get the label text of a scored node.

@@ -154,6 +154,8 @@ commonQueryOptsP = CommonQueryOpts
   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
   <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
+  <*> optional (option auto (long "max-nodes" <> metavar "N" <> help "Cap on returned nodes (unset or 0 = unlimited)"))
+  <*> optional (option auto (long "max-label-chars" <> metavar "N" <> help "Max label length before truncation (unset or 0 = default label-width)"))
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -183,14 +185,16 @@ researchOpts = do
     <*> optional (strOption (long "terms-file" <> metavar "PATH" <> help "File with newline-delimited query terms (appended to positional terms)"))
     <*> optional (strOption (long "label" <> metavar "TEXT" <> help "Label for output file (default: timestamp)"))
     <*> optional (strOption (long "mode" <> value "default" <> metavar "MODE" <> help "Research mode (default, deep, etc.)"))
-    <*> pure (CommonQueryOpts
-          { cqoGraphPath   = graphPath
-          , cqoBudget      = 2000
-          , cqoJson        = False
-          , cqoLabelWidth  = 120
-          , cqoEdges       = Semantic
-          , cqoStrictGraph = False
-          })
+     <*> pure (CommonQueryOpts
+           { cqoGraphPath     = graphPath
+           , cqoBudget        = 2000
+           , cqoJson          = False
+           , cqoLabelWidth    = 120
+           , cqoEdges         = Semantic
+           , cqoStrictGraph   = False
+           , cqoMaxNodes      = Nothing
+           , cqoMaxLabelChars = Nothing
+           })
 
 symbolsOpts :: Parser Command
 symbolsOpts = SymbolsCmd
