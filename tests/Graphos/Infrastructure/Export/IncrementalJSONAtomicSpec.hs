@@ -30,7 +30,7 @@ spec = do
       withSystemTempDirectory "graphos-incr-interrupt-spec" $ \dir -> do
         let target = dir </> "graph.json"
         writeFile target "{\"schema_version\":\"1.0.0\"}\n"
-        iw <- openWriter target
+        _ <- openWriter target
         -- Simulate an interrupted run: open the writer (which streams into a
         -- same-directory temp) but never call closeWriter, so nothing is placed
         -- at the final path and the previously valid graph is untouched.
