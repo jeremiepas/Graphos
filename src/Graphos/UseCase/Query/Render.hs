@@ -22,11 +22,11 @@ module Graphos.UseCase.Query.Render
   , renderNotFoundText
   , renderNotFoundJSON
 
-    -- * Truncation
-  , truncateOutput
-  , estimateTokens
-  , encodeText
-  ) where
+     -- * Truncation
+   , truncateOutput
+   , estimateTokens
+    , encodeText
+     ) where
 
 import Data.Aeson (toJSON, object, (.=), Value(..), encode)
 import Data.Text (Text)
@@ -41,22 +41,26 @@ import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 
 data CommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath   :: !FilePath
-  , cqoBudget      :: !Int
-  , cqoJson        :: !Bool
-  , cqoLabelWidth  :: !Int
-  , cqoEdges       :: !EdgeMode
-  , cqoStrictGraph :: !Bool
+  { cqoGraphPath     :: !FilePath
+  , cqoBudget        :: !Int
+  , cqoJson          :: !Bool
+  , cqoLabelWidth    :: !Int
+  , cqoEdges         :: !EdgeMode
+  , cqoStrictGraph   :: !Bool
+  , cqoMaxNodes      :: Maybe Int
+  , cqoMaxLabelChars :: Maybe Int
   } deriving (Eq, Show)
 
 defaultCommonQueryOpts :: CommonQueryOpts
 defaultCommonQueryOpts = CommonQueryOpts
-  { cqoGraphPath   = "graphos-out/graph.json"
-  , cqoBudget      = 2000
-  , cqoJson        = False
-  , cqoLabelWidth  = 120
-  , cqoEdges       = Semantic
-  , cqoStrictGraph = False
+  { cqoGraphPath     = "graphos-out/graph.json"
+  , cqoBudget        = 2000
+  , cqoJson          = False
+  , cqoLabelWidth    = 120
+  , cqoEdges         = Semantic
+  , cqoStrictGraph   = False
+  , cqoMaxNodes      = Nothing
+  , cqoMaxLabelChars = Nothing
   }
 
 -- | Estimate token count from character count (rough: chars / 4).
@@ -163,6 +167,7 @@ takeLinesFromTop remaining (l:ls)
 -- | Encode a JSON value to Text (compact, no spaces).
 encodeText :: Value -> Text
 encodeText = TL.toStrict . TL.decodeUtf8 . encode
+
 
 -- | Render a path result as JSON.
 -- Nothing yields {"path":null}; Just ids yields {"path":[...],"hops":n} where hops = length ids - 1.

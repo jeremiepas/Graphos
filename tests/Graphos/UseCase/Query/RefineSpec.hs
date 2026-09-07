@@ -35,6 +35,7 @@ testScoredNode nid lbl src score = ScoredNode
   , snScore       = score
   , snSourceFile  = src
   , snCommunityId = Nothing
+  , snKind        = Nothing
   }
 
 spec :: Spec
