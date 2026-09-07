@@ -36,7 +36,7 @@ import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
                                , chatCommunityId, enrichWithChatHistory)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndexCached, QueryResponse(..))
-import Graphos.UseCase.Query.Render (BudgetCtl(..), defaultBudgetCtl, boundedNodes, capLabel)
+import Graphos.UseCase.Query.Budget (BudgetCtl(..), defaultBudgetCtl, boundedNodes, boundedEdges, nodeJsonBytes, capLabel)
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL, LoadResult(..))
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)
 import Graphos.UseCase.FormatContext (formatContextForLLMBudgeted, countContextTokens
@@ -196,8 +196,12 @@ handleQueryGraph g idx args = do
                      Just n -> take n labelled
                      Nothing -> labelled
           (nodesOut, omittedNodes) = boundedNodes ctl capped
-          edgesOut = take budget allEdges
-          omittedEdges = length allEdges - length edgesOut
+          -- Edges share the byte budget with nodes: bound them to whatever
+          -- remains after the node list so the whole response stays within
+          -- the configured byte budget.
+          nodeBytes = sum (map nodeJsonBytes nodesOut)
+          edgeCtl = defaultBudgetCtl { bcByteBudget = max 0 (budget - nodeBytes) }
+          (edgesOut, omittedEdges) = boundedEdges edgeCtl allEdges
       pure $ Right $ object
         [ "verdict"      .= qrespVerdict resp
         , "best_score"   .= qrespBestScore resp

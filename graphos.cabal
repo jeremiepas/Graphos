@@ -105,6 +105,7 @@ library
                       -- UseCase - Query submodules
                       Graphos.UseCase.Query.Normalize
                       Graphos.UseCase.Query.Refine
+                      Graphos.UseCase.Query.Budget
                       Graphos.UseCase.Query.Research
                        Graphos.UseCase.Query.Render
                       -- UseCase - Detect submodules
