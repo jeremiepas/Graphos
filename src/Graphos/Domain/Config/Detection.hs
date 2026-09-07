@@ -8,9 +8,11 @@ module Graphos.Domain.Config.Detection
   , DetectionConfig(..)
   , defaultDetectionConfig
   , validDetectionConfig
+  , applyDetectionOverrides
   ) where
 
 import Control.DeepSeq (NFData)
+import Data.Maybe (fromMaybe)
 import Data.Aeson (ToJSON(..), FromJSON(..), withObject, withText, (.:?))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -80,3 +82,21 @@ validDetectionConfig c
   | dcMinifiedLineThreshold c <= 0 =
       Left $ "dcMinifiedLineThreshold must be > 0, got " ++ show (dcMinifiedLineThreshold c)
   | otherwise = Right c
+
+-- | Resolve the effective detection configuration from CLI-derived overrides on
+-- top of a base 'DetectionConfig', then validate the result.
+--
+-- The mode override encodes the --no-detect precedence (the caller resolves
+-- that precedence and passes 'Off' when detection is disabled); an explicit
+-- minified-line-threshold replaces the base value, otherwise the base value is
+-- kept. The result runs through 'validDetectionConfig' so a bad threshold can
+-- never disable the length guard silently.
+applyDetectionOverrides
+  :: DetectionConfig   -- ^ base config from graphos.yaml (or defaults)
+  -> DetectionMode     -- ^ effective mode ('Off' disables detection)
+  -> Maybe Int         -- ^ minified-line-threshold override (Nothing keeps the base value)
+  -> Either String DetectionConfig
+applyDetectionOverrides base mode mThreshold =
+  validDetectionConfig
+    ( base { dcMode = mode
+           , dcMinifiedLineThreshold = fromMaybe (dcMinifiedLineThreshold base) mThreshold } )
