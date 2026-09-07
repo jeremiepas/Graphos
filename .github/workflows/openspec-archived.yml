@@ -1,0 +1,70 @@
+name: OpenSpec Archive Check
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["develop", "main"]
+
+concurrency:
+  group: openspec-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  openspec-archived:
+    if: github.actor == 'jeremiepas'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No stray change directories at repo top level
+        run: |
+          # A change dir must live in openspec/changes/ (active) or openspec/changes/archive/ (done)
+          STRAY=$(find openspec -maxdepth 1 -type d ! -name openspec ! -name changes ! -name specs ! -name archive ! -name '.' 2>/dev/null || true)
+          if [ -n "$STRAY" ]; then
+            echo "::error::Stray change directories outside openspec/changes/: $STRAY"
+            exit 1
+          fi
+
+      - name: Active changes reference finished work only when PR is merged
+        run: |
+          # Every task in every ACTIVE (non-archived) change must be checked off before its PR merges to develop
+          FAIL=0
+          for TASKS in openspec/changes/*/tasks.md; do
+            [ -e "$TASKS" ] || continue
+            if grep -q '^- \[ \]' "$TASKS"; then
+              UNCHECKED=$(grep -c '^- \[ \]' "$TASKS")
+              echo "::warning::$TASKS has $UNCHECKED unchecked tasks (change still in progress — OK while the PR is open)"
+            fi
+          done
+          # Hard gate: changes already merged (PR merged into develop) must NOT remain active
+          # → they must be archived under openspec/changes/archive/
+          for CHANGE_DIR in openspec/changes/*/; do
+            [ -d "$CHANGE_DIR" ] || continue
+            NAME=$(basename "$CHANGE_DIR")
+            TASKS="$CHANGE_DIR/tasks.md"
+            [ -e "$TASKS" ] || continue
+            if ! grep -q '^- \[ \]' "$TASKS" && [ "$(grep -c '^- \[x\]' "$TASKS")" -gt 0 ]; then
+              echo "::error::$NAME: all tasks checked but change is NOT archived — run 'openspec archive $NAME' and commit before merge"
+              FAIL=1
+            fi
+          done
+          exit $FAIL
+
+      - name: Archived changes are complete
+        run: |
+          FAIL=0
+          for TASKS in openspec/changes/archive/*/tasks.md; do
+            [ -e "$TASKS" ] || continue
+            if grep -q '^- \[ \]' "$TASKS"; then
+              UNCHECKED=$(grep -c '^- \[ \]' "$TASKS")
+              echo "::error::$TASKS is ARCHIVED but has $UNCHECKED unchecked tasks — un-archive or complete it"
+              FAIL=1
+            fi
+          done
+          exit $FAIL
