@@ -7,8 +7,6 @@ import Control.Exception (SomeException, try)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLA
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
@@ -90,6 +88,6 @@ spec = do
       withSystemTempDirectory "graphos-atomic" $ \dir -> do
         let path = dir </> "text.md"
         writeTextFileAtomic path "héllo wörld"
-        BSL.readFile path `shouldReturn` TLA.encodeUtf8 (TL.pack "héllo wörld")
+        BSL.readFile path `shouldReturn` BSL.fromStrict (TE.encodeUtf8 "héllo wörld")
         writeStringFileAtomic (dir </> "text2.md") "plain string"
-        BSL.readFile (dir </> "text2.md") `shouldReturn` TLA.encodeUtf8 (TL.pack "plain string")
+        BSL.readFile (dir </> "text2.md") `shouldReturn` BSL.fromStrict (TE.encodeUtf8 "plain string")
