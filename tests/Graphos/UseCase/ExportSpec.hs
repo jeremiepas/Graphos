@@ -46,7 +46,8 @@ spec = describe "exportAll" $ do
             , epFlushWriter = \_ -> pure ()
             , epCloseWriter = \_ -> pure ()
             , epExportCommunityGraph = \_ _ _ -> pure ()
-            , epSaveCheckpoint = \_ _ -> pure ()
+            , epSaveCheckpoint = \_ _ _ -> pure ()
+            , epLoadCheckpoint = \_ -> pure (Left "no checkpoint")
             , epExportAll = undefined
             }
           config = defaultConfig { cfgOutputDir = tmpDir, cfgNoViz = False }

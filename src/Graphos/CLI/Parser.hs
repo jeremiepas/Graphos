@@ -67,8 +67,10 @@ pipelineOpts = PipelineConfig
   <*> switch (long "deep" <> help "Deep extraction mode")
   <*> switch (long "no-viz" <> help "Skip HTML visualization")
   <*> switch (long "update" <> help "Incremental update")
-  <*> switch (long "cluster-only" <> help "Rerun clustering only")
+  <*> switch (long "cluster-only" <> help "Rerun clustering only (loads nodes+edges from checkpoint)")
   <*> switch (long "no-cluster" <> help "Skip clustering entirely")
+  <*> (switch (long "fresh" <> help "Force full extraction, ignoring any existing checkpoint")
+       <|> switch (long "no-checkpoint" <> help "Alias for --fresh: ignore any existing checkpoint and re-extract"))
   <*> switch (long "label" <> help "Use LLM to label communities (requires --neo4j or graphos.yaml config)")
   <*> switch (long "obsidian" <> help "Generate Obsidian vault")
   <*> optional (strOption (long "obsidian-dir" <> help "Obsidian vault output directory"))
@@ -326,7 +328,7 @@ renderCommandReference = unlines $
   , "graphos [PATH]                  Build the knowledge graph (default: .)"
   , "  --output, -o DIR              Output directory"
   , "  --directed / --deep / --no-viz / --update"
-  , "  --cluster-only / --no-cluster / --label"
+   , "  --cluster-only / --no-cluster / --fresh (--no-checkpoint)"
   , "  --community-graph / --embed / --vision / --watch"
   , "  --neo4j / --memgraph / --svg / --graphml / --wiki"
   , "  --verbose, -v / --debug"

@@ -4,12 +4,16 @@ module Graphos.Infrastructure.Export.JSON
   , exportGraphWithLabels
   , exportSubgraphJSON
   , saveCheckpoint
+  , loadCheckpointInputSource
   ) where
 
-import Data.Aeson (encode, object, (.=))
+import Data.Aeson (encode, object, (.=), Value(..), eitherDecode)
+import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.Map as M
 import Data.Text (Text)
+import System.Directory (doesFileExist)
 
 import Graphos.Domain.Types
 import qualified Graphos.Domain.Types.Graph as G (LabeledGraph(..))
@@ -50,18 +54,49 @@ exportSubgraphJSON g path = do
   writeFileAtomic path (encode (object payload))
 
 -- | Save a checkpoint of the graph during pipeline execution.
--- Writes nodes and edges extracted so far; communities/analysis are empty.
--- The "checkpoint" flag signals this is a partial snapshot, not a final export.
--- If the pipeline crashes, the checkpoint file remains on disk for recovery.
-saveCheckpoint :: Graph -> FilePath -> IO ()
-saveCheckpoint g path = do
+--
+-- The checkpoint is written to @<output-dir>/graph.checkpoint.json@ — the canonical
+-- checkpoint location shared by the incremental-run and @--cluster-only@ paths. It is a
+-- partial snapshot: nodes and edges extracted so far, with communities, cohesion,
+-- god-nodes, and analysis all empty. The @"checkpoint": true@ flag distinguishes it
+-- from a final graph export; if the pipeline crashes the file remains on disk for
+-- recovery.
+--
+-- The payload carries a @"schema_version"@ (currently @"1"@; bump on breaking changes)
+-- and the originating @"input_source"@ provenance, so a resumed / @--cluster-only@ run
+-- can validate forward compatibility and warn when it was built from a different input.
+saveCheckpoint :: Graph -> FilePath -> Text -> IO ()
+saveCheckpoint g path provenance = do
   let emptyCommMap = Map.empty :: CommunityMap
       emptyCohMap   = Map.empty :: CohesionMap
-      payload = [ "nodes"       .= Map.elems (gNodes g)
-                , "edges"       .= Map.elems (gEdges g)
-                , "communities" .= emptyCommMap
-                , "cohesion"    .= emptyCohMap
-                , "god_nodes"   .= ([] :: [GodNode])
-                , "checkpoint" .= True
+      payload = [ "nodes"          .= Map.elems (gNodes g)
+                , "edges"          .= Map.elems (gEdges g)
+                , "communities"    .= emptyCommMap
+                , "cohesion"       .= emptyCohMap
+                , "god_nodes"      .= ([] :: [GodNode])
+                , "checkpoint"     .= True
+                , "schema_version" .= checkpointSchemaVersion
+                , "input_source"   .= provenance
                 ]
   writeFileAtomic path (encode (object payload))
+
+-- | Current checkpoint schema major version. Bump on breaking changes; the
+-- loader treats a missing version as this major (forward-compatible).
+checkpointSchemaVersion :: Text
+checkpointSchemaVersion = "1"
+
+-- | Read the recorded "input_source" provenance from a checkpoint file.
+-- Returns Nothing when the file is absent or has no provenance record, so
+-- callers can treat a missing value as "no mismatch to report".
+loadCheckpointInputSource :: FilePath -> IO (Maybe Text)
+loadCheckpointInputSource path = do
+  exists <- doesFileExist path
+  if not exists
+    then pure Nothing
+    else do
+      bs <- BSL.readFile path
+      case eitherDecode bs :: Either String (Map Text Value) of
+        Left _   -> pure Nothing
+        Right obj -> case M.lookup "input_source" obj of
+          Just (String s) -> pure (Just s)
+          _               -> pure Nothing
