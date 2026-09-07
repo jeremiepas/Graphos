@@ -152,3 +152,29 @@ spec = do
       let helpText = renderHelp 80 (parserHelp defaultPrefs (infoParser (info pipelineOpts idm)))
       helpText `shouldSatisfy` isInfixOf "--no-semantic-edges"
       helpText `shouldSatisfy` isInfixOf "--force-semantic-edges"
+
+  describe "pipelineOpts checkpoint & cluster-only flags" $ do
+    it "defaults --fresh and --cluster-only to False" $ do
+      parsePipeline [] `shouldSatisfy` \case
+        Right cfg -> cfgFresh cfg == False && cfgClusterOnly cfg == False && cfgNoCluster cfg == False
+        Left _    -> False
+
+    it "--fresh sets cfgFresh" $ do
+      parsePipeline ["--fresh"] `shouldSatisfy` \case
+        Right cfg -> cfgFresh cfg == True
+        Left _    -> False
+
+    it "--no-checkpoint is an alias for --fresh" $ do
+      parsePipeline ["--no-checkpoint"] `shouldSatisfy` \case
+        Right cfg -> cfgFresh cfg == True
+        Left _    -> False
+
+    it "--cluster-only sets cfgClusterOnly" $ do
+      parsePipeline ["--cluster-only"] `shouldSatisfy` \case
+        Right cfg -> cfgClusterOnly cfg == True
+        Left _    -> False
+
+    it "--no-cluster sets cfgNoCluster" $ do
+      parsePipeline ["--no-cluster"] `shouldSatisfy` \case
+        Right cfg -> cfgNoCluster cfg == True
+        Left _    -> False

@@ -24,7 +24,7 @@ import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
-import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
+import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
@@ -45,7 +45,7 @@ import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseTex
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
-import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, logInfo, logDebug, logError)
+import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, LogEnv(..), logInfo, logDebug, logError)
 import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGraphToNeo4j, pushToNeo4jWithCommunities)
 import Graphos.Infrastructure.Export.Memgraph (pushToMemgraphWithCommunities, pushSubgraphToMemgraph, pushCommunityGraphToMemgraph)
 import Graphos.Infrastructure.Observability.SDK
@@ -126,6 +126,31 @@ reexecWithRTS profile heapStr = do
       _ <- createProcess spec
       exitSuccess
 
+runClusterOnlyMode :: AppEnv -> LogEnv -> ObservabilityEnv -> PipelineConfig -> IO ()
+runClusterOnlyMode appEnv env obsEnv config' = do
+  logInfo env "Running in --cluster-only mode (clustering from checkpoint)..."
+  clusterResult <- case cfgTimeout config' of
+    Nothing -> runClusterOnlyPipeline appEnv config'
+    Just secs -> do
+      logInfo env $ "[pipeline] Running with " <> T.pack (show secs ++ "s timeout")
+      let timeoutMicros = fromIntegral (secs * 1000000)
+      timed <- timeout timeoutMicros (runClusterOnlyPipeline appEnv config')
+      case timed of
+        Nothing -> do
+          logError env $ "[pipeline] TIMEOUT: cluster-only exceeded " <> T.pack (show secs ++ "s limit")
+          exitWith (ExitFailure 1)
+        Just r -> pure r
+  case clusterResult of
+    Left err -> do
+      logError env $ "Cluster-only failed: " <> err
+      exitWith (ExitFailure 1)
+    Right commCount -> do
+      logInfo env "Cluster-only complete!"
+      logInfo env $ T.pack $ "  Communities: " ++ show commCount
+      let shutdownMicros = cfgOtelShutdownTimeout config' * 1000000
+      _ <- timeout shutdownMicros (shutdownObservability obsEnv)
+      exitSuccess
+
 main :: IO ()
 main = do
   rawArgs <- getArgs
@@ -184,6 +209,7 @@ main = do
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
           appEnv = productionAppEnv env obsEnv
+      when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
          Just graphPath -> do

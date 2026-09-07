@@ -8,6 +8,7 @@
 --   - UseCase.Pipeline.Incremental — --watch mode + single-file ingestion
 module Graphos.UseCase.Pipeline
   ( runPipeline
+  , runClusterOnlyPipeline
   , runIncrementalPipeline
   , runSingleFilePipeline
   , PipelineResult(..)
@@ -16,6 +17,7 @@ module Graphos.UseCase.Pipeline
 
 import Graphos.UseCase.Pipeline.Core
   ( runPipeline
+  , runClusterOnlyPipeline
   , PipelineResult(..)
   )
 import Graphos.UseCase.Pipeline.Incremental

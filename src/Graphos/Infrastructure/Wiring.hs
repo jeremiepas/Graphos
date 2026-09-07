@@ -17,6 +17,7 @@ module Graphos.Infrastructure.Wiring
 import Control.Monad (when)
 import Data.Dynamic (toDyn, fromDynamic)
 import Data.Maybe (isJust)
+import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import Foreign.Ptr (Ptr)
 
@@ -26,6 +27,7 @@ import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
 import Graphos.Domain.Config.Extraction (Granularity(..))
 import Graphos.UseCase.AppEnv (AppEnv(..))
+import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
@@ -242,10 +244,22 @@ productionExportPort _logEnv _obsEnv =
         , UEP.epCloseWriter = Inc.closeWriter
         , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
         , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
+        , UEP.epLoadCheckpoint = loadCheckpointFromPath
         , UEP.epExportAll = \g _outputDir analysis config detection mLabels aggregates ->
             UE.exportAll ep g analysis config detection mLabels aggregates
         }
   in ep
+
+-- | Load a checkpoint file back into a reconstructed graph, carrying the
+-- recorded input-source provenance so callers can warn on an input mismatch.
+loadCheckpointFromPath :: FilePath -> IO (Either Text UEP.LoadedCheckpoint)
+loadCheckpointFromPath path = do
+  r <- loadGraphFromFile path
+  case r of
+    Left t -> pure (Left t)
+    Right lr -> do
+      mSrc <- ExportJSON.loadCheckpointInputSource path
+      pure (Right (UEP.LoadedCheckpoint (lrGraph lr) mSrc))
 
 -- | Production LLM port — delegates to Infrastructure.LLM.*.
 productionLLMPort :: LLMPort

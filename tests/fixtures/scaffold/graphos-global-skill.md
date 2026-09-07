@@ -38,7 +38,7 @@ code, docs, and files into a navigable graph of symbols and their relationships.
 graphos [PATH]                  Build the knowledge graph (default: .)
   --output, -o DIR              Output directory
   --directed / --deep / --no-viz / --update
-  --cluster-only / --no-cluster / --label
+  --cluster-only / --no-cluster / --fresh (--no-checkpoint)
   --community-graph / --embed / --vision / --watch
   --neo4j / --memgraph / --svg / --graphml / --wiki
   --verbose, -v / --debug
