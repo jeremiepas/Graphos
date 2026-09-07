@@ -1,16 +1,17 @@
 {-# LANGUAGE StrictData #-}
 -- | Research view use case: multi-query union + induced subgraph extraction.
 --
--- `buildResearchView` runs a scored query for each input term, folds results
--- into a deduplicated node map, and extracts the induced edge subgraph.
+-- `buildResearchView` runs a scored query for each input term, folds the
+-- matched nodes into a deduplicated map carrying per-term discovery
+-- attribution, optionally expands the union with `--subgraph` seed terms, and
+-- induces (and refines) the subgraph over the resulting node set.
 module Graphos.UseCase.Query.Research
   ( buildResearchView
   , buildResearchViewIO
   , expandWithSeeds
   ) where
 
-import Data.Time (UTCTime(..), getCurrentTime)
-import Data.Time.Calendar (Day(..))
+import Data.Time (UTCTime(..), Day(ModifiedJulianDay), getCurrentTime)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -22,14 +23,14 @@ import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
   ( NodeId, Node(..)
-  , Edge(..), edgeRelation, edgeConfidence, Confidence(..)
+  , Edge(..), edgeRelation, edgeConfidence, edgeWeight, Confidence(..)
   , Relation(..), textToRelation, relationToText
   , EdgeId(..), CommunityId, CommunityMap
   , FileType(..)
   )
 import Graphos.Domain.Community (CommunityComposition(..))
 import Graphos.Domain.Query.Research
-import Graphos.Domain.Graph.Core (Graph(..), gHash)
+import Graphos.Domain.Graph.Core (Graph(..), gHash, gNodes, gEdges)
 import Graphos.Domain.Graph.Index (GraphIndex(..), bfsFromSet, communityMembers)
 import Graphos.UseCase.Query
   ( queryGraphWithIndexScored
@@ -43,71 +44,102 @@ import Graphos.UseCase.Query.Refine
 
 -- | Build the research view for a set of query terms.
 --
--- Runs `queryGraphWithIndexScored` for each term (using default budget of 2000),
--- folds results into a deduplicated node map, and extracts the induced edge
--- subgraph.
+-- Runs `queryGraphWithIndexScored` for each term (budget 2000), folds the
+-- matched nodes into a deduplicated map with per-term discovery attribution,
+-- optionally expands the union with seed terms (`--subgraph`), then induces
+-- and refines the subgraph over the final node set.
 buildResearchView
   :: Graph
   -> GraphIndex
   -> CommunityMap
   -> Map CommunityId CommunityComposition
   -> [Text]              -- ^ query terms
+  -> [Text]              -- ^ seed terms (--subgraph), may be empty
   -> Maybe EdgeMode      -- ^ edge refinement mode
   -> ResearchView
-buildResearchView g idx commMap comps terms mbMode = do
+buildResearchView g idx commMap comps terms seeds mbMode = do
   let mode = maybe Semantic id mbMode
       queries :: [QueryResponse]
       queries = map (\t -> queryGraphWithIndexScored g idx t (T.pack "bfs") 2000) terms
 
-      -- Fold all scored nodes into a ResearchNode map
+      -- Fold all scored nodes into a ResearchNode map, tracking per-term
+      -- discovery attribution and best score.
       nodeMap :: Map NodeId ResearchNode
       nodeMap = foldQueryResponses (zip terms queries)
 
-      unionIds :: Set NodeId
-      unionIds = Map.keysSet nodeMap
+      -- Replace reconstructed nodes with the originals from gNodes so line
+      -- info, file type, signature, etc. survive into the view.
+      nodeMap' :: Map NodeId ResearchNode
+      nodeMap' = Map.map fixNode nodeMap
+        where
+          fixNode n =
+            let real = Map.findWithDefault (rnNode n) (nodeId (rnNode n)) (gNodes g)
+             in n { rnNode = real }
 
-      -- Extract induced edges
-      allEdges :: [(NodeId, NodeId, Text, Double)]
-      allEdges =
-        [ (edgeSource e, edgeTarget e, relationToText (edgeRelation e), edgeWeight e)
-        | e <- Map.elems (gEdges g)
-        , edgeSource e `Set.member` unionIds
-        , edgeTarget e `Set.member` unionIds
-        ]
+      unionIds :: Set NodeId
+      unionIds = Map.keysSet nodeMap'
+
+      -- Seed expansion: add seed-matched nodes + 1-hop BFS neighbours. This is
+      -- additive — the expanded set only ever grows the original union.
+      expandedIds :: Set NodeId
+      expandedIds = case seeds of
+        [] -> unionIds
+        _  -> expandWithSeeds g idx unionIds seeds
+
+      -- Final node list over the expanded set: attributed nodes keep their
+      -- discovery info; any extra nodes (seed hits / BFS neighbours) get an
+      -- unattributed entry so every induced edge has both endpoints present.
+      finalNodes :: [ResearchNode]
+      finalNodes = map lookupOrUnattributed (Set.toList expandedIds)
+        where
+          lookupOrUnattributed nid =
+            case Map.lookup nid nodeMap' of
+              Just rn -> rn
+              Nothing -> unattributedNode (Map.findWithDefault undefined nid (gNodes g))
+
+      -- Fill each node's scores with every input term (0 for non-matching).
+      filledNodes :: [ResearchNode]
+      filledNodes = map (fillScores terms) finalNodes
 
       nodeNodes :: Map NodeId Node
-      nodeNodes = Map.map rnNode nodeMap
+      nodeNodes = Map.fromList [ (nodeId (rnNode n), rnNode n) | n <- filledNodes ]
+
+      inducedEdges :: [(NodeId, NodeId, Text, Double)]
+      inducedEdges =
+        [ (edgeSource e, edgeTarget e, relationToText (edgeRelation e), edgeWeight e)
+        | e <- Map.elems (gEdges g)
+        , edgeSource e `Set.member` expandedIds
+        , edgeTarget e `Set.member` expandedIds
+        ]
 
       refinedEdges :: [Edge]
-      refinedEdges = map edgeFromTuple
-        (refineEdges mode nodeNodes allEdges)
+      refinedEdges = map edgeFromTuple (refineEdges mode nodeNodes inducedEdges)
 
-      -- Collect communities for nodes in the union
       commIds :: [CommunityId]
       commIds =
-        [ cid'
-        | n <- Map.elems nodeMap
-        , let cid = nodeCommunityId (rnNode n)
-        , Just cid' <- [cid]
-        , cid' /= 0
-        ]
+        [ cid | n <- filledNodes
+              , Just cid <- [nodeCommunityId (rnNode n)]
+              , cid /= 0 ]
 
       commMapOut :: Map CommunityId ResearchCommunity
       commMapOut = Map.fromList
         [ (cid, ResearchCommunity
-              { rcLabel       = Nothing
+               { rcLabel       = Just (T.pack ("Community " ++ show cid))
               , rcComposition = Map.lookup cid comps
               , rcMemberCount = length (communityMembers cid commMap)
               })
-        | cid <- nub commIds
-        ]
+        | cid <- nub commIds ]
 
-  let nodeList = Map.elems nodeMap
-      termMap :: Map Text Int
-      termMap = Map.fromList (zip terms [0 :: Int ..])
-      -- Order nodeList by term discovery order (sort by the first discovering term)
+      termIdx :: Map Text Int
+      termIdx = Map.fromList (zip terms [0 :: Int ..])
+
       sortedNodes :: [ResearchNode]
-      sortedNodes = sortOn (\n -> maybe (length terms) snd (findFirstDiscoverer termMap n)) nodeList
+      sortedNodes = sortOn rankOf filledNodes
+        where
+          rankOf n = case rnDiscoveredBy n of
+            t:_ -> (False, Map.findWithDefault (length terms) t termIdx, nodeId (rnNode n))
+            []  -> (True, length terms, nodeId (rnNode n))
+
   ResearchView
     { rvTerms       = terms
     , rvNodes       = sortedNodes
@@ -116,7 +148,7 @@ buildResearchView g idx commMap comps terms mbMode = do
     , rvMetadata    = ResearchMetadata
       { rmGeneratedAt = utctEpoch
       , rmGraphHash   = gHash g
-      , rmNodeCount   = length nodeList
+      , rmNodeCount   = length sortedNodes
       , rmEdgeCount   = length refinedEdges
       }
     }
@@ -128,21 +160,38 @@ buildResearchView g idx commMap comps terms mbMode = do
             Just r -> r
             Nothing -> Inferred
        in Edge { edgeId = eid
-               , edgeSource = src
-               , edgeTarget = tgt
-               , edgeRelation = rel'
-               , edgeWeight = conf
-               , edgeConfidence = Confidence conf
-               , edgeExtra = Nothing
-               }
+              , edgeSource = src
+              , edgeTarget = tgt
+              , edgeRelation = rel'
+              , edgeWeight = conf
+              , edgeConfidence = Confidence conf
+              , edgeExtra = Nothing
+              }
+
+unattributedNode :: Node -> ResearchNode
+unattributedNode n = ResearchNode
+  { rnNode = n
+  , rnDiscoveredBy = []
+  , rnBestScore = 0
+  , rnScores = []
+  }
+
+-- | Augment a node's scores with every input term, using score 0 for any term
+-- whose query did not return the node.
+fillScores :: [Text] -> ResearchNode -> ResearchNode
+fillScores allTerms rn =
+  let existing = Map.fromList (rnScores rn)
+      newScores = [ (t, Map.findWithDefault 0 t existing) | t <- allTerms ]
+   in rn { rnScores = newScores }
 
 utctEpoch :: UTCTime
 utctEpoch = UTCTime (ModifiedJulianDay (25568 :: Integer)) 0
 
 -- | Fold a list of query responses into a ResearchNode map.
+--
 -- Each response's scored nodes are accumulated into the map, tracking
--- `rnDiscoveredBy` (in term order), `rnScores` (per-term),
--- and keeping the maximum as `rnBestScore`.
+-- `rnDiscoveredBy` (in term order), `rnScores` (per-term), and keeping the
+-- maximum as `rnBestScore`. Nodes are deduplicated by `NodeId`.
 foldQueryResponses :: [(Text, QueryResponse)] -> Map NodeId ResearchNode
 foldQueryResponses entries =
   let scoredNodeToNode sn = Node
@@ -154,12 +203,12 @@ foldQueryResponses entries =
           , nodeLineEnd = Nothing
           , nodeSignature = Nothing
           , nodeCommunityId = snCommunityId sn
-           , nodeKind = Nothing
-           , nodeDegree = Nothing
-           , nodeIsBridge = Nothing
-           , nodeExtra = Nothing
-           , nodePresentBits = 0
-           }
+          , nodeKind = Nothing
+          , nodeDegree = Nothing
+          , nodeIsBridge = Nothing
+          , nodeExtra = Nothing
+          , nodePresentBits = 0
+          }
       mergeNode :: ResearchNode -> ResearchNode -> ResearchNode
       mergeNode existing newRn =
         case rnDiscoveredBy newRn of
@@ -184,14 +233,7 @@ foldQueryResponses entries =
         in foldl insertOne acc scoredNodes
       acc0 :: Map NodeId ResearchNode
       acc0 = Map.empty
-   in foldl (\acc (term, qr) -> processTerm acc term (qrespNodes qr)) acc0 entries
-
-findFirstDiscoverer :: Map Text Int -> ResearchNode -> Maybe (Text, Int)
-findFirstDiscoverer termMap n =
-  let disc = rnDiscoveredBy n
-  in case disc of
-       [] -> Nothing
-       first:_ -> Just (first, Map.findWithDefault (length termMap) first termMap)
+    in foldl (\acc (term, qr) -> processTerm acc term (qrespNodes qr)) acc0 entries
 
 -- | IO wrapper that attaches the real `getCurrentTime` timestamp.
 buildResearchViewIO
@@ -200,14 +242,18 @@ buildResearchViewIO
   -> CommunityMap
   -> Map CommunityId CommunityComposition
   -> [Text]
+  -> [Text]
   -> Maybe EdgeMode
   -> IO ResearchView
-buildResearchViewIO g idx commMap comps terms mbMode = do
+buildResearchViewIO g idx commMap comps terms seeds mbMode = do
   t <- getCurrentTime
-  let rv = buildResearchView g idx commMap comps terms mbMode
+  let rv = buildResearchView g idx commMap comps terms seeds mbMode
   pure rv { rvMetadata = (rvMetadata rv) { rmGeneratedAt = t } }
 
 -- | Expand the union node set with 1-hop BFS from matched nodes of seed terms.
+--
+-- Runs a scored query for each seed term, adds the matched nodes to the union,
+-- then expands by one BFS hop. Additive: never removes any node.
 expandWithSeeds
   :: Graph
   -> GraphIndex
@@ -226,7 +272,7 @@ expandWithSeeds g idx union seeds =
       -- 1-hop BFS from matched nodes
       expanded :: Set NodeId
       expanded = Set.union matched (bfsFromSet idx matched 1 10000)
-  in expanded
+   in expanded
 
 nub :: (Ord a) => [a] -> [a]
 nub = go Map.empty

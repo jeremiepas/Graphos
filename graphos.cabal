@@ -352,8 +352,10 @@ test-suite graphos-test
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
-    Graphos.Infrastructure.Export.PersistMutationSpec
-    Graphos.UseCase.SubgraphSpec
+     Graphos.Infrastructure.Export.PersistMutationSpec
+     Graphos.Infrastructure.Export.ResearchHTMLSpec
+     Graphos.UseCase.SubgraphSpec
+     Graphos.UseCase.ResearchSpec
     Graphos.UseCase.DetectSpec
     Graphos.Fidelity.ImportEdgesSpec
     Graphos.Fidelity.GraphCoverageSpec

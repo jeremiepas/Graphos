@@ -17,6 +17,9 @@ import System.IO (stderr)
 import System.Process (createProcess, proc)
 import System.Environment (getArgs, getExecutablePath, withArgs)
 import System.FilePath ((</>))
+import qualified Data.Time.Clock as TCC (getCurrentTime)
+import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
+import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
@@ -33,7 +36,7 @@ import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
 import qualified Graphos.Domain.Query.Cypher.Eval as MutEval (mrGraph)
-import Graphos.UseCase.Query.Research (buildResearchViewIO, expandWithSeeds)
+import Graphos.UseCase.Query.Research (buildResearchViewIO)
 import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import qualified Graphos.UseCase.Merge as Merge (mrGraph)
@@ -418,11 +421,11 @@ main = do
                 else putStrLn $ T.unpack $ renderNotFoundText nodeArg
               exitWith (ExitFailure 1)
 
-    ResearchCmd termsArg seedsArg graphPath doHtml doJson termsFileArg labelArg researchMode commonOpts -> do
+    ResearchCmd termsArg seedsArg graphPath _doHtml doJson termsFileArg labelArg _researchMode commonOpts -> do
       hSetBuffering stdout NoBuffering
       loadResult <- loadGraphOpt (cqoStrictGraph commonOpts) graphPath
       case loadResult of
-        Left err -> putStrLn $ "Error: " ++ T.unpack err
+        Left err -> hPutStrLn stderr $ "Error: " ++ T.unpack err
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
@@ -438,28 +441,26 @@ main = do
                   content <- TIO.readFile path
                   pure $ filter (not . T.null) (T.lines content)
                 else do
-                  putStrLn $ "Error: terms file not found: " ++ path
+                  hPutStrLn stderr $ "Error: terms file not found: " ++ path
                   exitWith (ExitFailure 1)
           let terms = termsArg <> termsFileTerms
               dedupedTerms = go mempty terms
                where
-                 go _ [] = []
-                 go seen (t:rest)
-                   | Map.member t seen = go seen rest
-                   | otherwise = t : go (Map.insert t () seen) rest
-          let _expandedUnion = expandWithSeeds g idx Set.empty seedsArg
-          rv <- buildResearchViewIO g idx commMap comps dedupedTerms edgeMode
-          case labelArg of
-            Just lbl -> putStrLn $ "Output label: " ++ lbl
-            Nothing  -> putStrLn "No label provided"
-          putStrLn $ "Research mode: " ++ case researchMode of
-            Just m  -> T.unpack m
-            Nothing -> "default"
-          putStrLn $ "Seeds for expansion: " ++ show (length seedsArg)
+                  go _ [] = []
+                  go seen (t:rest)
+                    | Map.member t seen = go seen rest
+                    | otherwise = t : go (Map.insert t () seen) rest
+          rv <- buildResearchViewIO g idx commMap comps dedupedTerms seedsArg edgeMode
+          ts <- TTF.formatTime TTF.defaultTimeLocale "%Y%m%dT%H%M%S" <$> TCC.getCurrentTime
+          let lbl = maybe ts id labelArg
+              dir = "graphos-out"
+              base = "research-" ++ lbl
+              htmlPath = dir </> (base ++ ".html")
+          createDirectoryIfMissing True dir
+          writeFile htmlPath (T.unpack (renderResearchHtml rv))
+          hPutStrLn stderr $ "Wrote research HTML to " ++ htmlPath
           when doJson $ do
             BL.putStr (encode rv)
-          when doHtml $ do
-            putStrLn "HTML export not yet implemented"
 
     PushCmd graphPath uri user password pushMode topN -> do
       putStrLn $ "[graphos] Push: loading " ++ graphPath
