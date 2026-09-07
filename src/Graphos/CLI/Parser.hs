@@ -28,6 +28,7 @@ module Graphos.CLI.Parser
 
 import Options.Applicative
 import Data.Text (Text)
+import Data.Char (toLower)
 import GHC.Conc (numCapabilities)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
@@ -35,6 +36,7 @@ import Graphos.UseCase.Query.Refine (EdgeMode(..))
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
+import Graphos.Domain.Config.Detection (DetectionMode(..))
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), parsePattern)
 
@@ -113,7 +115,10 @@ pipelineOpts = PipelineConfig
          <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
           <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
           <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
-          <*> fmap not (switch (long "no-strict-graph" <> help "Disable strict startup graph validation (tolerant load on corrupt graph.json)"))
+           <*> fmap not (switch (long "no-strict-graph" <> help "Disable strict startup graph validation (tolerant load on corrupt graph.json)"))
+           <*> optional (option detectModeReader (long "detect-mode" <> metavar "MODE" <> help "Generated/vendored/minified detection mode: exclude|collapse|off (default: exclude)"))
+           <*> switch (long "no-detect" <> help "Disable generated/vendored/minified detection (equivalent to --detect-mode off)")
+           <*> optional (option auto (long "minified-threshold" <> help "Longest allowed line length before a file is classified as Minified (default: 5000)"))
 
 
 granularityReader :: ReadM Granularity
@@ -122,6 +127,13 @@ granularityReader = eitherReader $ \s -> case s of
   "function" -> Right GranularityFunction
   "file"     -> Right GranularityFile
   other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
+
+detectModeReader :: ReadM DetectionMode
+detectModeReader = eitherReader $ \s -> case map toLower s of
+  "exclude"  -> Right Exclude
+  "collapse" -> Right Collapse
+  "off"      -> Right Off
+  _          -> Left $ "Unknown detection mode: " ++ s ++ ". Expected exclude, collapse, or off"
 
 heapSizeReader :: String -> Either String Int
 heapSizeReader s = case span (`notElem` ['G','g','M','m']) s of

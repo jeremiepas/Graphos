@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-unused-imports #-}
 module Graphos.Infrastructure.Observability.SDKSpec where
 
 import Test.Hspec
@@ -7,7 +8,7 @@ import Control.Exception (catch, SomeException)
 import System.Directory (doesDirectoryExist, doesFileExist, getTemporaryDirectory, listDirectory, removeDirectoryRecursive)
 import System.FilePath ((</>))
 import System.IO (readFile)
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (getCurrentTime)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
@@ -54,17 +55,17 @@ spec = do
     it "retains only the last 1000 spans when more than 10000 are inserted" $ do
       st <- newSpanStore 1000
       now <- getCurrentTime
-      forM_ [1..10000] $ \i ->
+      forM_ ([1..10000] :: [Int]) $ \i ->
         insertSpan st (SpanRecord (T.pack ("span_" ++ show i)) now now Map.empty)
       spans <- readSpans st
       length spans `shouldBe` 1000
       map srName spans `shouldBe`
-        [T.pack ("span_" ++ show i) | i <- [9001..10000]]
+        [T.pack ("span_" ++ show i) | i <- [9001..10000] :: [Int]]
 
     it "does not grow beyond capacity when inserting a huge number of spans" $ do
       st <- newSpanStore 1000
       now <- getCurrentTime
-      forM_ [1..100000] $ \i ->
+      forM_ ([1..100000] :: [Int]) $ \i ->
         insertSpan st (SpanRecord (T.pack ("s_" ++ show i)) now now Map.empty)
       spans <- readSpans st
       length spans `shouldSatisfy` (\n -> n <= 1000)
@@ -74,7 +75,7 @@ spec = do
       tmp <- mkTempPath "bound"
       cleanDir tmp
       env <- newDebugTraceEnvAt True tmp defaultDebugTraceCapacity
-      forM_ [1..20000] $ \i ->
+      forM_ ([1..20000] :: [Int]) $ \i ->
         debugTraceEvent env (T.pack ("evt_" ++ show i)) Map.empty
       n <- debugBufferLen env
       n `shouldSatisfy` (\x -> x <= defaultDebugTraceCapacity)
@@ -88,7 +89,7 @@ spec = do
       tmp <- mkTempPath "cap"
       cleanDir tmp
       env <- newDebugTraceEnvAt True tmp 500
-      forM_ [1..5000] $ \i ->
+      forM_ ([1..5000] :: [Int]) $ \i ->
         debugTraceEvent env (T.pack ("e_" ++ show i)) Map.empty
       n <- debugBufferLen env
       n `shouldSatisfy` (\x -> x <= 500)
@@ -105,7 +106,7 @@ spec = do
 
     it "aggregates 100k observations into a constant-size metric" $ do
       store <- newMetricsStore
-      forM_ [1..100000] $ \i ->
+      forM_ ([1..100000] :: [Int]) $ \i ->
         observeHistogram store "hist_scale" (realToFrac i :: Double)
       out <- renderPrometheusMetrics store
       out `shouldSatisfy` (\s -> "hist_scale_count 100000" `T.isInfixOf` s)

@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-unused-imports #-}
 module Graphos.UseCase.DetectClassificationSpec (spec) where
 
 import qualified Data.Map.Strict as Map
@@ -8,10 +9,10 @@ import System.IO (writeFile)
 import System.IO.Temp (withSystemTempDirectory)
 import System.FilePath ((</>))
 import Test.Hspec
-import Test.QuickCheck (Property, property)
+import Test.QuickCheck (property)
 
 import Graphos.Domain.Types.Pipeline
-import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig, validDetectionConfig)
+import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
 import Graphos.UseCase.Detect
 
 spec :: Spec
