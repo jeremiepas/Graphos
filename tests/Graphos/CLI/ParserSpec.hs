@@ -83,6 +83,11 @@ spec = do
   describe "query family uniform flag surface" $ do
     it "query accepts --json / --label-width / --edges all / --budget" $ do
       parseWith queryOpts ["q", "--json", "--label-width", "80", "--edges", "all", "--budget", "1000"] `shouldSatisfy` isRight
+    it "query accepts --max-nodes / --max-label-chars output controls" $ do
+      parseWith queryOpts ["q", "--max-nodes", "10", "--max-label-chars", "40"] `shouldSatisfy` isRight
+    it "query help surface lists --max-nodes / --max-label-chars" $ do
+      renderCommandReference `shouldSatisfy` isInfixOf "--max-nodes"
+      renderCommandReference `shouldSatisfy` isInfixOf "--max-label-chars"
     it "query accepts --edges semantic" $ do
       parseWith queryOpts ["q", "--edges", "semantic"] `shouldSatisfy` isRight
     it "query rejects an unknown --edges mode" $ do

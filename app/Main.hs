@@ -31,7 +31,7 @@ import Graphos.UseCase.Pipeline (runPipeline, runIncrementalPipeline, runSingleF
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
-import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..))
+import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
@@ -269,12 +269,18 @@ main = do
       case loadResult of
         Left err -> (if cqoJson qopts then hPutStrLn stderr else putStrLn) $ "Error: " ++ T.unpack err
         Right loaded -> do
-          let g = lrGraph loaded
-              idx = lrIndex loaded
-              scoredResp = queryGraphWithIndexScored g idx question mode budget
-              refineCfg = RefineConfig { rcEdgeMode = cqoEdges qopts, rcLabelWidth = cqoLabelWidth qopts }
-              refinedResp = refineResponse refineCfg (gNodes g) scoredResp
-          if cqoJson qopts
+           let g = lrGraph loaded
+               idx = lrIndex loaded
+               scoredResp0 = queryGraphWithIndexScored g idx question mode budget
+               scoredResp = case cqoMaxNodes qopts of
+                 Just n | n > 0 -> scoredResp0 { qrespNodes = take n (qrespNodes scoredResp0) }
+                 _ -> scoredResp0
+               labelWidth = case cqoMaxLabelChars qopts of
+                 Just n | n > 0 -> n
+                 _ -> cqoLabelWidth qopts
+               refineCfg = RefineConfig { rcEdgeMode = cqoEdges qopts, rcLabelWidth = labelWidth }
+               refinedResp = refineResponse refineCfg (gNodes g) scoredResp
+           if cqoJson qopts
             then putStrLn $ T.unpack $ renderQueryResponseJSON refinedResp
             else putStrLn $ T.unpack $ renderQueryResponseText budget refinedResp
 

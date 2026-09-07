@@ -65,9 +65,11 @@ import Graphos.Domain.Graph.Score
   , verdictThreshold
    , normalizeScore
    , fullLabelBoostForTerms
-   , resultHash
-  , findSuggestions
-  )
+    , resultHash
+   , findSuggestions
+   )
+
+import Graphos.UseCase.Query.Budget (BudgetCtl(..), defaultBudgetCtl, boundedNodes)
 
 -- | Query result
 data QueryResult = QueryResult
@@ -176,16 +178,19 @@ queryGraphWithIndexScoredCached g idx cfg query mode budget =
             , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoostForTerms terms (toText (nodeLabel n))
             , snSourceFile  = toText (nodeSourceFile n)
             , snCommunityId = nodeCommunityId n
+            , snKind        = fmap toText (nodeKind n)
             }
         | nid <- Set.toList expanded
         , nid `Map.member` scoreMap
         , Just n <- [Map.lookup nid nodeMap]
         ]
-      -- Sort score-descending and cap to budget
+      -- Sort score-descending and cap to the serialized byte budget via
+      -- rank-then-serialize. Nodes are already score-ranked, so the running
+      -- byte counter keeps the most relevant nodes first and reports how many
+      -- were dropped.
       scoredNodesSorted :: [ScoredNode]
-      scoredNodesSorted = take budget $ sortOn (negate . snScore) scoredNodes
-      omittedNodes :: Int
-      omittedNodes = length scoredNodes - length scoredNodesSorted
+      (scoredNodesSorted, omittedNodes) =
+        boundedNodes (defaultBudgetCtl { bcByteBudget = budget }) (sortOn (negate . snScore) scoredNodes)
       -- Edges within the subgraph
       nodeLblMap :: Map NodeId Text
       nodeLblMap = Map.fromList [(nid, toText (nodeLabel n)) | (nid, n) <- Map.toList nodeMap, nid `Set.member` expanded]
@@ -338,6 +343,7 @@ symbolLookup name g idx =
                         , snScore       = if null exactHits then 0.5 else 1.0
                         , snSourceFile  = toText (nodeSourceFile n)
                         , snCommunityId = nodeCommunityId n
+                        , snKind        = fmap toText (nodeKind n)
                         }
                     | nid <- allHitIds
                     , Just n <- [Map.lookup nid nodeMap]
@@ -384,12 +390,13 @@ neighborhoodExpansion startId depth g idx =
                     }
        Just _ -> let expanded = bfsFrom idx startId depth
                      scoredNodes = [ ScoredNode
-                                       { snNodeId      = nid
-                                       , snLabel       = toText (nodeLabel n)
-                                       , snScore       = proximityScore startId nid idx
-                                        , snSourceFile  = toText (nodeSourceFile n)
-                                       , snCommunityId = nodeCommunityId n
-                                       }
+                                        { snNodeId      = nid
+                                        , snLabel       = toText (nodeLabel n)
+                                        , snScore       = proximityScore startId nid idx
+                                         , snSourceFile  = toText (nodeSourceFile n)
+                                        , snCommunityId = nodeCommunityId n
+                                        , snKind        = fmap toText (nodeKind n)
+                                        }
                                     | nid <- Set.toList expanded
                                     , Just n <- [Map.lookup nid nodeMap]
                                     ]

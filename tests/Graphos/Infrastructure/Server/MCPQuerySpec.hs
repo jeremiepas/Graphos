@@ -2,7 +2,9 @@ module Graphos.Infrastructure.Server.MCPQuerySpec where
 
 import Test.Hspec
 import Data.IORef (newIORef, readIORef)
-import Data.Aeson (Value(..), Object)
+import Data.Aeson (Value(..), Object, encode)
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Char8 as C8
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
@@ -78,6 +80,32 @@ spec = describe "MCP query handler JSON shape" $ do
           keyLookup "nodes" obj `shouldBe` True
           keyLookup "edges" obj `shouldBe` True
           keyLookup "omitted" obj `shouldBe` True
+        Right _ -> expectationFailure "expected JSON object"
+
+    it "emits compact node fields (kind + preview) and drops full-text blobs" $ do
+      let idx2 = buildIndex queryGraph Map.empty
+          args = mkArgs [("question", String "Auth")]
+      result <- handleQueryGraph queryGraph idx2 args
+      case result of
+        Left err -> expectationFailure (T.unpack err)
+        Right (Object obj) ->
+          let s = BSL.toStrict (encode obj)
+          in do
+            C8.isInfixOf "\"kind\"" s `shouldBe` True
+            C8.isInfixOf "\"preview\"" s `shouldBe` True
+            not (C8.isInfixOf "\"line_start\"" s) `shouldBe` True
+            not (C8.isInfixOf "\"signature\"" s) `shouldBe` True
+        Right _ -> expectationFailure "expected JSON object"
+
+    it "keeps the serialized node list within a generous byte budget" $ do
+      let idx2 = buildIndex queryGraph Map.empty
+          args = mkArgs [("question", String "Auth"), ("budget", Number 100000)]
+      result <- handleQueryGraph queryGraph idx2 args
+      case result of
+        Left err -> expectationFailure (T.unpack err)
+        Right (Object obj) ->
+          let bytes = BSL.length (encode obj)
+          in bytes `shouldSatisfy` (\b -> b <= 100000)
         Right _ -> expectationFailure "expected JSON object"
 
     it "returns none verdict and empty nodes/edges for unmatched query" $ do
