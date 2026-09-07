@@ -30,10 +30,9 @@ import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline
-  ( FileClass(..), FileMeta(..)
-  , isSourceClass )
+  ( FileMeta(..) )
 import Graphos.Domain.Config.Detection
-  ( DetectionConfig(..), defaultDetectionConfig )
+  ( DetectionConfig(..), DetectionMode(..), defaultDetectionConfig )
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
 import Graphos.Infrastructure.FileSystem.Ignore (matches, matchingPattern)
 
@@ -262,10 +261,13 @@ categorizeFilesWithConfig files extMap cfg = do
         fm <- fileMetaFromPath cfg f
         pure (f, classifyFile cfg fm)
       ) files
-  let sourceFiles = [ f | (f, c) <- classified, isSourceClass c ]
+  let eligibleFiles =
+        case dcMode cfg of
+          Off -> [ f | (f, _) <- classified ]
+          _   -> [ f | (f, c) <- classified, isSourceClass c ]
       byClass = Map.fromListWith (++ ) (reverse [ (c, [f]) | (f, c) <- classified ])
       categorized = Map.fromList
-        [ (cat, filter (\f -> takeExtension f `elem` exts) sourceFiles)
+        [ (cat, filter (\f -> takeExtension f `elem` exts) eligibleFiles)
         | (cat, exts) <- Map.toList extMap
         ]
   pure (categorized, byClass)

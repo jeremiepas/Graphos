@@ -39,6 +39,7 @@ import GHC.Conc (numCapabilities)
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
+import Graphos.Domain.Config.Detection (DetectionMode(..))
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
 
 -- | Pipeline configuration
@@ -93,9 +94,12 @@ data PipelineConfig = PipelineConfig
    , cfgIgnorePatterns     :: [AnnotatedPattern]        -- ^ CLI-provided --ignore patterns merged with .gitignore/.graphosignore
   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
-   , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
-   , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
-    } deriving (Eq, Show)
+     , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
+    , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
+     , cfgDetectionMode      :: Maybe DetectionMode       -- ^ CLI --detect-mode override (exclude|collapse|off)
+     , cfgDetectDisabled     :: Bool                      -- ^ --no-detect: force detection off
+     , cfgMinifiedThreshold  :: Maybe Int                 -- ^ CLI --minified-threshold override
+     } deriving (Eq, Show)
 
 -- | Edge density level for inference
 -- Controls how aggressively the pipeline infers additional edges between nodes.
@@ -177,8 +181,11 @@ defaultConfig = PipelineConfig
   , cfgRtsProfile         = False
   , cfgMaxHeap            = Nothing
    , cfgLspConcurrency     = 2
-   , cfgStrictGraph        = True
-   }
+    , cfgStrictGraph        = True
+    , cfgDetectionMode      = Nothing
+    , cfgDetectDisabled     = False
+    , cfgMinifiedThreshold  = Nothing
+    }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
 -- When provided, each file's extraction is pushed to Neo4j immediately
