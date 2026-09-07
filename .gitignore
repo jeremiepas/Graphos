@@ -18,6 +18,7 @@ result-*
 .tmp/
 tmp/
 .worktrees/
+.paperclip/worktrees/
 # .opencode local dev config (agent + skills tracked, rest ignored)
 .opencode/*
 !.opencode/agent/
