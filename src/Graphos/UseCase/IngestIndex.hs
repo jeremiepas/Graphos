@@ -22,6 +22,7 @@ import System.Directory (doesFileExist)
 import Graphos.Domain.Types
   ( NodeId, IngestIndex(..), emptyIngestIndex
   )
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 import Graphos.UseCase.Port.LLMPort (cosineSimilarity)
 
 -- | Load an IngestIndex from a JSON file.
@@ -40,7 +41,7 @@ loadIndex path = do
 
 -- | Save an IngestIndex to a JSON file.
 saveIndex :: FilePath -> IngestIndex -> IO ()
-saveIndex path idx = BSL.writeFile path (Aeson.encode idx)
+saveIndex path idx = writeFileAtomic path (Aeson.encode idx)
 
 -- | Merge two indices (right-biased: overwrites on nodeId collision).
 mergeIndices :: IngestIndex -> IngestIndex -> IngestIndex

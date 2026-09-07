@@ -77,10 +77,11 @@ library
                     Graphos.Domain.Labeling
                     Graphos.Domain.Logging
                     -- Use Cases
-                    Graphos.UseCase.Pipeline
-                    Graphos.UseCase.Pipeline.Core
-                     Graphos.UseCase.Pipeline.Incremental
-                     Graphos.UseCase.Subgraph
+                     Graphos.UseCase.Pipeline
+                     Graphos.UseCase.Pipeline.Core
+                      Graphos.UseCase.Pipeline.Incremental
+                      Graphos.UseCase.Pipeline.Staging
+                      Graphos.UseCase.Subgraph
                      Graphos.UseCase.Detect
                       Graphos.UseCase.Extract
                       Graphos.UseCase.Extract.Haskell
@@ -145,9 +146,10 @@ library
                       Graphos.Infrastructure.Extract.Image
                       Graphos.Infrastructure.Extract.Office
                       Graphos.Infrastructure.Extract.Markdown
-                     -- Infrastructure - FileSystem
-                     Graphos.Infrastructure.FileSystem.Watcher
-                     Graphos.Infrastructure.FileSystem.Cache
+                      -- Infrastructure - FileSystem
+                      Graphos.Infrastructure.FileSystem.AtomicWrite
+                      Graphos.Infrastructure.FileSystem.Watcher
+                      Graphos.Infrastructure.FileSystem.Cache
                      Graphos.Infrastructure.FileSystem.Ignore
                      Graphos.Infrastructure.FileSystem.Sensitive
                       Graphos.Infrastructure.FileSystem.Manifest
@@ -311,8 +313,9 @@ test-suite graphos-test
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
-    Graphos.UseCase.PipelineSpec
-    Graphos.UseCase.ExtractSpec
+     Graphos.UseCase.PipelineSpec
+     Graphos.UseCase.StagingSpec
+     Graphos.UseCase.ExtractSpec
     Graphos.UseCase.InferSpec
     Graphos.UseCase.Extract.HaskellSpec
     Graphos.UseCase.Extract.ImageSpec
@@ -341,8 +344,9 @@ test-suite graphos-test
     Graphos.Infrastructure.Server.MCPQuerySpec
     Graphos.Infrastructure.Server.QueryAPISpec
     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
-    Graphos.Infrastructure.FileSystem.IgnoreSpec
-    Graphos.Infrastructure.Scaffold.WriterSpec
+     Graphos.Infrastructure.FileSystem.IgnoreSpec
+     Graphos.Infrastructure.FileSystem.AtomicWriteSpec
+     Graphos.Infrastructure.Scaffold.WriterSpec
     Graphos.Domain.ScaffoldSpec
     Graphos.UseCase.ScaffoldSpec
     Graphos.CLI.ParserSpec

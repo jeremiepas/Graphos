@@ -7,7 +7,6 @@ module Graphos.Infrastructure.Export.JSON
   ) where
 
 import Data.Aeson (encode, object, (.=))
-import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -15,6 +14,7 @@ import Data.Text (Text)
 import Graphos.Domain.Types
 import qualified Graphos.Domain.Types.Graph as G (LabeledGraph(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
 -- | Export graph as JSON
 exportGraph :: Graph -> Analysis -> FilePath -> IO ()
@@ -33,7 +33,7 @@ exportGraphWithLabels g analysis mLabels path = do
       withLabels = case mLabels of
         Just labels -> base ++ ["community_labels" .= labels]
         Nothing    -> base
-  BSL.writeFile path (encode (object withLabels))
+  writeFileAtomic path (encode (object withLabels))
 
 -- | Export a subgraph (a 'LabeledGraph') in the standard graph.json format so
 -- it is directly consumable via @--graph@. Community/analysis sections are
@@ -47,7 +47,7 @@ exportSubgraphJSON g path = do
                 , "god_nodes"        .= ([] :: [GodNode])
                 , "community_labels" .= (Map.empty :: Map Int Text)
                 ]
-  BSL.writeFile path (encode (object payload))
+  writeFileAtomic path (encode (object payload))
 
 -- | Save a checkpoint of the graph during pipeline execution.
 -- Writes nodes and edges extracted so far; communities/analysis are empty.
@@ -64,4 +64,4 @@ saveCheckpoint g path = do
                 , "god_nodes"   .= ([] :: [GodNode])
                 , "checkpoint" .= True
                 ]
-  BSL.writeFile path (encode (object payload))
+  writeFileAtomic path (encode (object payload))

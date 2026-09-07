@@ -13,6 +13,7 @@ import System.Directory (createDirectoryIfMissing)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, degree)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
 
 -- | Export as Obsidian vault
 exportObsidian :: Graph -> Analysis -> FilePath -> IO ()
@@ -59,7 +60,7 @@ writeNodeNote g dir (nid, n) = do
         , "## Connections"
         , T.intercalate "\n" neighborLinks
         ]
-  writeFile filepath (T.unpack (frontmatter <> content))
+  writeStringFileAtomic filepath (T.unpack (frontmatter <> content))
 
 -- | Write a community overview note
 writeCommunityNote :: Graph -> FilePath -> CohesionMap -> (CommunityId, [NodeId]) -> IO ()
@@ -79,7 +80,7 @@ writeCommunityNote g dir cohesion (cid, members) = do
         , "## Members"
         , memberList
         ]
-  writeFile filepath (T.unpack content)
+  writeStringFileAtomic filepath (T.unpack content)
 
 -- | Write graph.canvas file for Obsidian
 writeCanvasFile :: Graph -> FilePath -> CommunityMap -> IO ()
@@ -88,7 +89,7 @@ writeCanvasFile g dir commMap = do
       nodesSection = concatMap (uncurry (formatCanvasNodesInCommunity g)) (Map.toList commMap)
       edgesSection = [formatCanvasEdge src tgt | ((src, tgt), _) <- Map.toList (gEdges g)]
       canvas = unlines (["---", "nodes:"] ++ nodesSection ++ ["edges:"] ++ edgesSection)
-  writeFile filepath canvas
+  writeStringFileAtomic filepath canvas
 
 formatCanvasNodesInCommunity :: Graph -> CommunityId -> [NodeId] -> [String]
 formatCanvasNodesInCommunity _g cid members =

@@ -11,14 +11,15 @@ import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
 
 -- | Export graph as SVG
 exportSVG :: Graph -> Analysis -> FilePath -> IO ()
 exportSVG g analysis path = do
   let nodeCount = Map.size (gNodes g)
   if nodeCount > 5000
-    then writeFile path "<!-- Graph too large for SVG visualization. Use Obsidian vault instead. -->"
-    else writeFile path (T.unpack (generateSVG g analysis))
+    then writeStringFileAtomic path "<!-- Graph too large for SVG visualization. Use Obsidian vault instead. -->"
+    else writeStringFileAtomic path (T.unpack (generateSVG g analysis))
 
 -- | Generate SVG with circular layout (simple, deterministic)
 generateSVG :: Graph -> Analysis -> Text

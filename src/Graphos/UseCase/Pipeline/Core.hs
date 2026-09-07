@@ -12,7 +12,6 @@ module Graphos.UseCase.Pipeline.Core
 import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when)
-import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
@@ -35,6 +34,11 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.Infrastructure.FileSystem.Ignore (apPriority)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
+import Graphos.UseCase.Pipeline.Staging
+  ( withStagedOutput
+  , relocateStagedPath
+  )
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
@@ -45,6 +49,7 @@ import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
 import Graphos.UseCase.Report (generateReport)
 import Graphos.UseCase.Label (labelCommunities)
+import Graphos.UseCase.Load (validateGraphFile, corruptGraphMessage)
 import Graphos.Domain.Labeling (LabelingResult(..))
 
 -- | Minimum ratio of edges to nodes for a code-dominant graph. Values below
@@ -68,7 +73,7 @@ generateGraphEmbeddings llm cfg graph = do
 
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
 writeEmbeddingsSidecar :: FilePath -> Map NodeId [Double] -> IO ()
-writeEmbeddingsSidecar path embs = BSL.writeFile path (encode embs)
+writeEmbeddingsSidecar path embs = writeFileAtomic path (encode embs)
 
 -- | Log the semantic edge inference decision (mode + inferred count) for the current run.
 logSemanticInference :: LoggingPort -> SemanticEdgesConfig -> SemanticMode -> [Edge] -> IO ()
@@ -93,9 +98,44 @@ data PipelineResult = PipelineResult
   , prNeo4jPath   :: Maybe FilePath
   } deriving (Eq, Show)
 
--- | Run the full pipeline
+-- | Run the full pipeline.
+--
+-- The build/export phase writes into a staging directory which is swapped
+-- into the real output directory only on success, so an interrupted or
+-- failed rebuild never destroys the previous output.
 runPipeline :: AppEnv -> PipelineConfig -> IO (Either Text PipelineResult)
-runPipeline appEnv config = catch (do
+runPipeline appEnv config =
+  let finalOutputDir = cfgOutputDir config
+      graphPath = finalOutputDir ++ "/graph.json"
+  in validateStartupGraph (cfgStrictGraph config) graphPath >>= \startup ->
+     case startup of
+       Left err -> pure (Left (corruptGraphMessage graphPath err))
+       Right () -> withStagedOutput finalOutputDir $ \stagingDir -> do
+         let stagedConfig = config { cfgOutputDir = stagingDir }
+         result <- runPipelineBody appEnv stagedConfig
+         pure $ fmap (relocateResult finalOutputDir stagingDir) result
+   where
+     relocateResult final staging pr = pr
+       { prReportPath = relocateStagedPath staging final (prReportPath pr)
+       , prGraphPath  = relocateStagedPath staging final (prGraphPath pr)
+       , prHtmlPath   = relocateStagedPath staging final <$> prHtmlPath pr
+       , prNeo4jPath  = relocateStagedPath staging final <$> prNeo4jPath pr
+       }
+
+-- | Validate an existing graph.json at startup before any staging or
+-- destructive work begins. Skipped when strict mode is disabled
+-- (--no-strict-graph); otherwise fails with a clear message naming the path
+-- and a recovery hint when the file is corrupt.
+validateStartupGraph :: Bool -> FilePath -> IO (Either Text ())
+validateStartupGraph strict graphPath =
+  if strict
+    then validateGraphFile graphPath
+    else pure (Right ())
+
+-- | The pipeline body, writing all artifacts under @cfgOutputDir@ (which the
+-- caller points at a staging directory during a staged rebuild).
+runPipelineBody :: AppEnv -> PipelineConfig -> IO (Either Text PipelineResult)
+runPipelineBody appEnv config = catch (do
   let lp = loggingPort appEnv
       op = observabilityPort appEnv
       fsp = fileSystemPort appEnv

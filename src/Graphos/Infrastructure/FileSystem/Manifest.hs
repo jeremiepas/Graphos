@@ -9,7 +9,9 @@ import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eit
 import qualified Data.ByteString.Lazy as BSL
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.Directory (doesFileExist, createDirectoryIfMissing)
+import System.Directory (doesFileExist)
+
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
 -- | Manifest entry - file path and its modification time
 data ManifestEntry = ManifestEntry
@@ -32,12 +34,11 @@ instance FromJSON ManifestEntry where
     hash  <- v .: "hash"
     pure ManifestEntry { mePath = path, meMtime = mtime, meHash = hash }
 
--- | Save manifest to graphos-out/manifest.json
+-- | Save manifest to graphos-out/manifest.json (atomic)
 saveManifest :: [ManifestEntry] -> FilePath -> IO ()
 saveManifest entries root = do
   let path = root ++ "/graphos-out/manifest.json"
-  createDirectoryIfMissing True (root ++ "/graphos-out")
-  BSL.writeFile path (encode entries)
+  writeFileAtomic path (encode entries)
 
 -- | Load manifest from graphos-out/manifest.json
 loadManifest :: FilePath -> IO (Either Text [ManifestEntry])

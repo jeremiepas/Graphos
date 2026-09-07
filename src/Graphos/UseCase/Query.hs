@@ -42,6 +42,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
+
 import System.Directory (createDirectoryIfMissing)
 import Data.List (sortOn, nubBy)
 import GHC.Generics (Generic)
@@ -292,7 +294,7 @@ saveQueryResult outputDir question answer answerType sourceNodes = do
         , "---"
         ]
       content = frontmatter <> "\n# Q: " <> question <> "\n\n" <> answer <> "\n"
-  writeFile filepath (T.unpack content)
+  writeStringFileAtomic filepath (T.unpack content)
   where
     quoteWrap t = "\"" <> t <> "\""
 
