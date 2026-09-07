@@ -48,6 +48,7 @@ data PipelineConfig = PipelineConfig
   , cfgUpdate       :: Bool
   , cfgClusterOnly  :: Bool
   , cfgNoCluster    :: Bool          -- ^ Skip clustering entirely (--no-cluster)
+  , cfgFresh        :: Bool          -- ^ Force full extraction, ignoring any existing checkpoint (--fresh / --no-checkpoint)
   , cfgLabel        :: Bool          -- ^ Use LLM to label communities (--label)
   , cfgObsidian     :: Bool
   , cfgObsidianDir  :: Maybe FilePath
@@ -131,6 +132,7 @@ defaultConfig = PipelineConfig
   , cfgUpdate       = False
   , cfgClusterOnly  = False
   , cfgNoCluster    = False
+  , cfgFresh        = False
   , cfgLabel        = False
   , cfgObsidian     = False
   , cfgObsidianDir  = Nothing

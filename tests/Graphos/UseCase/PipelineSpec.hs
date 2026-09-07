@@ -2,6 +2,7 @@ module Graphos.UseCase.PipelineSpec where
 
 import Data.Aeson (eitherDecode)
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Text as T
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -15,6 +16,7 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph.Core (Graph(..))
 import Graphos.UseCase.Pipeline.Core (generateGraphEmbeddings, writeEmbeddingsSidecar)
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
+import Graphos.Infrastructure.Export.JSON (saveCheckpoint, loadCheckpointInputSource)
 
 spec :: Spec
 spec = do
@@ -53,6 +55,28 @@ spec = do
         writeEmbeddingsSidecar path embs
         bs <- BSL.readFile path
         eitherDecode bs `shouldBe` Right embs
+
+  describe "checkpoint provenance (AC#3)" $ do
+    it "records input_source via saveCheckpoint and restores it via loadCheckpointInputSource" $ do
+      withSystemTempDirectory "graphos-checkpoint-roundtrip" $ \dir -> do
+        let path = dir </> "graph.checkpoint.json"
+            g = testGraph [testNode "a" "A" "a.hs"]
+        saveCheckpoint g path (T.pack "./src")
+        mSrc <- loadCheckpointInputSource path
+        mSrc `shouldBe` Just (T.pack "./src")
+
+    it "returns Nothing when the checkpoint file is absent" $ do
+      withSystemTempDirectory "graphos-checkpoint-absent" $ \dir -> do
+        mSrc <- loadCheckpointInputSource (dir </> "missing.checkpoint.json")
+        mSrc `shouldBe` Nothing
+
+    it "returns Nothing for a checkpoint written without input_source (old schema)" $ do
+      withSystemTempDirectory "graphos-checkpoint-old" $ \dir -> do
+        let path = dir </> "old.checkpoint.json"
+        -- A checkpoint from before input_source provenance was recorded.
+        BSL.writeFile path ("{\"nodes\":[],\"edges\":[],\"checkpoint\":true,\"schema_version\":\"1\"}")
+        mSrc <- loadCheckpointInputSource path
+        mSrc `shouldBe` Nothing
 
 -- ───────────────────────────────────────────────
 -- Fixtures

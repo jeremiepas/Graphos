@@ -2,7 +2,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Graphos.UseCase.Pipeline.Core
   ( runPipeline
+  , runClusterOnlyPipeline
   , PipelineResult(..)
+  , ClusterOutput(..)
+  , clusterGraph
   , edgeCollapseThreshold
   , generateGraphEmbeddings
   , writeEmbeddingsSidecar
@@ -12,6 +15,8 @@ module Graphos.UseCase.Pipeline.Core
 import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when)
+import Data.Maybe (isJust, fromJust)
+import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
@@ -98,6 +103,18 @@ data PipelineResult = PipelineResult
   , prNeo4jPath   :: Maybe FilePath
   } deriving (Eq, Show)
 
+-- | Result of the shared clustering / analysis stage. Both the full pipeline
+-- and the cluster-only entry point use this to avoid duplicating Steps 4-5.
+data ClusterOutput = ClusterOutput
+  { coEnrichedGraph :: Graph  -- ^ Graph ready for report + export (communities/analysis baked in)
+  , coGraphToWrite  :: Graph  -- ^ Graph whose nodes+edges are written incrementally to graph.json
+  , coCommunities   :: CommunityMap
+  , coCohesion      :: CohesionMap
+  , coAnalysis      :: Analysis
+  , coLabels        :: Maybe (Map CommunityId Text)
+  , coAggregates    :: [CommunityAggregate]
+  } deriving (Eq, Show)
+
 -- | Run the full pipeline.
 --
 -- The build/export phase writes into a staging directory which is swapped
@@ -155,12 +172,14 @@ runPipelineBody appEnv config = catch (do
                                               } }
         _ -> config
 
-  mCheckpoint <- fspLoadCheckpoint fsp (cfgOutputDir configWithStreaming)
-  case mCheckpoint of
-    Just chk -> do
-      lpLogInfo lp $ T.pack $ "Resuming from checkpoint: step " ++ show (chkCurrentStep chk)
-                           ++ ", " ++ show (length (chkFilesExtracted chk)) ++ " files already extracted"
-    Nothing -> lpLogInfo lp "No checkpoint found, starting fresh pipeline"
+  let isFresh = cfgFresh configWithStreaming
+  when isFresh (lpLogInfo lp "Checkpoint recovery disabled (--fresh); starting fresh")
+  when (not isFresh) (do
+    mCheckpoint <- fspLoadCheckpoint fsp (cfgOutputDir configWithStreaming)
+    case mCheckpoint of
+      Just chk -> lpLogInfo lp $ T.pack $ "Resuming from checkpoint: step " ++ show (chkCurrentStep chk)
+                                    ++ ", " ++ show (length (chkFilesExtracted chk)) ++ " files already extracted"
+      Nothing -> lpLogInfo lp "No checkpoint found, starting fresh pipeline")
 
   lpLogInfo lp "Step 1: Detecting files..."
   detectStart <- getCurrentTime
@@ -289,112 +308,32 @@ runPipelineBody appEnv config = catch (do
       iw <- epOpenIncrementalWriter ep (cfgOutputDir configWithStreaming ++ "/graph.json")
 
       let checkpointPath = cfgOutputDir configWithStreaming ++ "/graph.checkpoint.json"
-      epSaveCheckpoint ep graph checkpointPath
+      epSaveCheckpoint ep graph checkpointPath (T.pack (cfgInputPath configWithStreaming))
       lpLogInfo lp $ T.pack $ "  Checkpoint saved: " ++ checkpointPath
 
       performGC
 
-      (enrichedGraph, finalCommMap, _finalCohesion, analysis, llmLabelsResult, aggregatesResult) <-
-        if cfgNoCluster configWithStreaming
-          then do
-            lpLogInfo lp "Step 4: Skipping clustering (--no-cluster)"
-            let emptyCommMap = Map.empty :: CommunityMap
-                emptyCohesion = Map.empty :: CohesionMap
-                noAnalysis = analyzeGraph graph emptyCommMap emptyCohesion
-            epWriteNodes ep iw (Map.elems (gNodes graph))
-            epWriteEdges ep iw (Map.elems (gEdges graph))
-            epWriteCommunities ep iw emptyCommMap
-            epWriteCohesion ep iw emptyCohesion
-            epWriteGodNodes ep iw (analysisGodNodes noAnalysis)
-            epWriteCommunityAggregates ep iw []
-            epWriteCompositions ep iw (gCompositions graph)
-            epWriteEmbeddingsPath ep iw (fmap T.pack (gEmbeddingsPath graph))
-            epWriteAnalysisTail ep iw Nothing
-            epCloseWriter ep iw
-            pure (graph, emptyCommMap, emptyCohesion, noAnalysis, Nothing :: Maybe (Map.Map CommunityId Text), [])
-          else do
-            lpLogInfo lp "Step 4: Detecting communities..."
-            clusterStart <- getCurrentTime
-            let res = Resolution { resGamma = cfgResolution configWithStreaming
-                                 , resMinSize = cfgMinCommSize configWithStreaming
-                                 , resMergeInto = MergeToNeighbor
-                                 , resMaxIterations = cfgMaxLeidenIterations configWithStreaming
-                                 }
-                (commMap, cohesion) = clusterGraphWithResolution graph res
-            _ <- evaluate (Map.size commMap + sum (map length (Map.elems commMap)))
-            (commMap, cohesion) `deepseq` pure ()
-            clusterEnd <- getCurrentTime
-            opRecordHistogram op "graphos_cluster_duration_seconds" (realToFrac (diffUTCTime clusterEnd clusterStart) :: Double)
-            opIncCounter op "graphos_pipeline_steps_total" 1
-            opSetGauge op "graphos_communities" (fromIntegral $ Map.size commMap)
-            opDebugTraceSpan op "cluster" (StartTime clusterStart) (EndTime clusterEnd) (Map.fromList [("communities", T.pack $ show $ Map.size commMap)])
-
-            let seCfg = (gcSemanticEdges (cfgGraphosConfig configWithStreaming)) { seEnabled = not (cfgNoSemanticEdges configWithStreaming) }
-                force = cfgForceSemanticEdges configWithStreaming
-                mode = semanticMode seCfg force graph
-                semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-                allInferred = inferNonSemanticEdges (cfgEdgeDensity configWithStreaming) graph commMap ++ semanticEdges
-                enrichedGraph' = (if null allInferred
-                  then graph
-                  else addEdges graph allInferred)
-                  { gEmbeddings = gEmbeddings graph
-                  , gEmbeddingsPath = gEmbeddingsPath graph }
-            enrichedGraph' `deepseq` pure ()
-            logSemanticInference lp seCfg mode semanticEdges
-            lpLogInfo lp $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity configWithStreaming) ++ ")"
-
-            lpLogInfo lp "Step 5: Re-clustering and analyzing..."
-            step5Start <- getCurrentTime
-            let (finalComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
-                anal = analyzeGraph enrichedGraph' finalComm finalCohes
-            _ <- evaluate (Map.size finalComm + sum (map length (Map.elems finalComm)))
-            _ <- evaluate (length (analysisGodNodes anal))
-            (finalComm, finalCohes) `deepseq` pure ()
-            step5End <- getCurrentTime
-            opRecordHistogram op "graphos_cluster_step5_duration_seconds" (realToFrac (diffUTCTime step5End step5Start) :: Double)
-            opDebugTraceSpan op "cluster_step5" (StartTime step5Start) (EndTime step5End) (Map.fromList [("communities", T.pack $ show $ Map.size finalComm)])
-            lpLogInfo lp $ T.pack $ "  Re-cluster: " ++ show (Map.size finalComm) ++ " communities"
-
-            let compMap = computeCompositions enrichedGraph' finalComm
-                graphWithComps = enrichedGraph' { gCompositions = Just (toJSON compMap) }
-                joinedGraph = joinCommunitiesToNodes enrichedGraph' finalComm
-
-            epWriteNodes ep iw (Map.elems (gNodes joinedGraph))
-            epWriteEdges ep iw (Map.elems (gEdges joinedGraph))
-            epWriteCommunities ep iw finalComm
-            epWriteCohesion ep iw finalCohes
-            epWriteGodNodes ep iw (analysisGodNodes anal)
-
-            llmLabels <- if cfgLabel configWithStreaming
-              then do
-                lpLogInfo lp "Step 5b: Labeling communities via LLM..."
-                let lblCfg = gcLabeling (cfgGraphosConfig configWithStreaming)
-                lpLogInfo lp $ T.pack $ "  Labeling config: provider=" ++ labelingProvider lblCfg
-                                       ++ " model=" ++ labelingModel lblCfg
-                                       ++ " baseUrl=" ++ labelingBaseUrl lblCfg
-                                       ++ " batchSize=" ++ show (labelingBatchSize lblCfg)
-                labelingStart <- getCurrentTime
-                result <- labelCommunities appEnv enrichedGraph' finalComm finalCohes lblCfg
-                labelingEnd <- getCurrentTime
-                lpLogInfo lp $ T.pack $ "  Labeled " ++ show (Map.size (lrLabels result)) ++ " communities in "
-                                       ++ show (diffUTCTime labelingEnd labelingStart) ++ "s"
-                pure (Just (lrLabels result))
-              else pure Nothing
-
-            let artPoints = GAnalysis.articulationPoints enrichedGraph'
-                aggregates = computeCommunityAggregates joinedGraph finalComm finalCohes artPoints llmLabels
-            _ <- evaluate (length aggregates)
-            epWriteCommunityAggregates ep iw aggregates
-
-            epWriteCompositions ep iw (gCompositions graphWithComps)
-            epWriteEmbeddingsPath ep iw (fmap T.pack (gEmbeddingsPath graphWithComps))
-            epWriteAnalysisTail ep iw llmLabels
-            epFlushWriter ep iw
-            epCloseWriter ep iw
-            lpLogDebug lp "  Final graph, communities, and cohesion written incrementally"
-            pure (graphWithComps, finalComm, finalCohes, anal, llmLabels, aggregates)
+      -- Step 4/5: clustering + analysis (shared with --cluster-only).
+      clusterOut <- clusterGraph appEnv graph configWithStreaming
+      let enrichedGraph     = coEnrichedGraph clusterOut
+          finalCommMap      = coCommunities clusterOut
+          analysis          = coAnalysis clusterOut
+          llmLabelsResult   = coLabels clusterOut
+          aggregatesResult  = coAggregates clusterOut
 
       lpLogInfo lp "  graph.json written incrementally"
+      epWriteNodes ep iw (Map.elems (gNodes (coGraphToWrite clusterOut)))
+      epWriteEdges ep iw (Map.elems (gEdges (coGraphToWrite clusterOut)))
+      epWriteCommunities ep iw finalCommMap
+      epWriteCohesion ep iw (coCohesion clusterOut)
+      epWriteGodNodes ep iw (analysisGodNodes analysis)
+      epWriteCommunityAggregates ep iw (coAggregates clusterOut)
+      epWriteCompositions ep iw (gCompositions enrichedGraph)
+      epWriteEmbeddingsPath ep iw (fmap T.pack (gEmbeddingsPath enrichedGraph))
+      epWriteAnalysisTail ep iw llmLabelsResult
+      epFlushWriter ep iw
+      epCloseWriter ep iw
+      lpLogDebug lp "  Final graph, communities, and cohesion written incrementally"
 
       performGC
 
@@ -435,3 +374,129 @@ runPipelineBody appEnv config = catch (do
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Pipeline error: " ++ show e
   where
     allFiles d = concat (Map.elems (detectionFiles d))
+
+-- | Shared clustering + analysis stage (Steps 4-5). Used by both the full
+-- pipeline and --cluster-only so neither duplicates community detection, edge
+-- inference, re-clustering, analysis, labeling, or aggregation logic.
+clusterGraph :: AppEnv -> Graph -> PipelineConfig -> IO ClusterOutput
+clusterGraph appEnv graph config = do
+  let lp = loggingPort appEnv
+      op = observabilityPort appEnv
+  if cfgNoCluster config
+    then do
+      lpLogInfo lp "Step 4: Skipping clustering (--no-cluster)"
+      let emptyCommMap = Map.empty :: CommunityMap
+          emptyCohesion = Map.empty :: CohesionMap
+          noAnalysis = analyzeGraph graph emptyCommMap emptyCohesion
+      pure ClusterOutput
+        { coEnrichedGraph = graph
+        , coGraphToWrite = graph
+        , coCommunities = emptyCommMap
+        , coCohesion = emptyCohesion
+        , coAnalysis = noAnalysis
+        , coLabels = Nothing
+        , coAggregates = []
+        }
+    else do
+      lpLogInfo lp "Step 4: Detecting communities..."
+      clusterStart <- getCurrentTime
+      let res = Resolution { resGamma = cfgResolution config
+                           , resMinSize = cfgMinCommSize config
+                           , resMergeInto = MergeToNeighbor
+                           , resMaxIterations = cfgMaxLeidenIterations config }
+          (commMap, cohesion) = clusterGraphWithResolution graph res
+      _ <- evaluate (Map.size commMap + sum (map length (Map.elems commMap)))
+      (commMap, cohesion) `deepseq` pure ()
+      clusterEnd <- getCurrentTime
+      opRecordHistogram op "graphos_cluster_duration_seconds" (realToFrac (diffUTCTime clusterEnd clusterStart) :: Double)
+      opIncCounter op "graphos_pipeline_steps_total" 1
+      opSetGauge op "graphos_communities" (fromIntegral $ Map.size commMap)
+      opDebugTraceSpan op "cluster" (StartTime clusterStart) (EndTime clusterEnd) (Map.fromList [("communities", T.pack $ show $ Map.size commMap)])
+
+      let seCfg = (gcSemanticEdges (cfgGraphosConfig config)) { seEnabled = not (cfgNoSemanticEdges config) }
+          force = cfgForceSemanticEdges config
+          mode = semanticMode seCfg force graph
+          semanticEdges = inferSemanticEdgesForMode mode seCfg graph
+          allInferred = inferNonSemanticEdges (cfgEdgeDensity config) graph commMap ++ semanticEdges
+          enrichedGraph' = (if null allInferred
+            then graph
+            else addEdges graph allInferred)
+            { gEmbeddings = gEmbeddings graph
+            , gEmbeddingsPath = gEmbeddingsPath graph }
+      enrichedGraph' `deepseq` pure ()
+      logSemanticInference lp seCfg mode semanticEdges
+      lpLogInfo lp $ T.pack $ "  Inferred " ++ show (length allInferred) ++ " additional edges (density: " ++ show (cfgEdgeDensity config) ++ ")"
+
+      lpLogInfo lp "Step 5: Re-clustering and analyzing..."
+      step5Start <- getCurrentTime
+      let (finalComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
+          anal = analyzeGraph enrichedGraph' finalComm finalCohes
+      _ <- evaluate (Map.size finalComm + sum (map length (Map.elems finalComm)))
+      _ <- evaluate (length (analysisGodNodes anal))
+      (finalComm, finalCohes) `deepseq` pure ()
+      step5End <- getCurrentTime
+      opRecordHistogram op "graphos_cluster_step5_duration_seconds" (realToFrac (diffUTCTime step5End step5Start) :: Double)
+      opDebugTraceSpan op "cluster_step5" (StartTime step5Start) (EndTime step5End) (Map.fromList [("communities", T.pack $ show $ Map.size finalComm)])
+      lpLogInfo lp $ T.pack $ "  Re-cluster: " ++ show (Map.size finalComm) ++ " communities"
+
+      let compMap = computeCompositions enrichedGraph' finalComm
+          graphWithComps = enrichedGraph' { gCompositions = Just (toJSON compMap) }
+          joinedGraph = joinCommunitiesToNodes enrichedGraph' finalComm
+
+      let lblCfg = gcLabeling (cfgGraphosConfig config)
+      llmLabels <- if cfgLabel config
+        then do
+          lpLogInfo lp "Step 5b: Labeling communities via LLM..."
+          lpLogInfo lp $ T.pack $ "  Labeling config: provider=" ++ labelingProvider lblCfg
+                                 ++ " model=" ++ labelingModel lblCfg
+                                 ++ " baseUrl=" ++ labelingBaseUrl lblCfg
+                                 ++ " batchSize=" ++ show (labelingBatchSize lblCfg)
+          labelingStart <- getCurrentTime
+          result <- labelCommunities appEnv enrichedGraph' finalComm finalCohes lblCfg
+          labelingEnd <- getCurrentTime
+          lpLogInfo lp $ T.pack $ "  Labeled " ++ show (Map.size (lrLabels result)) ++ " communities in "
+                                 ++ show (diffUTCTime labelingEnd labelingStart) ++ "s"
+          pure (Just (lrLabels result))
+        else pure Nothing
+
+      let artPoints = GAnalysis.articulationPoints enrichedGraph'
+          aggregates = computeCommunityAggregates joinedGraph finalComm finalCohes artPoints llmLabels
+      _ <- evaluate (length aggregates)
+
+      pure ClusterOutput
+        { coEnrichedGraph = graphWithComps
+        , coGraphToWrite = joinedGraph
+        , coCommunities = finalComm
+        , coCohesion = finalCohes
+        , coAnalysis = anal
+        , coLabels = llmLabels
+        , coAggregates = aggregates
+        }
+
+-- | Cluster-only entry point: load the last checkpoint, reconstruct the graph,
+-- run only clustering + analysis, then exit. Enables incremental rebuilds and
+-- debugging of large pipelines without re-running detect/extract/build.
+runClusterOnlyPipeline :: AppEnv -> PipelineConfig -> IO (Either Text Int)
+runClusterOnlyPipeline appEnv config = catch (do
+  let lp = loggingPort appEnv
+      ep = exportPort appEnv
+      inputRoot = cfgInputPath config
+      checkpointPath = cfgOutputDir config ++ "/graph.checkpoint.json"
+  lpLogInfo lp "Step 1: Loading checkpoint..."
+  mLoaded <- UEP.epLoadCheckpoint ep checkpointPath
+  case mLoaded of
+    Left err -> pure $ Left $ T.concat ["Failed to load checkpoint: ", err]
+    Right loaded -> do
+      let graph = UEP.lcGraph loaded
+          mSrc  = UEP.lcInputSource loaded
+      when (isJust mSrc && fromJust mSrc /= T.pack inputRoot) $
+        lpLogInfo lp $ T.pack $ "  Warning: checkpoint was created from input " ++ show (fromJust mSrc)
+                       ++ " but --cluster-only input is " ++ show inputRoot
+      lpLogInfo lp $ T.pack $ "  Loaded checkpoint: " ++ show (Map.size (gNodes graph)) ++ " nodes, "
+                       ++ show (Map.size (gEdges graph)) ++ " edges"
+      lpLogInfo lp "Step 2: Clustering..."
+      clusterOut <- clusterGraph appEnv graph config
+      let commCount = Map.size (coCommunities clusterOut)
+      lpLogInfo lp $ T.pack $ "  Clustered into " ++ show commCount ++ " communities. Exiting (--cluster-only)."
+      pure $ Right commCount
+  ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Cluster-only pipeline error: " ++ show e

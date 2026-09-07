@@ -4,6 +4,8 @@
 module Graphos.UseCase.Port.ExportPort
   ( -- * Export result
     ExportResult(..)
+    -- * Loaded checkpoint
+  , LoadedCheckpoint(..)
     -- * Export port
   , ExportPort(..)
   ) where
@@ -13,6 +15,14 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Graphos.Domain.Types (Analysis, CommunityAggregate, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, IncrementalWriter)
 import Graphos.Domain.Graph (Graph)
+
+-- | A checkpoint snapshot loaded from disk for a resumed / cluster-only run.
+-- Carries the reconstructed graph plus minimal provenance (the input path the
+-- checkpoint was written from) so callers can warn on an input mismatch.
+data LoadedCheckpoint = LoadedCheckpoint
+  { lcGraph        :: Graph   -- ^ Reconstructed graph (nodes + edges) from the checkpoint
+  , lcInputSource  :: Maybe Text  -- ^ Input path the checkpoint was written from, if recorded
+  } deriving (Eq, Show)
 
 
 -- | Result of an export operation.
@@ -58,8 +68,13 @@ data ExportPort = ExportPort
   , epCloseWriter             :: IncrementalWriter -> IO ()
     -- | Community graph export
   , epExportCommunityGraph    :: Graph -> CommunityMap -> FilePath -> IO ()
-    -- | Checkpoint save
-  , epSaveCheckpoint          :: Graph -> FilePath -> IO ()
+     -- | Checkpoint save. The extra 'Text' records the input path as provenance
+     -- so a resumed / cluster-only run can warn if the checkpoint came from a
+     -- different input.
+   , epSaveCheckpoint          :: Graph -> FilePath -> Text -> IO ()
+     -- | Checkpoint load: reconstruct the graph snapshot from disk.
+     -- Returns Left with a reason when the file is missing or unusable.
+   , epLoadCheckpoint          :: FilePath -> IO (Either Text LoadedCheckpoint)
     -- | Full export orchestration
     , epExportAll :: Graph -> FilePath -> Analysis -> PipelineConfig -> Detection -> Maybe (Map CommunityId Text) -> [CommunityAggregate] -> IO ExportResult
   }

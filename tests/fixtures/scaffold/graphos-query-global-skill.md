@@ -30,7 +30,7 @@ You MUST NOT run any command that builds, updates, or ingests into the graph:
 graphos [PATH]                  Build the knowledge graph (default: .)
   --output, -o DIR              Output directory
   --directed / --deep / --no-viz / --update
-  --cluster-only / --no-cluster / --label
+  --cluster-only / --no-cluster / --fresh (--no-checkpoint)
   --community-graph / --embed / --vision / --watch
   --neo4j / --memgraph / --svg / --graphml / --wiki
   --verbose, -v / --debug
