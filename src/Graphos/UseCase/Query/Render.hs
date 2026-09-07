@@ -25,14 +25,8 @@ module Graphos.UseCase.Query.Render
      -- * Truncation
    , truncateOutput
    , estimateTokens
-   , encodeText
-
-     -- * Budget-aware serialization
-   , BudgetCtl(..)
-   , defaultBudgetCtl
-   , boundedNodes
-   , capLabel
-   ) where
+    , encodeText
+     ) where
 
 import Data.Aeson (toJSON, object, (.=), Value(..), encode)
 import Data.Text (Text)
@@ -44,7 +38,7 @@ import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdic
 import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
-import Graphos.UseCase.Query.Refine (EdgeMode(..), elideLabel)
+import Graphos.UseCase.Query.Refine (EdgeMode(..))
 
 data CommonQueryOpts = CommonQueryOpts
   { cqoGraphPath     :: !FilePath
@@ -174,51 +168,6 @@ takeLinesFromTop remaining (l:ls)
 encodeText :: Value -> Text
 encodeText = TL.toStrict . TL.decodeUtf8 . encode
 
--- | Controls for compact, byte-budget-aware serialization of query results.
---
--- 'bcByteBudget' caps the serialized node list via a running byte counter;
--- 'bcMaxNodes' caps the number of returned nodes (-1 = unbounded);
--- 'bcMaxLabelChars' caps the label width before elision (0 = use default 120).
-data BudgetCtl = BudgetCtl
-  { bcByteBudget      :: !Int
-  , bcMaxNodes        :: !Int
-  , bcMaxLabelChars   :: !Int
-  } deriving (Eq, Show)
-
-defaultBudgetCtl :: BudgetCtl
-defaultBudgetCtl = BudgetCtl
-  { bcByteBudget      = 2000
-  , bcMaxNodes        = -1
-  , bcMaxLabelChars   = 120
-  }
-
--- | Byte length of a scored node's compact JSON encoding.
-nodeJsonBytes :: ScoredNode -> Int
-nodeJsonBytes n = T.length (encodeText (toJSON n))
-
--- | Truncate a scored node's label to 'bcMaxLabelChars' (word-boundary aware).
--- A non-positive cap leaves the label untouched.
-capLabel :: BudgetCtl -> ScoredNode -> ScoredNode
-capLabel bc n
-  | bcMaxLabelChars bc <= 0 = n
-  | otherwise = n { snLabel = elideLabel (bcMaxLabelChars bc) (snLabel n) }
-
--- | Greedily retain scored nodes (already score-ranked) until their cumulative
--- serialized byte size would exceed 'bcByteBudget'. Returns the kept nodes and
--- the count of dropped (omitted) nodes. Highest scores are retained first, so a
--- response that fits always keeps the most relevant nodes.
-boundedNodes :: BudgetCtl -> [ScoredNode] -> ([ScoredNode], Int)
-boundedNodes bc nodes =
-  let cap = if bcMaxNodes bc < 0
-              then length nodes
-              else min (bcMaxNodes bc) (length nodes)
-      capped = take cap nodes
-      go _ acc [] = (reverse acc, 0)
-      go remaining acc (n : ns)
-        | not (null acc) && nodeJsonBytes n > remaining = (reverse acc, length ns)
-        | otherwise = go (remaining - nodeJsonBytes n) (n : acc) ns
-      (kept, dropped) = go (max 0 (bcByteBudget bc)) [] capped
-  in (kept, dropped)
 
 -- | Render a path result as JSON.
 -- Nothing yields {"path":null}; Just ids yields {"path":[...],"hops":n} where hops = length ids - 1.

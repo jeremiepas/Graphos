@@ -8,7 +8,8 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import Data.Text (Text)
 
-import Graphos.UseCase.Query.Render (renderCypherResultText, renderCypherResultJSON, renderMutationResultText, renderMutationResultJSON, BudgetCtl(..), defaultBudgetCtl, boundedNodes, capLabel, encodeText)
+import Graphos.UseCase.Query.Render (renderCypherResultText, renderCypherResultJSON, renderMutationResultText, renderMutationResultJSON, encodeText)
+import Graphos.UseCase.Query.Budget (BudgetCtl(..), defaultBudgetCtl, boundedNodes, capLabel)
 import Graphos.Domain.Graph.Score (ScoredNode(..))
 import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 
