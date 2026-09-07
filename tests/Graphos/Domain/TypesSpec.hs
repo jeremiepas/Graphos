@@ -21,14 +21,14 @@ spec = do
       toJSON (Confidence 1.0) `shouldBe` toJSON (1.0 :: Double)
 
   describe "Relation" $ do
-    it "has exactly 8 constructors" $ do
-      length [minBound .. maxBound :: Relation] `shouldBe` 8
+    it "has exactly 9 constructors" $ do
+      length [minBound .. maxBound :: Relation] `shouldBe` 9
 
     it "round-trips through text representation" $ do
       property $ \rel -> textToRelation (relationToText rel) == Just rel
 
     it "includes spec-required constructors" $ do
-      [Calls, Imports, Extends, Implements, References, Contains, DependsOn, Inferred]
+      [Calls, Imports, Extends, Implements, References, Contains, DependsOn, Inferred, Documents]
         `shouldSatisfy` (not . null)
 
   describe "EdgeId" $ do

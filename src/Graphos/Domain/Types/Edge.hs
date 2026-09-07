@@ -38,6 +38,7 @@ data Relation
   | Contains
   | DependsOn
   | Inferred
+  | Documents
   deriving (Eq, Show, Generic, Ord, Bounded, Enum)
 
 instance NFData Relation
@@ -61,6 +62,7 @@ relationToText = \case
   Contains   -> "contains"
   DependsOn  -> "depends_on"
   Inferred   -> "inferred"
+  Documents  -> "documents"
 
 textToRelation :: Text -> Maybe Relation
 textToRelation = \case
@@ -72,6 +74,7 @@ textToRelation = \case
   "contains"    -> Just Contains
   "depends_on"  -> Just DependsOn
   "inferred"   -> Just Inferred
+  "documents"  -> Just Documents
   _            -> Nothing
 
 newtype Confidence = Confidence Double
