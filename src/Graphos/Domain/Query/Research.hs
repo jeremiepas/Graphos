@@ -21,7 +21,7 @@ module Graphos.Domain.Query.Research
   , lookupResearchNode
   ) where
 
-import Data.Aeson (ToJSON(..), object, (.=))
+import Data.Aeson (ToJSON(..), object, (.=), Value)
 import qualified Data.Aeson.Key as Key
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -35,6 +35,7 @@ import Control.DeepSeq (NFData(..))
 import Graphos.Domain.Types
   ( NodeId, Node(..)
   , Edge(..)
+  , relationToText
   , CommunityId
   )
 import Graphos.Domain.Community (CommunityComposition(..))
@@ -90,12 +91,20 @@ instance NFData ResearchMetadata
 
 instance ToJSON ResearchView where
   toJSON rv = object
-    [ "terms"        .= rvTerms rv
-    , "nodes"        .= map toJSON (rvNodes rv)
-    , "edges"        .= map toJSON (rvEdges rv)
-    , "communities"  .= object [(Key.fromText (T.pack (show (k :: CommunityId))), toJSON v) | (k, v) <- Map.toList (rvCommunities rv)]
-    , "metadata"     .= toJSON (rvMetadata rv)
+    [ "terms"       .= rvTerms rv
+    , "nodes"       .= map toJSON (rvNodes rv)
+    , "edges"       .= map renderEdge (rvEdges rv)
+    , "communities" .= object [(Key.fromText (T.pack (show (k :: CommunityId))), toJSON v) | (k, v) <- Map.toList (rvCommunities rv)]
+    , "metadata"    .= toJSON (rvMetadata rv)
     ]
+
+renderEdge :: Edge -> Value
+renderEdge e = object
+  [ "source"     .= edgeSource e
+  , "target"     .= edgeTarget e
+  , "type"       .= relationToText (edgeRelation e)
+  , "confidence" .= edgeConfidence e
+  ]
 
 instance ToJSON ResearchNode where
   toJSON n = object
@@ -105,7 +114,7 @@ instance ToJSON ResearchNode where
     , "community"      .= nodeCommunityId (rnNode n)
     , "discovered_by"  .= rnDiscoveredBy n
     , "best_score"     .= rnBestScore n
-    , "scores"         .= object [(Key.fromText t, toJSON s) | (t, s) <- rnScores n]
+    , "scores"         .= map (\(t, s) -> object ["term" .= t, "score" .= s]) (rnScores n)
     ]
 
 instance ToJSON ResearchCommunity where

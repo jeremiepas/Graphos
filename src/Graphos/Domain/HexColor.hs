@@ -2,6 +2,7 @@
 -- | Hex color representation and palette utilities for term visualization.
 module Graphos.Domain.HexColor
   ( HexColor
+  , unHexColor
   , d3Palette
   , assignTermColors
   ) where
@@ -14,6 +15,10 @@ import Data.Text (Text)
 -- | A CSS hex color string (e.g. "#441")
 newtype HexColor = HexColor Text
   deriving (Eq, Show)
+
+-- | Extract the CSS hex color string.
+unHexColor :: HexColor -> Text
+unHexColor (HexColor t) = t
 
 -- | D3's 20-color qualitative palette (Tableau-20 adapted for web).
 d3Palette :: [HexColor]

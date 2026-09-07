@@ -19,17 +19,20 @@ module Graphos.Infrastructure.Export.HTML
   , communityAggregatesToJSON
   , computePayload
   , convertAggregate
+  , renderResearchHtml
   , VisCommunityAggregate(..)
   , VisPayload(..)
   ) where
 
-import Data.Aeson (ToJSON(..), object, (.=), encode, eitherDecode)
+import Data.Aeson (ToJSON(..), object, (.=), encode, eitherDecode, Value)
 import Data.FileEmbed (embedFile)
 import GHC.Generics (Generic)
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Aeson.Key as Key
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8)
 import Data.Text.Short (toText)
 import System.IO (hFlush, hPutStr)
 import qualified Data.Set as Set
@@ -37,6 +40,8 @@ import qualified Data.Set as Set
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints, gCompositions)
 import Graphos.Domain.Community (cohesionScore, CommunityComposition(..))
+import Graphos.Domain.HexColor (assignTermColors, unHexColor)
+import Graphos.Domain.Query.Research (ResearchView(..))
 import Graphos.UseCase.Cluster (colorForCommunity)
 import Graphos.Infrastructure.FileSystem.AtomicWrite (withAtomicHandle)
 
@@ -392,4 +397,106 @@ communityAggregatesToJSON g commMap mLabels =
     compMixedRatio c = ccMixedRatio c
     compCodeDocEdges :: CommunityComposition -> Int
     compCodeDocEdges c = ccCodeDocEdges c
+
+-- | Render a ResearchView as a self-contained interactive HTML document.
+--
+-- Mirrors the offline-first approach of the existing graph.html, but draws the
+-- research subgraph with vis-network loaded from a CDN, embeds the ResearchView
+-- JSON in a <script> blob, colors nodes by their first-discovering term, shows a
+-- per-term discovery legend, and populates a detail panel on hover/click.
+renderResearchHtml :: ResearchView -> Text
+renderResearchHtml rv =
+  let title = "Research View — " <> T.intercalate ", " (rvTerms rv)
+      dataJson = escapeForScript (decodeUtf8 (BSL.toStrict (encode rv)))
+      colorsJson = termColorJSON rv
+   in T.unlines
+        [ "<!DOCTYPE html>"
+        , "<html lang='en'><head>"
+        , "<meta charset='utf-8'>"
+        , "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        , "<title>" <> title <> "</title>"
+        , "<meta name='graphos-renderer' content='vis-network 10.1.1'>"
+        , "<script>"
+        , "document.write('<script src=https://unpkg.com/vis-network@10.1.1/dist/vis-network.min.js><\\/script>');"
+        , "</script>"
+        , "<style>" <> researchCss <> "</style>"
+        , "</head><body>"
+        , "<div id='sidebar'>"
+        , "  <h1 id='researchTitle'>" <> title <> "</h1>"
+        , "  <p class='meta'><span id='stats'></span></p>"
+        , "  <section class='legend-section'>"
+        , "    <h3>Discovered by</h3>"
+        , "    <div id='legend'></div>"
+        , "  </section>"
+        , "  <section class='detail-section'>"
+        , "    <h3>Node details</h3>"
+        , "    <div id='research-detail'><p class='hint'>Hover or click a node to inspect.</p></div>"
+        , "  </section>"
+        , "  <section class='communities-section'>"
+        , "    <h3>Communities</h3>"
+        , "    <div id='community-summary'></div>"
+        , "  </section>"
+        , "</div>"
+        , "<div id='graph'><div id='loading'>Loading graph...</div></div>"
+        , "<script type='application/json' id='research-data'>" <> dataJson <> "</script>"
+        , "<script>" <> researchJs colorsJson <> "</script>"
+        , "</body></html>"
+        ]
+
+termColorJSON :: ResearchView -> Value
+termColorJSON rv =
+  object [(Key.fromText t, toJSON (T.unpack (unHexColor c))) | (t, c) <- Map.toList (assignTermColors (rvTerms rv))]
+
+escapeForScript :: Text -> Text
+escapeForScript = T.replace "<" "\\u003c"
+
+researchCss :: Text
+researchCss =
+  T.unlines
+    [ "* { box-sizing: border-box; }"
+    , "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; color: #1a1a1a; display: flex; }"
+    , "#sidebar { width: 340px; min-width: 340px; padding: 20px; overflow-y: auto; background: #fafafa; border-right: 1px solid #e5e5e5; }"
+    , "#researchTitle { font-size: 18px; margin: 0 0 4px; }"
+    , ".meta { color: #666; font-size: 13px; margin: 0 0 20px; }"
+    , ".legend-section, .detail-section, .communities-section { margin-bottom: 24px; }"
+    , "h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin: 0 0 12px; }"
+    , ".legend-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 4px; background: #fff; border: 1px solid #eee; border-radius: 6px; font-size: 13px; cursor: default; }"
+    , ".legend-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }"
+    , ".hint { color: #999; font-size: 13px; margin: 0; }"
+    , ".detail-name { font-size: 15px; font-weight: 600; margin-bottom: 10px; word-break: break-all; }"
+    , ".row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }"
+    , ".row .k { color: #888; }"
+    , ".row .v { color: #1a1a1a; word-break: break-word; text-align: right; }"
+    , ".scores { margin-top: 8px; }"
+    , "#graph { flex: 1; position: relative; }"
+    , "#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #999; }"
+    , "@media (max-width: 720px) { #sidebar { width: auto; min-width: 0; max-height: 40vh; }"
+    ]
+
+researchJs :: Value -> Text
+researchJs colorsJson =
+  T.unlines
+    [ "(function(){"
+    , "var rv = JSON.parse(document.getElementById('research-data').textContent);"
+    , "var termColors = " <> escapeForScript (decodeUtf8 (BSL.toStrict (encode colorsJson))) <> ";"
+    , "document.getElementById('stats').textContent = rv.nodes.length + ' nodes, ' + rv.edges.length + ' edges, ' + (rv.communities ? Object.keys(rv.communities).length : 0) + ' communities';"
+    , "var legendEl = document.getElementById('legend');"
+    , "rv.terms.forEach(function(t){ var row = document.createElement('div'); row.className='legend-item'; var dot = document.createElement('span'); dot.className='legend-dot'; dot.style.backgroundColor = termColors[t] || '#888888'; var label = document.createElement('span'); label.textContent = t; row.appendChild(dot); row.appendChild(label); legendEl.appendChild(row); });"
+    , "var nodeData = new vis.DataSet(rv.nodes.map(function(n){ var c = n.discovered_by && n.discovered_by.length ? (termColors[n.discovered_by[0]] || '#888888') : '#888888'; return { id: n.id, label: n.label, color: { background: c, border: '#333333' }, title: n.id }; }));"
+    , "var edgeData = new vis.DataSet(rv.edges.map(function(e){ var w = Math.max(1, Math.min(5, ((e.confidence || 0) * 3))); return { from: e.source, to: e.target, label: e.type || '', width: w, color: { color: '#999999' }, title: (e.type || '') + ' (' + (e.confidence || 0) + ')' }; }));"
+    , "var network = new vis.Network(document.getElementById('graph'), { nodes: nodeData, edges: edgeData }, { physics: { forceAtlas2BasedCentroid: true, stabilization: { enabled: true, iterations: 250 } }, interaction: { hover: true, tooltipOnHover: false } });"
+    , "function findNode(id){ for (var i=0;i<rv.nodes.length;i++){ if (rv.nodes[i].id === id) return rv.nodes[i]; } return null; }"
+    , "function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }"
+    , "function nodeIdsFromEvent(e){ if (!e) return []; if (e.nodes) return e.nodes; if (e.node) return [e.node]; return []; }"
+    , "function updateDetail(e){ var ids = nodeIdsFromEvent(e); var detail = document.getElementById('research-detail'); if (!ids.length){ detail.innerHTML = \"<p class='hint'>Hover or click a node to inspect.</p>\"; return; } var n = findNode(ids[0]); if (!n){ detail.innerHTML = \"\"; return; } var html = \"<div class='detail-name'>\" + esc(n.label || ids[0]) + \"</div>\"; html += \"<div class='row'><span class='k'>Source</span><span class='v'>\" + esc(n.source_file || '') + \"</span></div>\"; html += \"<div class='row'><span class='k'>Community</span><span class='v'>\" + (n.community || '\\u2014') + \"</span></div>\"; html += \"<div class='row'><span class='k'>Best score</span><span class='v'>\" + (n.best_score != null ? n.best_score : '\\u2014') + \"</span></div>\"; html += \"<div class='row'><span class='k'>Discovered by</span><span class='v'>\" + (n.discovered_by && n.discovered_by.length ? n.discovered_by.join(', ') : '\\u2014') + \"</span></div>\"; if (n.scores && n.scores.length){ html += \"<div class='scores'>\"; n.scores.forEach(function(s){ html += \"<div class='row'><span class='k'>\" + esc(s.term) + \"</span><span class='v'>\" + s.score + \"</span></div>\"; }); html += \"</div>\"; } detail.innerHTML = html; }"
+    , "network.on('select', function(e){ updateDetail(e); });"
+    , "network.on('blur', function(){ updateDetail(); });"
+    , "network.on('hoverNode', function(e){ updateDetail(e); });"
+    , "network.on('blurNode', function(){ updateDetail(); });"
+    , "var commEl = document.getElementById('community-summary');"
+    , "if (rv.communities){ Object.keys(rv.communities).forEach(function(cid){ var item = document.createElement('div'); item.className='legend-item'; item.style.marginBottom='4px'; item.textContent = (rv.communities[cid].label || ('Community ' + cid)) + ' \\u2014 ' + rv.communities[cid].member_count + ' members'; commEl.appendChild(item); }); }"
+    , "window.addEventListener('resize', function(){ network.fit(); });"
+    , "updateDetail();"
+    , "})();"
+    ]
 

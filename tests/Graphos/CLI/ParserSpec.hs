@@ -98,6 +98,18 @@ spec = do
     it "cypher accepts a positional query plus --json / --budget" $ do
       parseWith cypherOpts ["MATCH (n) RETURN n", "--json", "--budget", "100"] `shouldSatisfy` isRight
 
+  describe "research subcommand parsing" $ do
+    it "requires at least one term" $ do
+      parseWith researchOpts [] `shouldSatisfy` isLeft
+    it "accepts positional terms plus --subgraph seed terms" $ do
+      parseWith researchOpts ["Auth", "--subgraph", "Seed"] `shouldSatisfy` isRight
+    it "defaults edges mode to semantic" $ do
+      parseWith researchOpts ["Auth"] `shouldSatisfy` isRight
+    it "accepts --edges all" $ do
+      parseWith researchOpts ["Auth", "--edges", "all"] `shouldSatisfy` isRight
+    it "rejects an unknown --edges mode" $ do
+      parseWith researchOpts ["Auth", "--edges", "bogus"] `shouldSatisfy` isLeft
+
   describe "cypherOpts --write (opencypher-write-mutations)" $ do
     it "parses --write" $ do
       parseWith cypherOpts ["MERGE (n)", "--write"] `shouldBe`

@@ -172,25 +172,26 @@ cypherOpts = CypherCmd
      <> help "Permit openCypher write clauses (CREATE/MERGE/SET/REMOVE/DELETE); persist graph.json when set" )
 
 researchOpts :: Parser Command
-researchOpts = do
+researchOpts =
   let graphPath = "graphos-out/graph.json"
-  ResearchCmd
-    <$> some (argument str (metavar "TERM"))
-    <*> many (strOption (long "subgraph" <> metavar "TERM" <> help "Seed terms for 1-hop BFS expansion (added to union before inducing edges)"))
-    <*> strOption (long "graph" <> value graphPath <> help "Path to graph.json file")
-    <*> switch (long "html" <> help "Render interactive HTML research view")
-    <*> switch (long "json" <> help "Output ResearchView as JSON")
-    <*> optional (strOption (long "terms-file" <> metavar "PATH" <> help "File with newline-delimited query terms (appended to positional terms)"))
-    <*> optional (strOption (long "label" <> metavar "TEXT" <> help "Label for output file (default: timestamp)"))
-    <*> optional (strOption (long "mode" <> value "default" <> metavar "MODE" <> help "Research mode (default, deep, etc.)"))
-    <*> pure (CommonQueryOpts
-          { cqoGraphPath   = graphPath
-          , cqoBudget      = 2000
-          , cqoJson        = False
-          , cqoLabelWidth  = 120
-          , cqoEdges       = Semantic
-          , cqoStrictGraph = False
-          })
+      baseCqo = CommonQueryOpts
+        { cqoGraphPath   = graphPath
+        , cqoBudget      = 2000
+        , cqoJson        = False
+        , cqoLabelWidth  = 120
+        , cqoEdges       = Semantic
+        , cqoStrictGraph = False
+        }
+  in ResearchCmd
+       <$> some (argument str (metavar "TERM"))
+       <*> many (strOption (long "subgraph" <> metavar "TERM" <> help "Seed terms for 1-hop BFS expansion (added to union before inducing edges)"))
+       <*> strOption (long "graph" <> value graphPath <> help "Path to graph.json file")
+       <*> switch (long "html" <> help "Render interactive HTML research view (default: on)")
+       <*> switch (long "json" <> help "Output ResearchView as JSON")
+       <*> optional (strOption (long "terms-file" <> metavar "PATH" <> help "File with newline-delimited query terms (appended to positional terms)"))
+       <*> optional (strOption (long "label" <> metavar "TEXT" <> help "Label for output file (default: timestamp)"))
+       <*> optional (strOption (long "mode" <> value "default" <> metavar "MODE" <> help "Research mode (default, deep, etc.)"))
+       <*> fmap (\e -> baseCqo { cqoEdges = e }) (option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)"))
 
 symbolsOpts :: Parser Command
 symbolsOpts = SymbolsCmd
