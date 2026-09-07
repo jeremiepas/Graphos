@@ -4,6 +4,11 @@ module Graphos.UseCase.Detect
   , detectFilesWithExtensions
   , detectFilesWithExtensionsAndIgnore
   , detectFilesWithExtensionsAndIgnore'
+  , categorizeFiles
+  , categorizeFilesWith
+  , categorizeFilesWithConfig
+  , classifyFile
+  , fileMetaFromPath
   , allSupportedExtensions
   , hardcodedIgnoreDirNames
   , rootAnchoredIgnoreDirs
@@ -16,11 +21,18 @@ module Graphos.UseCase.Detect
 import Data.List (isPrefixOf)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes)
 import qualified Data.Text as T
-import System.Directory (doesDirectoryExist, listDirectory)
+import Control.Exception (try, IOException)
+import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
+import System.IO (withFile, IOMode(..), hGetLine)
 import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
+import Graphos.Domain.Types.Pipeline
+  ( FileMeta(..) )
+import Graphos.Domain.Config.Detection
+  ( DetectionConfig(..), DetectionMode(..), defaultDetectionConfig )
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
 import Graphos.Infrastructure.FileSystem.Ignore (matches, matchingPattern)
 
@@ -49,8 +61,8 @@ allSupportedExtensions = Map.fromList
     officeExts = [".docx", ".pptx", ".xlsx", ".doc", ".ppt"]
 
 -- | Detect files in a directory
-detectFiles :: FilePath -> IO Detection
-detectFiles root = do
+detectFiles :: DetectionConfig -> FilePath -> IO Detection
+detectFiles cfg root = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -59,39 +71,41 @@ detectFiles root = do
       , detectionNeedsGraph  = False
       , detectionWarning     = Just $ T.pack $ "Directory not found: " ++ root
       , detectionFiles        = Map.empty
+      , detectionClassification = Map.empty
       , detectionExclusions   = emptyExclusionCounts
       }
     else do
       files <- findAllFiles root
-      let categorized = categorizeFiles files
-          totalFiles = sum (length <$> Map.elems categorized)
+      (categorized, classification) <- categorizeFilesWithConfig files allSupportedExtensions cfg
+      let totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
-        { detectionTotalFiles  = totalFiles
-        , detectionTotalWords  = 0  -- word counting requires file reading
-        , detectionNeedsGraph  = totalFiles > 0
-        , detectionWarning     = if totalFiles > 200
-                                  then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
-                                  else Nothing
-        , detectionFiles       = categorized
-        , detectionExclusions   = emptyExclusionCounts
+        { detectionTotalFiles       = totalFiles
+        , detectionTotalWords       = 0  -- word counting requires file reading
+        , detectionNeedsGraph       = totalFiles > 0
+        , detectionWarning          = if totalFiles > 200
+                                        then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
+                                        else Nothing
+        , detectionFiles            = categorized
+        , detectionClassification   = classification
+        , detectionExclusions       = emptyExclusionCounts
         }
 
 -- | Detect files in a directory using config-driven extension categories.
-detectFilesWithExtensions :: FileSystemPort -> FilePath -> Map FileCategory [String] -> IO Detection
-detectFilesWithExtensions fsp root extMap = detectFilesWithExtensionsAndIgnore fsp root extMap (const (pure ()))
+detectFilesWithExtensions :: FileSystemPort -> DetectionConfig -> FilePath -> Map FileCategory [String] -> IO Detection
+detectFilesWithExtensions fsp cfg root extMap = detectFilesWithExtensionsAndIgnore fsp cfg root extMap (const (pure ()))
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- This is the primary entry point for the pipeline — it applies .gitignore and .graphosignore
 -- patterns in addition to hardcoded directory ignores.
-detectFilesWithExtensionsAndIgnore :: FileSystemPort -> FilePath -> Map FileCategory [String] -> (T.Text -> IO ()) -> IO Detection
-detectFilesWithExtensionsAndIgnore fsp root extMap logDebug = do
+detectFilesWithExtensionsAndIgnore :: FileSystemPort -> DetectionConfig -> FilePath -> Map FileCategory [String] -> (T.Text -> IO ()) -> IO Detection
+detectFilesWithExtensionsAndIgnore fsp cfg root extMap logDebug = do
   ignorePatterns <- fspLoadIgnorePatterns fsp root
-  detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug
+  detectFilesWithExtensionsAndIgnore' fsp cfg root extMap ignorePatterns logDebug
 
 -- | Detect files in a directory using config-driven extension categories and ignore patterns.
 -- Internal version that takes pre-loaded ignore patterns.
-detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> (T.Text -> IO ()) -> IO Detection
-detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug = do
+detectFilesWithExtensionsAndIgnore' :: FileSystemPort -> DetectionConfig -> FilePath -> Map FileCategory [String] -> [AnnotatedPattern] -> (T.Text -> IO ()) -> IO Detection
+detectFilesWithExtensionsAndIgnore' fsp cfg root extMap ignorePatterns logDebug = do
   exists <- doesDirectoryExist root
   if not exists
     then pure Detection
@@ -100,21 +114,23 @@ detectFilesWithExtensionsAndIgnore' fsp root extMap ignorePatterns logDebug = do
       , detectionNeedsGraph  = False
       , detectionWarning     = Just $ T.pack $ "Directory not found: " ++ root
       , detectionFiles        = Map.empty
+      , detectionClassification = Map.empty
       , detectionExclusions   = emptyExclusionCounts
       }
     else do
       (files, excs) <- findAllFilesWithExclusions root root (fspShouldIgnore fsp) extMap ignorePatterns logDebug
-      let categorized = categorizeFilesWith files extMap
-          totalFiles = sum (length <$> Map.elems categorized)
+      (categorized, classification) <- categorizeFilesWithConfig files extMap cfg
+      let totalFiles = sum (length <$> Map.elems categorized)
       pure Detection
-        { detectionTotalFiles  = totalFiles
-        , detectionTotalWords  = 0  -- word counting requires file reading
-        , detectionNeedsGraph  = totalFiles > 0
-        , detectionWarning     = if totalFiles > 200
-                                  then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
-                                  else Nothing
-        , detectionFiles       = categorized
-        , detectionExclusions   = excs
+        { detectionTotalFiles       = totalFiles
+        , detectionTotalWords       = 0  -- word counting requires file reading
+        , detectionNeedsGraph       = totalFiles > 0
+        , detectionWarning          = if totalFiles > 200
+                                        then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
+                                        else Nothing
+        , detectionFiles            = categorized
+        , detectionClassification   = classification
+        , detectionExclusions       = excs
         }
 
 -- | Find all files recursively (using default extensions)
@@ -219,16 +235,111 @@ addExclusionCounts a b = ExclusionCounts
   , excIgnoredFiles     = excIgnoredFiles a + excIgnoredFiles b
   }
 
--- | Categorize files by type (using default extensions)
-categorizeFiles :: [FilePath] -> Map FileCategory [FilePath]
-categorizeFiles files = categorizeFilesWith files allSupportedExtensions
+-- | Categorize files by type (using default extensions), excluding
+-- generated/vendored/minified so only 'Source' files reach the Extract stage.
+categorizeFiles :: [FilePath] -> IO (Map FileCategory [FilePath], Map FileClass [FilePath])
+categorizeFiles files =
+  categorizeFilesWithConfig files allSupportedExtensions defaultDetectionConfig
 
--- | Categorize files by type using config-driven extension map
-categorizeFilesWith :: [FilePath] -> Map FileCategory [String] -> Map FileCategory [FilePath]
-categorizeFilesWith files extMap = Map.fromList
-  [ (cat, filter (\f -> takeExtension f `elem` exts) files)
-  | (cat, exts) <- Map.toList extMap
-  ]
+-- | Categorize files by type using config-driven extension map (Source-only).
+categorizeFilesWith :: [FilePath] -> Map FileCategory [String] -> IO (Map FileCategory [FilePath], Map FileClass [FilePath])
+categorizeFilesWith files extMap =
+  categorizeFilesWithConfig files extMap defaultDetectionConfig
+
+-- | Categorize files by type and provenance. Returns a pair:
+--   * the 'Source'-only category map (what reaches Extract), and
+--   * the full classification breakdown over every file.
+-- Files classified as generated/vendored/minified are dropped from the
+-- category map so they never reach extraction.
+categorizeFilesWithConfig
+  :: [FilePath]
+  -> Map FileCategory [String]
+  -> DetectionConfig
+  -> IO (Map FileCategory [FilePath], Map FileClass [FilePath])
+categorizeFilesWithConfig files extMap cfg = do
+  classified <- mapM (\f -> do
+        fm <- fileMetaFromPath cfg f
+        pure (f, classifyFile cfg fm)
+      ) files
+  let eligibleFiles =
+        case dcMode cfg of
+          Off -> [ f | (f, _) <- classified ]
+          _   -> [ f | (f, c) <- classified, isSourceClass c ]
+      byClass = Map.fromListWith (++ ) (reverse [ (c, [f]) | (f, c) <- classified ])
+      categorized = Map.fromList
+        [ (cat, filter (\f -> takeExtension f `elem` exts) eligibleFiles)
+        | (cat, exts) <- Map.toList extMap
+        ]
+  pure (categorized, byClass)
+
+-- | Classify a single file by provenance using three heuristics. Pure and
+-- side-effect free: it consumes only the 'FileMeta' view, so it is trivially
+-- testable by constructing that record directly. Precedence is Vendored >
+-- Generated > Minified > Source, with path-based vendored detection first
+-- because it is structural and unambiguous.
+classifyFile :: DetectionConfig -> FileMeta -> FileClass
+classifyFile cfg fm =
+  case catMaybes [classifyVendored cfg fm, classifyGenerated cfg fm, classifyMinified cfg fm] of
+    (c : _) -> c
+    []      -> Source
+
+-- | Path-based vendored detection: any path segment matches a configured
+-- vendored directory name (node_modules, vendor, third_party, ...).
+classifyVendored :: DetectionConfig -> FileMeta -> Maybe FileClass
+classifyVendored cfg fm =
+  let parts = splitPath (metaPath fm)
+  in if any (`elem` dcVendorSegments cfg) parts then Just Vendored else Nothing
+
+-- | Header-sniff generated detection: a generator signature appears within the
+-- leading content window, matched case-insensitively.
+classifyGenerated :: DetectionConfig -> FileMeta -> Maybe FileClass
+classifyGenerated cfg fm =
+  let sigs = map T.toLower (dcGeneratorSignatures cfg)
+      lines_ = map T.toLower (metaLeadingLines fm)
+  in if any (\l -> any (`T.isInfixOf` l) sigs) lines_ then Just Generated else Nothing
+
+-- | Minified detection: the longest line exceeds the configured threshold.
+classifyMinified :: DetectionConfig -> FileMeta -> Maybe FileClass
+classifyMinified cfg fm =
+  if metaMaxLineLen fm > dcMinifiedLineThreshold cfg then Just Minified else Nothing
+
+-- | Split a path into its '/'-separated components. Empty components (from
+-- leading/trailing separators) are preserved; they never match a segment name.
+splitPath :: FilePath -> [FilePath]
+splitPath [] = []
+splitPath p =
+  let (seg, rest) = break (== '/') p
+  in seg : case rest of
+             ('/' : t) -> splitPath t
+             _         -> []
+
+-- | Build a 'FileMeta' for a path by reading only its leading content window.
+-- IO boundary: reads at most 'dcLeadingLines' lines and stops at EOF or on a
+-- non-UTF8 line rather than reading a huge generated file to completion.
+fileMetaFromPath :: DetectionConfig -> FilePath -> IO FileMeta
+fileMetaFromPath cfg path = do
+  lines_ <- readLeadingLines path (dcLeadingLines cfg)
+  let maxLen = foldr (\l mx -> max mx (T.length l)) 0 lines_
+  pure FileMeta
+    { metaPath = path
+    , metaLeadingLines = lines_
+    , metaMaxLineLen = maxLen
+    }
+
+-- | Read up to 'maxLines' lines from a file, stopping at EOF or on error.
+readLeadingLines :: FilePath -> Int -> IO [T.Text]
+readLeadingLines path maxLines = do
+  exists <- doesFileExist path
+  if not exists
+    then pure []
+    else withFile path ReadMode $ \h -> loop maxLines [] h
+  where
+    loop 0 acc _ = pure (reverse acc)
+    loop i acc h = do
+      ln <- try (T.pack <$> hGetLine h) :: IO (Either IOException T.Text)
+      case ln of
+        Right l   -> loop (i - 1) (l : acc) h
+        Left _    -> pure (reverse acc)
 
 -- | Build-output directory names that are pruned only when they appear as a
 -- direct child of the scan root. A directory named @build@ nested inside a
