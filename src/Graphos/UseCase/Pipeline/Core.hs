@@ -30,7 +30,7 @@ import System.Mem (performGC)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Config (FileExtensionConfig(..), SemanticEdgesConfig(..))
-import Graphos.Domain.Config.Detection (DetectionConfig(..), DetectionMode(..), validDetectionConfig)
+import Graphos.Domain.Config.Detection (DetectionConfig(..), DetectionMode(..), applyDetectionOverrides)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
 import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
@@ -63,30 +63,6 @@ import Graphos.Domain.Labeling (LabelingResult(..))
 -- collapse and are logged as a prominent warning.
 edgeCollapseThreshold :: Double
 edgeCollapseThreshold = 0.05
-
--- | Fold CLI detection flags over the on-disk detection configuration.
--- --no-detect wins over --detect-mode; an explicit --detect-mode only takes
--- effect when --no-detect is absent. The minified threshold override replaces
--- the configured value when present. The result is run through the validating
--- smart constructor so a bad --minified-threshold can never disable the guard.
-applyDetectionOverrides
-  :: DetectionConfig -- ^ base config from graphos.yaml (or defaults)
-  -> PipelineConfig  -- ^ parsed CLI flags
-  -> DetectionConfig
-applyDetectionOverrides base config =
-  case validDetectionConfig
-    ( base { dcMode = effectiveMode
-           , dcMinifiedLineThreshold = effectiveThreshold } )
-  of
-    Right ok -> ok
-    Left err -> error $ "graphos: invalid detection config: " ++ err
-  where
-    effectiveMode =
-      if cfgDetectDisabled config
-        then Off
-        else maybe (dcMode base) id (cfgDetectionMode config)
-    effectiveThreshold =
-      maybe (dcMinifiedLineThreshold base) id (cfgMinifiedThreshold config)
 
 -- | Generate embeddings for all nodes in a graph.
 -- Nodes whose embedding call fails are omitted from the result.
@@ -227,7 +203,14 @@ runPipelineBody appEnv config = catch (do
         , (VideoFiles, fecVideo fec)
         , (OfficeFiles, fecOffice fec)
         ]
-  let effectiveDetection = applyDetectionOverrides (gcDetection (cfgGraphosConfig configWithStreaming)) configWithStreaming
+  let baseDetection    = gcDetection (cfgGraphosConfig configWithStreaming)
+      effectiveMode    = if cfgDetectDisabled configWithStreaming
+                           then Off
+                           else maybe (dcMode baseDetection) id (cfgDetectionMode configWithStreaming)
+      effectiveDetection =
+        case applyDetectionOverrides baseDetection effectiveMode (cfgMinifiedThreshold configWithStreaming) of
+          Right ok -> ok
+          Left err -> error $ "graphos: invalid detection config: " ++ err
   detection <- detectFilesWithExtensionsAndIgnore' fsp effectiveDetection (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
