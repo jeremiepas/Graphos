@@ -26,6 +26,7 @@ import Graphos.UseCase.Load (LoadResult(..))
 import Graphos.Infrastructure.Export.IncrementalJSON
   ( openWriter
   , closeWriter
+  , abortWriter
   , writeNodes
   , writeEdges
   , writeCommunities
@@ -38,6 +39,9 @@ import Graphos.Infrastructure.Export.IncrementalJSON
 
 -- | Persist the mutated graph to the original graph.json path. Returns
 -- the backup path on success.
+--
+-- The document is written to a temp file and renamed over the target only
+-- on success, so a failed persistence leaves the existing graph intact.
 persistMutatedGraph :: FilePath -> LoadResult -> Graph -> IO (Either Text FilePath)
 persistMutatedGraph path lr mutated = do
   backupPath <- timestampedBackupPath path
@@ -55,6 +59,11 @@ persistMutatedGraph path lr mutated = do
       let nodes = Map.elems (gNodes mutated')
           edges = Map.elems (gEdges mutated')
       iw <- openWriter path
+      result <- writeAllSections iw nodes edges
+      case result of
+        Right () -> closeWriter iw >> pure (Right ())
+        Left err -> abortWriter iw >> pure (Left err)
+    writeAllSections iw nodes edges = do
       writeNodes iw nodes
       writeEdges iw edges
       writeCommunities iw (lrCommunities lr)
@@ -63,7 +72,6 @@ persistMutatedGraph path lr mutated = do
       writeAnalysisTail iw (Just (lrCommunityLabels lr))
       writeCommunityAggregates iw (lrCommunityAggregates lr)
       writeCompositions iw (lrCompositions lr)
-      closeWriter iw
       pure (Right ())
 
 -- | A backup path like @graph.json.bak-20260904T120000Z@.

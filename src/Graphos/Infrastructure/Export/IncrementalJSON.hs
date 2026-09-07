@@ -3,6 +3,7 @@ module Graphos.Infrastructure.Export.IncrementalJSON
   ( IncrementalWriter
   , openWriter
   , closeWriter
+  , abortWriter
   , flushWriter
   , writeNodes
   , writeEdges
@@ -23,10 +24,15 @@ import Data.Map.Strict (Map, empty)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
-import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
+import System.IO (hFlush, hClose, hPutStr)
 
 import Graphos.Domain.Types
 import qualified Graphos.Domain.Types.Writer as W
+import Graphos.Infrastructure.FileSystem.AtomicWrite
+  ( commitAtomicHandle
+  , discardAtomicHandle
+  , openAtomicHandle
+  )
 
 -- | Sanitize JSON bytes: replace invalid UTF-8 sequences with replacement char.
 -- This prevents pipeline crashes when source files contain mixed encodings.
@@ -38,10 +44,13 @@ sanitizeUtf8 bs =
 
 openWriter :: FilePath -> IO W.IncrementalWriter
 openWriter path = do
-  h <- openFile path WriteMode
+  -- Write to a temp file in the target's directory; the caller commits it
+  -- atomically via 'closeWriter' (rename over the target only on success).
+  (tmpPath, h) <- openAtomicHandle path
   firstRef <- newIORef True
   hPutStr h "{\n"
-  let iw = W.IncrementalWriter { W.iwHandle = h, W.iwFirst = firstRef }
+  let iw = W.IncrementalWriter { W.iwHandle = h, W.iwFirst = firstRef
+                               , W.iwTmpPath = Just tmpPath, W.iwTarget = Just path }
   writeKey iw "\"schema_version\""
   safePut iw (encode (graphFileSchemaVersion :: Text))
   pure iw
@@ -50,7 +59,19 @@ closeWriter :: W.IncrementalWriter -> IO ()
 closeWriter iw = do
   hPutStr (W.iwHandle iw) "\n}\n"
   hFlush (W.iwHandle iw)
-  hClose (W.iwHandle iw)
+  case (W.iwTmpPath iw, W.iwTarget iw) of
+    (Just tmpPath, Just target) -> commitAtomicHandle tmpPath target (W.iwHandle iw)
+    _ -> hClose (W.iwHandle iw)
+
+-- | Abort an in-flight incremental write: close the handle and remove the
+-- temp file, leaving the target untouched. Safe to call after 'closeWriter'
+-- (the temp path is cleared once committed).
+abortWriter :: W.IncrementalWriter -> IO ()
+abortWriter iw = case (W.iwTmpPath iw, W.iwTarget iw) of
+  (Just tmpPath, Just _) -> do
+    discardAtomicHandle tmpPath (W.iwHandle iw)
+    pure ()
+  _ -> hClose (W.iwHandle iw)
 
 flushWriter :: W.IncrementalWriter -> IO ()
 flushWriter iw = hFlush (W.iwHandle iw)

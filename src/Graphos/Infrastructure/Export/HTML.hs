@@ -31,13 +31,14 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
-import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStr)
+import System.IO (hFlush, hPutStr)
 import qualified Data.Set as Set
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, articulationPoints, gCompositions)
 import Graphos.Domain.Community (cohesionScore, CommunityComposition(..))
 import Graphos.UseCase.Cluster (colorForCommunity)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (withAtomicHandle)
 
 -- | Convert the canonical 'CommunityAggregate' (used in graph.json) into the
 -- HTML-specific view record. This keeps the single computation site in
@@ -73,23 +74,23 @@ visNetworkBundle = BSL.fromStrict $(embedFile "assets/viewer/vis-network.min.js"
 exportHTML :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate] -> FilePath -> IO ()
 exportHTML g analysis mLabels aggregates htmlPath = do
   let payload = computePayload g analysis mLabels aggregates
-  h <- openFile htmlPath WriteMode
-  -- Document head + body skeleton (static markup and asset containers)
-  hPutStr h $ T.unpack htmlDocStart
-  BSL.hPut h visNetworkBundle
-  hPutStr h "</script>\n"
-  hPutStr h "<style>\n"
-  BSL.hPut h viewerCss
-  hPutStr h "\n</style>\n"
-  hPutStr h $ T.unpack (htmlBodySkeleton g analysis)
-  -- Stream payload JSON directly to handle
-  BSL.hPut h (encode payload)
-  -- Close the payload script, embed the viewer application, close the document
-  hPutStr h ";\n</script>\n<script>\n"
-  BSL.hPut h viewerJs
-  hPutStr h "\n</script>\n</body></html>\n"
-  hFlush h
-  hClose h
+  -- Stream into a temp file and rename over the target only when complete.
+  withAtomicHandle htmlPath $ \h -> do
+    -- Document head + body skeleton (static markup and asset containers)
+    hPutStr h $ T.unpack htmlDocStart
+    BSL.hPut h visNetworkBundle
+    hPutStr h "</script>\n"
+    hPutStr h "<style>\n"
+    BSL.hPut h viewerCss
+    hPutStr h "\n</style>\n"
+    hPutStr h $ T.unpack (htmlBodySkeleton g analysis)
+    -- Stream payload JSON directly to handle
+    BSL.hPut h (encode payload)
+    -- Close the payload script, embed the viewer application, close the document
+    hPutStr h ";\n</script>\n<script>\n"
+    BSL.hPut h viewerJs
+    hPutStr h "\n</script>\n</body></html>\n"
+    hFlush h
 
 -- | Compute the interned, style-free payload for the viewer.
 computePayload :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate] -> VisPayload

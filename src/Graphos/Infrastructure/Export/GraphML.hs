@@ -8,12 +8,13 @@ import qualified Data.Text as T
 
 import Graphos.Domain.Types ()
 import Graphos.Domain.Graph (Graph)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeTextFileAtomic)
 
 -- | Export graph as GraphML
 exportGraphML :: Graph -> FilePath -> IO ()
 exportGraphML g path = do
   let xml = generateGraphML g
-  writeFile path (T.unpack xml)
+  writeTextFileAtomic path xml
 
 generateGraphML :: Graph -> Text
 generateGraphML _g =

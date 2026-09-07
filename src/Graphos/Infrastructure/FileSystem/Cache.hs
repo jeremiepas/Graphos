@@ -20,11 +20,12 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Short (toText)
-import System.Directory (doesFileExist, createDirectoryIfMissing, removeFile, renameFile)
+import System.Directory (doesFileExist, removeFile)
 import System.FilePath (takeFileName, (</>))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
 -- | Get the cache directory path
 cacheDir :: FilePath -> FilePath
@@ -49,10 +50,7 @@ saveCached :: FilePath -> Extraction -> FilePath -> IO ()
 saveCached path result root = do
   h <- fileHash path root
   let entry = cacheDir root </> h ++ ".json"
-      tmp   = entry ++ ".tmp"
-  createDirectoryIfMissing True (cacheDir root)
-  BSL.writeFile tmp (encode (extractionToCached result))
-  renameFile tmp entry  -- atomic write
+  writeFileAtomic entry (encode (extractionToCached result))
 
 -- | Check semantic cache for a list of files
 -- Returns (cachedExtractions, uncachedFiles)
@@ -153,15 +151,11 @@ groupBySourceFile nodes edges =
 checkpointPath :: FilePath -> FilePath
 checkpointPath outputDir = outputDir </> "pipeline.checkpoint.json"
 
--- | Save a pipeline checkpoint to disk.
--- Uses atomic write (write to tmp, then rename) to avoid corruption.
+-- | Save a pipeline checkpoint to disk (atomic write).
 savePipelineCheckpoint :: FilePath -> PipelineCheckpoint -> IO ()
 savePipelineCheckpoint outputDir chk = do
-  createDirectoryIfMissing True outputDir
   let path = checkpointPath outputDir
-      tmp  = path ++ ".tmp"
-  BSL.writeFile tmp (encode chk)
-  renameFile tmp path
+  writeFileAtomic path (encode chk)
 
 -- | Load a pipeline checkpoint from disk.
 -- Returns Nothing if no checkpoint exists (first run or after cleanup).

@@ -4,8 +4,9 @@ module Graphos.Infrastructure.Export.Report
   ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
+
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeTextFileAtomic)
 
 -- | Write report to file
 exportReport :: Text -> FilePath -> IO ()
-exportReport reportContent path = writeFile path (T.unpack reportContent)
+exportReport reportContent path = writeTextFileAtomic path reportContent

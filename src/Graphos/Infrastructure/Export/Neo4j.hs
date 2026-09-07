@@ -38,13 +38,14 @@ import qualified Data.Text as T
 import Data.Text.Short (toText)
 import System.Directory (removeFile)
 import System.Exit (ExitCode(..))
-import System.IO (IOMode(..), hFlush, hClose, openFile, hPutStrLn)
+import System.IO (hFlush, hPutStrLn)
 import System.Process (readProcessWithExitCode)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 import Graphos.Domain.Community.Label (suggestCommunityLabels)
 import Graphos.Domain.Community (selectRepresentatives, filterEdgesByNodeSet)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (withAtomicHandle)
 
 
 -- ───────────────────────────────────────────────
@@ -52,16 +53,15 @@ import Graphos.Domain.Community (selectRepresentatives, filterEdgesByNodeSet)
 -- ───────────────────────────────────────────────
 
 -- | Generate Cypher statements and write to file (without communities).
--- Streams statements to handle to reduce peak memory for large graphs.
+-- Streams into a temp file which is renamed over the target only on success.
 exportCypher :: Graph -> FilePath -> IO ()
-exportCypher g path = do
-  h <- openFile path WriteMode
-  -- Stream node statements one by one
-  mapM_ (\n -> hPutStrLn h (T.unpack (generateCypherNodeStatement n))) (Map.elems (gNodes g))
-  -- Stream edge statements one by one
-  mapM_ (\e -> hPutStrLn h (T.unpack (generateCypherEdgeStatement e))) (Map.elems (gEdges g))
-  hFlush h
-  hClose h
+exportCypher g path =
+  withAtomicHandle path $ \h -> do
+    -- Stream node statements one by one
+    mapM_ (\n -> hPutStrLn h (T.unpack (generateCypherNodeStatement n))) (Map.elems (gNodes g))
+    -- Stream edge statements one by one
+    mapM_ (\e -> hPutStrLn h (T.unpack (generateCypherEdgeStatement e))) (Map.elems (gEdges g))
+    hFlush h
 
 -- ───────────────────────────────────────────────
 -- Neo4j push (basic — nodes + edges only)

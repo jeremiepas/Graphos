@@ -35,7 +35,7 @@ import Data.Text.Short (toText)
 import qualified Data.Text.IO as TIO
 import System.Exit (ExitCode(..))
 import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (hClose, hFlush, hPutStrLn, IOMode(..), openFile, openTempFile)
+import System.IO (hClose, hFlush, hPutStrLn, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Data.List (sortOn)
 
@@ -43,6 +43,7 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 import Graphos.Domain.Community (selectRepresentatives, filterEdgesByNodeSet)
 import Graphos.Domain.Community.Label (suggestCommunityLabels)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (withAtomicHandle)
 
 -- ───────────────────────────────────────────────
 -- Cypher file export
@@ -50,19 +51,18 @@ import Graphos.Domain.Community.Label (suggestCommunityLabels)
 
 -- | Generate Memgraph-compatible Cypher and write to file.
 -- Includes index creation statements before data.
--- Streams statements to handle to reduce peak memory for large graphs.
+-- Streams into a temp file which is renamed over the target only on success.
 exportMemgraphCypher :: Graph -> FilePath -> IO ()
-exportMemgraphCypher g path = do
-  h <- openFile path WriteMode
-  -- Write index creation statements
-  mapM_ (hPutStrLn h . T.unpack) (T.lines generateIndexCypher)
-  hPutStrLn h ""
-  -- Stream node statements one by one
-  mapM_ (\n -> hPutStrLn h (T.unpack (generateInlineNodeStatement n))) (Map.elems (gNodes g))
-  -- Stream edge statements one by one
-  mapM_ (\e -> hPutStrLn h (T.unpack (generateInlineEdgeStatement e))) (Map.elems (gEdges g))
-  hFlush h
-  hClose h
+exportMemgraphCypher g path =
+  withAtomicHandle path $ \h -> do
+    -- Write index creation statements
+    mapM_ (hPutStrLn h . T.unpack) (T.lines generateIndexCypher)
+    hPutStrLn h ""
+    -- Stream node statements one by one
+    mapM_ (\n -> hPutStrLn h (T.unpack (generateInlineNodeStatement n))) (Map.elems (gNodes g))
+    -- Stream edge statements one by one
+    mapM_ (\e -> hPutStrLn h (T.unpack (generateInlineEdgeStatement e))) (Map.elems (gEdges g))
+    hFlush h
 
 -- ───────────────────────────────────────────────
 -- Index creation

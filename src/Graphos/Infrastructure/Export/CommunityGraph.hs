@@ -6,7 +6,6 @@ module Graphos.Infrastructure.Export.CommunityGraph
   ) where
 
 import Data.Aeson (ToJSON(..), object, (.=), encode)
-import qualified Data.ByteString.Lazy as BSL
 import Data.List (sortOn, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -21,6 +20,7 @@ import Graphos.Domain.Types
   , nodeLabel )
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 import Graphos.Domain.Community (cohesionScore)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
 -- ───────────────────────────────────────────────
 -- JSON types for community graph
@@ -90,7 +90,7 @@ exportCommunityGraph g commMap outPath = do
         , cgnEdges = commEdges
         , cgnSummary = summary
         }
-  BSL.writeFile outPath (encode cg)
+  writeFileAtomic outPath (encode cg)
 
 -- ───────────────────────────────────────────────
 -- Build community nodes
