@@ -18,7 +18,15 @@ spec = describe "exportAll" $ do
       ref <- newIORef Nothing
       let g = buildGraph False (extractionFromLists [] [])
           analysis = Analysis Map.empty Map.empty [] [] []
-          detection = Detection 0 0 True Nothing Map.empty emptyExclusionCounts
+          detection = Detection
+            { detectionTotalFiles = 0
+            , detectionTotalWords = 0
+            , detectionNeedsGraph = True
+            , detectionWarning = Nothing
+            , detectionFiles = Map.empty
+            , detectionClassification = Map.empty
+            , detectionExclusions = emptyExclusionCounts
+            }
           labels = Just (Map.fromList [(1 :: Int, T.pack "Auth")])
           port = ExportPort
             { epExportHTML = \_g _analysis mLbl _aggregates _path -> modifyIORef ref (const (Just mLbl))

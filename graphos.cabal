@@ -197,6 +197,7 @@ library
                        -- Domain - Config
                        Graphos.Domain.Config
                        Graphos.Domain.Config.Core
+                       Graphos.Domain.Config.Detection
                        Graphos.Domain.Config.Extraction
                        Graphos.Domain.Config.Export
                        Graphos.Domain.Config.Ingest
@@ -334,6 +335,7 @@ test-suite graphos-test
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec
     Graphos.Domain.Graph.CollisionSpec
+    Graphos.Domain.Graph.SCCSpec
     Graphos.Domain.Query.Cypher.MappingSpec
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
@@ -358,6 +360,7 @@ test-suite graphos-test
      Graphos.UseCase.SubgraphSpec
      Graphos.UseCase.ResearchSpec
     Graphos.UseCase.DetectSpec
+    Graphos.UseCase.DetectClassificationSpec
     Graphos.Fidelity.ImportEdgesSpec
     Graphos.Fidelity.GraphCoverageSpec
     Graphos.UseCase.ExportSpec

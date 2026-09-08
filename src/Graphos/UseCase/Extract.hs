@@ -19,8 +19,9 @@ module Graphos.UseCase.Extract
   , resolveGranularity
   , granularityForFile
   , pushExtractionStreaming
-  , isStubExtraction
-  ) where
+   , isStubExtraction
+   , collapseDetectedFiles
+   ) where
 
 import Graphos.UseCase.Extract.Core
   ( extractAll
@@ -30,6 +31,7 @@ import Graphos.UseCase.Extract.Core
   , resolveGranularity
   , granularityForFile
   , isStubExtraction
+  , collapseDetectedFiles
   )
 import Graphos.UseCase.Extract.LSP (extractFromFile)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI)
