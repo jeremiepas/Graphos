@@ -14,6 +14,7 @@ module Graphos.UseCase.Extract.Core
   , ImageSource(..)
   , extractImageSource
   , collectEmbeddedImages
+  , collapseDetectedFiles
   ) where
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
@@ -22,17 +23,18 @@ import Control.Exception (bracket_, evaluate)
 import Control.Monad (unless, void, when)
 import Data.List (nubBy, sortBy)
 import Data.Ord (comparing)
+import Data.Bits ((.|.))
 import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..), bitNodeKind)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..), bitNodeKind, bitNodeExtra)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
@@ -40,6 +42,7 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
+import Data.Aeson (object, (.=))
 
 -- | Extract entities from all detected files.
 extractAll :: AppEnv -> PipelineConfig -> Detection -> IO Extraction
@@ -461,6 +464,69 @@ extractChangedFiles appEnv config changedFiles = do
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) stubExtractions
 
   let merged = List.foldl' mergeExtractions emptyExtraction
-                 (tsExtractions ++ lspExtractions ++ stubExtractions)
+                  (tsExtractions ++ lspExtractions ++ stubExtractions)
   logInfo $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
   pure merged
+
+-- | In collapse mode, produce one representative node per detected
+-- (non-'Source') file. Each node carries 'childCount' = the number of nodes
+-- that file would have produced if extracted normally. Detected files are not
+-- added to the graph as their full node set; they are represented compactly so
+-- a huge generated/vendored/minified file occupies a single node.
+collapseDetectedFiles
+  :: AppEnv
+  -> PipelineConfig
+  -> Map.Map FileClass [FilePath] -- ^ detectionClassification (all files by class)
+  -> IO [Node]
+collapseDetectedFiles appEnv config classification = do
+  let detectedFiles = [ f | (c, fs) <- Map.toList classification, not (isSourceClass c), f <- fs ]
+  if null detectedFiles
+    then pure []
+    else mapM (\fp -> do
+                  count <- countExtractedNodes appEnv config fp
+                  pure (collapsedNode fp count)
+                ) detectedFiles
+
+-- | Count the nodes a single file would produce if extracted normally.
+-- Mirrors the routing in 'extractAll' (tree-sitter / LSP / stub) but processes
+-- exactly one file, then keeps only nodes whose source is this file so imported
+-- and external nodes (which belong to other files) are not double-counted.
+countExtractedNodes
+  :: AppEnv -> PipelineConfig -> FilePath -> IO Int
+countExtractedNodes appEnv config fp = do
+   let (tsFiles, _, stubFiles) = partitionByExtractor config [fp]
+   ext <- if not (null tsFiles)
+         then extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
+       else if not (null stubFiles)
+         then pure (extractionFromLists [makeStubNode fp] [])
+        else do
+          absRoot <- canonicalizePath (cfgInputPath config)
+          let groups = groupByLSPServer (epLanguageServerCommands (extractionPort appEnv)) [fp]
+          extractions <- mapM (extractGroup appEnv absRoot config) groups
+          pure (List.foldl' mergeExtractions emptyExtraction (concat extractions))
+   pure $ length [ () | n <- Map.elems (extractionNodes ext), toText (nodeSourceFile n) == T.pack fp ]
+
+-- | Build a single representative node for a detected file, tagging it with the
+-- detection class and a childCount attribute recording how many nodes the file
+-- would have produced. Kept pure so it is trivially testable.
+collapsedNode :: FilePath -> Int -> Node
+collapsedNode fp count = Node
+  { nodeId           = T.pack fp
+  , nodeLabel        = fromText (T.pack (takeFileName fp))
+  , nodeFileType     = CodeFile
+  , nodeSourceFile   = fromText (T.pack fp)
+  , nodeLineStart    = Nothing
+  , nodeLineEnd      = Nothing
+  , nodeSignature    = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeKind         = Just (fromText "Collapsed")
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Just collapsedNodeExtra
+  , nodePresentBits  = bitNodeKind .|. bitNodeExtra
+  }
+  where
+    collapsedNodeExtra = object
+      [ "childCount" .= count
+      , "sourceFile" .= T.pack fp
+      ]

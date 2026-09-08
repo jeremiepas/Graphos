@@ -1,0 +1,58 @@
+name: OpenSpec Archive Check
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["develop", "main"]
+
+concurrency:
+  group: openspec-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  openspec-archived:
+    if: github.actor == 'jeremiepas'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No stray change directories at repo top level
+        run: |
+          # A change dir must live in openspec/changes/ (active) or openspec/changes/archive/ (done)
+          STRAY=$(find openspec -maxdepth 1 -type d ! -name openspec ! -name changes ! -name specs ! -name archive ! -name '.' 2>/dev/null || true)
+          if [ -n "$STRAY" ]; then
+            echo "::error::Stray change directories outside openspec/changes/: $STRAY"
+            exit 1
+          fi
+
+      - name: Active changes reference finished work only when PR is merged
+        run: |
+          # Changes with ALL tasks checked should be archived. Warning-only until the
+          # openspec-verifier archives the historical backlog via the PDCA loop.
+          for CHANGE_DIR in openspec/changes/*/; do
+            [ -d "$CHANGE_DIR" ] || continue
+            NAME=$(basename "$CHANGE_DIR")
+            TASKS="$CHANGE_DIR/tasks.md"
+            [ -e "$TASKS" ] || continue
+            if ! grep -q '^- \[ \]' "$TASKS" && [ "$(grep -c '^- \[x\]' "$TASKS")" -gt 0 ]; then
+              echo "::warning::$NAME: all tasks checked but change is NOT archived — openspec-verifier should run 'openspec archive $NAME' and commit"
+            fi
+          done
+
+      - name: Archived changes are complete
+        run: |
+          # Warning-only until the openspec-verifier trims the historical archive;
+          # superseded/dropped changes may legitimately retain unchecked tasks.
+          for TASKS in openspec/changes/archive/*/tasks.md; do
+            [ -e "$TASKS" ] || continue
+            if grep -q '^- \[ \]' "$TASKS"; then
+              UNCHECKED=$(grep -c '^- \[ \]' "$TASKS")
+              echo "::warning::$TASKS is ARCHIVED but has $UNCHECKED unchecked tasks"
+            fi
+          done

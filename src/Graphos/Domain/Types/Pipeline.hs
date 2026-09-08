@@ -20,12 +20,15 @@ module Graphos.Domain.Types.Pipeline
   , advanceStage
   , checkpointPath
 
-    -- * Detection types
-  , Detection(..)
-  , ExclusionCounts(..)
-  , emptyExclusionCounts
-  , FileCategory(..)
-  ) where
+      -- * Detection types
+    , Detection(..)
+    , FileClass(..)
+   , FileMeta(..)
+   , isSourceClass
+   , ExclusionCounts(..)
+   , emptyExclusionCounts
+   , FileCategory(..)
+   ) where
 
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject, withText)
 import Data.Map.Strict (Map)
@@ -36,6 +39,7 @@ import GHC.Conc (numCapabilities)
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
+import Graphos.Domain.Config.Detection (DetectionMode(..))
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
 
 -- | Pipeline configuration
@@ -91,9 +95,12 @@ data PipelineConfig = PipelineConfig
    , cfgIgnorePatterns     :: [AnnotatedPattern]        -- ^ CLI-provided --ignore patterns merged with .gitignore/.graphosignore
   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
-   , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
-   , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
-    } deriving (Eq, Show)
+     , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
+    , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
+     , cfgDetectionMode      :: Maybe DetectionMode       -- ^ CLI --detect-mode override (exclude|collapse|off)
+     , cfgDetectDisabled     :: Bool                      -- ^ --no-detect: force detection off
+     , cfgMinifiedThreshold  :: Maybe Int                 -- ^ CLI --minified-threshold override
+     } deriving (Eq, Show)
 
 -- | Edge density level for inference
 -- Controls how aggressively the pipeline infers additional edges between nodes.
@@ -176,8 +183,11 @@ defaultConfig = PipelineConfig
   , cfgRtsProfile         = False
   , cfgMaxHeap            = Nothing
    , cfgLspConcurrency     = 2
-   , cfgStrictGraph        = True
-   }
+    , cfgStrictGraph        = True
+    , cfgDetectionMode      = Nothing
+    , cfgDetectDisabled     = False
+    , cfgMinifiedThreshold  = Nothing
+    }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
 -- When provided, each file's extraction is pushed to Neo4j immediately
@@ -205,12 +215,13 @@ emptyExclusionCounts = ExclusionCounts 0 0 0 0 0 0
 
 -- | File detection result
 data Detection = Detection
-  { detectionTotalFiles    :: Int
-  , detectionTotalWords    :: Int
-  , detectionNeedsGraph    :: Bool
-  , detectionWarning      :: Maybe Text
-  , detectionFiles        :: Map FileCategory [FilePath]
-  , detectionExclusions   :: ExclusionCounts
+  { detectionTotalFiles       :: Int
+  , detectionTotalWords       :: Int
+  , detectionNeedsGraph       :: Bool
+  , detectionWarning          :: Maybe Text
+  , detectionFiles            :: Map FileCategory [FilePath]
+  , detectionClassification   :: Map FileClass [FilePath]
+  , detectionExclusions       :: ExclusionCounts
   } deriving (Eq, Show)
 
 -- | Pipeline steps for checkpoint tracking
@@ -304,6 +315,49 @@ instance FromJSON FileCategory where
     "video"    -> pure VideoFiles
     "office"   -> pure OfficeFiles
     _          -> fail $ "Unknown file category: " ++ T.unpack t
+
+-- | Classification of a file by provenance, used to exclude generated,
+-- vendored and minified code from extraction. Only 'Source' files are
+-- extracted; every other value is flagged so downstream stages can treat it
+-- accordingly.
+data FileClass
+  = Source        -- ^ human-authored source; extracted normally
+  | Generated     -- ^ auto-generated (a generator header signature is present)
+  | Vendored      -- ^ third-party code under a known vendored directory
+  | Minified      -- ^ single oversized line (minified / bundled asset)
+  deriving (Eq, Show, Ord, Generic)
+
+instance NFData FileClass
+
+instance ToJSON FileClass where
+  toJSON Source     = "source"
+  toJSON Generated  = "generated"
+  toJSON Vendored   = "vendored"
+  toJSON Minified   = "minified"
+
+instance FromJSON FileClass where
+  parseJSON = withText "FileClass" $ \t -> case t of
+    "source"     -> pure Source
+    "generated"  -> pure Generated
+    "vendored"   -> pure Vendored
+    "minified"   -> pure Minified
+    _            -> fail $ "Unknown file class: " ++ T.unpack t
+
+-- | A read-only view of a file used by the classifier: its path, the leading
+-- content window (first 'dcLeadingLines' lines), and the longest line length.
+data FileMeta
+  = FileMeta
+    { metaPath         :: FilePath     -- ^ path used for vendored-segment matching
+    , metaLeadingLines :: [Text]       -- ^ first up to dcLeadingLines lines
+    , metaMaxLineLen   :: Int          -- ^ length of the longest line, in characters
+    } deriving (Eq, Show, Generic)
+
+instance NFData FileMeta
+
+-- | A file reaches extraction only when classified 'Source'.
+isSourceClass :: FileClass -> Bool
+isSourceClass Source = True
+isSourceClass _      = False
 
 -- | Seven-stage pipeline state
 -- Tracks completion of: Detect → Extract → Build → Cluster → Infer → Analyze → Export
