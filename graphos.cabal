@@ -334,6 +334,7 @@ test-suite graphos-test
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec
     Graphos.Domain.Graph.CollisionSpec
+    Graphos.Domain.Graph.SCCSpec
     Graphos.Domain.Query.Cypher.MappingSpec
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
