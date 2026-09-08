@@ -22,14 +22,15 @@ module Graphos.Domain.Graph.Query
 
 import Control.DeepSeq (deepseq)
 import Control.Monad (forM_)
-import Control.Monad.ST (ST, runST)
-import Control.Monad.ST.Strict (STRef, newSTRef, readSTRef, writeSTRef)
-import Data.List (sortOn)
+import Control.Monad.ST (runST)
+import Data.STRef (newSTRef, readSTRef, writeSTRef)
+import Data.List (sort, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
+import qualified Data.Graph.Inductive.Graph as FGL (Edge)
 import Data.Graph.Inductive.Graph (edges)
 import Data.Graph.Inductive.Query.BFS (bfs, esp)
 import Data.Graph.Inductive.Query.DFS (dfs)
@@ -127,22 +128,19 @@ shortestPathReachableWithCached cfg src tgt =
 -- ids assigned by ascending minimum \`NodeId\` — so the mapping is invariant under
 -- any permutation of \`gNodes\`/\`gEdges\` keys (INV-9). Iterative single DFS pass,
 -- O(N+E) time and O(C) auxiliary component buckets beyond the O(N) state vectors.
-stronglyConnectedComponents :: Graph -> Map Int [NodeId]
+stronglyConnectedComponents :: Graph -> Map.Map Int [NodeId]
 stronglyConnectedComponents g =
   stronglyConnectedComponentsWithCached (toCachedFGL g)
 
 -- | SCC decomposition using a pre-built CachedFGL.
-stronglyConnectedComponentsWithCached :: CachedFGL -> Map Int [NodeId]
+stronglyConnectedComponentsWithCached :: CachedFGL -> Map.Map Int [NodeId]
 stronglyConnectedComponentsWithCached cfg =
   let nidMap = cfgNidMap cfg
       n = V.length nidMap
-      rawComps = runST (sccIndices n (sccAdjacency cfg))
-      forced = rawComps `deepseq` rawComps
-      ordered = sortOn (minComponent nidMap) (V.toList forced)
-      mapped = Map.fromList (zip [0 ..] [nidMap V.! x | c <- ordered, x <- c])
-  in mapped `deepseq` mapped
-  where
-    minComponent c = minimum (fmap (nidMap V.!) c)
+      comps = sccIndices n (sccAdjacency cfg)
+      ordered = sortOn minimum comps
+      mapped = Map.fromList (zip [0 ..] [sort [nidMap V.! x | x <- c] | c <- ordered])
+  in comps `deepseq` mapped `deepseq` mapped
 
 -- | Forward adjacency over fgl sequential indices, sorted ascending per source.
 -- Derived from the directed edge relation \`E\` (= FGL edges, built from \`gEdges\`).
@@ -150,15 +148,15 @@ sccAdjacency :: CachedFGL -> V.Vector (V.Vector Int)
 sccAdjacency cfg =
   let gr = cfgGraph cfg
       n = V.length (cfgNidMap cfg)
-      grouped = Map.fromListWith (++) [(s, V.singleton v) | (s, v, _) <- edges gr]
-      sorted = Map.map V.sort grouped
+      grouped = Map.fromListWith (++) [(s, [v]) | (s, v) <- edges gr :: [FGL.Edge]]
+      sorted = Map.map (V.fromList . sort) grouped
   in V.generate n (\s -> Map.findWithDefault V.empty s sorted)
 
 -- | Tarjan SCC over an index-keyed adjacency list. Iterative (explicit frame
 -- stack) so it does not recurse per node and scales to large graphs. Returns
 -- completed components as node-index lists. Seeds are visited in ascending
 -- index order (== ascending \`NodeId\`, since indices are assigned in key order).
-sccIndices :: Int -> V.Vector (V.Vector Int) -> ST s [[Int]]
+sccIndices :: Int -> V.Vector (V.Vector Int) -> [[Int]]
 sccIndices n adj = runST $ do
   idx      <- MV.replicate n (negate 1)   -- discovery index; -1 == unvisited (∞)
   low      <- MV.replicate n 0
@@ -170,80 +168,93 @@ sccIndices n adj = runST $ do
   comps    <- newSTRef ([] :: [[Int]])    -- completed components (node-index lists)
   cnt      <- newSTRef (0 :: Int)         -- global discovery counter
 
-  let visit u = do
-        k <- readSTRef cnt
-        writeSTRef cnt (k + 1)
-        MV.write idx u k
-        MV.write low u k
-        MV.write onStack u True
-        ct <- readSTRef cTop
-        MV.write compStk ct u
-        writeSTRef cTop (ct + 1)
+  let
+    visit u = do
+      k <- readSTRef cnt
+      writeSTRef cnt (k + 1)
+      MV.write idx u k
+      MV.write low u k
+      MV.write onStack u True
+      t <- readSTRef cTop
+      MV.write compStk t u
+      writeSTRef cTop (t + 1)
 
-      pushFrame u startIdx parent = do
-        t <- readSTRef fTop
-        MV.write frStk t (u, startIdx, parent)
-        writeSTRef fTop (t + 1)
+    pushFrame u startIdx parent = do
+      t <- readSTRef fTop
+      MV.write frStk t (u, startIdx, parent)
+      writeSTRef fTop (t + 1)
 
-      relow u v = do
-        lu <- MV.read low u
-        iv <- MV.read idx v
-        MV.write low u (min lu iv)
+    -- Tree-edge propagation: parent inherits the CHILD's lowlink (Tarjan §3.1);
+    -- back/cross-edge propagation: parent inherits the TARGET's index.
+    relow u v = do
+      lu <- MV.read low u
+      lv <- MV.read low v
+      MV.write low u (min lu lv)
 
-      popComponent root = go []
-        where
-          go acc = do
-            ct <- readSTRef cTop
-            x <- MV.read compStk (ct - 1)
-            writeSTRef cTop (ct - 1)
-            MV.write onStack x False
-            if x == root then pure (reverse (x : acc)) else go (x : acc)
+    relowIdx u v = do
+      lu <- MV.read low u
+      iv <- MV.read idx v
+      MV.write low u (min lu iv)
 
-      drain = do
-        m <- readSTRef fTop
-        if m == 0
-          then pure ()
-          else do
-            writeSTRef fTop (m - 1)
-            (u, nx, parent) <- MV.read frStk (m - 1)
-            let au = adj V.! u
-            if nx >= V.length au
-              then do
-                lu <- MV.read low u
-                iu <- MV.read idx u
-                if lu == iu
-                  then do
-                    comp <- popComponent u
-                    cs <- readSTRef comps
-                    writeSTRef comps (comp : cs)
-                  else pure ()
-                case parent of
-                  Just p -> relow p u
-                  Nothing -> pure ()
-                drain
-              else do
-                let v = au V.! nx
-                vu <- MV.read idx v
-                pushFrame u (nx + 1) parent   -- resume u at the next neighbor later
-                if vu == negate 1
-                  then do
-                    visit v
-                    pushFrame v 0 (Just u)      -- recurse into unvisited neighbor v
-                  else do
-                    os <- MV.read onStack v
-                    if os then relow u v else pure ()
-                drain
+    -- Pop the Tarjan node stack down to and including @root@, returning the
+    -- popped node indices (in pop order, then reversed to DFS order).
+    popUntil r acc = do
+      t <- readSTRef cTop
+      x <- MV.read compStk (t - 1)
+      writeSTRef cTop (t - 1)
+      MV.write onStack x False
+      if x == r then pure (reverse (x : acc)) else popUntil r (x : acc)
 
-      seedLoop = forM_ [0 .. n - 1] $ \s -> do
-        vs <- MV.read idx s
-        if vs == negate 1
-          then do
-            visit s
-            pushFrame s 0 Nothing
-            drain
-          else pure ()
+    drain = do
+      m <- readSTRef fTop
+      if m == 0
+        then pure ()
+        else do
+          writeSTRef fTop (m - 1)
+          (u, nx, parent) <- MV.read frStk (m - 1)
+          let au = adj V.! u
+          if nx >= V.length au
+            then do
+              lu <- MV.read low u
+              iu <- MV.read idx u
+              if lu == iu
+                then do
+                  comp <- popUntil u []
+                  cs <- readSTRef comps
+                  writeSTRef comps (comp : cs)
+                else pure ()
+              case parent of
+                Just p  -> relow p u        -- finished child: propagate low[u]
+                Nothing -> pure ()
+              drain
+            else do
+              let v = au V.! nx
+              vu <- MV.read idx v
+              pushFrame u (nx + 1) parent   -- resume u at the next neighbor later
+              if vu == negate 1
+                then do
+                  visit v
+                  pushFrame v 0 (Just u)    -- recurse into unvisited neighbor v
+                else do
+                  os <- MV.read onStack v
+                  if os then relowIdx u v else pure ()
+              drain
 
-  in seedLoop >> readSTRef comps
+    seedLoop = forM_ [0 .. n - 1] $ \s -> do
+      vs <- MV.read idx s
+      if vs == negate 1
+        then do
+          visit s
+          pushFrame s 0 Nothing
+          drain
+        else pure ()
+
+  seedLoop
+  result <- readSTRef comps
+  pure result
+
+-- | Induced subgraph restricted to the given node set.
+subgraph :: Graph -> Set NodeId -> Graph
 subgraph g nodeSet =
   let nodes' = Map.filterWithKey (\k _ -> k `Set.member` nodeSet) (gNodes g)
       edges' = Map.filterWithKey (\(s, t) _ -> s `Set.member` nodeSet && t `Set.member` nodeSet) (gEdges g)
