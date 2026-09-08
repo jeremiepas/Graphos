@@ -4,11 +4,13 @@ module Graphos.Infrastructure.FileSystem.AtomicWriteSpec (spec) where
 
 import Control.Concurrent (killThread, forkIO, threadDelay)
 import Control.Exception (SomeException, try)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath ((</>))
+import System.IO (Handle, hIsOpen)
 import System.IO.Temp (withSystemTempDirectory)
 
 import Test.Hspec
@@ -82,6 +84,20 @@ spec = do
         withAtomicHandle path $ \h -> do
           mapM_ (BSL.hPut h) ["chunk1,", "chunk2,", "chunk3"]
         BSL.readFile path `shouldReturn` "chunk1,chunk2,chunk3"
+
+    it "closes the handle after commit (no fd leak)" $ do
+      -- Regression (AVI-567): commitAtomicHandle used to close the POSIX fd
+      -- directly and leave the Handle open forever. After a successful commit
+      -- the Handle must be closed (hIsOpen == False).
+      withSystemTempDirectory "graphos-atomic" $ \dir -> do
+        let path = dir </> "fd-check.json"
+        hRef <- newIORef (error "withAtomicHandle did not run" :: Handle)
+        withAtomicHandle path $ \h -> writeIORef hRef h
+        h <- readIORef hRef
+        open <- hIsOpen h
+        open `shouldBe` False
+        -- The committed file is intact.
+        BSL.readFile path `shouldReturn` ""
 
   describe "writeTextFileAtomic / writeStringFileAtomic" $ do
     it "writes UTF-8 text" $ do
