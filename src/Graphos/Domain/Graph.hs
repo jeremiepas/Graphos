@@ -18,8 +18,10 @@ module Graphos.Domain.Graph
   , neighbors
   , degree
   , shortestPath
+  , shortestPathReachable
   , breadthFirstSearch
   , depthFirstSearch
+  , stronglyConnectedComponents
   , subgraph
   
     -- * Advanced queries (fgl-powered)
@@ -38,6 +40,6 @@ module Graphos.Domain.Graph
   ) where
 
 import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, makeStubNode)
-import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, breadthFirstSearch, depthFirstSearch, subgraph)
+import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, subgraph)
 import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness)
 import Graphos.Domain.Graph.Diff (graphDiff)
