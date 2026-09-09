@@ -32,6 +32,13 @@ code, docs, and files into a navigable graph of symbols and their relationships.
 - For a full rebuild: `graphos .` (slower but comprehensive)
 - To add a new file: `graphos ingest <file>`
 
+## Your tool: the graphos CLI
+
+- The backing tool for this skill is the **graphos** CLI binary — use it exclusively; do not reach for Python or any foreign tool.
+- The knowledge graph lives at `graphos-out/graph.json`; the output directory is `graphos-out/`.
+- The unrelated `graphify` tool is a separate Python program that writes to `graphify-out/`. It is NOT this tool and MUST NOT be used here.
+- Do NOT call `graphos_*` MCP tools — they are not registered in this environment.
+
 ## Command reference
 
 ```
