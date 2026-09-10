@@ -1,0 +1,5 @@
+name = "ViewerNav"
+defaultTargets = ["ViewerNav"]
+
+[[lean_lib]]
+name = "ViewerNav"
