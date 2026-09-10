@@ -39,3 +39,4 @@ opencode.json
 opencode.jsonc
 *.heapsnapshot
 __pycache__/
+.lake/
