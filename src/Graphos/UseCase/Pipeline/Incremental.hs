@@ -4,6 +4,8 @@ module Graphos.UseCase.Pipeline.Incremental
   ( runIncrementalPipeline
   , runSingleFilePipeline
   , SingleFileResult(..)
+  , clusterAndInfer
+  , cleanInferred
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -11,12 +13,13 @@ import Control.Monad (when, void)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.FilePath ((</>))
 
 import Graphos.Domain.Types hiding (PushMode(..))
-import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
+import Graphos.Domain.Types.Pipeline (EdgeDensity(..), Neo4jStreamingConfig(..), Neo4jPushMode(..))
 import Graphos.Domain.Config (SemanticEdgesConfig(..))
-import Graphos.Domain.Graph (gNodes, gEdges)
+import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -29,12 +32,13 @@ import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
-import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode)
+import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.Domain.Labeling (LabelingResult(..))
 import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
 import Graphos.UseCase.Pipeline.Core (PipelineResult(..), logSemanticInference)
+import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 
 -- | Run incremental pipeline for --watch mode.
 runIncrementalPipeline :: AppEnv -> PipelineConfig -> [FilePath] -> IO (Either Text PipelineResult)
@@ -62,7 +66,12 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
 
   extraction <- extractChangedFiles appEnv configWithStreaming changedFiles
 
-  let graph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
+  let directed = cfgDirected configWithStreaming
+      baseGraph = buildGraphFromExtractions directed [extraction]
+  retained <- loadCleanRetainedGraph (cfgOutputDir configWithStreaming)
+  let graph = case retained of
+        Just old -> mergeGraphs old baseGraph
+        Nothing  -> baseGraph
 
   when (cfgNeo4jStreaming configWithStreaming /= Nothing) $ do
     lpLogInfo lp "  [neo4j-stream] Running edge repair pass for incremental update..."
@@ -78,27 +87,20 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
          Nothing -> "graphos_dev")
     lpLogInfo lp $ T.pack $ "  [neo4j-stream] Edge repair: " ++ show stmts ++ " statements in " ++ show batches ++ " batches"
 
-  (enrichedGraph, finalCommMap, _finalCohesion) <-
+  (enrichedGraph, finalCommMap) <-
     if cfgNoCluster configWithStreaming
-      then pure (graph, Map.empty, Map.empty)
+      then pure (graph, Map.empty)
       else do
         let res = Resolution { resGamma = cfgResolution configWithStreaming
                              , resMinSize = cfgMinCommSize configWithStreaming
                              , resMergeInto = MergeToNeighbor
                              , resMaxIterations = cfgMaxLeidenIterations configWithStreaming }
-            (commMap, cohesion) = clusterGraphWithResolution graph res
             seCfg = (gcSemanticEdges (cfgGraphosConfig configWithStreaming)) { seEnabled = not (cfgNoSemanticEdges configWithStreaming) }
             force = cfgForceSemanticEdges configWithStreaming
-            mode = semanticMode seCfg force graph
-            semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-            allInferred = inferNonSemanticEdges (cfgEdgeDensity configWithStreaming) graph commMap ++ semanticEdges
-            enriched = if null allInferred
-              then graph
-              else buildGraphFromExtractions (cfgDirected configWithStreaming)
-                   [extractionFromLists (Map.elems (gNodes graph))
-                                        (Map.elems (gEdges graph) ++ allInferred)]
+            density = cfgEdgeDensity configWithStreaming
+            (enriched, commMap, mode, semanticEdges) = clusterAndInfer res seCfg force density directed graph
         logSemanticInference lp seCfg mode semanticEdges
-        pure (enriched, commMap, cohesion)
+        pure (enriched, commMap)
 
   createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
   let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
@@ -134,6 +136,42 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
   lpLogInfo lp "[watch] Incremental pipeline complete!"
   pure $ Right result
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Incremental pipeline error: " ++ show e
+
+-- | Cluster then infer edges on a single graph. Pure and deterministic in its graph
+-- input: folding incremental batches into the running graph yields the same enriched
+-- graph as a full build over the merged source (AVI-533 / G2 confluence).
+clusterAndInfer :: Resolution -> SemanticEdgesConfig -> Bool -> EdgeDensity -> Bool -> Graph 
+                -> (Graph, CommunityMap, SemanticMode, [Edge])
+clusterAndInfer res seCfg force density directed graph =
+  let (commMap, cohesion) = clusterGraphWithResolution graph res
+      mode = semanticMode seCfg force graph
+      semanticEdges = inferSemanticEdgesForMode mode seCfg graph
+      allInferred = inferNonSemanticEdges density graph commMap ++ semanticEdges
+      enriched = if null allInferred
+        then graph
+        else buildGraphFromExtractions directed
+             [extractionFromLists (Map.elems (gNodes graph))
+                                 (Map.elems (gEdges graph) ++ allInferred)]
+  in (enriched, commMap, mode, semanticEdges)
+
+-- | Load the persisted graph from the output directory (if present), stripping any
+-- edges previously marked Inferred. Re-inferring on top of a retained graph would
+-- otherwise compound prior inference and diverge from a full build (AVI-533 / G2).
+loadCleanRetainedGraph :: FilePath -> IO (Maybe Graph)
+loadCleanRetainedGraph outputDir = do
+  let graphPath = outputDir </> "graph.json"
+  exists <- doesFileExist graphPath
+  if not exists
+    then pure Nothing
+    else loadGraphFromFile graphPath >>= \case
+      Left _ -> pure Nothing
+      Right lr -> pure (Just (cleanInferred (lrGraph lr)))
+
+-- | Drop edges whose Relation is Inferred, rebuilding a plain source graph.
+cleanInferred :: Graph -> Graph
+cleanInferred g =
+  let keptEdges = Map.filter (\e -> edgeRelation e /= Inferred) (gEdges g)
+  in buildGraph (gDirected g) (extractionFromLists (Map.elems (gNodes g)) (Map.elems keptEdges))
 
 -- | Result of single-file ingestion pipeline
 data SingleFileResult = SingleFileResult
