@@ -50,7 +50,7 @@ graphos [PATH]                  Build the knowledge graph (default: .)
 graphos query QUESTION          Query the knowledge graph
   --dfs / --budget N / --graph FILE
   --json / --label-width N / --edges MODE
-  --max-nodes N / --max-label-chars N
+  --max-nodes N / --max-label-chars N / --path GLOB
 
 graphos cypher QUERY [--write]  openCypher/GQL query; --write permits/persists mutations
   --graph FILE / --budget N / --json

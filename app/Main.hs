@@ -297,7 +297,7 @@ main = do
         Right loaded -> do
            let g = lrGraph loaded
                idx = lrIndex loaded
-               scoredResp0 = queryGraphWithIndexScored g idx question mode budget
+               scoredResp0 = queryGraphWithIndexScoredScoped g idx question mode budget (cqoPath qopts)
                scoredResp = case cqoMaxNodes qopts of
                  Just n | n > 0 -> scoredResp0 { qrespNodes = take n (qrespNodes scoredResp0) }
                  _ -> scoredResp0
