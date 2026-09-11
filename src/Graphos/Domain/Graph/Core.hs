@@ -142,8 +142,10 @@ mergeGraphs old new =
   let mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
                       (gEdges old <> gEdges new)
-      mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
-      mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
+      fwdAdj   = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems mergedEdges]
+      reverseParts = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems mergedEdges]
+      mergedFwd   = fwdAdj
+      mergedBwd   = if gDirected old then reverseParts else reverseParts <> fwdAdj
       mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
                       (Just a, Just b) -> Just (a <> b)
                       (Just a, Nothing) -> Just a
