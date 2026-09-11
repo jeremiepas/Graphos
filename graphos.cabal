@@ -148,7 +148,8 @@ library
                       Graphos.Infrastructure.Extract.Office
                       Graphos.Infrastructure.Extract.Markdown
                       -- Infrastructure - FileSystem
-                      Graphos.Infrastructure.FileSystem.AtomicWrite
+                       Graphos.Infrastructure.FileSystem.AtomicWrite
+                       Graphos.Infrastructure.FileSystem.Fd
                       Graphos.Infrastructure.FileSystem.Watcher
                       Graphos.Infrastructure.FileSystem.Cache
                      Graphos.Infrastructure.FileSystem.Ignore
