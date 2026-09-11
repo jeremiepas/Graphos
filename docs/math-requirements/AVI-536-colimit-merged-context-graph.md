@@ -175,7 +175,7 @@ main = do
 
 ## 10. Next Actions (Graphos-Dev owns the concrete next step)
 
-1. **Feasibility gate + property tests** (AC-1..AC-5) — delegated to Graphos-Dev via child issue [AVI-537](/AVI/issues/AVI-537). Questions to confirm: (i) is Leiden deterministic (canonical tie-break)? [gates AC-4 consistent-input equality, M-6]; (ii) does any field of `Graph` break strict associativity under re-association? [gates R4]; (iii) confirm old-wins direction at edge keys (`EdgeId "<src>-><tgt>:<relation>"`) too.
+1. **Feasibility gate + property tests** (AC-1..AC-5) — delegated to Graphos-Dev via child issue [AVI-645](/AVI/issues/AVI-645). Questions to confirm: (i) is Leiden deterministic (canonical tie-break)? [gates AC-4 consistent-input equality, M-6]; (ii) does any field of `Graph` break strict associativity under re-association? [gates R4]; (iii) confirm old-wins direction at edge keys (`EdgeId "<src>-><tgt>:<relation>"`) too.
 2. **Lock the old-wins correction.** Once AC-5 passes, [AVI-524](/AVI/issues/AVI-524) §3.2 / 09-merge's "new-wins" language should be corrected to "left/first-operand wins" for consistency across the CT corpus.
 3. **Escalate** any category-level judgment above confidence to the Head of R&D (per execution contract); e.g., whether `Gr_inj` (key-inclusions) is the right subcategory vs. a richer relation-poset once relation-coercions are introduced.
 
@@ -183,4 +183,4 @@ main = do
 
 ## 11. Child issue for the concrete next step
 
-The property-test implementations (AC-1..AC-5) and the Haskell feasibility gate are Graphos-Dev's work; they are captured in child issue [AVI-537](/AVI/issues/AVI-537), which carries the acceptance criteria from §6 verbatim and the GATE questions from §10/§9.
+The property-test implementations (AC-1..AC-5) and the Haskell feasibility gate are Graphos-Dev's work; they are captured in child issue [AVI-645](/AVI/issues/AVI-645), which carries the acceptance criteria from §6 verbatim and the GATE questions from §10/§9.
