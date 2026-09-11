@@ -15,13 +15,17 @@ module Graphos.Infrastructure.FileSystem.Cache
 
 import Control.Exception (SomeException, catch)
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Short (toText)
 import System.Directory (doesFileExist, removeFile)
-import System.FilePath (takeFileName, (</>))
+import System.FilePath ((</>))
+import Data.Word (Word8)
+import Numeric (showHex)
+import qualified Crypto.Hash.SHA256 as Hash
 
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
@@ -116,23 +120,28 @@ cachedToExtraction c = extractionFromLists (ceNodes c) (ceEdges c)
 -- Helpers
 -- ───────────────────────────────────────────────
 
--- | Compute SHA256 hash of file contents + relative path
+-- | Hex-encode a single byte, zero-padding to two digits.
+byteToHex :: Word8 -> String
+byteToHex w = case showHex (fromIntegral w :: Int) "" of
+  s -> if length s == 1 then '0' : s else s
+
+-- | Content-addressed cache key: the SHA-256 (hex) of a file's contents.
+--
+-- The key is a pure function of file content only (never the path), so the cache
+-- factors through content as required by INV-CACHE-SOUND / Theorem 1 of the
+-- hot-reload cost model: identical content hits the same slot, and any edit to
+-- the file's bytes produces a new key, invalidating the entry. A missing file has
+-- no content to hash, so it falls back to a deterministic path-derived key that
+-- always misses (forcing re-extraction) without throwing.
 fileHash :: FilePath -> FilePath -> IO String
-fileHash path root = do
-  -- Simplified: use file path as hash key (proper SHA256 would need cryptohash)
-  -- TODO: implement proper SHA256 hashing with cryptohash-sha256
-  let rel = makeRelative root path
-  pure (show (length rel) ++ "_" ++ map safeChar rel)
-  where
-    safeChar '/' = '_'
-    safeChar '.' = '_'
-    safeChar c   = c
-    makeRelative root' path'
-      | takeFileName root' `isPrefixOf` path' = drop (length (takeFileName root') + 1) path'
-      | otherwise = path'
-    isPrefixOf _ "" = True
-    isPrefixOf [] _ = True
-    isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
+fileHash path _root = do
+  exists <- doesFileExist path
+  if exists
+    then do
+      contents <- BS.readFile path
+      let digestBytes = Hash.hash contents :: BS.ByteString
+      pure (concatMap byteToHex (BS.unpack digestBytes))
+    else pure (show (length path) ++ "_" ++ path)
 
 -- | Group nodes/edges/hyperedges by source_file
 groupBySourceFile :: [Node] -> [Edge] -> Map FilePath ([Node], [Edge])

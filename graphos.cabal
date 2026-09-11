@@ -265,7 +265,7 @@ library
      , xml-types             >= 0.3
      , base16-bytestring     >= 1.0
     , base64-bytestring     >= 1.0
-     , cryptohash-sha256     >= 0.11
+      , cryptohash-sha256     >= 0.11
      , file-embed            >= 0.0.15
     , text-short            >= 0.1
     , unix                  >= 2.8
@@ -359,10 +359,12 @@ test-suite graphos-test
      Graphos.Infrastructure.Export.ResearchHTMLSpec
      Graphos.UseCase.SubgraphSpec
      Graphos.UseCase.ResearchSpec
-    Graphos.UseCase.DetectSpec
-    Graphos.Fidelity.ImportEdgesSpec
-    Graphos.Fidelity.GraphCoverageSpec
-    Graphos.UseCase.ExportSpec
+     Graphos.UseCase.DetectSpec
+     Graphos.Fidelity.ImportEdgesSpec
+     Graphos.Fidelity.GraphCoverageSpec
+     Graphos.UseCase.ExportSpec
+     Graphos.UseCase.PipelineIncrementalSpec
+     Graphos.Infrastructure.FileSystem.CacheSpec
 
   build-depends:
       base
