@@ -1,5 +1,20 @@
 # Tasks — Elm Graph Studio
 
+> **v1 implementation status (2026-09-11)** — `studio/` implemented and green:
+> `elm make --optimize` + 55 elm-tests passing, devenv toolchain, Studio CI
+> workflow with token-lint gate. Covered: TEA shell, navigation with the
+> Lean-model invariants tested, tokens+components+themes, file mode (picker,
+> drag-drop, size guard, aggregate synthesis), connected mode (probe, legacy
+> full-fetch, optimistic mutate + revert), editing (intents/validation/
+> inverses/log/undo-redo/export), groups (local eval, first-match-wins,
+> isolate/hide, persistence, import/export, server-assisted counts), scope
+> algebra + dim preview + canonical export with color baking.
+> **Not yet done**: elm-review config (CI lints via grep instead), component
+> gallery page, measured size threshold (constant 100 MB), slice-backed data
+> layer (probe only — server endpoints not shipped), isolated preview mode
+> (dim-only), views-catalog round-trip walk, task 7.1 cabal-regenerated
+> fixtures, live-server scenario pass (6.2/7.2).
+
 ## 1. Scaffold (foundation)
 
 ### 1.1 Toolchain + skeleton

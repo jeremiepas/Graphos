@@ -40,3 +40,5 @@ opencode.jsonc
 *.heapsnapshot
 __pycache__/
 .lake/
+elm-stuff/
+studio/public/studio.js

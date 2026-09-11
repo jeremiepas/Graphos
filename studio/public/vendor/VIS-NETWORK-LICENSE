@@ -1,0 +1,18 @@
+vis-network 10.1.1 — vendored renderer bundle
+https://visjs.github.io/vis-network/
+
+Source: unpkg vis-network@10.1.1 standalone UMD bundle
+Bundled on 2026-08-07 (per bundle header @date).
+
+vis-network is dual licensed under either
+
+  1. The Apache 2.0 License
+     http://www.apache.org/licenses/LICENSE-2.0
+
+  and
+
+  2. The MIT License
+     http://opensource.org/licenses/MIT
+
+The bundle may be distributed under either license. This document reports the
+version so the emitted HTML can state it (see the `graphos-renderer` meta tag).

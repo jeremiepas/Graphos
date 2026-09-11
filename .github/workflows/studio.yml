@@ -1,0 +1,58 @@
+name: Studio CI
+
+# Graphos Studio (studio/, Elm SPA — openspec/changes/elm-graph-studio).
+# A failing studio build or test fails CI, independently of the Haskell jobs.
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "studio/**"
+      - ".github/workflows/studio.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "studio/**"
+      - ".github/workflows/studio.yml"
+
+concurrency:
+  group: studio-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    if: github.actor == 'jeremiepas'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Restore elm package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.elm
+          key: elm-${{ runner.os }}-${{ hashFiles('studio/elm.json') }}
+
+      - name: Build (elm make --optimize)
+        working-directory: studio
+        run: nix shell nixpkgs#elmPackages.elm -c elm make src/Main.elm --optimize --output=public/studio.js
+
+      - name: Test (elm-test)
+        working-directory: studio
+        run: nix shell nixpkgs#elmPackages.elm nixpkgs#elmPackages.elm-test -c elm-test
+
+      - name: Token lint (no literal colors outside Tokens.elm)
+        working-directory: studio
+        run: |
+          # studio-design-system: every color literal lives in the Tokens
+          # module; a hex color anywhere else in src/ fails CI.
+          violations=$(grep -rnE '#[0-9a-fA-F]{6}' src/ --include='*.elm' | grep -v 'DesignSystem/Tokens.elm' || true)
+          if [ -n "$violations" ]; then
+            echo "Color literals outside Studio.DesignSystem.Tokens:" >&2
+            echo "$violations" >&2
+            exit 1
+          fi
