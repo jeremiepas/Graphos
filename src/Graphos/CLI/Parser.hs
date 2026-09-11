@@ -116,6 +116,8 @@ pipelineOpts = PipelineConfig
           <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
           <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
           <*> fmap not (switch (long "no-strict-graph" <> help "Disable strict startup graph validation (tolerant load on corrupt graph.json)"))
+          <*> option auto (long "max-sampled-sources" <> value 500 <> help "AVI-534 SG-1: max sampled sources for edge betweenness (default: 500)")
+          <*> option auto (long "exact-betweenness-node-cap" <> value 10000 <> help "AVI-534 SG-2: node count above which exact all-pairs betweenness is bypassed for the sampled estimator (default: 10000)")
 
 
 granularityReader :: ReadM Granularity

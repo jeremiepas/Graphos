@@ -34,6 +34,9 @@ module Graphos.Domain.Graph
   , isConceptNode
   , makeStubNode
   , edgeBetweenness
+  , edgeBetweennessWith
+  , defaultMaxSampledSources
+  , defaultExactBetweennessNodeCap
   
     -- * Diff
   , graphDiff
@@ -41,5 +44,5 @@ module Graphos.Domain.Graph
 
 import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, makeStubNode)
 import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, subgraph)
-import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness)
+import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness, edgeBetweennessWith, defaultMaxSampledSources, defaultExactBetweennessNodeCap)
 import Graphos.Domain.Graph.Diff (graphDiff)
