@@ -18,6 +18,10 @@ let
     vscode-langservers-extracted
     openspec
     llama-cpp
+    # Graphos Studio toolchain (studio/, Elm SPA — openspec/changes/elm-graph-studio)
+    elmPackages.elm
+    elmPackages.elm-test
+    elmPackages.elm-format
   ];
 in
 {
