@@ -31,6 +31,8 @@ import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncreme
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
+import Graphos.UseCase.SpecCheck (runSpecCheck, renderSpecReport, reportGates)
+import Graphos.Infrastructure.SpecParse (parseSpecDir)
 import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
@@ -657,6 +659,19 @@ main = do
           logInfo env $ T.pack $ "  Index: " ++ sfrIndexPath res
           when (sfrEmbeddingCount res > 0) $
             logInfo env $ T.pack $ "  Embeddings: " ++ show (sfrEmbeddingCount res) ++ " vectors"
+
+    SpeccheckCmd specsDir asJson strictCov -> do
+      parsed <- parseSpecDir specsDir
+      case parsed of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] speccheck: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right (specNodes, specEdges) -> do
+          let report = runSpecCheck specNodes specEdges strictCov
+          if asJson
+            then BL.putStr (encode report) >> putStrLn ""
+            else TIO.putStrLn (renderSpecReport report)
+          if reportGates report then exitWith (ExitFailure 1) else exitSuccess
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
       case mConfigPath of

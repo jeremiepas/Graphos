@@ -1,5 +1,19 @@
 # Tasks — Spec Graph Verification
 
+> **v1 implementation status (2026-09-12)** — deterministic trust chain
+> implemented and green: Relation vocabulary extended (contract delta),
+> `Domain/SpecCheck.hs` mirrors the Lean model (same fixtures, identical
+> verdicts asserted by `SpecCheckSpec`), openspec structural parser
+> (requirements/scenarios/spans/contains + capability cross-references),
+> `graphos speccheck` CLI with subcommand help, markdown/JSON reports,
+> certificate-checked verdicts and gate discipline. Self-check runs on this
+> repo's own corpus (541 spec nodes). 823 tests, 0 failures.
+> **Not yet done**: ADR file parsing (3.1 partial — spec.md only), the
+> small-model semantic edge pass (3.2), duplication/SPOF findings (4.2),
+> `--check` filter and `--adjudicate` (4.3 partial, 5), self-check
+> shared-target confirmation (6.1 — needs the semantic pass to emit
+> constrains edges).
+
 ## 1. Formal model (first — it is the reference for the Domain checker)
 
 ### 1.1 Lean model
