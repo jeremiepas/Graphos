@@ -93,6 +93,11 @@ data PipelineConfig = PipelineConfig
   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
    , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
    , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
+    -- ^ AVI-534 SG-1: cap on sampled betweenness sources (default 500).
+   , cfgMaxSampledSources  :: Int
+    -- ^ AVI-534 SG-2: node count above which exact O(N·M) all-pairs
+    -- betweenness is bypassed in favour of the sampled estimator (default 10000).
+   , cfgExactBetweennessNodeCap :: Int
     } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -177,6 +182,8 @@ defaultConfig = PipelineConfig
   , cfgMaxHeap            = Nothing
    , cfgLspConcurrency     = 2
    , cfgStrictGraph        = True
+   , cfgMaxSampledSources  = 500
+   , cfgExactBetweennessNodeCap = 10000
    }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

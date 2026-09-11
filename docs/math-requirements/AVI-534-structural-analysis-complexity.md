@@ -170,7 +170,7 @@ Yes for reducible graphs (Theorem 2.2). Graphos code-dependency graphs are reduc
 Graph (undirected): nodes `{a,b,c,d}`; edges `{a–b, b–c, c–d}` (a path).
 - **Articulation points:** `{b, c}` (removing either disconnects the path); `a`, `d` are not cut vertices.
 - **Biconnected components:** blocks `{a–b}`, `{b–c}`, `{c–d}` (each edge is a bridge).
-- **Edge betweenness:** only edge `b–c` has nonzero betweenness; `BC(b–c) = 2/3` after the `2/(N(N−1))` normalization over unordered pairs (pairs `{a,d}`, `{a,c}`, `{b,d}` all route through `b–c`; here `σ=1` for each).
+- **Edge betweenness:** every bridge has nonzero betweenness (each lies on some shortest path). Normalized by `2/(N(N−1))` over the `C(4,2)=6` unordered pairs: `a–b` routes through `{a,b},{a,c},{a,d}` (3 pairs) → `BC = 3/6 = 1/2`; `b–c` routes through `{b,c},{a,c},{b,d},{a,d}` (4 pairs) → `BC = 4/6 = 2/3`; `c–d` routes through `{c,d},{b,d},{a,d}` (3 pairs) → `BC = 3/6 = 1/2`. Here `σ=1` for each pair. The sum `1/2 + 2/3 + 1/2 = 5/3` equals `Σ_pairs d(s,t)/C(N,2) = 10/6` (mass conservation).
 - **Sampled check:** sampling sources `{a, d}` rescaled by `N/s = 4/2 = 2` must reproduce `BC(b–c)` within `ε` on denser synthetic graphs (AC-2).
 
 > **Acceptance (golden test):** the exact routine reproduces `{b,c}`, the three bridges, and `BC(b–c) = 2/3` on this fixture; the sampled routine satisfies AC-2 on a synthetic sparse graph.
