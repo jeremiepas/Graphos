@@ -22,6 +22,8 @@ module Graphos.Domain.Community
 
   , CommunityStats(..)
   , computeCommunityStats
+  , modularity
+  , localMovesFrom
 
   , CommunityComposition(..)
   , computeCompositions
@@ -105,6 +107,58 @@ computeCommunityStats g assign =
       sigmaIn = Map.fromListWith (+) internalContribs
   in CommunityStats { csSigmaIn = sigmaIn, csSigmaTot = sigmaTot, csDegrees = degrees, csM = m }
 
+-- | Auditable global modularity @Q@ at resolution @γ = 1@ (Newshyld 2004,
+-- /Modularity and community structure in networks/, Eq. 1).
+--
+-- This is a pure projection over the aggregates already produced by
+-- 'computeCommunityStats' (@csSigmaIn@ / @csSigmaTot@ / @csM@); it never
+-- re-scans the edge list on the hot path, so its cost is @O(C)@ beyond the
+-- single @O(N + E_s)@ pass in 'computeCommunityStats'.
+--
+-- On the unweighted support graph @G_s@:
+--
+-- > Q = Σ_c [ σ_in(c)/(2m) − (σ_tot(c)/(2m))² ]
+--
+-- where @σ_in(c)@ is twice the number of internal edges of community @c@,
+-- @σ_tot(c)@ is the sum of node degrees in @c@, and @m@ is the number of
+-- edges. The second term is the /square/ of @σ_tot(c)/(2m)@ (per Newshyld),
+-- not @σ_tot(c)@ itself.
+--
+-- The fold runs over the partition's @CommunityId@s in ascending @Data.Map@
+-- order (INV-Q4): @Double@ addition is not associative, so a fixed order
+-- makes @Q@ a deterministic pure function of @(g, cm)@.
+--
+-- When the graph has no edges (@m == 0@) the quantity is pinned to @0.0@ —
+-- both terms vanish by convention and this avoids division by zero, mirroring
+-- 'bestCommunityFor''s @m <= 0@ guard.
+modularity :: Graph -> CommunityMap -> Double
+modularity g cm =
+  let stats   = computeCommunityStats g (buildReverseIndex cm)
+      twoM    = 2.0 * csM stats
+      acc q cid =
+        let si = Map.findWithDefault 0.0 cid (csSigmaIn stats)
+            st = Map.findWithDefault 0.0 cid (csSigmaTot stats)
+        in q + si / twoM - (st / twoM) * (st / twoM)
+  in if csM stats == 0.0
+       then 0.0
+       else foldl' acc 0.0 (Map.keys cm)
+
+-- | One Leiden local-moving pass applied to a starting partition.
+--
+-- Used by the auditable-modularity monotonicity invariant (INV-Q3): applying
+-- a single pass to any starting assignment never decreases @Q@. The pass is
+-- seeded from the input partition (via 'buildLeidenStateSeeded') so that it
+-- genuinely starts from that assignment rather than from all-singletons. Only
+-- one pass runs — community refinement and size-merging are intentionally
+-- skipped, since those steps may decrease @Q@ (INV-Q3 constrains the local
+-- move step alone). The returned @CommunityMap@ uses internal Leiden indices
+-- as community labels; @modularity@ is partition-only, so those labels do not
+-- affect the resulting @Q@ (INV-Q2).
+localMovesFrom :: Graph -> CommunityMap -> CommunityMap
+localMovesFrom g cm =
+  let st0 = buildLeidenStateSeeded g defaultResolution cm
+  in leidenStateToCommunityMap (fst (localMovingPass st0))
+
 -- ───────────────────────────────────────────────
 -- Optimized Leiden algorithm using Int-indexed vectors
 -- ───────────────────────────────────────────────
@@ -138,29 +192,74 @@ instance NFData LeidenState where
     lsN st `seq`
     ()
 
-buildLeidenState :: Graph -> Resolution -> LeidenState
-buildLeidenState g res =
-  let nodeIds  = V.fromList (Map.keys (gNodes g))
-      n       = V.length nodeIds
-      nidToIdx = Map.fromList (zip (V.toList nodeIds) [0::Int ..])
-      degrees = VU.generate n $ \i ->
+-- | Shared Leiden construction: node ids, adjacency CSR, and per-node degrees.
+-- Independent of the initial assignment so both the all-singletons entry point
+-- ('buildLeidenState') and the seeded entry point ('buildLeidenStateSeeded')
+-- share a single adjacency/degree computation.
+leidenCore
+  :: Graph
+  -> Resolution
+  -> ( Int
+       , V.Vector NodeId
+       , V.Vector (VU.Vector Int)
+       , VU.Vector Int
+       , VU.Vector Int
+       , VU.Vector Double
+       , Double)
+leidenCore g res =
+  let nodeIds    = V.fromList (Map.keys (gNodes g))
+      n          = V.length nodeIds
+      nidToIdx   = Map.fromList (zip (V.toList nodeIds) [0::Int ..])
+      degrees    = VU.generate n $ \i ->
         fromIntegral (Set.size (neighbors g (nodeIds V.! i)))
-      m = VU.sum degrees / 2.0
+      m          = VU.sum degrees / 2.0
       perNodeNbs = [ let nbs = neighbors g (nodeIds V.! i)
                          idxs = [case Map.lookup nb nidToIdx of
-                                   Just idx -> idx
-                                   Nothing  -> i
+                                    Just idx -> idx
+                                    Nothing  -> i
                                 | nb <- Set.toList nbs]
-                     in idxs
-                   | i <- [0..n-1] ]
-      adj = VU.fromList (concat perNodeNbs)
-      offset = VU.fromList (scanl (+) 0 (map length perNodeNbs))
-      assign0 = VU.generate n id
-      sigTot0 = IntMap.fromListWith (+)
-        [ (i, degrees VU.! i) | i <- [0..n-1] ]
+                      in idxs
+                    | i <- [0..n-1] ]
+      adj        = VU.fromList (concat perNodeNbs)
+      offset     = VU.fromList (scanl (+) 0 (map length perNodeNbs))
+      neighbours = V.fromList (map VU.fromList perNodeNbs)
+  in ( n, nodeIds, neighbours, adj, offset, degrees, m )
+
+buildLeidenState :: Graph -> Resolution -> LeidenState
+buildLeidenState g res =
+  let ( n, nodeIds, neighbours, adj, offset, degrees, m ) = leidenCore g res
   in LeidenState
         { lsNodeIds   = nodeIds
-        , lsNeighbors  = V.fromList (map VU.fromList perNodeNbs)
+        , lsNeighbors  = neighbours
+        , lsAdj        = adj
+        , lsOffset     = offset
+        , lsDegrees    = degrees
+        , lsAssignment = VU.generate n id
+        , lsSigmaTot   = IntMap.fromListWith (+)
+            [ (i, degrees VU.! i) | i <- [0..n-1] ]
+        , lsM          = m
+        , lsGamma      = resGamma res
+        , lsN          = n
+        }
+
+-- | Seeded Leiden construction: same adjacency/degree as 'buildLeidenState',
+-- but the initial assignment vector and its @σ_tot@ totals are derived from a
+-- supplied partition so that a local-moving pass starts from that partition.
+-- The distinct community labels of @cm@ are compressed to contiguous indices
+-- via ascending @Data.Map@ order, which keeps the seeding deterministic.
+buildLeidenStateSeeded :: Graph -> Resolution -> CommunityMap -> LeidenState
+buildLeidenStateSeeded g res cm =
+  let ( n, nodeIds, neighbours, adj, offset, degrees, m ) = leidenCore g res
+      assign0 = VU.generate n $ \i ->
+                case Map.lookup (nodeIds V.! i) (buildReverseIndex cm) of
+                  Just cid -> cidToIdx Map.! cid
+                  Nothing  -> i
+      cidToIdx = Map.fromList (zip (Map.keys cm) [0::Int ..])
+      sigTot0  = IntMap.fromListWith (+)
+        [ (assign0 VU.! i, degrees VU.! i) | i <- [0..n-1] ]
+  in LeidenState
+        { lsNodeIds   = nodeIds
+        , lsNeighbors  = neighbours
         , lsAdj        = adj
         , lsOffset     = offset
         , lsDegrees    = degrees

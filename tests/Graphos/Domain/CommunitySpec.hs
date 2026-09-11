@@ -2,6 +2,7 @@ module Graphos.Domain.CommunitySpec where
 
 import Test.Hspec
 import Control.DeepSeq (deepseq)
+import Control.Monad (forM_)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -14,8 +15,8 @@ import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
 import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (buildGraph, gCompositions)
-import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
+import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), neighbors, degree)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
 spec :: Spec
 spec = do
   describe "detectCommunities" $ do
@@ -325,6 +326,80 @@ spec = do
       let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
           g = buildGraph False ext
       gCompositions g `shouldBe` Nothing
+
+  describe "modularity (Q) — auditable, per CTO note 1 §2.2 / INV-Q" $ do
+    -- Shared undirected fixture: two triangles joined by a bridge (c-f).
+    -- 7 edge records; degree sum = 14 (m = 7).
+    let twoTriangleBridge = buildGraph False $ extractionFromLists
+              [ testNode "a", testNode "b", testNode "c"
+              , testNode "d", testNode "e", testNode "f" ]
+              (cliqueEdges ["a", "b", "c"] ++ cliqueEdges ["d", "e", "f"] ++ [testEdge "c" "f"])
+        -- Independent audit oracle: recompute Q straight from gEdges, bypassing
+        -- computeCommunityStats entirely (CTO note 1 §2.2 fallback).
+        modularityDirect g cm =
+          let assign   = buildReverseIndex cm
+              degrees  = Map.fromList [(nid, fromIntegral (degree g nid)) | nid <- Map.keys (gNodes g)]
+              m        = sum (Map.elems degrees) / 2.0
+              twoM     = 2.0 * m
+              sigmaTot = Map.fromListWith (+)
+                    [ (Map.findWithDefault 0 nid assign, fromIntegral (degree g nid))
+                    | nid <- Map.keys (gNodes g) ]
+              sigmaIn  = Map.fromListWith (+)
+                    [ (Map.findWithDefault 0 (edgeSource e) assign, 2.0)
+                    | e <- Map.elems (gEdges g)
+                    , Map.findWithDefault 0 (edgeSource e) assign == Map.findWithDefault 0 (edgeTarget e) assign ]
+          in if m == 0.0 then 0.0
+             else foldl' (\q cid -> q + (Map.findWithDefault 0.0 cid sigmaIn) / twoM
+                                         - (Map.findWithDefault 0.0 cid sigmaTot / twoM) * (Map.findWithDefault 0.0 cid sigmaTot / twoM))
+                         0.0 (Map.keys cm)
+
+    it "single community on a connected undirected graph yields Q == 0" $ do
+      let g = twoTriangleBridge
+          cm = Map.fromList [(0, ["a", "b", "c", "d", "e", "f"])]
+      modularity g cm `shouldBe` (0 :: Double)
+
+    it "all-singletons partition yields Q < 0 and equals -(sum k_v^2)/(2m)^2" $ do
+      let g = twoTriangleBridge
+          cm = Map.fromList [(i, [nid]) | (i, nid) <- zip ([0 :: Int ..]) ["a", "b", "c", "d", "e", "f"]]
+          twoM = sum (map (\n -> fromIntegral (degree g n)) ["a", "b", "c", "d", "e", "f"])
+          expectedQ = -(sum (map (\k -> k * k) [fromIntegral (degree g n) | n <- ["a", "b", "c", "d", "e", "f"]])) / (twoM * twoM)
+      modularity g cm `shouldSatisfy` (< 0)
+      modularity g cm `shouldSatisfy` (\q -> abs (q - expectedQ) < 1e-9)
+
+    it "Q stays within [-0.5, 1] for reachable partitions on an undirected graph" $ do
+      let g = twoTriangleBridge
+          reachable = [ Map.fromList [(0, ["a", "b", "c", "d", "e", "f"])]
+                      , Map.fromList [(i, [nid]) | (i, nid) <- zip ([0 :: Int ..]) ["a", "b", "c", "d", "e", "f"]]
+                      , detectCommunities g
+                      , Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])] ]
+      forM_ reachable $ \cm -> do
+        let q = modularity g cm
+        q `shouldSatisfy` (>= (-0.5 :: Double))
+        q `shouldSatisfy` (<= (1 :: Double))
+
+    it "Q is monotone non-decreasing under one local move from a fine start (INV-Q3)" $ do
+      let g = twoTriangleBridge
+          cm0 = Map.fromList [(i, [nid]) | (i, nid) <- zip ([0 :: Int ..]) ["a", "b", "c", "d", "e", "f"]]
+          qBefore = modularity g cm0
+          qAfter  = modularity g (localMovesFrom g cm0)
+      qAfter `shouldSatisfy` (>= qBefore - 1e-9)
+
+    it "Q is independent of member-list order (INV-Q2)" $ do
+      let g = twoTriangleBridge
+          cm  = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
+          reordered = Map.fromList [(0, ["c", "a", "b"]), (1, ["f", "d", "e"])]
+      modularity g cm `shouldBe` modularity g reordered
+
+    it "audit fallback: Q recomputed from gEdges equals Q from modularity (INV-Q5)" $ do
+      let g = twoTriangleBridge
+          cm = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
+      modularity g cm `shouldBe` modularityDirect g cm
+      modularity g cm `shouldSatisfy` (> 0)
+
+    it "Q is deterministic across repeated calls (INV-Q4)" $ do
+      let g = twoTriangleBridge
+          cm = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
+      modularity g cm `shouldBe` modularity g cm
 
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node
