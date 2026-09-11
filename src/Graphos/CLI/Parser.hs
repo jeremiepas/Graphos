@@ -170,6 +170,7 @@ commonQueryOptsP = CommonQueryOpts
   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
   <*> optional (option auto (long "max-nodes" <> metavar "N" <> help "Cap on returned nodes (unset or 0 = unlimited)"))
   <*> optional (option auto (long "max-label-chars" <> metavar "N" <> help "Max label length before truncation (unset or 0 = default label-width)"))
+  <*> optional (strOption (long "path" <> metavar "GLOB" <> help "Restrict candidate matches to source files matching this path glob (e.g. 'src/cli/**'); restricts the budget to in-scope nodes"))
 
 queryOpts :: Parser Command
 queryOpts = QueryCmd
@@ -199,6 +200,7 @@ researchOpts =
         , cqoStrictGraph = False
         , cqoMaxNodes      = Nothing
         , cqoMaxLabelChars = Nothing
+        , cqoPath          = Nothing
         }
   in ResearchCmd
        <$> some (argument str (metavar "TERM"))
@@ -349,11 +351,11 @@ renderCommandReference = unlines $
   , "  --resolution FLOAT / --mcp GRAPH_JSON"
   , "  --ignore GLOB                 Additional ignore pattern (repeatable)"
   , ""
-   , "graphos query QUESTION          Query the knowledge graph"
-   , "  --dfs / --budget N / --graph FILE"
-   , "  --json / --label-width N / --edges MODE"
-   , "  --max-nodes N / --max-label-chars N"
-   , ""
+    , "graphos query QUESTION          Query the knowledge graph"
+    , "  --dfs / --budget N / --graph FILE"
+    , "  --json / --label-width N / --edges MODE"
+    , "  --max-nodes N / --max-label-chars N / --path GLOB"
+    , ""
   , "graphos cypher QUERY [--write]  openCypher/GQL query; --write permits/persists mutations"
   , "  --graph FILE / --budget N / --json"
   , ""

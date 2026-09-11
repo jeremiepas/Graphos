@@ -149,8 +149,15 @@ omittedFooter nodes edges =
   "- _omitted: " <> T.pack (show nodes) <> " nodes, "
     <> T.pack (show edges) <> " edges_"
 
--- | Approximate token count for a text.
--- Uses a simple heuristic: ~0.75 tokens per word (subword tokenizers average).
+-- | Approximate upper-bound token count for a text.
+--
+-- Heuristic: @ceil(1.33 * words)@. Real subword tokenizers average well under
+-- one token per word on English/code text, so this over-counts typical input
+-- and is therefore safe as an upper bound: a budget enforced against this
+-- estimate never under-fits the true model context window. It is exact only up
+-- to 'T.words' whitespace splitting, which can drift from a specific tokenizer
+-- on highly inflected or non-Latin text; treat the result as an order-of-
+-- magnitude estimate, not an exact count.
 countContextTokens :: Text -> Int
 countContextTokens txt =
   let wordCount = length (T.words txt)
