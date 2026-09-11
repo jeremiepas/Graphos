@@ -38,6 +38,12 @@ data Relation
   | Contains
   | DependsOn
   | Inferred
+  -- Spec-artifact relations (spec-graph-verification):
+  | Refines
+  | ConflictsWith
+  | Satisfies
+  | Supersedes
+  | Constrains
   deriving (Eq, Show, Generic, Ord, Bounded, Enum)
 
 instance NFData Relation
@@ -61,6 +67,11 @@ relationToText = \case
   Contains   -> "contains"
   DependsOn  -> "depends_on"
   Inferred   -> "inferred"
+  Refines       -> "refines"
+  ConflictsWith -> "conflicts_with"
+  Satisfies     -> "satisfies"
+  Supersedes    -> "supersedes"
+  Constrains    -> "constrains"
 
 textToRelation :: Text -> Maybe Relation
 textToRelation = \case
@@ -72,6 +83,11 @@ textToRelation = \case
   "contains"    -> Just Contains
   "depends_on"  -> Just DependsOn
   "inferred"   -> Just Inferred
+  "refines"        -> Just Refines
+  "conflicts_with" -> Just ConflictsWith
+  "satisfies"      -> Just Satisfies
+  "supersedes"     -> Just Supersedes
+  "constrains"     -> Just Constrains
   _            -> Nothing
 
 newtype Confidence = Confidence Double

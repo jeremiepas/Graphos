@@ -54,6 +54,7 @@ data Command
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
+  | SpeccheckCmd FilePath Bool Bool
   | LServers
    | Serve FilePath FilePath Int Bool Bool
 
@@ -287,6 +288,12 @@ subgraphOpts = SubgraphCmd
   <*> option auto (long "boundary-hops" <> value 1 <> help "Boundary expansion hops over imports edges (default: 1)")
   <*> switch (long "no-derive" <> help "Disable deriving imports edges from Import nodes")
 
+speccheckOpts :: Parser Command
+speccheckOpts = SpeccheckCmd
+  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec)")
+  <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
+  <*> switch (long "strict-coverage" <> help "Gate on unimplemented requirements too (default: warn only)")
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
@@ -300,6 +307,7 @@ commandOpts = subparser
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
+  <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))

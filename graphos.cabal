@@ -62,6 +62,9 @@ library
                     Graphos.Domain.Graph.Query
                     Graphos.Domain.Graph.Analysis
                     Graphos.Domain.Graph.Diff
+                    Graphos.Domain.SpecCheck
+                    Graphos.UseCase.SpecCheck
+                    Graphos.Infrastructure.SpecParse
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
                     Graphos.Domain.Graph.Mutation
@@ -306,6 +309,7 @@ test-suite graphos-test
       hspec-discover:hspec-discover >= 2.10
   other-modules:
     Graphos.Domain.TypesSpec
+    Graphos.Domain.SpecCheckSpec
     Graphos.Domain.ConfigSpec
     Graphos.Domain.Config.IngestSpec
     Graphos.Domain.Types.IngestSpec
