@@ -335,8 +335,9 @@ test-suite graphos-test
     Graphos.Domain.Graph.IndexSpec
     Graphos.Domain.Graph.CollisionSpec
     Graphos.Domain.Graph.SCCSpec
-    Graphos.Domain.Graph.StructuralSpec
-    Graphos.Domain.Query.Cypher.MappingSpec
+     Graphos.Domain.Graph.StructuralSpec
+     Graphos.Domain.Graph.ColimitPropertySpec
+     Graphos.Domain.Query.Cypher.MappingSpec
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
