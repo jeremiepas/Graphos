@@ -64,8 +64,9 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
-                    Graphos.Domain.Graph.Mutation
-                     Graphos.Domain.Graph.Score
+                     Graphos.Domain.Graph.Mutation
+                     Graphos.Domain.Graph.Conflict
+                      Graphos.Domain.Graph.Score
                      Graphos.Domain.Query.Research
                      Graphos.Domain.Query.Cypher.Mapping
                      Graphos.Domain.Query.Cypher.AST
@@ -341,6 +342,7 @@ test-suite graphos-test
      Graphos.Domain.Graph.StructuralSpec
       Graphos.Domain.Graph.ColimitPropertySpec
       Graphos.Domain.Graph.MergeConfluenceSpec
+      Graphos.Domain.Graph.ConflictSpec
      Graphos.Domain.Query.Cypher.MappingSpec
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
