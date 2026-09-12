@@ -135,17 +135,32 @@ mergeExtractions a b =
     , extractionEdges = mergedEdges
     }
 
--- | Merge two graphs (new graph takes precedence for overlapping nodes)
+-- | Merge two graphs (new graph takes precedence for overlapping nodes).
+--
 -- Dangling edges are removed to keep adjacency lists consistent.
+--
+-- The 'gDirected' flag is pinned by a canonical, order-independent rule: the
+-- result is directed iff either input view is directed. This makes the merge
+-- content-confluent (AVI-658, M1 — design.md §3 theorem T1): for consistent
+-- views the result is identical up to NodeId+weight iso regardless of operand
+-- order, because node maps ('Map.union'), edge maps (filtered 'Map.union'),
+-- 'adjFwd'/'adjBack' ('Set.union' over the shared edge set) and
+-- 'computeGraphHash' (sorted keys) are each order-independent, so the formerly
+-- operand-order-dependent 'gDirected' field was the sole blocker.
+--
+-- Caveat: 'gEmbeddingsPath' still follows the 'old' operand. It is transient
+-- sidecar metadata excluded from the content-confluence iso notion and left
+-- unchanged here (out of scope for M1).
 mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =
-  let mergedNodes = gNodes old <> gNodes new
+  let directed = gDirected old || gDirected new -- canonical: directed iff any input view is directed (order-independent)
+      mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
                       (gEdges old <> gEdges new)
       fwdAdj   = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems mergedEdges]
       reverseParts = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems mergedEdges]
       mergedFwd   = fwdAdj
-      mergedBwd   = if gDirected old then reverseParts else reverseParts <> fwdAdj
+      mergedBwd   = if directed then reverseParts else reverseParts <> fwdAdj
       mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
                       (Just a, Just b) -> Just (a <> b)
                       (Just a, Nothing) -> Just a
@@ -156,7 +171,7 @@ mergeGraphs old new =
      , gEdges         = mergedEdges
      , gAdjFwd        = mergedFwd
      , gAdjBack       = mergedBwd
-     , gDirected      = gDirected old
+     , gDirected      = directed
      , gCompositions  = Nothing
      , gHash          = computeGraphHash mergedNodes mergedEdges
      , gEmbeddings    = mergedEmbs
