@@ -17,8 +17,10 @@ module Graphos.Domain.Community
   , buildReverseIndex
   , communityOf
 
-  , selectRepresentatives
-  , filterEdgesByNodeSet
+   , selectRepresentatives
+   , filterEdgesByNodeSet
+
+   , bestCommunityFor
 
   , CommunityStats(..)
   , computeCommunityStats
@@ -325,7 +327,12 @@ nubInt = go IntMap.empty
 -- precomputed neighbor communities. Identical scoring to the previous
 -- implementation; the assignment vector is no longer consulted directly
 -- because callers precompute @commOfNb@ from the mutable vector.
-bestCommunityFor :: Double -> Double -> IntMap Double -> Double -> Int -> IntMap Int -> [Int] -> Int
+--
+-- Ties in modularity gain are broken canonically by 'maximumBySnd': the
+-- smallest community index among the maximum-gain candidates, independent of
+-- neighbor-traversal order. This pins cluster determinism (INV-DETERMINISTIC
+-- CLUSTER) so the result cannot silently change if adjacency is ever stored
+-- in an unordered structure (e.g. a 'HashMap' instead of a sorted 'Map').
 bestCommunityFor m gamma sigmaTotMap ki currentComm countMap comms =
   -- Edge case: graph with no edges (m = 0) -> stay in current community
   if m <= 0
@@ -506,9 +513,20 @@ scoreAllCohesion g commMap
   | Map.null commMap = Map.empty
   | otherwise = fmap (cohesionScore g) commMap
 
-maximumBySnd :: Ord a => [(b, a)] -> (b, a)
+-- | Greatest score (second element) wins; ties broken by the smallest key
+-- (first element).
+--
+-- Order-independent: the result does not depend on input ordering, so the
+-- argmax move-delta choice in 'bestCommunityFor' is canonical even when the
+-- neighbor communities arrive from an unordered traversal. The previous
+-- strict-@>@ fold kept the first element among ties, which made the tie-break
+-- implicitly depend on neighbor-list order and turned nondeterministic if
+-- adjacency were ever represented unsorted.
+maximumBySnd :: Ord a => Ord b => [(b, a)] -> (b, a)
 maximumBySnd [] = error "maximumBySnd: empty list — this should never happen (all communities have at least one neighbor)"
-maximumBySnd xs = foldl1 (\a@(_,sa) b@(_,sb) -> if sb > sa then b else a) xs
+maximumBySnd xs =
+  let bestScore = maximum [s | (_, s) <- xs]
+  in minimum [(k, s) | (k, s) <- xs, s == bestScore]
 
 foldlStrict' :: (a -> b -> a) -> a -> [b] -> a
 foldlStrict' _f z []     = z

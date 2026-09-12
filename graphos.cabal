@@ -312,6 +312,7 @@ test-suite graphos-test
     Graphos.Domain.CommunitySpec
     Graphos.Domain.Community.LabelSpec
     Graphos.Domain.Community.ClusterInvarianceSpec
+    Graphos.Domain.Community.DeterminismSpec
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
