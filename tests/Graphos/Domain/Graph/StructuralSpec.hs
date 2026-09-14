@@ -24,6 +24,8 @@ import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph
+import Graphos.Domain.Graph.Analysis (edgeBetweennessWithCached, toCachedFGL)
+import Control.DeepSeq (force)
 
 -- ───────────────────────────────────────────────
 -- Fixtures (AVI-534 §8 worked example + synthetic builders)
@@ -142,19 +144,25 @@ spec = do
       -- Σ_e BC(e) = Σ_{pairs} d(s,t) / C(N,2) = 10/6 = 5/3: mass conservation.
       abs (vAB + vBC + vCD - 5 / 3) `shouldSatisfy` (< 1e-9)
 
-  describe "AC-4 unbiasedness (s = N ⇒ rescaled estimator = exact BC)" $ do
-    it "sampled with s = N equals exact on the §8 fixture" $ do
-      let exact = toTextKeys (edgeBetweenness pathGraph)
-          -- s = N: maxSampledSources >= N forces the full source set.
-          allSources = toTextKeys
-            (edgeBetweennessWith defaultMaxSampledSources defaultExactBetweennessNodeCap pathGraph)
-      relL2 exact allSources `shouldSatisfy` (< 1e-9)
+  describe "AC-4 unbiasedness (rescaled sampled estimator converges to exact BC)" $ do
+    it "genuinely-sampled run (k<N) is within ε of exact on ring+chords" $ do
+      let g = sparseSyntheticGraph 500
+          -- Exact: default SG-2 cap (10000) keeps n=500 on the exact all-pairs
+          -- path. Sampled: exactNodeCap=1 forces the sampled path and k=450<N=500
+          -- draws a deterministic ascending-index subset, so this compares a real
+          -- sample against the exact result (not a function against itself).
+          exact   = toTextKeys (edgeBetweenness g)
+          sampled = toTextKeys (edgeBetweennessWith 450 1 g)
+      relL2 exact sampled `shouldSatisfy` (\r -> r <= 0.15)
 
-    it "sampled with s = N equals exact on a ring+chords synthetic graph" $ do
-      let g = sparseSyntheticGraph 120
-          exact = toTextKeys (edgeBetweennessWith 500 10000 g)
-          allSources = toTextKeys (edgeBetweennessWith 500 10000 g)
-      relL2 exact allSources `shouldSatisfy` (< 1e-9)
+    it "s=N sampled path reproduces exact on the §8 fixture (cheap sanity)" $ do
+      let g = sparseSyntheticGraph 4
+          -- Default caps take the exact path; the second call forces the sampled
+          -- code path with s=N=4 sources, so the two distinct code paths must
+          -- agree exactly when the rescale factor N/s equals 1.
+          exact    = toTextKeys (edgeBetweenness g)
+          sampledN = toTextKeys (edgeBetweennessWith 4 1 g)
+      relL2 exact sampledN `shouldSatisfy` (< 1e-9)
 
   describe "AC-2 sampled-betweenness relative error on sparse synthetic graphs" $ do
     let eps = 0.1 :: Double
@@ -235,9 +243,14 @@ spec = do
       Map.lookup "r" doms `shouldBe` Just Nothing
 
   describe "determinism (§9)" $ do
-    it "edgeBetweenness is repeat-call deterministic" $ do
+    it "edgeBetweenness is stable across two fresh CachedFGL constructions" $ do
+      -- Two independent toCachedFGL rebuilds of the same graph exercise the
+      -- shared FGL state; comparing the forced results catches cache/order-state
+      -- leakage between runs (not a function compared to itself).
       let g = sparseSyntheticGraph 80
-      edgeBetweenness g `shouldBe` edgeBetweenness g
+          a = force (edgeBetweennessWithCached (toCachedFGL g))
+          b = force (edgeBetweennessWithCached (toCachedFGL g))
+      a `shouldBe` b
 
 -- Suppress unused warning helper: prints the ratio for debugging when the
 -- assertion fails (hspec shows the value via the seq guard).
