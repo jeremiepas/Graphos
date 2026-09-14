@@ -29,9 +29,9 @@ import Graphos.UseCase.Merge (mergeGraphsAndAnalyze)
 -- ── builders ───────────────────────────────────────────────────────────
 
 mkNode :: Text -> Text -> FileType -> Text -> Node
-mkNode nid label ft src = Node
+mkNode nid lbl ft src = Node
   { nodeId = nid
-  , nodeLabel = fromText label
+  , nodeLabel = fromText lbl
   , nodeFileType = ft
   , nodeSourceFile = fromText src
   , nodeCommunityId = Nothing

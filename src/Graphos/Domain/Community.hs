@@ -208,7 +208,7 @@ leidenCore
        , VU.Vector Int
        , VU.Vector Double
        , Double)
-leidenCore g res =
+leidenCore g _res =
   let nodeIds    = V.fromList (Map.keys (gNodes g))
       n          = V.length nodeIds
       nidToIdx   = Map.fromList (zip (V.toList nodeIds) [0::Int ..])
@@ -302,7 +302,7 @@ localMovingLoop massign st0 = loop 0 0 (lsSigmaTot st0)
                len = (lsOffset st0 VU.! (i + 1)) - off
                nbs = VU.slice off len (lsAdj st0)
            commOfNb <- VU.mapM (VUM.unsafeRead massign) nbs
-           let countMap = VU.foldl' (\acc c -> IntMap.insertWith (+) c 1 acc) IntMap.empty commOfNb
+           let countMap = VU.foldl' (\acc c -> IntMap.insertWith ((+) :: Int -> Int -> Int) c 1 acc) IntMap.empty commOfNb
                neighborComms = nubInt (VU.toList commOfNb)
                bestComm = bestCommunityFor m gamma sigTot ki currentComm countMap neighborComms
            if bestComm /= currentComm
@@ -333,6 +333,7 @@ nubInt = go IntMap.empty
 -- neighbor-traversal order. This pins cluster determinism (INV-DETERMINISTIC
 -- CLUSTER) so the result cannot silently change if adjacency is ever stored
 -- in an unordered structure (e.g. a 'HashMap' instead of a sorted 'Map').
+bestCommunityFor :: Double -> Double -> IntMap Double -> Double -> Int -> IntMap Int -> [Int] -> Int
 bestCommunityFor m gamma sigmaTotMap ki currentComm countMap comms =
   -- Edge case: graph with no edges (m = 0) -> stay in current community
   if m <= 0

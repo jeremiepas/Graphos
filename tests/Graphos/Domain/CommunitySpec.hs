@@ -15,7 +15,7 @@ import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
 import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), neighbors, degree)
+import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), degree)
 import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
 spec :: Spec
 spec = do

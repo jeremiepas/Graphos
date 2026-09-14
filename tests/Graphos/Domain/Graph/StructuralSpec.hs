@@ -14,7 +14,7 @@
 module Graphos.Domain.Graph.StructuralSpec where
 
 import Test.Hspec
-import Test.QuickCheck hiding (Confidence)
+import Test.QuickCheck ()
 import Data.List (sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
