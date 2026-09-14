@@ -375,6 +375,7 @@ test-suite graphos-test
      Graphos.Fidelity.GraphCoverageSpec
      Graphos.UseCase.ExportSpec
      Graphos.UseCase.PipelineIncrementalSpec
+      Graphos.UseCase.InferBetweennessWiringSpec
      Graphos.Infrastructure.FileSystem.CacheSpec
 
   build-depends:
