@@ -16,10 +16,10 @@ import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when)
 import Data.Maybe (isJust, fromJust)
-import qualified Data.ByteString.Lazy as BSL
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
+import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
@@ -30,6 +30,7 @@ import System.Mem (performGC)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Config (FileExtensionConfig(..), SemanticEdgesConfig(..))
+import Graphos.Domain.Config.Detection (DetectionConfig(..), DetectionMode(..), applyDetectionOverrides)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
 import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
@@ -47,7 +48,7 @@ import Graphos.UseCase.Pipeline.Staging
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
-import Graphos.UseCase.Extract (extractAll)
+import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
 import Graphos.UseCase.Analyze (analyzeGraph)
@@ -202,7 +203,15 @@ runPipelineBody appEnv config = catch (do
         , (VideoFiles, fecVideo fec)
         , (OfficeFiles, fecOffice fec)
         ]
-  detection <- detectFilesWithExtensionsAndIgnore' fsp (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
+  let baseDetection    = gcDetection (cfgGraphosConfig configWithStreaming)
+      effectiveMode    = if cfgDetectDisabled configWithStreaming
+                           then Off
+                           else maybe (dcMode baseDetection) id (cfgDetectionMode configWithStreaming)
+      effectiveDetection =
+        case applyDetectionOverrides baseDetection effectiveMode (cfgMinifiedThreshold configWithStreaming) of
+          Right ok -> ok
+          Left err -> error $ "graphos: invalid detection config: " ++ err
+  detection <- detectFilesWithExtensionsAndIgnore' fsp effectiveDetection (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   opIncCounter op "graphos_pipeline_steps_total" 1
@@ -215,6 +224,9 @@ runPipelineBody appEnv config = catch (do
           ignoredFiles = excIgnoredFiles excs
       lpLogInfo lp $ T.pack $ "Ignored " ++ show ignoredFiles ++ " files"
       lpLogInfo lp $ T.pack $ "  Found " ++ show (detectionTotalFiles detection) ++ " files"
+      lpLogInfo lp $ T.pack $ "  Detected (classification): " ++
+        intercalate ", " [show (length fs) ++ " " ++ show c
+         | (c, fs) <- Map.toList (detectionClassification detection), not (null fs)]
       lpLogDebug lp $ T.pack $ "  File categories: " ++ show (Map.keys (detectionFiles detection))
       lpLogTrace lp $ T.pack $ "  Code files: " ++ show (Map.findWithDefault [] CodeFiles (detectionFiles detection))
       when (totalExcluded > 0) $ do
@@ -246,6 +258,12 @@ runPipelineBody appEnv config = catch (do
       extractStart <- getCurrentTime
       extraction <- extractAll appEnv configWithStreaming detection
       extractEnd <- getCurrentTime
+      collapsedNodes <- if dcMode effectiveDetection == Collapse
+            then collapseDetectedFiles appEnv configWithStreaming (detectionClassification detection)
+            else pure []
+      lpLogInfo lp $ T.pack $ "  Collapsed " ++ show (length collapsedNodes) ++ " detected file(s) into single nodes"
+      let collapsedExtraction = extraction
+            { extractionNodes = Map.union (Map.fromList [(nodeId n, n) | n <- collapsedNodes]) (extractionNodes extraction) }
       opRecordHistogram op "graphos_extract_duration_seconds" (realToFrac (diffUTCTime extractEnd extractStart) :: Double)
       opIncCounter op "graphos_pipeline_steps_total" 1
       opSetGauge op "graphos_nodes_extracted" (fromIntegral $ Map.size (extractionNodes extraction))
@@ -257,7 +275,7 @@ runPipelineBody appEnv config = catch (do
 
       when (cfgNeo4jStreaming configWithStreaming /= Nothing) $ do
         lpLogInfo lp "  [neo4j-stream] Running edge repair pass..."
-        let graph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
+        let graph = buildGraphFromExtractions (cfgDirected configWithStreaming) [collapsedExtraction]
         (_msg, stmts, batches) <- epPushEdgeRepair ep graph
           (case cfgNeo4jStreaming configWithStreaming of
              Just s -> neo4jsUri s
@@ -272,7 +290,7 @@ runPipelineBody appEnv config = catch (do
 
       lpLogInfo lp "Step 3: Building graph..."
       buildStart <- getCurrentTime
-      let builtGraph = buildGraphFromExtractions (cfgDirected configWithStreaming) [extraction]
+      let builtGraph = buildGraphFromExtractions (cfgDirected configWithStreaming) [collapsedExtraction]
       _ <- evaluate (Map.size (gNodes builtGraph) + Map.size (gEdges builtGraph))
       builtGraph `deepseq` pure ()
       buildEnd <- getCurrentTime
