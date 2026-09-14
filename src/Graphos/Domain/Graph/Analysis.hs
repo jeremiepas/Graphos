@@ -96,9 +96,10 @@ import Graphos.Domain.Graph.FGL (FGLGraph, FGLNodeLabel, FGLEdgeLabel)
 -- Saves ~600MB on 100k-node graphs by avoiding redundant FGL conversions.
 -- Uses bijective sequential indices (0..N-1) to avoid hash collisions.
 data CachedFGL = CachedFGL
-  { cfgGraph   :: !FGLGraph
-  , cfgNidMap  :: !(V.Vector NodeId)
-  , cfgIdxMap  :: !(Map NodeId Int)
+  { cfgGraph        :: !FGLGraph
+  , cfgNidMap       :: !(V.Vector NodeId)
+  , cfgIdxMap       :: !(Map NodeId Int)
+  , cfgDirectedFlag :: !Bool
   } deriving (Eq, Show)
 
 -- | Build a cached FGL graph with bijective sequential indices.
@@ -133,7 +134,7 @@ toCachedFGL g =
              else [(srcIdx, tgtIdx, lbl), (tgtIdx, srcIdx, lbl)]
       fglEdges :: [FGL.LEdge FGLEdgeLabel]
       fglEdges = concatMap mkLEdge (Map.elems (gEdges g))
-  in CachedFGL { cfgGraph = FGL.mkGraph fglNodes fglEdges, cfgNidMap = nidMap, cfgIdxMap = idxMap }
+   in CachedFGL { cfgGraph = FGL.mkGraph fglNodes fglEdges, cfgNidMap = nidMap, cfgIdxMap = idxMap, cfgDirectedFlag = directed }
 
 -- | Find the fgl Int index for a Graphos NodeId — O(log N) via Map lookup.
 cachedFindIdx :: CachedFGL -> NodeId -> Maybe Int
@@ -283,7 +284,12 @@ edgeBetweennessWithSources maxSampledSources exactNodeCap cfg =
         | useExact || n <= maxSampledSources = allIndices
         | otherwise = take maxSampledSources allIndices
       s = length sources
-      isUndirected = fglIsUndirected gr
+      -- Classification comes from the graph's own @gDirected@ flag (known at
+      -- 'toCachedFGL'), not from arc symmetry: a genuinely directed graph whose
+      -- every arc happens to have a matching reverse must stay directed, so
+      -- inferring undirectedness here would misclassify it (AVI-735). With AF-3
+      -- reverse-embedding, @cfgDirected cfg = False@ iff the graph is undirected.
+      isUndirected = not (cfgDirectedFlag cfg)
       -- One BFS per source = O(N + M); summing over s sources gives the
       -- O(s·(N+M)) sampled / O(N·M) exact bound (Theorem 2.3). For an
       -- undirected graph 'brandesSource' canonicalizes every flow to the
