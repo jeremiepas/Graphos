@@ -311,9 +311,10 @@ test-suite graphos-test
     Graphos.Domain.Config.IngestSpec
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
-    Graphos.Domain.CommunitySpec
-    Graphos.Domain.Community.LabelSpec
-    Graphos.Domain.LabelingSpec
+     Graphos.Domain.CommunitySpec
+     Graphos.Domain.Community.LabelSpec
+     Graphos.Domain.Community.DeterminismSpec
+     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
      Graphos.UseCase.PipelineSpec
