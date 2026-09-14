@@ -26,8 +26,11 @@ import Control.Exception
   ( SomeException
   , catch
   , throwIO
+  , try
   )
 import Control.Monad (unless, when)
+import Data.List (isPrefixOf)
+import qualified Data.Text as T
 import Data.Text (Text)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
@@ -38,7 +41,12 @@ import System.Directory
   , removeDirectoryRecursive
   , renameDirectory
   )
-import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.FilePath
+  ( isPathSeparator
+  , takeDirectory
+  , takeFileName
+  , (</>)
+  )
 import System.Posix.Process (getProcessID)
 
 import Graphos.Infrastructure.FileSystem.AtomicWrite (fsyncDirectory)
@@ -61,7 +69,11 @@ prevDirPrefix final = takeFileName final ++ ".prev-"
 -- * @Left@ result   → delete the staging dir and return the error.
 -- * exception       → delete the staging dir and rethrow.
 --
--- The existing @final@ directory is never modified unless the swap succeeds.
+-- A failure of the swap itself (e.g. disk full, permission denied, or an
+-- fsync error after the build succeeded) is converted to a @Left@ so the
+-- contract above holds: this function never throws a swap exception at the
+-- caller. The existing @final@ directory is never modified unless the swap
+-- succeeds; on a failed swap it is rolled back to its previous state.
 withStagedOutput :: FilePath -> (FilePath -> IO (Either Text a)) -> IO (Either Text a)
 withStagedOutput final action = do
   recoverInterruptedSwap final
@@ -78,8 +90,13 @@ withStagedOutput final action = do
     Right a -> do
       exists <- doesDirectoryExist final
       when exists (carryOverState final staging)
-      swapIntoPlace staging final
-      pure (Right a)
+      swapRes <- try (swapIntoPlace staging final)
+      case swapRes of
+        Left (e :: SomeException) -> do
+          cleanupStaging staging
+          pure (Left (T.pack ("failed to swap staged output into place: " ++ show e)))
+        Right () ->
+          pure (Right a)
 
 -- | Move persistent state (cache, memory, ...) from the old output directory
 -- into the staging directory before the swap, so a rebuild does not lose it.
@@ -142,32 +159,48 @@ recoverInterruptedSwap final = do
   unless finalExists $ do
     siblings <- listDirectory (takeDirectory final)
       `catch` \(_ :: SomeException) -> pure []
-    case filter (isPrefixOf (prevDirPrefix final)) siblings of
+    case filter (hasDirPrefix (prevDirPrefix final)) siblings of
       (prev:_) -> renameDirectory (takeDirectory final </> prev) final `catch` ignoreErr
       [] -> pure ()
-  where
-    isPrefixOf p s = take (length p) s == p
+   where
+    hasDirPrefix p s = take (length p) s == p
 
 -- | Remove leftover staging and backup directories from earlier runs.
 sweepStaleDirs :: FilePath -> IO ()
 sweepStaleDirs final = do
   siblings <- listDirectory (takeDirectory final)
     `catch` \(_ :: SomeException) -> pure []
-  let stale = filter (\d -> isPrefixOf (stagingDirPrefix final) d || isPrefixOf (prevDirPrefix final) d) siblings
+  let stale = filter (\d -> hasDirPrefix (stagingDirPrefix final) d || hasDirPrefix (prevDirPrefix final) d) siblings
   mapM_ (\d -> removeDirectoryRecursive (takeDirectory final </> d) `catch` ignoreErr) stale
   where
-    isPrefixOf p s = take (length p) s == p
+    hasDirPrefix p s = take (length p) s == p
+
+-- | Persistent state entries inside the output directory that a rebuild does
+-- not regenerate: the extraction cache, the conversation memory, debug trace
+-- files and directories. These are moved from the old output into the staging
+-- directory right before the swap so they survive the rebuild.
+--
+-- This list must mirror the persistent state the rest of the code base writes
+-- into the output directory; it is intentionally free of generated artifacts
+-- (reports, graphs, HTML) that a rebuild regenerates anyway.
+carryOverEntries :: [FilePath]
+carryOverEntries = ["cache", "memory", "debug", "traces"]
 
 -- | Rewrite a path that pointed into the staging directory to point into the
 -- final output directory (used to fix up result paths after the swap).
+--
+-- The match is on path components, not on a string prefix: a sibling path
+-- that merely starts with the same characters as the staging directory
+-- (e.g. @out.staging-1-backup@ when staging is @out.staging-1@) is left
+-- untouched. Only paths under the staging directory itself are rewritten.
 relocateStagedPath :: FilePath -> FilePath -> FilePath -> FilePath
-relocateStagedPath staging final p =
-  let (pre, rest) = splitAt (length staging) p
-  in if pre == staging then final ++ rest else p
+relocateStagedPath staging final p
+  | staging `isPathPrefixOf` p = final ++ drop (length staging) p
+  | otherwise = p
 
--- | Persistent state entries inside the output directory that a rebuild does
--- not regenerate: extraction cache, conversation memory, debug traces,
--- Q&A memory, cost log. These are moved from the old output into the staging
--- directory right before the swap so they survive the rebuild.
-carryOverEntries :: [FilePath]
-carryOverEntries = ["cache", "memory", "debug", "traces"]
+-- | True if @prefix@ is a proper directory prefix of @path@: either equal to
+-- it, or a prefix that ends on a path separator boundary.
+isPathPrefixOf :: FilePath -> FilePath -> Bool
+isPathPrefixOf prefix path =
+  prefix == path
+    || (prefix `isPrefixOf` path && let next = path !! length prefix in isPathSeparator next)

@@ -31,6 +31,7 @@ import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest (IngestConfig(..), defaultIngestConfig, mergeIngestConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import Graphos.Domain.Config.Vision
+import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
 
 -- ───────────────────────────────────────────────
 -- Top-level Configuration
@@ -52,8 +53,9 @@ data GraphosConfig = GraphosConfig
   , gcEmbedding        :: EmbeddingConfig               -- ^ Local embedding settings (Ollama)
   , gcSemanticEdges    :: SemanticEdgesConfig           -- ^ Semantic code↔doc edge inference settings
   , gcVision           :: VisionConfig                  -- ^ Vision analysis settings
-  , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
-  } deriving (Eq, Show, Generic)
+   , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
+   , gcDetection        :: DetectionConfig               -- ^ Generated/vendored/minified code detection settings
+   } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
 defaultGraphosConfig :: GraphosConfig
@@ -70,9 +72,10 @@ defaultGraphosConfig = GraphosConfig
   , gcObservability    = defaultObservabilityConfig
   , gcEmbedding        = defaultEmbeddingConfig
   , gcSemanticEdges    = defaultSemanticEdgesConfig
-  , gcVision           = defaultVisionConfig
-  , gcIngest           = defaultIngestConfig
-  }
+   , gcVision           = defaultVisionConfig
+   , gcIngest           = defaultIngestConfig
+   , gcDetection        = defaultDetectionConfig
+   }
 
 -- ───────────────────────────────────────────────
 -- Config merging (global + project + CLI)
@@ -119,5 +122,8 @@ mergeGraphosConfig global project = GraphosConfig
   , gcVision = if gcVision project == defaultVisionConfig
                     then gcVision global
                     else gcVision project
-  , gcIngest = mergeIngestConfig (gcIngest global) (gcIngest project)
-  }
+   , gcIngest = mergeIngestConfig (gcIngest global) (gcIngest project)
+   , gcDetection = if gcDetection project == defaultDetectionConfig
+                     then gcDetection global
+                     else gcDetection project
+   }

@@ -36,10 +36,11 @@ import System.Posix.IO
   ( OpenMode(..)
   , closeFd
   , defaultFileFlags
-  , handleToFd
   , openFd
   )
 import System.Posix.Unistd (fileSynchronise)
+
+import Graphos.Infrastructure.FileSystem.Fd (fdSyncAndClose, hToFd)
 
 -- | Swallow exceptions from best-effort cleanup/durability steps.
 ignoreErr :: SomeException -> IO ()
@@ -83,12 +84,15 @@ openAtomicHandle targetPath = do
 
 -- | Flush, fsync, close the temp handle, rename it over the target, and fsync
 -- the parent directory. Throws on failure; the target is untouched in that case.
+--
+-- The handle is closed with 'hClose' (via 'Graphos.Infrastructure.FileSystem.Fd.hToFd')
+-- after its descriptor is detached for fsync; both resources are released
+-- exactly once.
 commitAtomicHandle :: FilePath -> FilePath -> Handle -> IO ()
 commitAtomicHandle tmpPath targetPath h = do
   hFlush h
-  fd <- handleToFd h
-  fileSynchronise fd `catch` ignoreErr
-  closeFd fd
+  fd <- hToFd h
+  fdSyncAndClose fd
   renameFile tmpPath targetPath
   fsyncDirectory (takeDirectory targetPath)
 

@@ -43,9 +43,11 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , Granularity(..)
                              , LSPServerConfig(..)
                              , IngestConfig(..)
-                             , defaultGraphosConfig
-                             , mergeGraphosConfig
-                             )
+   , defaultGraphosConfig
+   , mergeGraphosConfig
+   )
+
+import Graphos.Domain.Config.Detection (DetectionConfig(..))
 
 -- ───────────────────────────────────────────────
 -- Configuration file format (YAML)
@@ -67,8 +69,9 @@ data ConfigFile = ConfigFile
   , cfEmbedding         :: Maybe EmbeddingConfig
   , cfSemanticEdges     :: Maybe SemanticEdgesConfig
   , cfVision            :: Maybe VisionConfig
-  , cfIngest            :: Maybe IngestConfig
-  } deriving (Eq, Show)
+   , cfIngest            :: Maybe IngestConfig
+   , cfDetection         :: Maybe DetectionConfig
+   } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
   parseJSON = withObject "ConfigFile" $ \v -> ConfigFile
@@ -83,9 +86,10 @@ instance FromJSON ConfigFile where
     <*> v .:? "labeling"
     <*> v .:? "observability"
     <*> v .:? "embedding"
-    <*> v .:? "semantic_edges"
-    <*> v .:? "vision"
-    <*> v .:? "ingest"
+     <*> v .:? "semantic_edges"
+     <*> v .:? "vision"
+     <*> v .:? "ingest"
+     <*> v .:? "detection"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -194,6 +198,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcIngest = case cfIngest cfgFile of
       Just ingest -> ingest
       Nothing     -> gcIngest defaults
+  , gcDetection = case cfDetection cfgFile of
+      Just det -> det
+      Nothing   -> gcDetection defaults
   }
 
 -- ───────────────────────────────────────────────
