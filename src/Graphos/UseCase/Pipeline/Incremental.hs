@@ -17,7 +17,7 @@ import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath ((</>))
 
 import Graphos.Domain.Types hiding (PushMode(..))
-import Graphos.Domain.Types.Pipeline (EdgeDensity(..), Neo4jStreamingConfig(..), Neo4jPushMode(..))
+import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
 import Graphos.Domain.Config (SemanticEdgesConfig(..))
 import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected)
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
@@ -143,7 +143,7 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
 clusterAndInfer :: Resolution -> SemanticEdgesConfig -> Bool -> EdgeDensity -> Bool -> Graph 
                 -> (Graph, CommunityMap, SemanticMode, [Edge])
 clusterAndInfer res seCfg force density directed graph =
-  let (commMap, cohesion) = clusterGraphWithResolution graph res
+  let (commMap, _cohesion) = clusterGraphWithResolution graph res
       mode = semanticMode seCfg force graph
       semanticEdges = inferSemanticEdgesForMode mode seCfg graph
       allInferred = inferNonSemanticEdges density graph commMap ++ semanticEdges
