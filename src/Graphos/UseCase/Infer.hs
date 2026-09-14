@@ -9,7 +9,8 @@ module Graphos.UseCase.Infer
    , inferEdges
    , semanticModeName
    , classifyBridgeNodes
-  , BridgeClassification(..)
+   , classifyBridgeNodesWith
+   , BridgeClassification(..)
   , SemanticMode(..)
   , semanticMode
   , isSingleCorpus
@@ -30,7 +31,7 @@ import Graphos.Domain.Config (SemanticEdgesConfig(..))
 import Graphos.Domain.Graph
   ( Graph, gNodes, gEdges, gEmbeddings, neighbors, degree
   , articulationPoints, biconnectedComponents
-  , edgeBetweenness
+  , edgeBetweennessWith
   )
 import Graphos.UseCase.Port.LLMPort (cosineSimilarity)
 
@@ -66,11 +67,20 @@ data BridgeClassification = BridgeClassification
   , bcCommunities   :: [CommunityId]
   } deriving (Eq, Show)
 
+-- | Bridge-node classification using default PipelineConfig scale guards
+-- (cfgMaxSampledSources = 500, cfgExactBetweennessNodeCap = 10000).
 classifyBridgeNodes :: Graph -> CommunityMap -> [BridgeClassification]
 classifyBridgeNodes g commMap =
+  classifyBridgeNodesWith defaultConfig g commMap
+
+-- | Bridge-node classification wiring PipelineConfig scale guards
+-- (cfgMaxSampledSources / cfgExactBetweennessNodeCap) into edge betweenness.
+-- Defaults are preserved when the CLI flags are unset.
+classifyBridgeNodesWith :: PipelineConfig -> Graph -> CommunityMap -> [BridgeClassification]
+classifyBridgeNodesWith cfg g commMap =
   let artPoints = articulationPoints g
       bccs = biconnectedComponents g
-      between = edgeBetweenness g
+      between = edgeBetweennessWith (cfgMaxSampledSources cfg) (cfgExactBetweennessNodeCap cfg) g
       nodeComm = nodeCommunityMap commMap
       bccMembership = Map.fromListWith (+)
         [ (nid, 1)
