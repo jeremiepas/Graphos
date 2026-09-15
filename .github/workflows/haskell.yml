@@ -50,7 +50,7 @@ jobs:
         if: success() && github.event_name == 'push'
         run: |
           mkdir -p dist/release
-          BIN_PATH=$(devenv shell -- cabal list-bin graphos)
+          BIN_PATH=$(devenv shell -- cabal list-bin graphos 2>/dev/null | grep -E '^/' | tail -n 1)
           cp "$BIN_PATH" dist/release/graphos-linux-x86_64
           chmod +x dist/release/graphos-linux-x86_64
 
