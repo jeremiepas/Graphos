@@ -134,4 +134,79 @@
       });
     });
   });
+
+  // ── Focus-trap port ────────────────────────────────────────────────────
+  // JS owns native-Tab prevention and focus movement; Elm owns the stop index.
+  // openDialog captures the active element (restored on close), moveFocus moves
+  // to a CSS selector computed by Studio.DialogFocus, restoreFocus hands focus
+  // back. The Elm side only ever *dispatches* the stop; this file performs it.
+  var dialogTrap = null;
+  var capturedElement = null;
+
+  function dialogRoot() {
+    return document.getElementById("studio-dialog");
+  }
+
+  function withinDialog(el) {
+    return el && el.closest && el.closest("#studio-dialog");
+  }
+
+  function detachTabTrap() {
+    var root = dialogRoot();
+    if (root && dialogTrap) {
+      root.removeEventListener("keydown", dialogTrap);
+      dialogTrap = null;
+    }
+  }
+
+  function handleKeydown(e) {
+    // Trap Tab / Shift+Tab: never let the browser move focus outside the modal.
+    if (e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  function focusBySelector(selector) {
+    try {
+      var el = document.querySelector(selector);
+      if (el && typeof el.focus === "function") {
+        el.focus();
+      }
+    } catch (_e) {
+      /* selector matched nothing: leave focus untouched */
+    }
+  }
+
+  app.ports.openDialog.subscribe(function (msg) {
+    // Remember what had focus so restoreFocus can return to it on close.
+    capturedElement = document.activeElement;
+    detachTabTrap();
+    requestAnimationFrame(function () {
+      var root = dialogRoot();
+      if (!root) {
+        return;
+      }
+      dialogTrap = handleKeydown;
+      root.addEventListener("keydown", dialogTrap);
+      var sel = msg.stops && msg.stops[msg.index] ? msg.stops[msg.index] : "";
+      focusBySelector(sel);
+    });
+  });
+
+  app.ports.moveFocus.subscribe(function (selector) {
+    focusBySelector(selector);
+  });
+
+  app.ports.restoreFocus.subscribe(function () {
+    detachTabTrap();
+    try {
+      if (capturedElement && typeof capturedElement.focus === "function") {
+        capturedElement.focus();
+      }
+    } catch (_e) {
+      /* restore is best-effort */
+    }
+    capturedElement = null;
+  });
 })();
