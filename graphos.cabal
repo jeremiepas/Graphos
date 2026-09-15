@@ -366,7 +366,8 @@ test-suite graphos-test
     Graphos.Fidelity.ImportEdgesSpec
     Graphos.Fidelity.GraphCoverageSpec
     Graphos.UseCase.ExportSpec
-
+    Graphos.Domain.Graph.ColimitPropertySpec
+ 
   build-depends:
       base
     , graphos
