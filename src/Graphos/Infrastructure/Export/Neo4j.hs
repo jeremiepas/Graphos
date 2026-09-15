@@ -20,8 +20,9 @@ module Graphos.Infrastructure.Export.Neo4j
   , pushCommunityGraphToNeo4j
   , pushFileExtraction
   , pushEdgeRepair
-  , generateSubgraphStatements
-  , generateCommunityOnlyStatements
+   , generateSubgraphStatements
+   , generateParameterizedStatements
+   , generateCommunityOnlyStatements
   , generateCommunityStatements
   , generateFileStatements
   , generateEdgeRepairStatements
