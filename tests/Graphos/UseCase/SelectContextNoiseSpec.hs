@@ -8,7 +8,7 @@ import Data.Text.Short (fromText)
 
 import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..)
                             , Relation(..), Confidence(..), Analysis(..)
-                             , GodNode(..), extractionFromLists)
+                            , NullModel(..), GodNode(..), extractionFromLists)
 
 import Graphos.Domain.Graph (Graph, buildGraph)
 import Graphos.Domain.Context (QueryComplexity(..), ContextBudget(..)
@@ -61,6 +61,7 @@ parserCommunities = Map.fromList [(1, ["n1", "n2"]), (2, ["n3"])]
 parserAnalysis :: Analysis
 parserAnalysis = Analysis
   { analysisCommunities = parserCommunities
+  , analysisNullModel     = DefaultNullModel
   , analysisCohesion    = Map.empty
   , analysisGodNodes    = [GodNode "n3" "Main" 246]
   , analysisSurprises   = []

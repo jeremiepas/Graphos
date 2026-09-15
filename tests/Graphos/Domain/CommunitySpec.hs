@@ -10,13 +10,14 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
 import Data.List (sort)
+import Data.Maybe (isNothing, listToMaybe, fromMaybe)
 import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
 
 import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), degree)
-import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
 spec :: Spec
 spec = do
   describe "detectCommunities" $ do
@@ -401,6 +402,143 @@ spec = do
           cm = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
       modularity g cm `shouldBe` modularity g cm
 
+  describe "cohesionWeighted" $ do
+    it "returns 0 for a singleton community (AVI-535 §6.3)" $ do
+      let ext = extractionFromLists [testNode "a"] []
+          g = buildGraph False ext
+      cohesionWeighted g ["a"] `shouldBe` 0.0
+
+    it "reduces to cohesionScore under uniform confidence (self-consistency)" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] [testEdge "a" "b"]
+          g = buildGraph False ext
+          cs = cohesionScore g ["a", "b"]
+      cohesionWeighted g ["a", "b"] `shouldSatisfy` (\x -> abs (x - cs) < 1e-9)
+
+    it "is 0 when the community members are disconnected" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"] []
+          g = buildGraph False ext
+      cohesionWeighted g ["a", "b"] `shouldBe` 0.0
+
+  describe "weightedModularity" $ do
+    it "is 0 for a singleton partition (all nodes in one community)" $ do
+      let ns = map testNode ["a", "b", "c", "d", "e", "f"]
+          es = cliqueEdges ["a", "b", "c"] ++ cliqueEdges ["d", "e", "f"] ++ [testEdge "c" "d"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm = Map.fromList [(0, ["a", "b", "c", "d", "e", "f"])]
+      weightedModularity g cm `shouldBe` 0.0
+
+    it "is positive for two tight cliques joined by a weak bridge" $ do
+      let ns = map testNode ["a", "b", "c", "d", "e", "f"]
+          es = cliqueEdges ["a", "b", "c"] ++ cliqueEdges ["d", "e", "f"] ++ [testEdge "c" "d"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
+      weightedModularity g cm `shouldSatisfy` (> 0)
+
+  describe "bestCommunityWeighted" $ do
+    it "proposes a strictly beneficial move into a neighbour community (AVI-535 §8)" $ do
+      let ns = map testNode ["a", "b", "c", "x"]
+          es = cliqueEdges ["a", "b", "c"] ++ [testEdge "x" "a", testEdge "x" "b"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm = Map.fromList [(0, ["a", "b", "c"]), (1, ["x"])]
+      bestCommunityWeighted cm g (T.pack "x") `shouldSatisfy` maybe False (\(_, s) -> s > 0)
+
+    it "returns Nothing when the only neighbour community is the node's own" $ do
+      let ns = map testNode ["a", "b"]
+          es = [testEdge "a" "b"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm = Map.fromList [(0, ["a", "b"])]
+      bestCommunityWeighted cm g (T.pack "a") `shouldSatisfy` isNothing
+
+  describe "computeCommunityStatsWeighted" $ do
+    it "records internal weight, undirected pair count, and cohesion per community" $ do
+      let ns = map testNode ["a", "b", "c"]
+          es = cliqueEdges ["a", "b", "c"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm = Map.fromList [(0, ["a", "b", "c"])]
+          stats = computeCommunityStatsWeighted cm g
+      length stats `shouldBe` 1
+      let s = fromMaybe (error "exactly one community stats") (listToMaybe stats)
+      cswInternalWeight s `shouldSatisfy` (> 0)
+      cswUndirectedPairs s `shouldBe` 6
+      cswCohesion s `shouldSatisfy` (> 0)
+
+  describe "weighted modularity invariants (AVI-535)" $ do
+    it "INV-CONSTR: Q_w equals auditable Q under equal confidence (w0 in {0.25,1,4})" $ do
+      let ns = map testNode ["a", "b", "c", "d"]
+          cm = Map.fromList [(0, ["a", "b"]), (1, ["c", "d"])]
+          g1  = buildGraph False (extractionFromLists ns (cliqueEdges ["a", "b"] ++ cliqueEdges ["c", "d"] ++ [testEdge "b" "c"]))
+          g25 = buildGraph False (extractionFromLists ns [testEdgeWithConfidence 0.25 "a" "b", testEdgeWithConfidence 0.25 "c" "d", testEdgeWithConfidence 0.25 "b" "c"])
+          g40 = buildGraph False (extractionFromLists ns [testEdgeWithConfidence 4.0 "a" "b", testEdgeWithConfidence 4.0 "c" "d", testEdgeWithConfidence 4.0 "b" "c"])
+          tol = 1e-9
+      weightedModularity g1 cm `shouldSatisfy` (\x -> abs (x - modularity g1 cm) < tol)
+      weightedModularity g25 cm `shouldSatisfy` (\x -> abs (x - modularity g1 cm) < tol)
+      weightedModularity g40 cm `shouldSatisfy` (\x -> abs (x - modularity g1 cm) < tol)
+
+    it "INV-Qw0: Q_w = 0 when confidence mass is zero (no divide-by-zero)" $ do
+      let ns = map testNode ["a", "b", "c"]
+          g = buildGraph False (extractionFromLists ns [testEdgeWithConfidence 0.0 "a" "b", testEdgeWithConfidence 0.0 "b" "c", testEdgeWithConfidence 0.0 "a" "c"])
+          cm = Map.fromList [(0, ["a", "b", "c"])]
+      weightedModularity g cm `shouldBe` 0.0
+
+    it "INV-Qw1: Q_w in [-0.5, 1] on undirected fixtures" $ do
+      let inRange x = x >= (-0.5) && x <= 1
+          bridge = buildGraph False (extractionFromLists (map testNode ["a", "b", "c", "d", "e", "f"]) (cliqueEdges ["a", "b", "c"] ++ cliqueEdges ["d", "e", "f"] ++ [testEdge "c" "d"]))
+          pathAllSingletons = buildGraph False (extractionFromLists (map testNode ["a", "b", "c"]) [testEdge "a" "b", testEdge "b" "c"])
+          triSplit = buildGraph False (extractionFromLists (map testNode ["a", "b", "c"]) (cliqueEdges ["a", "b", "c"]))
+      weightedModularity bridge (Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]) `shouldSatisfy` inRange
+      weightedModularity pathAllSingletons (Map.fromList [(0, ["a"]), (1, ["b"]), (2, ["c"])]) `shouldSatisfy` inRange
+      weightedModularity triSplit (Map.fromList [(0, ["a", "b"]), (1, ["c"])]) `shouldSatisfy` inRange
+
+    it "INV-Qw4: all-singletons yields negative Q_w with exact value" $ do
+      -- path a-b-c: m=2, degrees 1,2,1 ; Q_w = -(1/(2m))^2 * sum deg^2 = -6/16
+      let ns = map testNode ["a", "b", "c"]
+          es = [testEdge "a" "b", testEdge "b" "c"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm = Map.fromList [(0, ["a"]), (1, ["b"]), (2, ["c"])]
+      weightedModularity g cm `shouldSatisfy` (< 0)
+      weightedModularity g cm `shouldSatisfy` (\x -> abs (x - (-6 / 16 :: Double)) < 1e-9)
+
+    it "INV-C1: cohesion_w in [0, 1]" $ do
+      let inRange x = x >= 0 && x <= 1
+          tri = buildGraph False (extractionFromLists (map testNode ["a", "b", "c"]) (cliqueEdges ["a", "b", "c"]))
+          mixed = buildGraph False (extractionFromLists (map testNode ["a", "b", "c", "x"]) (cliqueEdges ["a", "b", "c"] ++ [testEdge "a" "x"]))
+      cohesionWeighted tri ["a", "b", "c"] `shouldSatisfy` inRange
+      cohesionWeighted mixed ["a", "b", "c"] `shouldSatisfy` inRange
+
+    it "INV-C2: cohesion_w is scale-invariant under uniform confidence" $ do
+      -- members [a,b,c]; a-x external. Node a ratio = 2w_int / 3w_total = 2/3; mean over a,b,c = 8/9.
+      let ns = map testNode ["a", "b", "c", "x"]
+          g1  = buildGraph False (extractionFromLists ns (cliqueEdges ["a", "b", "c"] ++ [testEdge "a" "x"]))
+          g4  = buildGraph False (extractionFromLists ns [testEdgeWithConfidence 4.0 "a" "b", testEdgeWithConfidence 4.0 "b" "c", testEdgeWithConfidence 4.0 "a" "c", testEdgeWithConfidence 4.0 "a" "x"])
+          tol = 1e-9
+      cohesionWeighted g1 ["a", "b", "c"] `shouldSatisfy` (\x -> abs (x - 8 / 9 :: Double) < tol)
+      cohesionWeighted g4 ["a", "b", "c"] `shouldSatisfy` (\x -> abs (x - 8 / 9 :: Double) < tol)
+
+    it "signal strength moves Q_w: edge confidence changes weighted modularity" $ do
+      let ns = map testNode ["a", "b", "c", "d", "e", "f"]
+          twoCliques = cliqueEdges ["a", "b", "c"] ++ cliqueEdges ["d", "e", "f"]
+          cm = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
+          weak  = buildGraph False (extractionFromLists ns (twoCliques ++ [testEdgeWithConfidence 0.1 "c" "d"]))
+          strong = buildGraph False (extractionFromLists ns (twoCliques ++ [testEdgeWithConfidence 10.0 "c" "d"]))
+      let wWeak  = weightedModularity weak cm
+          wStrong = weightedModularity strong cm
+      -- Q_w responds to confidence weights; an inter-community bridge of
+      -- different mass moves the objective (a strong bridge inflates sigma_tot
+      -- and penalises Q_w for this fixed partition).
+      abs (wWeak - wStrong) `shouldSatisfy` (> 1e-9)
+      wStrong `shouldSatisfy` (< wWeak)
+
+    it "INV-Qw2/Qw3: Q_w is deterministic and order-independent" $ do
+      let ns = map testNode ["a", "b", "c", "d", "e", "f"]
+          es = cliqueEdges ["a", "b", "c"] ++ cliqueEdges ["d", "e", "f"] ++ [testEdge "c" "d"]
+          g = buildGraph False (extractionFromLists ns es)
+          cmA = Map.fromList [(0, ["a", "b", "c"]), (1, ["d", "e", "f"])]
+          cmB = Map.fromList [(1, ["d", "e", "f"]), (0, ["a", "b", "c"])]
+          tol = 1e-12
+      let x = weightedModularity g cmA
+      weightedModularity g cmA `shouldSatisfy` (\y -> abs (y - x) < tol)
+      weightedModularity g cmB `shouldSatisfy` (\y -> abs (y - x) < tol)
+
 -- Helpers (duplicated from GraphSpec for test isolation)
 testNode :: Text -> Node
 testNode nid = Node
@@ -487,6 +625,9 @@ testEdge src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence 1.0) 
 
 testEdgeWithRelation :: Relation -> Text -> Text -> Edge
 testEdgeWithRelation rel src tgt = Edge (edgeIdFrom src tgt) src tgt rel 1.0 (Confidence 1.0) Nothing
+
+testEdgeWithConfidence :: Double -> Text -> Text -> Edge
+testEdgeWithConfidence w src tgt = Edge (edgeIdFrom src tgt) src tgt Calls 1.0 (Confidence w) Nothing
 
 keyToText :: Key -> Text
 keyToText = T.drop 1 . T.init . T.pack . show

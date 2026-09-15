@@ -30,10 +30,11 @@ exportGraphWithLabels :: Graph -> Analysis -> Maybe (Map Int Text) -> FilePath -
 exportGraphWithLabels g analysis mLabels path = do
   let base = [ "nodes"      .= Map.elems (gNodes g)
               , "edges"      .= Map.elems (gEdges g)
-              , "communities" .= analysisCommunities analysis
-              , "cohesion"   .= analysisCohesion analysis
-              , "god_nodes"  .= analysisGodNodes analysis
-              ]
+               , "communities" .= analysisCommunities analysis
+               , "cohesion"   .= analysisCohesion analysis
+               , "god_nodes"  .= analysisGodNodes analysis
+               , "null_model" .= analysisNullModel analysis
+               ]
       withLabels = case mLabels of
         Just labels -> base ++ ["community_labels" .= labels]
         Nothing    -> base

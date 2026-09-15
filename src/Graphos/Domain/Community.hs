@@ -22,10 +22,16 @@ module Graphos.Domain.Community
 
    , bestCommunityFor
 
-  , CommunityStats(..)
-  , computeCommunityStats
-  , modularity
-  , localMovesFrom
+   , CommunityStats(..)
+   , computeCommunityStats
+   , modularity
+    , localMovesFrom
+
+    , cohesionWeighted
+   , CommunityStatsWeighted(..)
+   , computeCommunityStatsWeighted
+   , weightedModularity
+   , bestCommunityWeighted
 
   , CommunityComposition(..)
   , computeCompositions
@@ -144,6 +150,162 @@ modularity g cm =
   in if csM stats == 0.0
        then 0.0
        else foldl' acc 0.0 (Map.keys cm)
+
+-- | Numeric signal-strength carried by an edge's @edgeConfidence@ (AVI-535 §1.2).
+getConfidence :: Confidence -> Double
+getConfidence (Confidence w) = w
+
+-- | Total undirected confidence mass @m_w = Σ_e getConfidence(edgeConfidence e)@
+-- of @g@ (each stored edge counted once; AVI-535 §1.2).
+weightedEdgeMass :: Graph -> Double
+weightedEdgeMass g = sum [getConfidence (edgeConfidence e) | e <- Map.elems (gEdges g)]
+
+-- | Weighted degree of each node: the sum of incident confidence weights on the
+-- undirected support graph (every edge contributes to both endpoints; AVI-535 §1.2).
+nodeWeightedDegrees :: Graph -> Map NodeId Double
+nodeWeightedDegrees g =
+  let mk e = Map.insertWith (+) (edgeSource e) (getConfidence (edgeConfidence e))
+          . Map.insertWith (+) (edgeTarget e) (getConfidence (edgeConfidence e))
+  in foldr mk Map.empty (Map.elems (gEdges g))
+
+-- | Internal undirected confidence mass of a node set: the sum of
+-- @getConfidence(edgeConfidence e)@ over edges whose both endpoints are members.
+-- This is half of @σ_in^w(c)@ (AVI-535 §1.3).
+internalWeight :: Graph -> [NodeId] -> Double
+internalWeight g members =
+  let memberSet = Set.fromList members
+  in sum [getConfidence (edgeConfidence e)
+         | e <- Map.elems (gEdges g)
+         , edgeSource e `Set.member` memberSet
+         , edgeTarget e `Set.member` memberSet]
+
+-- | Weighted-modularity contribution of a single community at resolution @γ@
+-- (AVI-535 §1.5, (*)). With @μ = m_w@ and @γ = 1@ this is
+-- > σ_in^w / (2 m_w) − σ_tot^w² / (2 m_w)²
+-- where @w_in(c)@ is the internal confidence mass (half of @σ_in^w(c)@) and
+-- @w_tot(c)@ is the weighted total-degree of the members.
+communityQuality :: Graph -> Double -> Map NodeId Double -> [NodeId] -> Double
+communityQuality g μ deg members =
+  let wIn  = internalWeight g members
+      wTot = sum [Map.findWithDefault 0.0 m deg | m <- members]
+  in wIn / μ - (wTot / (2 * μ)) * (wTot / (2 * μ))
+
+-- | Weighted cohesion score @C(S)@ (AVI-535 §1.6).
+--
+-- The mean over members of the internal incident confidence weight divided by
+-- the total incident confidence weight:
+-- > C(S) = (1 / |S|) · Σ_{i ∈ S} in_w(i) / d_w(i)
+-- where @in_w(i)@ is the confidence weight of edges from @i@ to other members
+-- of @S@ and @d_w(i)@ is the weighted degree of @i@. A member with @d_w(i) = 0@
+-- contributes @0@; a singleton (or empty) community is defined to be @0@.
+cohesionWeighted :: Graph -> [NodeId] -> Double
+cohesionWeighted g members =
+  let n = length members
+  in if n <= 1
+       then 0.0
+       else
+         let memberSet = Set.fromList members
+             deg       = nodeWeightedDegrees g
+             inW i     =
+               sum [getConfidence (edgeConfidence e)
+                  | e <- Map.elems (gEdges g)
+                  , let (s, t) = (edgeSource e, edgeTarget e)
+                  , ((s == i && t `Set.member` memberSet && t /= i)
+                     ||   (t == i && s `Set.member` memberSet && s /= i))]
+             term i    = case Map.lookup i deg of
+                           Just d | d > 0 -> inW i / d
+                           _              -> 0.0
+         in sum (map term members) / fromIntegral n
+
+-- | Per-community statistics for the weighted modularity pipeline
+-- (AVI-535 §6.1, §6.3, §7). Records the internal undirected weight, the
+-- undirected pair count @n_S·(n_S−1)@, and the weighted cohesion score C(S).
+data CommunityStatsWeighted = CommunityStatsWeighted
+  { cswId               :: !CommunityId
+  , cswMembers          :: !([NodeId])
+  , cswInternalWeight   :: !Double
+  , cswUndirectedPairs  :: !Int
+  , cswCohesion         :: !Double
+  } deriving (Eq, Show)
+
+-- | Compute per-community statistics for every community in @commMap@.
+computeCommunityStatsWeighted :: CommunityMap -> Graph -> [CommunityStatsWeighted]
+computeCommunityStatsWeighted commMap g =
+  map
+    (\(cid, members) ->
+       let n = length members
+       in CommunityStatsWeighted
+            { cswId               = cid
+            , cswMembers          = members
+            , cswInternalWeight   = internalWeight g members
+            , cswUndirectedPairs  = if n <= 1 then 0 else n * (n - 1)
+            , cswCohesion         = cohesionWeighted g members
+          })
+    (Map.toList commMap)
+
+-- | Weighted modularity @Q_w@ for a partition (AVI-535 §1.5, (*)).
+--
+-- Sums the per-community contribution of 'communityQuality' at resolution
+-- @γ = 1@ over the configuration null model: @Σ_c [σ_in^w / (2 m_w) −
+-- σ_tot^w² / (2 m_w)²]@, where @m_w@ is the total confidence mass of 'g'. This
+-- matches the scale of 'modularity' so it reduces to the auditable unweighted
+-- @Q@ when every edge carries equal confidence (AVI-535 §2.2). A graph with no
+-- edges, or a singleton partition, is defined to be @0@.
+weightedModularity :: Graph -> CommunityMap -> Double
+weightedModularity g commMap =
+  let μ   = weightedEdgeMass g
+      deg = nodeWeightedDegrees g
+  in if μ <= 0 || Map.null commMap
+       then 0.0
+       else sum [communityQuality g μ deg members | (_, members) <- Map.toList commMap]
+
+-- | Marginal weighted-modularity score of moving @nodeId@ into community
+-- @members@ (AVI-535 §8). Returns a non-positive value when the move does not
+-- increase weighted modularity, when it is blocked by the maximum-size
+-- constraint (§8), or when @members@ is empty (the membership constraint,
+-- §6.1).
+candidateScore :: Graph -> CommunityMap -> NodeId -> [NodeId] -> Double
+candidateScore g commMap nid members =
+  let μ      = weightedEdgeMass g
+      deg    = nodeWeightedDegrees g
+      maxN   = max 1 (Map.size (gNodes g))
+      revIdx = buildReverseIndex commMap
+      curComm = maybe (-1) id (communityOf nid revIdx)
+      curM    = Map.findWithDefault [] curComm commMap
+      curMX   = [m | m <- curM, m /= nid]
+  in if length members <= 0 || length members >= maxN
+       then 0.0
+       else
+         let qAdd   = communityQuality g μ deg (members ++ [nid])
+             qBase  = communityQuality g μ deg members
+             qCur   = communityQuality g μ deg curM
+             qDrop  = communityQuality g μ deg curMX
+         in (qAdd - qBase) + (qDrop - qCur)
+
+-- | Best community for a node under the weighted modularity objective
+-- (AVI-535 §8).
+--
+-- Considers only candidate communities that contain at least one neighbour of
+-- @nodeId@ (the neighbourhood constraint) and excludes the node's own community
+-- (a move there is a no-op); returns the pair @(communityId, score)@ when the
+-- best move strictly increases weighted modularity, or @Nothing@ otherwise.
+bestCommunityWeighted :: CommunityMap -> Graph -> NodeId -> Maybe (CommunityId, Double)
+bestCommunityWeighted commMap g nid =
+  let revIdx     = buildReverseIndex commMap
+      neighbours = Set.elems (neighbors g nid)
+      candComms  = Set.fromList [c | n <- neighbours, Just c <- [communityOf n revIdx]]
+      curComm    = communityOf nid revIdx
+      candidates = [ (cid, members)
+                   | (cid, members) <- Map.toList commMap
+                   , Set.member cid candComms
+                   , maybe True (\c' -> cid /= c') curComm ]
+      scored     = [ (cid, candidateScore g commMap nid members)
+                   | (cid, members) <- candidates ]
+  in if null scored
+       then Nothing
+       else case maximumBySnd scored of
+              (cid, score) | score > 0 -> Just (cid, score)
+              _                        -> Nothing
 
 -- | One Leiden local-moving pass applied to a starting partition.
 --

@@ -5,11 +5,13 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.IO.Temp (withSystemTempDirectory)
+import Data.List (isInfixOf)
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.UseCase.Port.ExportPort
 import Graphos.UseCase.Export (exportAll)
+import Graphos.Infrastructure.Export.JSON (exportGraph)
 
 spec :: Spec
 spec = describe "exportAll" $ do
@@ -17,7 +19,14 @@ spec = describe "exportAll" $ do
     withSystemTempDirectory "graphos-export-test" $ \tmpDir -> do
       ref <- newIORef Nothing
       let g = buildGraph False (extractionFromLists [] [])
-          analysis = Analysis Map.empty Map.empty [] [] []
+          analysis = Analysis
+            { analysisCommunities   = Map.empty
+            , analysisNullModel     = DefaultNullModel
+            , analysisCohesion      = Map.empty
+            , analysisGodNodes      = []
+            , analysisSurprises     = []
+            , analysisQuestions     = []
+            }
           detection = Detection
             { detectionTotalFiles = 0
             , detectionTotalWords = 0
@@ -62,3 +71,20 @@ spec = describe "exportAll" $ do
       _ <- exportAll port g analysis config detection labels []
       recorded <- readIORef ref
       recorded `shouldBe` Just labels
+
+  describe "JSON null-model export (AF-5)" $ do
+    it "records the chosen null model in graph.json" $ do
+      withSystemTempDirectory "graphos-nullmodel-test" $ \tmpDir -> do
+        let g = buildGraph False (extractionFromLists [] [])
+            analysis = Analysis
+              { analysisCommunities   = Map.empty
+              , analysisNullModel     = DefaultNullModel
+              , analysisCohesion      = Map.empty
+              , analysisGodNodes      = []
+              , analysisSurprises     = []
+              , analysisQuestions     = []
+              }
+            path = tmpDir ++ "/graph.json"
+        exportGraph g analysis path
+        contents <- readFile path
+        ("\"null_model\"" `isInfixOf` contents) `shouldBe` True
