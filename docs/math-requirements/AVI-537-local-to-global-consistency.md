@@ -21,8 +21,8 @@ Notation is inherited verbatim from [AVI-511](/AVI/issues/AVI-511) §0 (verified
 | Name | Signature | Core semantics | Source |
 |---|---|---|---|
 | `buildGraph` | `Bool -> Extraction -> Graph` | drops dangling edges; builds adjacency from edge incidence; takes `directed` flag | `Core.hs:96` |
-| `mergeExtractions` | `Extraction -> Extraction -> Extraction` | `Map.union` on nodes and edges — **second wins** on key conflict | `Core.hs:129` |
-| `mergeGraphs` | `Graph -> Graph -> Graph` | `gNodes old <> gNodes new` (second wins), edges keyed by `(src,tgt)` unioned then filtered to drop dangling, adjacency `Map.unionWith Set.union`, `gDirected old` preserved, hash recomputed | `Core.hs:140` |
+| `mergeExtractions` | `Extraction -> Extraction -> Extraction` | `Data.Map.union` on nodes and edges — **left-biased: first operand (a) wins** on key conflict (`containers`; `Map.union` prefers the left map) | `Core.hs:130` |
+| `mergeGraphs` | `Graph -> Graph -> Graph` | `gNodes old <> gNodes new` (**old/first operand wins**, left-biased), edges keyed by `(src,tgt)` unioned then filtered to drop dangling, adjacency `Map.unionWith Set.union`, `gDirected old || gDirected new` (canonical: directed iff either input is directed; order-independent, [AVI-658](/AVI/issues/AVI-658) M1 T1), hash recomputed | `Core.hs:154` |
 
 - **Agreement region (this doc's central predicate).** For two views `A, B` with a common target shape, define the **agreement set**
   ```
@@ -31,7 +31,7 @@ Notation is inherited verbatim from [AVI-511](/AVI/issues/AVI-511) §0 (verified
   ```
   i.e. the keys present in **both** views carrying **identical** label values. This is precisely the domain on which a value-preserving embedding into both exists ([AVI-511](/AVI/issues/AVI-511) §1.1).
 
-> **Constrains (required by the issue).** Every requirement below names one of these surfaces. Behavior-constraining requirements (marked 🔧) require a loop with [Graphos Dev](/AVI/agents/graphos-dev) before finalizing the Haskell semantics.
+> **Constrains (required by the issue).** Every requirement below names one of these surfaces. The one behavior-constraining requirement (LG-C3, status 🔧) required a loop with [devhaskell](/AVI/agents/devhaskell) before finalizing the Haskell semantics — now closed (AVI-647): all requirements are Proven, LG-C3 locked.
 
 ---
 
@@ -56,7 +56,7 @@ In Graphos the apex is `M = mergeGraphs` of the constituent graphs and the legs 
 
 on `gNodes`; analogously on `gEdges` (keyed by `(NodeId, NodeId)`) and on `gAdjFwd/gAdjBack` (`Map.unionWith Set.union`). The leg `ι_x` is *not* a total map on keys — it is defined on `keys(D(V_x))` and lands in `keys(M)`; on a shared key it lands in the single merged entry. This is exactly what "structure-preserving graph morphism" means concretely here.
 
-> **Constrains:** `mergeGraphs` (`Core.hs:142,145-146`).
+> **Constrains:** `mergeGraphs` (`Core.hs:154,157-163`).
 
 ---
 
@@ -68,7 +68,7 @@ on `gNodes`; analogously on `gEdges` (keyed by `(NodeId, NodeId)`) and on `gAdjF
 
 **What this fixes.** The merged graph's node set is `⋃_i keys(extNodes V_i)` (each shared key **once**), its edge set is `⋃_i keys(extEdges V_i)` (each once), and adjacency is the union — realized by `Map.union` / `Map.unionWith Set.union`. It pins (a) no duplicate copies remain ([AVI-511](/AVI/issues/AVI-511) §4, INV-MERGE) and (b) the legs are jointly surjective onto `M`. It does **not** fix attribute values on a **conflict** (§3).
 
-> **Constrains:** `mergeExtractions` (`Core.hs:129-132`), `mergeGraphs` (`Core.hs:140-144`).
+> **Constrains:** `mergeExtractions` (`Core.hs:129-132`), `mergeGraphs` (`Core.hs:154-159`).
 
 ### 2.2 The SHALL — shared nodes map identically under both cocone legs
 
@@ -80,7 +80,7 @@ on `gNodes`; analogously on `gEdges` (keyed by `(NodeId, NodeId)`) and on `gAdjF
 
 This is the operational form of "local and global truth agree on overlaps": the label seen locally in either view is the label held globally. It is exactly [AVI-511](/AVI/issues/AVI-511) §5 structural naturality ([R7](AVI-511-colimit-merge.md)) specialized to the node-label leg.
 
-> **Constrains:** `mergeGraphs` (`Core.hs:142`), `Node` (`Node.hs:120`), `extNodes` (`Types/Graph.hs:66`).
+> **Constrains:** `mergeGraphs` (`Core.hs:154,157`), `Node` (`Node.hs:120`), `extNodes` (`Types/Graph.hs:66`).
 
 ### 2.3 The pushout square is a **pullback on labels** where views agree
 
@@ -100,21 +100,21 @@ is a **pushout** (colimit over the span, [AVI-511](/AVI/issues/AVI-511) §3.2) *
 
 **What this pins.** Merge introduces **no ident beyond those forced by shared identical labels** and retains **no duplicate copy** of any agreed label. That is the conjunction of dedup ([AVI-511](/AVI/issues/AVI-511) §4) and structure-preservation ([AVI-511](/AVI/issues/AVI-511) §5), stated as a universal property of the square rather than as two separate facts.
 
-> **Constrains:** `mergeGraphs` (`Core.hs:142,145-146`), `extNodes/extEdges` (`Types/Graph.hs:66-69`), `Node/Edge` records (`Node.hs:120`, `Edge.hs:88`). 🔧 Requires [Graphos Dev](/AVI/agents/graphos-dev) confirmation that `Map.union` second-wins does not create a *hidden* identification at conflicting keys (§3).
+> **Constrains:** `mergeGraphs` (`Core.hs:154,157-163`), `extNodes/extEdges` (`Types/Graph.hs:66-69`), `Node/Edge` records (`Node.hs:120`, `Edge.hs:88`). **RESOLVED** by [devhaskell](/AVI/agents/devhaskell) (AVI-647): `Data.Map.union` is left-biased; the *only* identifications `mergeGraphs` introduces are shared-key collapses and conflicting-pair over-identification (LG-C4) — no hidden cross-key value-collision. LG-C3 locked.
 
 ---
 
 ## 3. Requirements register (LG-C1 … LG-C5)
 
-Status legend: **Proven** = established within these docs (invariant / standard categorical fact); **Assumed 🔧** = required design semantic pending [Graphos Dev](/AVI/agents/graphos-dev) confirmation; **Open** = needs an external decision.
+Status legend: **Proven** = established within these docs (invariant / standard categorical fact); **Assumed 🔧** = required design semantic pending [devhaskell](/AVI/agents/devhaskell) confirmation; **Open** = needs an external decision.
 
 | ID | Req (statement) | Surface | Acceptance | Status |
 |---|---|---|---|---|
-| **LG-C1** | **Cocone legs are structure-preserving graph morphisms.** Each `ι_i : F_d(V_i) → M` preserves `gNodes` injection, edge incidence (`edgeSource/edgeTarget`), `edgeRelation`, `edgeWeight`, `edgeConfidence`, and maps `gAdjFwd/gAdjBack(V_i)` into those of `M`; preserves `gDirected`. | `mergeGraphs` (`Core.hs:140-162`), `buildGraph` (`Core.hs:96`) | property (morphism on each leg) | Proven |
-| **LG-C2** | **SHALL — shared nodes map identically under both cocone legs.** For agreeing overlapping views, `ι_A(k) = ι_B(k)` in `M` (and dually for edges). | `mergeGraphs` (`Core.hs:142`), `Node` (`Node.hs:120`) | property (shared-node equality) | Proven |
-| **LG-C3** | **Pushout = pullback on labels where views agree.** `Agree(A,B) ≅ A ×_M B` on identical-label keys; merge adds no spurious identification and keeps no duplicate. | `mergeGraphs` (`Core.hs:142,145-146`), `Map.union` | property (fiber-product identity) | 🔧 loop w/ Dev |
-| **LG-C4** | **Honesty boundary.** Where views disagree (shared key, differing label) no value-preserving embedding exists; the square is a pushout but **not** a pullback (the fiber product over-identifies the conflicting pair). Pullback-on-labels holds ⟺ `Agree(A,B)` = full overlap. | `mergeGraphs` (`Core.hs:142`, `Map.union` second-wins) | counterexample (conflict over-identifies) | Proven |
-| **LG-C5** | **Local↔global structure agreement.** The structural projection `Struct : Graph → (NodeMap, EdgeMap, Bool)` is a natural iso: `Struct(colim D) ≅ ⋂_i Struct(D(V_i))` over the overlap. Extends [AVI-511](/AVI/issues/AVI-511) [R7](AVI-511-colimit-merge.md). | `mergeGraphs` (`Core.hs:140-162`) | property (Struct square commutes) | Proven |
+| **LG-C1** | **Cocone legs are structure-preserving graph morphisms.** Each `ι_i : F_d(V_i) → M` preserves `gNodes` injection, edge incidence (`edgeSource/edgeTarget`), `edgeRelation`, `edgeWeight`, `edgeConfidence`, and maps `gAdjFwd/gAdjBack(V_i)` into those of `M`; preserves `gDirected`. | `mergeGraphs` (`Core.hs:154-163`), `buildGraph` (`Core.hs:96`) | property (morphism on each leg) | Proven |
+| **LG-C2** | **SHALL — shared nodes map identically under both cocone legs.** For agreeing overlapping views, `ι_A(k) = ι_B(k)` in `M` (and dually for edges). | `mergeGraphs` (`Core.hs:154,157`), `Node` (`Node.hs:120`) | property (shared-node equality) | Proven |
+| **LG-C3** | **Pushout = pullback on labels where views agree.** `Agree(A,B) ≅ A ×_M B` on identical-label keys; merge adds no spurious identification and keeps no duplicate. | `mergeGraphs` (`Core.hs:154,157-163`), `Data.Map.union` | property (fiber-product identity) | Proven (locked, AVI-647) |
+| **LG-C4** | **Honesty boundary.** Where views disagree (shared key, differing label) no value-preserving embedding exists; the square is a pushout but **not** a pullback (the fiber product over-identifies the conflicting pair). Pullback-on-labels holds ⟺ `Agree(A,B)` = full overlap. | `mergeGraphs` (`Core.hs:154-159`, left-biased `Data.Map.union`) | counterexample (conflict over-identifies) | Proven |
+| **LG-C5** | **Local↔global structure agreement.** The structural projection `Struct : Graph → (NodeMap, EdgeMap, Bool)` is a natural iso: `Struct(colim D) ≅ ⋂_i Struct(D(V_i))` over the overlap. Extends [AVI-511](/AVI/issues/AVI-511) [R7](AVI-511-colimit-merge.md). | `mergeGraphs` (`Core.hs:154-163`) | property (Struct square commutes) | Proven |
 
 ---
 
@@ -124,9 +124,9 @@ Status legend: **Proven** = established within these docs (invariant / standard 
 
 For each leg `ι_x` of the cocone over `M = mergeGraphs A B`:
 - **node injection:** `ι_A = inclusion (gNodes A ↦ gNodes M)` is injective on `keys(gNodes A)`; likewise `ι_B`.
-- **incidence preserved:** for every edge `e ∈ gEdges A` with `(src,tgt)`, `(ι_N(src), ι_N(tgt)) ∈ gEdges M` and `edgeRelation`, `edgeWeight`, `edgeConfidence` equal the carried value (`Core.hs:143-144`, dangling filter preserves surviving incidences).
-- **adjacency preserved:** `gAdjFwd(A)(v) ⊆ gAdjFwd(M)(ι_N(v))` (`Core.hs:145`), and symmetrically for `gAdjBack` and for `B`.
-- **directed flag:** `gDirected M = gDirected A` (first operand), constant across both legs.
+- **incidence preserved:** for every edge `e ∈ gEdges A` with `(src,tgt)`, `(ι_N(src), ι_N(tgt)) ∈ gEdges M` and `edgeRelation`, `edgeWeight`, `edgeConfidence` equal the carried value (`Core.hs:158-159`, dangling filter preserves surviving incidences).
+- **adjacency preserved:** `gAdjFwd(A)(v) ⊆ gAdjFwd(M)(ι_N(v))` (`Core.hs:160-163`), and symmetrically for `gAdjBack` and for `B`.
+- **directed flag:** `gDirected M = gDirected A || gDirected B` (canonical: directed iff either input is directed; order-independent, [AVI-658](/AVI/issues/AVI-658) M1 T1), constant across both legs.
 
 **Acceptance (property test).** For random small graphs `A, B` built via `buildGraph` from consistent extractions, assert for every edge `e ∈ gEdges A`: `edgeRelation, edgeWeight, edgeConfidence` of the surviving entry in `M` equal those of `e`; and `neighbors_M(ι_A v) ⊇ neighbors_A(v)` for all `v ∈ keys(gNodes A)`; likewise `B`. (This is [CT-R4 functoriality](AVI-511-colimit-merge.md#2-functoriality-of-the-pipeline) applied to the cocone legs.)
 
@@ -149,7 +149,7 @@ and the dedup identity `|keys(gNodes M)| = |keys(gNodes A) ∪ keys(gNodes B)|` 
 
 ### LG-C4 — Honesty boundary (pullback fails on conflict)
 
-**Acceptance (counterexample).** Construct `A, B` sharing a key `k` with **different** `Node` values. Then `k` is **not** in `Agree(A,B)`, the square is still a pushout (`M = mergeGraphs A B` exists via `Map.union` second-wins, `Core.hs:142`) but the fiber product `{(a,b) : ι_A(a)=ι_B(b)}` contains the conflicting pair `(k_A, k_B)` that resolved to one entry — an identification not present in either view as a value-preserving object ([AVI-511](/AVI/issues/AVI-511) §3.3). Assert the test records this as *expected non-pullback* (a policy artifact, not a correctness violation). Requirement: the doc must state this boundary explicitly (it does, §3).
+**Acceptance (counterexample).** Construct `A, B` sharing a key `k` with **different** `Node` values. Then `k` is **not** in `Agree(A,B)`, the square is still a pushout (`M = mergeGraphs A B` exists via left-biased `Data.Map.union`, `Core.hs:157-159`) but the fiber product `{(a,b) : ι_A(a)=ι_B(b)}` contains the conflicting pair `(k_A, k_B)` that resolved to one entry — an identification not present in either view as a value-preserving object ([AVI-511](/AVI/issues/AVI-511) §3.3). Assert the test records this as *expected non-pullback* (a policy artifact, not a correctness violation). Requirement: the doc must state this boundary explicitly (it does, §3).
 
 ### LG-C5 — Local↔global structure agreement (naturality)
 
@@ -178,20 +178,20 @@ The merged graph `M` is simultaneously (i) the colimit of extraction views (this
 
 ## 6. Arbitration Log
 
-- **AQ-LG1 — Is "pullback on labels" more than re-stated dedup?** It is not tautological: dedup alone says "one copy per key"; the pullback statement additionally forbids **over-identification** (two distinct entries collapsing to one node) on the overlap, which plain `Map.union` could do under a second-wins conflict. Pullback-on-labels therefore constrains the merge beyond cardinality — it pins the *injection* of the overlap into `M`. **Decision: SETTLED** (LG-C3 vs LG-C4 boundary).
-- **AQ-LG2 — Does the pullback hold at the edge level too?** Yes, symmetric to nodes: edges keyed by `(NodeId, NodeId)` merge by key; on agreeing edges `ι_A(e) = ι_B(e)` (LG-C2 dual) and the edge fiber product equals the agreement set. The `(src,tgt)` keying means two edges with the same endpoints but different relations keep distinct keys (`lsp-edge-extraction` unique-`EdgeId` rule), so they never spuriously merge — reinforcing the pullback. **Decision: SETTLED** (LG-C3 dual, LG-C5).
-- **O-LG1 — Confirm second-wins does not create a hidden identification at conflicting keys.** Owner [Graphos Dev](/AVI/agents/graphos-dev): audit `Map.union` second-wins on `gNodes`/`gEdges` (`Core.hs:142`) to confirm the only over-identifications are exactly the conflicting keys (which LG-C4 already classifies as non-pullback). Gates LG-C3's 🔧 lock.
+- **AQ-LG1 — Is "pullback on labels" more than re-stated dedup?** It is not tautological: dedup alone says "one copy per key"; the pullback statement additionally forbids **over-identification** (two distinct entries collapsing to one node) on the overlap, which plain left-biased `Data.Map.union` could do under a conflict. Pullback-on-labels therefore constrains the merge beyond cardinality — it pins the *injection* of the overlap into `M`. **Decision: SETTLED** (LG-C3 vs LG-C4 boundary).
+- **AQ-LG2 — Does the pullback hold at the edge level too?** Symmetric to nodes: on agreeing edges `ι_A(e) = ι_B(e)` (LG-C2 dual) and the edge fiber product equals the agreement set. **Two-level honesty.** At the *Extraction* level, `EdgeId = source->target:<relation>` keeps relation-differing edges distinct ([lsp-edge-extraction] unique-`EdgeId` rule) — they do not merge there. But at the *Graph* level, `gEdges :: Map (NodeId, NodeId) Edge` is keyed by endpoints only, so relation-differing edges with the same endpoints collapse by documented design in `buildGraph` (`Core.hs:103`), a pre-existing modeling choice (openspec `09-merge`: edges unioned) **orthogonal to LG-C3**. The LG-C3 edge clause therefore holds on the Extraction/`EdgeId` level; the Graph-level collapse is a separate JOINT-LG2 concern flagged for the joint review. **Decision: SETTLED** (LG-C3 dual, LG-C5); JOINT-LG2 flagged.
+- **O-LG1 — RESOLVED by [devhaskell](/AVI/agents/devhaskell) (AVI-647).** `Data.Map.union` is left-biased (`containers`); the *only* identifications `mergeGraphs` introduces are shared-key collapses and conflicting-pair over-identification (LG-C4), both already classified as non-pullback by LG-C4. No hidden cross-key value-collision. Gates LG-C3's 🔧 lock — now released.
 
 ---
 
 ## 7. Surface Map (every requirement → concrete Graphos surface)
 
 - **Cocone apex / colimit:** `UseCase/Merge.hs` (`mergeGraphsAndAnalyze:37`), `Domain/Graph/Core.hs` (`mergeGraphs:140`, `mergeExtractions:129`, `buildGraph:96`).
-- **Cocone legs (inclusions):** `gNodes <>` (`Core.hs:142`), `gEdges` keyed by `(NodeId,NodeId)` (`Core.hs:143`), `gAdjFwd/gAdjBack Map.unionWith Set.union` (`Core.hs:145-146`).
+- **Cocone legs (inclusions):** `gNodes <>` (`Core.hs:157`), `gEdges` keyed by `(NodeId,NodeId)` (`Core.hs:158-159`), `gAdjFwd/gAdjBack Map.unionWith Set.union` (`Core.hs:160-163`).
 - **Views (objects of 𝔻):** `UseCase/Extract/LSP.hs` (`extractFromFile:127`, `extractionFromPortSymbols:107`), `UseCase/Extract/Core.hs` (`mergeIntoRunning:123`). Each `Extraction` is one file's view.
 - **Labels (Node/Edge records):** `Domain/Types/Node.hs` (`Node:120`), `Domain/Types/Edge.hs` (`Edge:88`).
 - **Structural projection `Struct`:** `gNodes/gEdges/gDirected` (`Graph/Core.hs:47`).
-- **Specs:** openspec `09-merge` (§Requirement "Workflow 09 — merge two knowledge graphs": dedup by NodeId, last-write-from-B wins, union edges, preserve directed flag; scenario "Merge deduplicates and re-clusters"), `lsp-extraction` (§Requirement "Infrastructure.LSP.Extraction"), `domain-types` (§Requirement "Domain.Types.Node"/"Domain.Types.Edge"), `lsp-edge-extraction` (unique `EdgeId` per `(source,target,relation)`).
+- **Specs:** openspec `09-merge` (§Requirement "Workflow 09 — merge two knowledge graphs": dedup by NodeId, union edges, preserve directed flag; **code/prose mismatch — the spec prose says 'last-write-from-B wins' but the implementation (`Data.Map.union`) is left-biased / `old`-wins; flagged to the PO, closed by AVI-647**), `lsp-extraction` (§Requirement "Infrastructure.LSP.Extraction"), `domain-types` (§Requirement "Domain.Types.Node"/"Domain.Types.Edge"), `lsp-edge-extraction` (unique `EdgeId` per `(source,target,relation)`).
 
 ---
 
@@ -200,7 +200,7 @@ The merged graph `M` is simultaneously (i) the colimit of extraction views (this
 - **Universal property with uniqueness:** LG-COLIM states the terminal-cocone property and uniqueness up to unique iso ([AVI-511](/AVI/issues/AVI-511) §3.1); LG-C2 is the operational SHALL.
 - **Property tests:** cocone legs as graph morphisms (LG-C1), shared-node identity under both legs (LG-C2, the issue's criterion), fiber-product / dedup identity (LG-C3), conflict counterexample (LG-C4), structural naturality (LG-C5).
 - **Boundary statement (diagram honesty):** pullback-on-labels holds ⟺ agreement; conflicts are a documented non-pullback (LG-C4).
-- **Haskell-constraint statement per requirement:** §2/§3 name the constrained surface for every `LG-C-*` ID; `LG-C3` carries a required [Graphos Dev](/AVI/agents/graphos-dev) loop (§6 O-LG1).
+- **Haskell-constraint statement per requirement:** §2/§3 name the constrained surface for every `LG-C-*` ID; `LG-C3` carried a required [devhaskell](/AVI/agents/devhaskell) loop ([§6 O-LG1](AVI-537-local-to-global-consistency.md#6-open-items), AVI-647) — now closed, LG-C3 locked.
 - **Joint validation path:** JOINT-LG1/2/3 give the graph-theory combinatorial acceptance bar on the same colimit object; owner the Graph Theory Expert via the Head of R&D joint issue.
 - **No silently dropped requirement:** all 5 `LG-C-*` rows appear in §2 with surface + acceptance; LG-C4's "skip" is an explicit boundary, not an omission.
 
@@ -212,14 +212,14 @@ The merged graph `M` is simultaneously (i) the colimit of extraction views (this
 - **Graph gluing via pushout / cospan semantics** (Lemmermeyer, *Graph Categories*; Freyjá, Lack & Morrison, "Cospan Semantics for Relational Systems").
 - **Sheaf-style local-to-global as a colimit over a cover, with the sheaf condition as descent/colimit equality** (Mac Lane & Moerdahl, *Sheaves in Geometry and Logic*) — the reference for "local and global truth agree on overlaps."
 - **Pullback as agreement / fiber product over a common codomain** — standard (e.g. Riehl, *Categorical Topology and Logic*, Ch. 2); this doc applies it to the merge square restricted to identical-label keys.
-- **`Data.Map.union` second-wins** — `containers` library semantics; the conflict policy ([AVI-511](/AVI/issues/AVI-511) §3.3) is a Graphos choice layered on top.
+- **`Data.Map.union` left-biased (first operand wins)** — `containers` library semantics; the conflict policy ([AVI-511](/AVI/issues/AVI-511) §3.3) is a Graphos choice layered on top.
 
 ---
 
 ## 10. Determinism Lens
 
 - **Consistent diagrams (full overlap = agreement):** the pushout square is both a pushout and a pullback on labels (LG-C3); `M` is order-independent ([AVI-511](/AVI/issues/AVI-511) §3.1), so shared nodes map identically under both legs regardless of merge order (LG-C2). Local and global truth agree on the entire overlap.
-- **Conflicting diagrams:** `Map.union` second-wins over-identifies the conflicting pair (LG-C4); the square is a pushout but **not** a pullback, and shared-node identity holds only on the non-conflicting (agreeing) keys. Requirement: the doc states this boundary explicitly and tests it (LG-C4 asserts the expected non-pullback).
+- **Conflicting diagrams:** left-biased `Data.Map.union` over-identifies the conflicting pair (LG-C4); the square is a pushout but **not** a pullback, and shared-node identity holds only on the non-conflicting (agreeing) keys. Requirement: the doc states this boundary explicitly and tests it (LG-C4 asserts the expected non-pullback).
 - **Deterministic label identity on agreement:** given agreeing views, `Map.lookup k (gNodes M)` is a pure function of the inputs and equals both view labels; the cocone legs are deterministic inclusions, so LG-C2 is order-independent on the agreement region.
 
 (End of file)
