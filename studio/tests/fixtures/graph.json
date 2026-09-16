@@ -1,0 +1,39 @@
+{
+  "nodes": [
+    { "id": "mod_Auth", "label": "Auth", "file_type": "code", "source_file": "src/Auth.hs", "line_start": 10, "line_end": 90, "signature": "module Auth where", "community_id": 483, "kind": "Module", "degree": 3, "is_bridge": true, "extra": null },
+    { "id": "fn_verify", "label": "verifyToken", "file_type": "code", "source_file": "src/Auth.hs", "line_start": 40, "line_end": 60, "signature": "verifyToken :: Text -> IO Bool", "community_id": 483, "kind": "Function", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "fn_login", "label": "loginHandler", "file_type": "code", "source_file": "src/Auth.hs", "line_start": 62, "line_end": 88, "signature": null, "community_id": 483, "kind": "Function", "degree": 2, "is_bridge": false, "extra": null },
+    { "id": "mod_Config", "label": "Config", "file_type": "code", "source_file": "src/Config.hs", "line_start": 1, "line_end": 40, "signature": "module Config where", "community_id": 7, "kind": "Module", "degree": 2, "is_bridge": false, "extra": null },
+    { "id": "fn_parse", "label": "parseFlags", "file_type": "code", "source_file": "src/Config.hs", "line_start": 12, "line_end": 38, "signature": null, "community_id": 7, "kind": "Function", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "doc_readme", "label": "README", "file_type": "doc", "source_file": "README.md", "community_id": 7, "kind": "Documentation", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "log_main", "label": "main", "file_type": "code", "source_file": "app/Main.hs", "line_start": 5, "line_end": 30, "signature": "module Main where", "community_id": 12, "kind": "Function", "degree": 4, "is_bridge": true, "extra": null },
+    { "id": "fn_format", "label": "formatLog", "file_type": "code", "source_file": "src/Log.hs", "line_start": 20, "line_end": 45, "signature": null, "community_id": 12, "kind": "Function", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "doc_changelog", "label": "CHANGELOG", "file_type": "doc", "source_file": "CHANGELOG.md", "community_id": 12, "kind": "Documentation", "degree": 0, "is_bridge": false, "extra": null },
+    { "id": "fn_route", "label": "route", "file_type": "code", "source_file": "src/Web.hs", "line_start": 8, "line_end": 50, "signature": null, "community_id": 5, "kind": "Function", "degree": 2, "is_bridge": false, "extra": null },
+    { "id": "fn_view", "label": "viewPage", "file_type": "code", "source_file": "src/Web.hs", "line_start": 52, "line_end": 95, "signature": null, "community_id": 5, "kind": "Function", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "zz_orphan", "label": "LegacyUtil", "file_type": "code", "source_file": "src/Legacy.hs", "line_start": 1, "line_end": 5, "signature": null, "community_id": null, "kind": "Function", "degree": 0, "is_bridge": false, "extra": null }
+  ],
+  "edges": [
+    { "id": "e1", "source": "mod_Auth", "target": "fn_verify", "relation": "defines", "weight": 1.0, "confidence": 0.95 },
+    { "id": "e2", "source": "mod_Auth", "target": "fn_login", "relation": "defines", "weight": 1.0, "confidence": 0.9 },
+    { "id": "e3", "source": "fn_login", "target": "fn_verify", "relation": "calls", "weight": 0.8, "confidence": 0.7 },
+    { "id": "e4", "source": "mod_Config", "target": "fn_parse", "relation": "defines", "weight": 1.0, "confidence": 0.95 },
+    { "id": "e5", "source": "mod_Config", "target": "doc_readme", "relation": "references", "weight": 0.5, "confidence": 0.6 },
+    { "id": "e6", "source": "log_main", "target": "fn_format", "relation": "calls", "weight": 0.7, "confidence": 0.8 },
+    { "id": "e7", "source": "log_main", "target": "mod_Auth", "relation": "calls", "weight": 0.6, "confidence": 0.7 },
+    { "id": "e8", "source": "log_main", "target": "mod_Config", "relation": "calls", "weight": 0.6, "confidence": 0.7 },
+    { "id": "e9", "source": "log_main", "target": "fn_route", "relation": "calls", "weight": 0.6, "confidence": 0.7 },
+    { "id": "e10", "source": "fn_route", "target": "fn_view", "relation": "calls", "weight": 0.9, "confidence": 0.85 },
+    { "id": "e11", "source": "fn_format", "target": "doc_changelog", "relation": "references", "weight": 0.4, "confidence": 0.5 }
+  ],
+  "community_aggregates": [
+    { "id": 483, "member_count": 3, "cohesion": 0.82, "bridge_count": 1, "color": "hsl(210,62%,52%)", "label": "Authentication", "representative_labels": ["verifyToken", "loginHandler"] },
+    { "id": 7, "member_count": 3, "cohesion": 0.71, "bridge_count": 0, "color": "hsl(140,62%,52%)", "label": "Config", "representative_labels": ["parseFlags", "README"] },
+    { "id": 12, "member_count": 3, "cohesion": 0.68, "bridge_count": 1, "color": "hsl(40,62%,52%)", "label": "Logging", "representative_labels": ["main", "formatLog"] },
+    { "id": 5, "member_count": 2, "cohesion": 0.9, "bridge_count": 0, "color": "hsl(320,62%,52%)", "label": "Web", "representative_labels": ["route", "viewPage"] }
+  ],
+  "communities": {},
+  "cohesion": {},
+  "god_nodes": [],
+  "community_labels": { "483": "Authentication", "7": "Config", "12": "Logging", "5": "Web" }
+}
