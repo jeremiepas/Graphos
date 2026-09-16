@@ -17,7 +17,7 @@ import Dict exposing (Dict)
 import File exposing (File)
 import File.Download
 import File.Select
-import Html exposing (Html, div, h1, input, span, text)
+import Html exposing (Html, div, h1, h2, input, p, span, text)
 import Html.Attributes as A
 import Html.Events as Ev
 import Json.Decode as D
@@ -27,6 +27,7 @@ import Studio.Api as Api
 import Studio.Data.Graph as Graph exposing (Graph)
 import Studio.DesignSystem.Components as UI
 import Studio.DesignSystem.Tokens as Tokens exposing (Theme(..))
+import Studio.DialogFocus as DF
 import Studio.Edit as Edit
 import Studio.Groups as Groups
 import Studio.Navigation as Navi exposing (Position(..))
@@ -46,6 +47,19 @@ port fromRenderer : (D.Value -> msg) -> Sub msg
 
 
 port persist : E.Value -> Cmd msg
+
+
+
+-- ── Dialog focus ports (browser glue moves focus, Elm decides where) ───────
+
+
+port openDialog : { stops : List String, index : Int } -> Cmd msg
+
+
+port moveFocus : String -> Cmd msg
+
+
+port restoreFocus : E.Value -> Cmd msg
 
 
 
@@ -74,6 +88,7 @@ type Dialog
     = ConfirmIntent Edit.EditIntent
     | OfferReplay (List Edit.EditIntent)
     | ExportScopeDialog { title : String, bake : Bool }
+    | GalleryDemo { message : String }
 
 
 type alias Toast =
@@ -98,6 +113,8 @@ type alias Model =
     , scopeBoundary : Bool
     , scopePreview : Bool
     , dialog : Maybe Dialog
+    , dialogStops : List String
+    , focusIndex : Int
     , toasts : List Toast
     , toastSeq : Int
     , originInput : String
@@ -111,6 +128,10 @@ type alias Model =
     , newNodeLabel : String
     , dropActive : Bool
     , helpOpen : Bool
+    , galleryOpen : Bool
+    , galleryTitle : String
+    , gallerySelect : String
+    , gallerySlider : Int
     }
 
 
@@ -165,6 +186,8 @@ init flagsValue url key =
       , scopeBoundary = False
       , scopePreview = False
       , dialog = Nothing
+      , dialogStops = []
+      , focusIndex = 0
       , toasts = []
       , toastSeq = 0
       , originInput = "http://localhost:8080"
@@ -178,6 +201,10 @@ init flagsValue url key =
       , newNodeLabel = ""
       , dropActive = False
       , helpOpen = False
+      , galleryOpen = False
+      , galleryTitle = ""
+      , gallerySelect = "doc"
+      , gallerySlider = 50
       }
     , Cmd.none
     )
@@ -205,6 +232,15 @@ type Msg
     | KeyPressed { key : String, ctrl : Bool, shift : Bool, typing : Bool }
     | ToggleTheme
     | ToggleHelp
+    | ToggleGallery
+      -- gallery
+    | GalleryInput String
+    | GallerySelect String
+    | GallerySlider Int
+    | GalleryToast
+    | GalleryNoop
+    | OpenGalleryDemo
+    | GalleryConfirmDialog
       -- source
     | PickFile
     | GotFile File
@@ -247,6 +283,8 @@ type Msg
     | RequestDeleteEdge String
     | ConfirmDialog
     | CancelDialog
+    | DialogTab
+    | DialogShiftTab
     | MutateResult Edit.EditIntent Edit.UndoStack (Result String ())
     | Undo
     | Redo
@@ -351,6 +389,30 @@ update msg model =
 
         ToggleHelp ->
             ( { model | helpOpen = not model.helpOpen }, Cmd.none )
+
+        ToggleGallery ->
+            ( { model | galleryOpen = not model.galleryOpen }, Cmd.none )
+
+        GalleryInput s ->
+            ( { model | galleryTitle = s }, Cmd.none )
+
+        GallerySelect s ->
+            ( { model | gallerySelect = s }, Cmd.none )
+
+        GallerySlider n ->
+            ( { model | gallerySlider = n }, Cmd.none )
+
+        GalleryToast ->
+            addToast "success" "Gallery toast — this is a live, theme-styled toast." model
+
+        OpenGalleryDemo ->
+            armDialog (GalleryDemo { message = "This modal is keyboard-complete: Tab is trapped, Enter confirms, Escape cancels, and focus returns here on close." }) model
+
+        GalleryConfirmDialog ->
+            closeDialog model
+
+        GalleryNoop ->
+            ( model, Cmd.none )
 
         -- ── Source: file mode ──────────────────────────────────────────
         PickFile ->
@@ -570,18 +632,15 @@ update msg model =
         RequestDeleteNode ->
             withSelectedNode model
                 (\node ->
-                    ( { model
-                        | dialog =
-                            Just (ConfirmIntent (Edit.DeleteNode node (Graph.incidentEdges model.graph node.id)))
-                      }
-                    , Cmd.none
-                    )
+                    armDialog
+                        (ConfirmIntent (Edit.DeleteNode node (Graph.incidentEdges model.graph node.id)))
+                        model
                 )
 
         RequestDeleteEdge edgeId ->
             case Dict.get edgeId model.graph.edges of
                 Just e ->
-                    ( { model | dialog = Just (ConfirmIntent (Edit.DeleteEdge e)) }, Cmd.none )
+                    armDialog (ConfirmIntent (Edit.DeleteEdge e)) model
 
                 Nothing ->
                     ( model, Cmd.none )
@@ -590,7 +649,23 @@ update msg model =
             confirmDialog model
 
         CancelDialog ->
-            ( { model | dialog = Nothing }, Cmd.none )
+            closeDialog model
+
+        DialogTab ->
+            case model.dialog of
+                Just _ ->
+                    focusDialogAt model (DF.nextIndex model.focusIndex)
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        DialogShiftTab ->
+            case model.dialog of
+                Just _ ->
+                    focusDialogAt model (DF.prevIndex model.focusIndex)
+
+                Nothing ->
+                    ( model, Cmd.none )
 
         MutateResult intent prevStack result ->
             case result of
@@ -713,9 +788,7 @@ update msg model =
                 addToast "error" "Scope is empty — add a community, group or selection" model
 
             else
-                ( { model | dialog = Just (ExportScopeDialog { title = "subgraph", bake = False }) }
-                , Cmd.none
-                )
+                armDialog (ExportScopeDialog { title = "subgraph", bake = False }) model
 
         ExportScopeTitle s ->
             ( { model | dialog = mapExportDialog (\f -> { f | title = s }) model.dialog }, Cmd.none )
@@ -762,7 +835,8 @@ changeNav newState model =
     ( m2, Cmd.batch [ historyCmd, renderCmd m2 ] )
 
 
-{-| Prefill edit forms from the newly selected node. -}
+{-| Prefill edit forms from the newly selected node.
+-}
 syncEditForms : Model -> Model
 syncEditForms model =
     case selectedNode model of
@@ -905,54 +979,114 @@ graphLoaded source identity content model =
                             , stack = Edit.emptyStack
                             , log = []
                             , scope = Scope.empty
-                            , dialog =
-                                if offerReplay then
-                                    Just (OfferReplay storedLog)
-
-                                else
-                                    Nothing
+                            , dialog = Nothing
                         }
+
+                ( armed, openCmd ) =
+                    if offerReplay then
+                        armDialog (OfferReplay storedLog) m2
+
+                    else
+                        ( m2, Cmd.none )
             in
-            ( m2
+            ( armed
             , Cmd.batch
-                [ Nav.replaceUrl m2.key (Navi.encodeHash navState)
-                , renderCmd m2
-                , serverCountCmds m2
+                [ Nav.replaceUrl armed.key (Navi.encodeHash navState)
+                , renderCmd armed
+                , serverCountCmds armed
+                , openCmd
                 ]
             )
+
+
+
+-- ── Dialog focus glue (see ports above) ────────────────────────────────────
+-- The generic, unit-tested stop list: dialog container, then cancel, then
+-- confirm. Every studio dialog shares it (`Studio.DialogFocus.tabStops`), so
+-- the pure nextIndex/prevIndex arithmetic (mod count) stays aligned with the
+-- selectors the browser glue actually moves focus to.
+
+
+armDialog : Dialog -> Model -> ( Model, Cmd Msg )
+armDialog newDialog model =
+    ( { model | dialog = Just newDialog, dialogStops = DF.tabStops, focusIndex = 0 }
+    , openDialog { stops = DF.tabStops, index = 0 }
+    )
+
+
+
+-- Move the trap to a computed stop index; the browser glue performs the focus.
+
+
+focusDialogAt : Model -> Int -> ( Model, Cmd Msg )
+focusDialogAt model i =
+    case List.head (List.drop i model.dialogStops) of
+        Just sel ->
+            ( { model | focusIndex = i }, moveFocus sel )
+
+        Nothing ->
+            ( { model | focusIndex = i }, Cmd.none )
+
+
+
+-- Clear the dialog and hand focus back to the control that opened it.
+
+
+closeDialog : Model -> ( Model, Cmd Msg )
+closeDialog model =
+    ( { model | dialog = Nothing, focusIndex = 0 }, restoreFocus E.null )
 
 
 confirmDialog : Model -> ( Model, Cmd Msg )
 confirmDialog model =
     case model.dialog of
         Just (ConfirmIntent intent) ->
-            acceptIntent intent { model | dialog = Nothing }
+            let
+                ( closed, cmd ) =
+                    closeDialog model
+
+                ( applied, cmd2 ) =
+                    acceptIntent intent closed
+            in
+            ( applied, Cmd.batch [ cmd, cmd2 ] )
 
         Just (OfferReplay log) ->
             let
+                ( closed, cmd ) =
+                    closeDialog model
+
                 m2 =
-                    { model
-                        | dialog = Nothing
-                        , graph = List.foldl Edit.applyIntent model.graph log
+                    { closed
+                        | graph = List.foldl Edit.applyIntent closed.graph log
                         , log = List.reverse log
                     }
             in
-            ( m2, renderCmd m2 )
+            ( m2, Cmd.batch [ cmd, renderCmd m2 ] )
 
         Just (ExportScopeDialog form) ->
-            ( { model | dialog = Nothing }
-            , File.Download.string
-                (slugify form.title ++ ".json")
-                "application/json"
-                (E.encode 2
-                    (Scope.encodeCanonical
-                        { title = form.title, boundary = model.scopeBoundary, bakeGroups = form.bake }
-                        model.graph
-                        model.groups
-                        model.scope
+            let
+                ( closed, cmd ) =
+                    closeDialog model
+            in
+            ( closed
+            , Cmd.batch
+                [ cmd
+                , File.Download.string
+                    (slugify form.title ++ ".json")
+                    "application/json"
+                    (E.encode 2
+                        (Scope.encodeCanonical
+                            { title = form.title, boundary = model.scopeBoundary, bakeGroups = form.bake }
+                            model.graph
+                            model.groups
+                            model.scope
+                        )
                     )
-                )
+                ]
             )
+
+        Just (GalleryDemo _) ->
+            closeDialog model
 
         Nothing ->
             ( model, Cmd.none )
@@ -968,7 +1102,8 @@ acceptIntent intent model =
             addToast "error" reason model
 
         Ok _ ->
-            applyAndSend intent model.stack
+            applyAndSend intent
+                model.stack
                 { model | stack = Edit.pushDone intent model.stack }
 
 
@@ -1453,21 +1588,25 @@ view model =
         , div [ A.class "studio-shell" ]
             ([ viewTopbar model
              , div [ A.class "studio-main" ]
-                (case model.source of
-                    NoGraph ->
-                        [ viewWelcome model ]
+                (if model.galleryOpen then
+                    [ viewGallery model ]
 
-                    _ ->
-                        [ viewSidebar model
-                        , div [ A.class "studio-canvas" ] [ div [ A.id "graph-canvas" ] [] ]
-                        ]
-                            ++ (case selectedNode model of
-                                    Just node ->
-                                        [ viewDetail model node ]
+                 else
+                    case model.source of
+                        NoGraph ->
+                            [ viewWelcome model ]
 
-                                    Nothing ->
-                                        []
-                               )
+                        _ ->
+                            [ viewSidebar model
+                            , div [ A.class "studio-canvas" ] [ div [ A.id "graph-canvas" ] [] ]
+                            ]
+                                ++ (case selectedNode model of
+                                        Just node ->
+                                            [ viewDetail model node ]
+
+                                        Nothing ->
+                                            []
+                                   )
                 )
              , viewToasts model
              ]
@@ -1497,6 +1636,8 @@ viewTopbar model =
             , enabled = True
             , onPress = ToggleTheme
             }
+        , UI.btn
+            { label = "▦ Gallery", enabled = True, onPress = ToggleGallery }
         , UI.btn { label = "?", enabled = True, onPress = ToggleHelp }
         ]
 
@@ -1978,6 +2119,8 @@ viewDialog model =
                 , confirmLabel = "Apply"
                 , onConfirm = ConfirmDialog
                 , onCancel = CancelDialog
+                , onTab = DialogTab
+                , onShiftTab = DialogShiftTab
                 , destructive = True
                 }
             ]
@@ -1995,6 +2138,8 @@ viewDialog model =
                 , confirmLabel = "Replay"
                 , onConfirm = ConfirmDialog
                 , onCancel = CancelDialog
+                , onTab = DialogTab
+                , onShiftTab = DialogShiftTab
                 , destructive = False
                 }
             ]
@@ -2013,9 +2158,101 @@ viewDialog model =
                 , confirmLabel = "Download"
                 , onConfirm = ConfirmDialog
                 , onCancel = CancelDialog
+                , onTab = DialogTab
+                , onShiftTab = DialogShiftTab
                 , destructive = False
                 }
             ]
+
+        Just (GalleryDemo msg) ->
+            [ UI.dialog
+                { title = "Keyboard-complete dialog"
+                , body = [ text msg.message ]
+                , confirmLabel = "Got it"
+                , onConfirm = GalleryConfirmDialog
+                , onCancel = CancelDialog
+                , onTab = DialogTab
+                , onShiftTab = DialogShiftTab
+                , destructive = False
+                }
+            ]
+
+
+viewGallery : Model -> Html Msg
+viewGallery model =
+    div [ A.class "gallery" ]
+        [ div [ A.class "gallery-head" ]
+            [ h2 [] [ text "Component gallery" ]
+            , span [ A.class "muted" ]
+                [ text " Every control below is theme-correct. Toggle "
+                , Html.button [ A.class "btn", Ev.onClick ToggleTheme ] [ text "◑◐" ]
+                , text " above — each re-renders with the active Tokens."
+                ]
+            ]
+        , div [ A.class "gallery-grid" ]
+            [ UI.panel "Buttons"
+                [ div [ A.class "row" ]
+                    [ UI.btn { label = "Default", enabled = True, onPress = GalleryNoop }
+                    , UI.btnPrimary { label = "Primary", enabled = True, onPress = GalleryNoop }
+                    , UI.btnDanger { label = "Danger", enabled = True, onPress = GalleryNoop }
+                    , UI.btn { label = "Disabled", enabled = False, onPress = GalleryNoop }
+                    ]
+                , UI.btn
+                    { label = "Open a keyboard-complete dialog", enabled = True, onPress = OpenGalleryDemo }
+                ]
+            , UI.panel "Text input"
+                [ UI.field "Editable text"
+                    (UI.textInput
+                        { value = model.galleryTitle
+                        , placeholder = "Type here..."
+                        , onInput = GalleryInput
+                        }
+                    )
+                ]
+            , UI.panel "Select"
+                [ UI.field "Kind"
+                    (UI.selectInput
+                        { value = model.gallerySelect
+                        , options =
+                            [ ( "doc", "Documents" )
+                            , ( "code", "Code" )
+                            , ( "meta", "Metadata" )
+                            ]
+                        , onSelect = GallerySelect
+                        }
+                    )
+                ]
+            , UI.panel "Slider"
+                [ UI.field "Intensity"
+                    (UI.slider
+                        { min = 0
+                        , max = 100
+                        , value = model.gallerySlider
+                        , onChange = GallerySlider
+                        }
+                    )
+                ]
+            , UI.panel "Badges + empty state"
+                [ div [ A.class "row" ]
+                    [ UI.badge "default" "default"
+                    , UI.badge "accent" "accent"
+                    , UI.badge "danger" "danger"
+                    ]
+                , UI.emptyState "No entries match this group."
+                ]
+            , UI.panel "Toast + panel"
+                [ UI.toast { level = "success", message = "Re-styling with the active theme." }
+                , UI.panel "Container panel"
+                    [ p [ A.class "muted" ] [ text "Panels and their contents inherit theme tokens." ]
+                    , UI.btn { label = "Do something", enabled = True, onPress = GalleryNoop }
+                    ]
+                ]
+            , UI.panel "Dialog (openable)"
+                [ UI.btn
+                    { label = "Open a modal", enabled = True, onPress = OpenGalleryDemo }
+                ]
+            ]
+        ]
 
 
 viewHelp : Model -> List (Html Msg)

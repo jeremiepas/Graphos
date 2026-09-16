@@ -384,6 +384,15 @@ stylesheet theme =
         , rule ".toast-error" ("border-left-color:" ++ t.danger)
         , rule ".toast-success" ("border-left-color:" ++ t.success)
 
+        -- gallery
+        , rule ".gallery"
+            ("display:flex;flex-direction:column;gap:" ++ px t.s4 ++ ";padding:" ++ px t.s4 ++ ";overflow:auto;min-height:100%")
+        , rule ".gallery-head"
+            ("display:flex;align-items:baseline;gap:" ++ px t.s3 ++ ";margin-bottom:" ++ px t.s4)
+        , rule ".gallery-head h2" ("font-size:" ++ px t.fontLg ++ ";margin:0")
+        , rule ".gallery-grid"
+            ("display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:" ++ px t.s3 ++ ";align-items:start")
+
         -- misc
         , rule ".empty-state" ("text-align:center;color:" ++ t.textMuted ++ ";padding:" ++ px t.s8 ++ " " ++ px t.s4)
         , rule ".muted" ("color:" ++ t.textMuted ++ ";font-size:" ++ px t.fontSm)
