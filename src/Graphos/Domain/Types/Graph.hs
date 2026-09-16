@@ -58,6 +58,13 @@ instance ToJSON NullModel where
   toJSON DefaultNullModel = String "degree_config_undirected"
   toJSON DirectedNullModel = String "degree_config_directed"
 
+instance FromJSON NullModel where
+  parseJSON (String s) = case s of
+    "degree_config_undirected" -> pure DefaultNullModel
+    "degree_config_directed"   -> pure DirectedNullModel
+    _                        -> fail ("unknown NullModel tag: " ++ T.unpack s)
+  parseJSON _                = fail "expected a string tag for NullModel"
+
 data Extraction = Extraction
   { extractionNodes :: !(Map NodeId Node)
   , extractionEdges :: !(Map EdgeId Edge)

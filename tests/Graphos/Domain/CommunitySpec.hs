@@ -419,6 +419,14 @@ spec = do
           g = buildGraph False ext
       cohesionWeighted g ["a", "b"] `shouldBe` 0.0
 
+    it "is independent of member ordering (INV-CONSTR)" $ do
+      -- Weighted cohesion must not depend on the order candidates are enumerated
+      -- — the exact property the reviewer flagged as non-deterministic (AVI-578).
+      let ns = map testNode ["a", "b", "c", "x"]
+          g = buildGraph False (extractionFromLists ns
+            (cliqueEdges ["a", "b", "c"] ++ [testEdge "a" "x"]))
+      cohesionWeighted g ["a", "b", "c"] `shouldBe` cohesionWeighted g ["c", "a", "b"]
+
   describe "weightedModularity" $ do
     it "is 0 for a singleton partition (all nodes in one community)" $ do
       let ns = map testNode ["a", "b", "c", "d", "e", "f"]
@@ -473,6 +481,18 @@ spec = do
       weightedModularity g1 cm `shouldSatisfy` (\x -> abs (x - modularity g1 cm) < tol)
       weightedModularity g25 cm `shouldSatisfy` (\x -> abs (x - modularity g1 cm) < tol)
       weightedModularity g40 cm `shouldSatisfy` (\x -> abs (x - modularity g1 cm) < tol)
+
+    it "INV-CONSTR: bidirectional pair — Q_w well-defined and order-independent (AVI-578)" $ do
+      -- The exact fixture the reviewer cited as divergent: a bidirectional pair
+      -- (a→b, b→a). A single community spanning every node yields Q_w = 0 under
+      -- the configuration null model, independent of how the members are enumerated.
+      let ns = map testNode ["a", "b"]
+          es = [testEdge "a" "b", testEdge "b" "a"]
+          g = buildGraph False (extractionFromLists ns es)
+          cm  = Map.fromList [(0, ["a", "b"])]
+          cmR = Map.fromList [(0, ["b", "a"])]
+      weightedModularity g cm `shouldBe` 0.0
+      weightedModularity g cm `shouldBe` weightedModularity g cmR
 
     it "INV-Qw0: Q_w = 0 when confidence mass is zero (no divide-by-zero)" $ do
       let ns = map testNode ["a", "b", "c"]
