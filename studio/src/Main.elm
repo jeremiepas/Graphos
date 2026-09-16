@@ -25,12 +25,14 @@ import Json.Encode as E
 import Set
 import Studio.Api as Api
 import Studio.Data.Graph as Graph exposing (Graph)
+import Studio.Data.Source as Source
 import Studio.DesignSystem.Components as UI
 import Studio.DesignSystem.Tokens as Tokens exposing (Theme(..))
 import Studio.DialogFocus as DF
 import Studio.Edit as Edit
 import Studio.Groups as Groups
 import Studio.Navigation as Navi exposing (Position(..))
+import Studio.Persist as Persist
 import Studio.Scope as Scope
 import Task
 import Url exposing (Url)
@@ -66,12 +68,9 @@ port restoreFocus : E.Value -> Cmd msg
 -- CONSTANTS
 
 
-{-| File-mode size guard (`studio-data-sources`): refuse above this rather
-than freezing the tab; recommend connected mode.
--}
-sizeThresholdBytes : Int
-sizeThresholdBytes =
-    100 * 1024 * 1024
+{-| File-mode size guard lives in `Studio.Data.Source` (`studio-data-sources`):
+refuse files above this rather than freezing the tab, and recommend connected
+mode. Referenced here via `Source.sizeThresholdBytes`. -}
 
 
 
@@ -82,6 +81,7 @@ type Source
     = NoGraph
     | FileMode String
     | Connected { origin : String, caps : Api.Capabilities }
+    | Disconnected { origin : String }
 
 
 type Dialog
@@ -102,6 +102,9 @@ type alias Model =
     , source : Source
     , graph : Graph
     , identity : Maybe String
+    , caps : Api.Capabilities
+    , probed : Int
+    , overview : Maybe Source.Overview
     , nav : Navi.ViewState
     , pendingHash : Maybe String
     , suppressUrlMsg : Bool
@@ -119,6 +122,7 @@ type alias Model =
     , toastSeq : Int
     , originInput : String
     , connecting : Bool
+    , connectingOrigin : Maybe String
     , groupForm : { name : String, query : String, color : String }
     , editLabel : String
     , editKind : String
@@ -173,9 +177,12 @@ init flagsValue url key =
       , theme = theme
       , stored = flags.stored
       , source = NoGraph
-      , graph = Graph.empty
-      , identity = Nothing
-      , nav = Navi.initialState
+       , graph = Graph.empty
+       , identity = Nothing
+       , caps = Api.noCapabilities
+       , probed = 0
+       , overview = Nothing
+       , nav = Navi.initialState
       , pendingHash = url.fragment
       , suppressUrlMsg = False
       , groups = []
@@ -190,8 +197,9 @@ init flagsValue url key =
       , focusIndex = 0
       , toasts = []
       , toastSeq = 0
-      , originInput = "http://localhost:8080"
-      , connecting = False
+       , originInput = "http://localhost:8080"
+       , connecting = False
+       , connectingOrigin = Nothing
       , groupForm = { name = "", query = "", color = Tokens.defaultGroupColor }
       , editLabel = ""
       , editKind = ""
@@ -252,9 +260,13 @@ type Msg
     | Connect
     | ProbedQuery Bool
     | ProbedSlices Bool
-    | GotRemoteGraph (Result String String)
-    | Disconnect
-      -- groups
+     | GotRemoteGraph ( String, Result String String )
+     | GotOverview ( String, Result String String )
+     | ConnectionLost
+     | Retry
+     | Discard
+     | Disconnect
+       -- groups
     | GroupFormName String
     | GroupFormQuery String
     | GroupFormColor String
@@ -438,38 +450,104 @@ update msg model =
             ( { model | originInput = s }, Cmd.none )
 
         Connect ->
-            ( { model | connecting = True }
+            ( { model
+                  | connecting = True
+                  , probed = 0
+                  , overview = Nothing
+                  , connectingOrigin = Just model.originInput
+                }
             , Cmd.batch
                 [ Api.probeQuery model.originInput ProbedQuery
                 , Api.probeSlices model.originInput ProbedSlices
-                , Api.fetchGraphString model.originInput GotRemoteGraph
                 ]
             )
 
         ProbedQuery ok ->
-            ( updateCaps (\c -> { c | query = ok }) model, Cmd.none )
+            updateCaps (\c -> { c | query = ok }) model |> afterProbe
 
         ProbedSlices ok ->
-            ( updateCaps (\c -> { c | slices = ok }) model, Cmd.none )
+            updateCaps (\c -> { c | slices = ok }) model |> afterProbe
 
-        GotRemoteGraph (Err err) ->
+        GotOverview ( origin, Err err ) ->
             addToast "error" err { model | connecting = False }
 
-        GotRemoteGraph (Ok body) ->
-            if String.length body > sizeThresholdBytes then
+        GotOverview ( origin, Ok body ) ->
+            case D.decodeString Source.overviewDecoder body of
+                Ok ov ->
+                    overviewLoaded origin ov { model | connecting = False }
+
+                Err err ->
+                    addToast "error"
+                        ("Not an overview: " ++ shortDecodeError err)
+                        { model | connecting = False }
+
+        GotRemoteGraph ( origin, Err err ) ->
+            addToast "error" err { model | connecting = False }
+
+        GotRemoteGraph ( origin, Ok body ) ->
+            if String.length body > Source.sizeThresholdBytes then
                 addToast "error"
                     ("graph.json exceeds the studio threshold ("
-                        ++ String.fromInt (sizeThresholdBytes // (1024 * 1024))
+                        ++ String.fromInt (Source.sizeThresholdBytes // (1024 * 1024))
                         ++ " MB) — this server needs the slice API (progressive-graph-interface)"
                     )
                     { model | connecting = False }
 
             else
                 graphLoaded
-                    (Connected { origin = model.originInput, caps = Api.noCapabilities })
+                    (Connected { origin = origin, caps = model.caps })
                     (Graph.fingerprint body)
                     body
                     { model | connecting = False }
+
+        ConnectionLost ->
+            -- The origin just became unreachable mid-session. Preserve local
+            -- work (groups/undo/log/scope/nav); a connection loss is not a data
+            -- loss, so a Retry can resume from here (studio-data-sources 2.2).
+            case model.source of
+                Connected k ->
+                    ( { model | source = Disconnected { origin = k.origin }, connecting = False }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Retry ->
+            case model.source of
+                Disconnected k ->
+                    ( { model | connecting = True, probed = 0, connectingOrigin = Just k.origin }
+                    , Cmd.batch
+                        [ Api.probeQuery k.origin ProbedQuery
+                        , Api.probeSlices k.origin ProbedSlices
+                        ]
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Discard ->
+            -- Explicit discard from the disconnected state: drop local work.
+            case model.source of
+                Disconnected _ ->
+                    ( { model
+                          | source = NoGraph
+                          , graph = Graph.empty
+                          , identity = Nothing
+                          , nav = Navi.initialState
+                          , suppressUrlMsg = True
+                          , groups = []
+                          , stack = Edit.emptyStack
+                          , log = []
+                          , scope = Scope.empty
+                          , overview = Nothing
+                          , connecting = False
+                        }
+                    , Nav.replaceUrl model.key (Navi.encodeHash Navi.initialState)
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         Disconnect ->
             let
@@ -898,14 +976,93 @@ withSelectedNode model fn =
             ( model, Cmd.none )
 
 
+{-| Both probes have returned; route to the resolved implementation. Slices
+capability boots from /api/overview (never the full graph.json); otherwise fall
+back to the legacy full-fetch path (`studio-data-sources` 2.2). -}
+afterProbe : Model -> ( Model, Cmd Msg )
+afterProbe m =
+    let
+        m2 =
+            { m | probed = m.probed + 1 }
+    in
+    if m2.probed >= 2 then
+        resolveFetch m2
+
+    else
+        ( m2, Cmd.none )
+
+
+{-| The single fetch a resolved connection needs. -}
+resolveFetch : Model -> ( Model, Cmd Msg )
+resolveFetch model =
+    let
+        origin =
+            Maybe.withDefault model.originInput model.connectingOrigin
+    in
+    if model.caps.slices then
+        ( { model | connecting = False }
+        , Api.fetchOverview origin (\r -> GotOverview ( origin, r ))
+        )
+
+    else
+        ( { model | connecting = False }
+        , Api.fetchGraphString origin (\r -> GotRemoteGraph ( origin, r ))
+        )
+
+
+{-| Shared slices-mode load path: boot from the overview (aggregates + totals +
+graph hash) with zero nodes/edges until communities pull their slices on
+drill-down. The overview's totals are authoritative for the stats line. -}
+overviewLoaded : String -> Source.Overview -> Model -> ( Model, Cmd Msg )
+overviewLoaded origin ov model =
+    let
+        graph =
+            { nodes = Dict.empty
+            , edges = Dict.empty
+            , aggregates = ov.aggregates
+            , communityLabels =
+                Dict.fromList (List.map (\a -> ( a.id, a.label )) ov.aggregates)
+            }
+
+        navState =
+            model.pendingHash
+                |> Maybe.andThen Navi.decodeHash
+                |> Maybe.map (Navi.sanitize (validPos graph))
+                |> Maybe.withDefault Navi.initialState
+
+        m2 =
+            { model
+                | source = Connected { origin = origin, caps = model.caps }
+                , graph = graph
+                , identity = Just ov.graphHash
+                , overview = Just ov
+                , nav = navState
+                , pendingHash = Nothing
+                , suppressUrlMsg = True
+                , serverCounts = Dict.empty
+                , connecting = False
+            }
+    in
+    ( m2
+    , Cmd.batch
+        [ Nav.replaceUrl m2.key (Navi.encodeHash navState)
+        , renderCmd m2
+        ]
+    )
+
+
 updateCaps : (Api.Capabilities -> Api.Capabilities) -> Model -> Model
 updateCaps fn model =
+    let
+        c =
+            fn model.caps
+    in
     case model.source of
-        Connected c ->
-            { model | source = Connected { c | caps = fn c.caps } }
+        Connected k ->
+            { model | caps = c, source = Connected { k | caps = c } }
 
         _ ->
-            model
+            { model | caps = c }
 
 
 mapGroupForm :
@@ -918,10 +1075,10 @@ mapGroupForm fn model =
 
 loadFile : File -> Model -> ( Model, Cmd Msg )
 loadFile file model =
-    if File.size file > sizeThresholdBytes then
+    if File.size file > Source.sizeThresholdBytes then
         addToast "error"
             ("File exceeds the studio threshold ("
-                ++ String.fromInt (sizeThresholdBytes // (1024 * 1024))
+                ++ String.fromInt (Source.sizeThresholdBytes // (1024 * 1024))
                 ++ " MB) — use connected mode against graphos serve instead"
             )
             model
@@ -942,12 +1099,12 @@ graphLoaded source identity content model =
         Ok graph ->
             let
                 storedGroups =
-                    Dict.get ("graphos-studio:groups:" ++ identity) model.stored
+                    Dict.get (Persist.groupsKey identity) model.stored
                         |> Maybe.andThen (Groups.decodeSet >> Result.toMaybe)
                         |> Maybe.withDefault []
 
                 storedLog =
-                    Dict.get ("graphos-studio:editlog:" ++ identity) model.stored
+                    Dict.get (Persist.editlogKey identity) model.stored
                         |> Maybe.andThen (Edit.decodeLog >> Result.toMaybe)
                         |> Maybe.withDefault []
 
@@ -979,6 +1136,7 @@ graphLoaded source identity content model =
                             , stack = Edit.emptyStack
                             , log = []
                             , scope = Scope.empty
+                            , overview = Nothing
                             , dialog = Nothing
                         }
 
@@ -1126,6 +1284,18 @@ applyAndSend intent prevStack model =
             )
 
         FileMode _ ->
+            -- Offline edits (file mode): apply locally and keep the persisted
+            -- edit log.
+            let
+                m3 =
+                    { m2 | log = intent :: m2.log }
+            in
+            ( m3, Cmd.batch [ renderCmd m3, persistLog m3 ] )
+
+        Disconnected _ ->
+            -- Connected mode after a connection loss: apply locally and keep
+            -- the edit log so a Retry can carry them across once the origin is
+            -- back.
             let
                 m3 =
                     { m2 | log = intent :: m2.log }
@@ -1145,7 +1315,7 @@ persistLog : Model -> Cmd Msg
 persistLog model =
     case model.identity of
         Just identity ->
-            persistValue ("graphos-studio:editlog:" ++ identity)
+            persistValue (Persist.editlogKey identity)
                 (Edit.encodeLog (List.reverse model.log))
 
         Nothing ->
@@ -1161,7 +1331,7 @@ groupsChanged groups model =
         persistCmd =
             case model.identity of
                 Just identity ->
-                    persistValue ("graphos-studio:groups:" ++ identity) (Groups.encodeSet groups)
+                    persistValue (Persist.groupsKey identity) (Groups.encodeSet groups)
 
                 Nothing ->
                     Cmd.none
@@ -1771,6 +1941,13 @@ viewSourcePanel model =
                     ]
                 , div [ A.class "row" ]
                     [ UI.badge ""
+                        (if c.caps.slices then
+                            "slices mode"
+
+                         else
+                            "legacy (full fetch)"
+                        )
+                    , UI.badge ""
                         (if c.caps.query then
                             "query ✓"
 
@@ -1786,23 +1963,64 @@ viewSourcePanel model =
                         )
                     ]
                 , viewGraphStats model
-                , UI.btn { label = "Disconnect", enabled = True, onPress = Disconnect }
+                , UI.btn { label = "Disconnect", enabled = True, onPress = ConnectionLost }
+                ]
+
+            Disconnected k ->
+                [ div [ A.class "spread" ]
+                    [ span [] [ text k.origin ]
+                    , UI.badge "" "disconnected"
+                    ]
+                , div [ A.class "row" ]
+                    [ UI.btn { label = "Retry", enabled = True, onPress = Retry }
+                    , UI.btn { label = "Clear everything", enabled = True, onPress = Discard }
+                    ]
+                , div [ A.class "muted" ]
+                    [ text "Working offline — your edits are kept locally and replayed on retry." ]
                 ]
         )
 
 
 viewGraphStats : Model -> Html Msg
 viewGraphStats model =
-    div [ A.class "muted" ]
-        [ text
-            (String.fromInt (Graph.nodeCount model.graph)
+    let
+        ( n, e, c ) =
+            case model.overview of
+                Just ov ->
+                    -- Overview totals are authoritative in slices mode (the
+                    -- graph is loaded lazily via slices, so local node/edge
+                    -- counts start empty).
+                    ( ov.nodeCount, ov.edgeCount, ov.communityCount )
+
+                Nothing ->
+                    ( Graph.nodeCount model.graph
+                    , Graph.edgeCount model.graph
+                    , List.length model.graph.aggregates
+                    )
+
+        identity =
+            model.identity
+                |> Maybe.map (\h -> "graph " ++ String.left 16 h)
+                |> Maybe.withDefault ""
+
+        statsText =
+            String.fromInt n
                 ++ " nodes · "
-                ++ String.fromInt (Graph.edgeCount model.graph)
+                ++ String.fromInt e
                 ++ " edges · "
-                ++ String.fromInt (List.length model.graph.aggregates)
+                ++ String.fromInt c
                 ++ " communities"
-            )
+    in
+    div [ A.class "muted" ]
+    ( List.concat
+        [ [ text statsText ]
+        , if identity == "" then
+            []
+
+          else
+            [ div [ A.class "hash" ] [ text identity ] ]
         ]
+    )
 
 
 viewTuningPanel : Model -> Html Msg
