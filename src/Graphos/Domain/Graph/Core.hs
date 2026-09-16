@@ -135,7 +135,8 @@ mergeExtractions a b =
     , extractionEdges = mergedEdges
     }
 
--- | Merge two graphs (new graph takes precedence for overlapping nodes)
+-- | Merge two graphs (old graph takes precedence for overlapping nodes;
+-- the new graph's exclusive keys are unioned in).
 -- Dangling edges are removed to keep adjacency lists consistent.
 mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =
