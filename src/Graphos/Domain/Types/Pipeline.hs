@@ -96,7 +96,12 @@ data PipelineConfig = PipelineConfig
   , cfgRtsProfile         :: Bool                      -- ^ Enable RTS profiling output (+RTS -s -h) (--rts-profile)
   , cfgMaxHeap            :: Maybe Int                 -- ^ Max heap size in MB (+RTS -M <size>) (--max-heap)
      , cfgLspConcurrency     :: Int                       -- ^ Max concurrent LSP server processes (--lsp-concurrency)
-    , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
+     , cfgStrictGraph        :: Bool                      -- ^ Fail-fast on corrupt graph.json at startup (default: True; --no-strict-graph disables)
+      -- ^ AVI-534 SG-1: cap on sampled betweenness sources (default 500).
+     , cfgMaxSampledSources  :: Int
+      -- ^ AVI-534 SG-2: node count above which exact O(N·M) all-pairs
+      -- betweenness is bypassed in favour of the sampled estimator (default 10000).
+     , cfgExactBetweennessNodeCap :: Int
      , cfgDetectionMode      :: Maybe DetectionMode       -- ^ CLI --detect-mode override (exclude|collapse|off)
      , cfgDetectDisabled     :: Bool                      -- ^ --no-detect: force detection off
      , cfgMinifiedThreshold  :: Maybe Int                 -- ^ CLI --minified-threshold override
@@ -182,9 +187,11 @@ defaultConfig = PipelineConfig
   , cfgIgnorePatterns     = []
   , cfgRtsProfile         = False
   , cfgMaxHeap            = Nothing
-   , cfgLspConcurrency     = 2
-    , cfgStrictGraph        = True
-    , cfgDetectionMode      = Nothing
+    , cfgLspConcurrency     = 2
+     , cfgStrictGraph        = True
+     , cfgMaxSampledSources  = 500
+     , cfgExactBetweennessNodeCap = 10000
+     , cfgDetectionMode      = Nothing
     , cfgDetectDisabled     = False
     , cfgMinifiedThreshold  = Nothing
     }
