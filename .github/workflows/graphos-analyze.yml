@@ -109,7 +109,7 @@ jobs:
             echo "No release available; building from source"
           fi
           devenv tasks run ci:build
-          GRAPHOS_BIN=$(devenv shell -- cabal list-bin graphos)
+          GRAPHOS_BIN=$(devenv shell -- cabal list-bin graphos 2>/dev/null | grep -E '^/' | tail -n 1)
           cp "$GRAPHOS_BIN" graphos
           chmod +x graphos
 
