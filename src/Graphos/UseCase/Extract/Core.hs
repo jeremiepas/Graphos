@@ -34,7 +34,7 @@ import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), FileType(..), bitNodeKind, bitNodeExtra)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), EdgeId, FileType(..), bitNodeKind, bitNodeExtra)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
@@ -90,15 +90,15 @@ extractAll appEnv config detection = do
   let docThreads = min 8 (max 1 numThreads)
 
   codeNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
-  codeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  codeEdgeAccRef  <- newIORef Map.empty :: IO (IORef (Map.Map EdgeId Edge))
   docNodeMapRef  <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
-  docEdgeAccRef   <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  docEdgeAccRef   <- newIORef Map.empty :: IO (IORef (Map.Map EdgeId Edge))
   officeNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
-  officeEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  officeEdgeAccRef  <- newIORef Map.empty :: IO (IORef (Map.Map EdgeId Edge))
   imageNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
-  imageEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  imageEdgeAccRef  <- newIORef Map.empty :: IO (IORef (Map.Map EdgeId Edge))
   paperNodeMapRef <- newIORef Map.empty :: IO (IORef (Map.Map NodeId Node))
-  paperEdgeAccRef  <- newIORef id :: IO (IORef ([Edge] -> [Edge]))
+  paperEdgeAccRef  <- newIORef Map.empty :: IO (IORef (Map.Map EdgeId Edge))
   runningRef <- newIORef emptyExtraction :: IO (IORef Extraction)
 
   let totalFiles = length codeFiles + length docFiles + length officeFiles + length imageFiles + length paperFiles
@@ -115,10 +115,10 @@ extractAll appEnv config detection = do
       accumulateNodes ref nodes = modifyIORef' ref $ \acc ->
         List.foldl' (\m n -> Map.insertWith (\_old new -> new) (nodeId n) n m) acc nodes
 
-      accumulateEdges :: IORef ([Edge] -> [Edge]) -> [Edge] -> IO ()
-      accumulateEdges ref edges = modifyIORef' ref $ \acc -> acc . (edges ++)
+      accumulateEdges :: IORef (Map.Map EdgeId Edge) -> [Edge] -> IO ()
+      accumulateEdges ref edges = modifyIORef' ref $ \acc -> Map.union (Map.fromList [(edgeId e, e) | e <- edges]) acc
 
-      accumulate :: IORef (Map.Map NodeId Node) -> IORef ([Edge] -> [Edge]) -> Extraction -> IO ()
+      accumulate :: IORef (Map.Map NodeId Node) -> IORef (Map.Map EdgeId Edge) -> Extraction -> IO ()
       accumulate nodeRef edgeRef ext = do
         accumulateNodes nodeRef (Map.elems (extractionNodes ext))
         accumulateEdges edgeRef (Map.elems (extractionEdges ext))

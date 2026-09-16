@@ -78,6 +78,18 @@ testEdgeWithConfidence src tgt conf = Edge
   , edgeExtra     = Nothing
   }
 
+-- | Edge with an explicit relation (used by the LG-C3 feasibility gate below).
+mkRelEdge :: Text -> Text -> Relation -> Edge
+mkRelEdge src tgt rel = Edge
+  { edgeId        = edgeIdFrom src tgt
+  , edgeSource    = src
+  , edgeTarget    = tgt
+  , edgeRelation  = rel
+  , edgeConfidence = Confidence 1.0
+  , edgeWeight    = 1.0
+  , edgeExtra     = Nothing
+  }
+
 -- Helper: create a test node with file type
 testNodeWithFile :: Text -> FileType -> Text -> Node
 testNodeWithFile nid ft srcFile = Node
@@ -249,6 +261,105 @@ spec = do
           merged = mergeGraphs g1 g2
       -- Old graph takes precedence (<>) - first argument wins
       nodeLabel (fromJust (Map.lookup "a" (gNodes merged))) `shouldBe` "Original"
+
+  describe "mergeGraphs — LG-C3 feasibility gate (identification)" $ do
+
+    describe "LG-C2 (agreeing shared node key maps identically under both cocone legs)" $ do
+      it "Agree(A,B): identical node value is carried by both operands and the merge" $ do
+        let eA = extractionFromLists
+              [ testNodeWithLabel "shared" "Alpha", testNode "a" ] []
+            eB = extractionFromLists
+              [ testNodeWithLabel "shared" "Alpha", testNode "b" ] []
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+            k = "shared" :: Text
+        Map.lookup k (gNodes gm) `shouldBe` Map.lookup k (gNodes ga)
+        Map.lookup k (gNodes gm) `shouldBe` Map.lookup k (gNodes gb)
+
+      it "LG-C2 holds for every agreeing node key simultaneously" $ do
+        let eA = extractionFromLists
+              [ testNodeWithLabel "s1" "Alpha", testNodeWithLabel "s2" "Beta", testNode "a" ] []
+            eB = extractionFromLists
+              [ testNodeWithLabel "s1" "Alpha", testNodeWithLabel "s2" "Beta", testNode "b" ] []
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+        Map.lookup "s1" (gNodes gm) `shouldBe` Map.lookup "s1" (gNodes ga)
+        Map.lookup "s1" (gNodes gm) `shouldBe` Map.lookup "s1" (gNodes gb)
+        Map.lookup "s2" (gNodes gm) `shouldBe` Map.lookup "s2" (gNodes ga)
+        Map.lookup "s2" (gNodes gm) `shouldBe` Map.lookup "s2" (gNodes gb)
+
+    describe "LG-C3 (no identification beyond shared identical labels)" $ do
+      it "|keys(gNodes gm)| == |keys(gNodes ga) ∪ keys(gNodes gb)| — no over-identification of distinct keys" $ do
+        let eA = extractionFromLists
+              [ testNodeWithLabel "shared" "Alpha", testNode "a", testNode "c" ] []
+            eB = extractionFromLists
+              [ testNodeWithLabel "shared" "Alpha", testNode "b", testNode "d" ] []
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+            keysA = Map.keysSet (gNodes ga)
+            keysB = Map.keysSet (gNodes gb)
+            keysUnion = keysA `Set.union` keysB
+        Map.size (gNodes gm) `shouldBe` Set.size keysUnion
+        -- every merged key is present in at least one operand (nothing collapsed away)
+        all (\k -> Set.member k keysA || Set.member k keysB) (Map.keys (gNodes gm)) `shouldBe` True
+
+      it "agreeing edge key is carried by both operands" $ do
+        let eA = extractionFromLists
+              [ testNode "a", testNode "b" ] [ testEdge "a" "b" ]
+            eB = extractionFromLists
+              [ testNode "a", testNode "b" ] [ testEdge "a" "b" ]
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+            ek = ("a", "b") :: (NodeId, NodeId)
+        Map.lookup ek (gEdges gm) `shouldBe` Map.lookup ek (gEdges ga)
+        Map.lookup ek (gEdges gm) `shouldBe` Map.lookup ek (gEdges gb)
+        edgeRelation (fromJust (Map.lookup ek (gEdges gm))) `shouldBe` Calls
+
+      it "edges with distinct endpoint pairs never spuriously merge" $ do
+        let eA = extractionFromLists
+              [ testNode "a", testNode "b", testNode "c" ]
+              [ testEdge "a" "b", testEdge "b" "c" ]
+            eB = extractionFromLists
+              [ testNode "x", testNode "y", testNode "z" ]
+              [ testEdge "x" "y", testEdge "y" "z" ]
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+        Map.size (gEdges gm) `shouldBe` 4
+        Map.member ("a", "b") (gEdges gm) `shouldBe` True
+        Map.member ("b", "c") (gEdges gm) `shouldBe` True
+        Map.member ("x", "y") (gEdges gm) `shouldBe` True
+        Map.member ("y", "z") (gEdges gm) `shouldBe` True
+
+    describe "LG-C4 (conflicting key over-identifies: pushout but NOT pullback — expected)" $ do
+      it "same node key, differing value collapses to one entry (over-identification), not a correctness violation" $ do
+        let eA = extractionFromLists [ testNodeWithLabel "shared" "Alpha", testNode "a" ] []
+            eB = extractionFromLists [ testNodeWithLabel "shared" "Gamma", testNode "b" ] []
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+        -- conflicting key collapses to a single entry (fiber product over-identifies)
+        Map.size (gNodes gm) `shouldBe` 3
+        let kept = fromJust (Map.lookup "shared" (gNodes gm))
+            fromA  = fromJust (Map.lookup "shared" (gNodes ga))
+            fromB  = fromJust (Map.lookup "shared" (gNodes gb))
+        kept `shouldBe` fromA
+        kept /= fromB `shouldBe` True
+        nodeLabel kept `shouldBe` "Alpha"
+
+      it "same edge endpoint pair, differing relation collapses to one edge (documented non-pullback)" $ do
+        let eA = extractionFromLists [ testNode "a", testNode "b" ] [ testEdge "a" "b" ]
+            eB = extractionFromLists [ testNode "a", testNode "b" ] [ mkRelEdge "a" "b" Imports ]
+            ga = buildGraph False eA
+            gb = buildGraph False eB
+            gm = mergeGraphs ga gb
+            ek = ("a", "b") :: (NodeId, NodeId)
+        Map.size (gEdges gm) `shouldBe` 1
+        edgeRelation (fromJust (Map.lookup ek (gEdges gm))) `shouldBe` Calls
 
   describe "embeddings_path JSON round-trip" $ do
     it "omits embeddings_path when gEmbeddingsPath is Nothing" $ do

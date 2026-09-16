@@ -118,10 +118,12 @@ pipelineOpts = PipelineConfig
          <*> switch (long "rts-profile" <> help "Enable RTS profiling output (GC stats, heap profile) (--rts-profile)")
           <*> optional (option (eitherReader heapSizeReader) (long "max-heap" <> metavar "SIZE" <> help "Maximum heap size (e.g. 1G, 512M, 2048) (--max-heap)"))
           <*> option auto (long "lsp-concurrency" <> value 2 <> help "Maximum concurrent LSP server processes (default: 2)")
-           <*> fmap not (switch (long "no-strict-graph" <> help "Disable strict startup graph validation (tolerant load on corrupt graph.json)"))
-           <*> optional (option detectModeReader (long "detect-mode" <> metavar "MODE" <> help "Generated/vendored/minified detection mode: exclude|collapse|off (default: exclude)"))
-           <*> switch (long "no-detect" <> help "Disable generated/vendored/minified detection (equivalent to --detect-mode off)")
-           <*> optional (option auto (long "minified-threshold" <> help "Longest allowed line length before a file is classified as Minified (default: 5000)"))
+      <*> fmap not (switch (long "no-strict-graph" <> help "Disable strict startup graph validation (tolerant load on corrupt graph.json)"))
+      <*> option auto (long "max-sampled-sources" <> value 500 <> help "AVI-534 SG-1: max sampled sources for edge betweenness (default: 500)")
+      <*> option auto (long "exact-betweenness-node-cap" <> value 10000 <> help "AVI-534 SG-2: node count above which exact all-pairs betweenness is bypassed for the sampled estimator (default: 10000)")
+      <*> optional (option detectModeReader (long "detect-mode" <> metavar "MODE" <> help "Generated/vendored/minified detection mode: exclude|collapse|off (default: exclude)"))
+      <*> switch (long "no-detect" <> help "Disable generated/vendored/minified detection (equivalent to --detect-mode off)")
+      <*> optional (option auto (long "minified-threshold" <> help "Longest allowed line length before a file is classified as Minified (default: 5000)"))
 
 
 granularityReader :: ReadM Granularity
