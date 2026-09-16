@@ -22,6 +22,7 @@ let
     elmPackages.elm
     elmPackages.elm-test
     elmPackages.elm-format
+    elmPackages.elm-review
   ];
 in
 {

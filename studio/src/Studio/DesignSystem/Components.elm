@@ -136,7 +136,7 @@ emptyState message =
 
 
 
--- DIALOG (Escape cancels, Enter confirms, backdrop click cancels)
+-- DIALOG (Escape cancels, Enter confirms, focus trapped, returns on close)
 
 
 dialog :
@@ -145,34 +145,59 @@ dialog :
     , confirmLabel : String
     , onConfirm : msg
     , onCancel : msg
+    , onTab : msg
+    , onShiftTab : msg
     , destructive : Bool
     }
     -> Html msg
 dialog cfg =
     let
+        typingOf : String -> Bool
+        typingOf tag =
+            tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT"
+
         keyHandler =
+            -- Activation + stop dispatch. Tab / Shift+Tab are dispatched here so
+            -- Main can move to the next stop through Studio.DialogFocus.tabStops
+            -- (moveFocus with the matching selector); native Tab is prevented by
+            -- the JS focus-trap glue so focus never escapes the modal. Enter
+            -- confirms and Escape cancels. Text-entry widgets still let Enter
+            -- insert a newline (Enter is only trapped when not typing).
             Ev.on "keydown"
-                (D.field "key" D.string
+                (D.map2
+                    (\key tag -> ( key, tag ))
+                    (D.field "key" D.string)
+                    (D.oneOf [ D.at [ "target", "tagName" ] D.string, D.succeed "" ])
                     |> D.andThen
-                        (\key ->
+                        (\( key, tag ) ->
                             case key of
                                 "Escape" ->
                                     D.succeed cfg.onCancel
 
                                 "Enter" ->
-                                    D.succeed cfg.onConfirm
+                                    if not (typingOf tag) then
+                                        D.succeed cfg.onConfirm
+
+                                    else
+                                        D.fail "unhandled"
+
+                                "Shift+Tab" ->
+                                    D.succeed cfg.onShiftTab
+
+                                "Tab" ->
+                                    D.succeed cfg.onTab
 
                                 _ ->
                                     D.fail "unhandled"
                         )
                 )
 
-        confirmBtn =
+        confirmClass =
             if cfg.destructive then
-                btnDanger { label = cfg.confirmLabel, enabled = True, onPress = cfg.onConfirm }
+                "btn btn-danger"
 
             else
-                btnPrimary { label = cfg.confirmLabel, enabled = True, onPress = cfg.onConfirm }
+                "btn btn-primary"
     in
     div [ A.class "dialog-backdrop" ]
         [ div
@@ -184,8 +209,8 @@ dialog cfg =
             (div [ A.class "dialog-title" ] [ text cfg.title ]
                 :: cfg.body
                 ++ [ div [ A.class "dialog-actions" ]
-                        [ btn { label = "Cancel", enabled = True, onPress = cfg.onCancel }
-                        , confirmBtn
+                        [ btnBase "btn btn-cancel" { label = "Cancel", enabled = True, onPress = cfg.onCancel }
+                        , btnBase confirmClass { label = cfg.confirmLabel, enabled = True, onPress = cfg.onConfirm }
                         ]
                    ]
             )

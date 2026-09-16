@@ -8,24 +8,26 @@
 > full-fetch, optimistic mutate + revert), editing (intents/validation/
 > inverses/log/undo-redo/export), groups (local eval, first-match-wins,
 > isolate/hide, persistence, import/export, server-assisted counts), scope
-> algebra + dim preview + canonical export with color baking.
-> **Not yet done**: elm-review config (CI lints via grep instead), component
-> gallery page, measured size threshold (constant 100 MB), slice-backed data
-> layer (probe only — server endpoints not shipped), isolated preview mode
-> (dim-only), views-catalog round-trip walk, task 7.1 cabal-regenerated
-> fixtures, live-server scenario pass (6.2/7.2).
+> algebra + dim preview + canonical export with color baking, component gallery
+> (both themes) and dialog keyboard completeness (focus trap, Enter, Escape,
+> focus return).
+> **Not yet done**: elm-review config (CI lints via grep instead), measured size
+> threshold (constant 100 MB), slice-backed data layer (probe only — server
+> endpoints not shipped), isolated preview mode (dim-only), views-catalog
+> round-trip walk, task 7.1 cabal-regenerated fixtures, live-server scenario
+> pass (6.2/7.2).
 
 ## 1. Scaffold (foundation)
 
 ### 1.1 Toolchain + skeleton
-- [ ] Add elm, elm-test, elm-review to `devenv.nix`; create `studio/` with `elm.json`, `src/Main.elm` (TEA skeleton), `ports.js`, vendored vis-network shared with `assets/viewer/`
-- [ ] Check criteria first: `elm make --optimize` and `elm-test` run green in the devenv shell on a fresh clone
-- [ ] CI job: studio build + test + review beside the Haskell jobs; a broken Elm type fails CI
+- [x] Add elm, elm-test, elm-review to `devenv.nix`; create `studio/` with `elm.json`, `src/Main.elm` (TEA skeleton), `ports.js`, vendored vis-network shared with `assets/viewer/`
+- [x] Check criteria first: `elm make --optimize` and `elm-test` run green in the devenv shell on a fresh clone
+- [x] CI job: studio build + test + review beside the Haskell jobs; a broken Elm type fails CI
 
 ### 1.2 Design tokens + component base
-- [ ] `Studio.DesignSystem.Tokens` (color roles, type/spacing scales, radii, elevation; light/dark bindings; community-color harmonization) and `Studio.DesignSystem.Components` (button, input, select, slider, panel, dialog, toast, badge, empty/loading states)
-- [ ] Lint gate: elm-review rule (or CI grep) — no literal colors/px outside Tokens
-- [ ] Check: component gallery page renders in both themes; dialog keyboard scenarios (trap, Enter, Escape, focus return)
+- [x] `Studio.DesignSystem.Tokens` (color roles, type/spacing scales, radii, elevation; light/dark bindings; community-color harmonization) and `Studio.DesignSystem.Components` (button, input, select, slider, panel, dialog, toast, badge, empty/loading states)
+- [x] Lint gate: elm-review rule (or CI grep) — no literal colors/px outside Tokens
+- [x] Check: component gallery page renders in both themes; dialog keyboard scenarios (trap, Enter, Escape, focus return)
 
 ## 2. Data sources (depends on 1.1)
 
