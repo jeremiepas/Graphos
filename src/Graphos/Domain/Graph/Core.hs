@@ -135,8 +135,9 @@ mergeExtractions a b =
     , extractionEdges = mergedEdges
     }
 
--- | Merge two graphs (new graph takes precedence for overlapping nodes)
--- Dangling edges are removed to keep adjacency lists consistent.
+-- | Merge two graphs (the old/left operand wins for overlapping node keys;
+-- `gNodes old <> gNodes new` is Data.Map left-wins). Dangling edges are removed
+-- to keep adjacency lists consistent.
 mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =
   let mergedNodes = gNodes old <> gNodes new

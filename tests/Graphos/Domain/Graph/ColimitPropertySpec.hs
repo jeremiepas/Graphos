@@ -24,14 +24,14 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph
 import Graphos.Domain.Community (defaultResolution, detectCommunitiesWithResolution)
 import Graphos.Domain.Config.Vision (defaultSemanticEdgesConfig)
-import Graphos.UseCase.Merge (mergeGraphsAndAnalyze)
+import Graphos.UseCase.Merge (MergeResult(..), mergeGraphsAndAnalyze)
 
 -- ── builders ───────────────────────────────────────────────────────────
 
 mkNode :: Text -> Text -> FileType -> Text -> Node
-mkNode nid label ft src = Node
+mkNode nid lbl ft src = Node
   { nodeId = nid
-  , nodeLabel = fromText label
+  , nodeLabel = fromText lbl
   , nodeFileType = ft
   , nodeSourceFile = fromText src
   , nodeCommunityId = Nothing
@@ -87,14 +87,23 @@ baseValues = do
   let keys = ["k0", "k1", "k2", "k3"]
   Map.fromList <$> mapM (\k -> do v <- elements canonicalValues; pure (k, v)) keys
 
--- | Build one view over the shared key base. Key "k0" is always present so
--- consistency/inconsistency is anchored on a guaranteed shared node.
+-- | Build one view over the shared key base. Keys "k0","k1","k2" are always
+-- carried so the views overlap on real multi-node structure; each remaining
+-- shared key is included with high probability. The previous per-key Bool gate
+-- degenerated (it reduced to "always include every base key" via the trivially
+-- true `any ((== k) . fst) mem`, or to a near-empty graph when the random Bool
+-- was False), so associativity/old-wins properties rarely exercised overlapping
+-- multi-node structure.
 genView :: Map.Map Text KeyVal -> Map.Map Text KeyVal -> Gen Graph
 genView base mut = do
   let keys = Map.keys base
       edgePairs = zip keys (tail keys)
-  mem <- mapM (\k -> do b <- arbitrary :: Gen Bool; pure (k, b)) keys
-  let inK k = ((any ((== k) . fst) mem) || k == "k0")
+      alwaysIn k = k `elem` ["k0", "k1", "k2"]
+  inclMap <- Map.fromList <$>
+    mapM (\k -> if alwaysIn k
+                then pure (k, True)
+                else do r <- frequency [(4, pure True), (1, pure False)]; pure (k, r)) keys
+  let inK k = Map.findWithDefault True k inclMap
       baseVal k = Map.findWithDefault (head canonicalValues) k base
       val k = case Map.lookup k mut of Just v -> v; Nothing -> baseVal k
       nodes =
@@ -171,6 +180,10 @@ spec = do
       property $ \(ConsistentPair (a, b)) ->
         Map.keysSet (gNodes (mergeGraphs a b))
           `shouldBe` (Map.keysSet (gNodes a) `Set.union` Map.keysSet (gNodes b))
+    it "merged edge set equals the union of source edge sets" $
+      property $ \(ConsistentPair (a, b)) ->
+        Map.keysSet (gEdges (mergeGraphs a b))
+          `shouldBe` (Map.keysSet (gEdges a) `Set.union` Map.keysSet (gEdges b))
 
   describe "AC-2 unique mediating morphism (colimit = minimal cocone)" $ do
     it "canonical cocone contains exactly the union of keys and edges (minimality ⇒ uniqueness)" $ do
@@ -195,10 +208,20 @@ spec = do
     it "AC-4(a): mergeGraphs is order-dependent for inconsistent pairs" $
       property $ \(InconsistentPair (a, b)) ->
         mergeGraphs a b `shouldNotBe` mergeGraphs b a
-    it "AC-4(b): mergeGraphsAndAnalyze is order-dependent for inconsistent pairs" $
+    -- AC-4(b) pins the *community partition* (mrCommunities), not the whole
+    -- MergeResult. Empirically the partition is order-INDEPENDENT even under
+    -- value conflicts: mergeGraphs is commutative on node/edge key sets (Data
+    -- Map union) and detectCommunitiesWithResolution (Leiden) derives community
+    -- labels purely from adjacency, ignoring node label/filetype/source values
+    -- (see Community.hs buildLeidenState / computeCommunityStats). The only
+    -- order-dependent residue is node/edge VALUE reconciliation (mrGraph), which
+    -- AC-4(a) already covers; the re-detected partition does not reorder. Assert
+    -- the true property so a regression that made detection value-dependent is
+    -- caught here instead of being masked by an mrGraph-only difference.
+    it "AC-4(b): merge x cluster re-detection is order-independent on the community partition under conflicts" $
       property $ \(InconsistentPair (a, b)) ->
         let cfg g1 g2 = mergeGraphsAndAnalyze g1 g2 Normal defaultResolution defaultSemanticEdgesConfig False
-        in cfg a b `shouldNotBe` cfg b a
+        in mrCommunities (cfg a b) `shouldBe` mrCommunities (cfg b a)
     it "AC-4 consistent: mergeGraphsAndAnalyze is order-independent for consistent pairs" $
       property $ \(ConsistentPair (a, b)) ->
         let cfg g1 g2 = mergeGraphsAndAnalyze g1 g2 Normal defaultResolution defaultSemanticEdgesConfig False
@@ -215,11 +238,22 @@ spec = do
         in members `shouldSatisfy` (\m -> Set.isSubsetOf m nodeSet && Set.size m == Set.size nodeSet)
 
   describe "AC-5 old-wins semantics (consistent + forced)" $ do
-    it "AC-5 consistent nodes keep view A's value" $ do
-      let (a, b) = samplePair
+    it "AC-5 consistent-key sub-case keeps view A's value at a shared key with differing values" $ do
+      -- 'x' is shared across both views but carries DIFFERING values, so this
+      -- actually disambiguates old-wins (Aval) from new-wins (Bval). The prior
+      -- samplePair variant had k0 identical in both views, which could only ever
+      -- test consistency preservation, never the old-wins direction.
+      let a = smallGraph False
+            [ mkNode "x" "Aval" CodeFile "a.hs"
+            , mkNode "y" "shared" DocFile "y.md" ]
+            []
+          b = smallGraph False
+            [ mkNode "x" "Bval" CodeFile "b.hs"
+            , mkNode "y" "shared" DocFile "y.md" ]
+            []
           merged = mergeGraphs a b
-      nodeLabel (Map.findWithDefault (mkNode "" "" CodeFile "") "k0" (gNodes merged))
-        `shouldBe` fromText "foo"
+      nodeLabel (Map.findWithDefault (mkNode "" "" CodeFile "") "x" (gNodes merged))
+        `shouldBe` fromText "Aval"
     it "AC-5 forced (both present, differing value) keeps view A's value" $ do
       let a = smallGraph False [mkNode "x" "Aval" CodeFile "a.hs"] []
           b = smallGraph False [mkNode "x" "Bval" CodeFile "b.hs"] []
@@ -236,6 +270,23 @@ spec = do
       Map.member "y" (gNodes merged) `shouldBe` True
       nodeLabel (Map.findWithDefault (mkNode "" "" CodeFile "") "y" (gNodes merged))
         `shouldBe` fromText "Bonly"
+    it "AC-5 edge-key old-wins: mergeGraphs keeps the left operand's edge value on a conflicting edge key" $ do
+      -- Both views carry the same edge key (k1,k2) with a different relation;
+      -- gEdges old <> gEdges new (Core.hs:143) is left/old-wins, so the merged
+      -- edge must retain view A's relation (References), not view B's (DependsOn).
+      let a = smallGraph False
+            [ mkNode "k0" "foo" CodeFile "a.hs"
+            , mkNode "k1" "bar" CodeFile "b.hs"
+            , mkNode "k2" "baz" CodeFile "c.hs" ]
+            [ mkEdge "k0" "k1" Calls, mkEdge "k1" "k2" References ]
+          b = smallGraph False
+            [ mkNode "k0" "foo" CodeFile "a.hs"
+            , mkNode "k1" "bar" CodeFile "b.hs"
+            , mkNode "k2" "baz" CodeFile "c.hs" ]
+            [ mkEdge "k0" "k1" Calls, mkEdge "k1" "k2" DependsOn ]
+          merged = mergeGraphs a b
+      edgeRelation (Map.findWithDefault (mkEdge "" "" References) ("k1", "k2") (gEdges merged))
+        `shouldBe` References
 
   describe "Feasibility gate (Q1–Q4)" $ do
     it "Q1: force (full identity-inclusion) commutes — canonical cocone is symmetric" $ do
