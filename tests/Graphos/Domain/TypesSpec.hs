@@ -21,14 +21,14 @@ spec = do
       toJSON (Confidence 1.0) `shouldBe` toJSON (1.0 :: Double)
 
   describe "Relation" $ do
-    it "has exactly 13 constructors (8 code + 5 spec-artifact per spec-graph-verification)" $ do
-      length [minBound .. maxBound :: Relation] `shouldBe` 13
+    it "has exactly 14 constructors (8 code + 5 spec-artifact + Documents per deterministic doc-code edges)" $ do
+      length [minBound .. maxBound :: Relation] `shouldBe` 14
 
     it "round-trips through text representation" $ do
       property $ \rel -> textToRelation (relationToText rel) == Just rel
 
     it "includes spec-required constructors" $ do
-      [Calls, Imports, Extends, Implements, References, Contains, DependsOn, Inferred]
+      [Calls, Imports, Extends, Implements, References, Contains, DependsOn, Inferred, Documents]
         `shouldSatisfy` (not . null)
 
     it "includes the spec-artifact relations (graph-json-contract delta)" $ do

@@ -4,7 +4,7 @@ module Graphos.UseCase.InferSpec where
 
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
-import Data.List (nubBy)
+import Data.List (nub, nubBy, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -89,6 +89,40 @@ spec = do
           edges = inferCodeDocEdges g
           pairs = map (\e -> (edgeSource e, edgeTarget e)) edges
       length pairs `shouldBe` length (dedupOn id pairs)
+
+  describe "doc-code edge determinism" $ do
+    -- A non-trivial graph: several docs plus many code nodes whose labels
+    -- collide across the doc labels, exercising label + path alignment.
+    let sampleGraph = buildGraph False $ extractionFromLists
+          ( [docNode "doc1" "parseConfig", docNode "doc2" "runTask", docNode "doc3" "Config"]
+            ++ [codeNode (T.pack ("c" ++ show i)) (T.pack ("parseConfig" ++ show (i `mod` 5)))
+                | i <- [1 .. 60 :: Int]] )
+          []
+
+    it "returns identical edges across repeated runs on the same graph" $ do
+      let runs = replicate 5 (inferCodeDocEdges sampleGraph)
+      length (nub runs) `shouldBe` 1
+
+    it "emits edges in canonical stable order (source, target, relation)" $ do
+      let es = inferCodeDocEdges sampleGraph
+      es `shouldBe` sortOn (\e -> (edgeSource e, edgeTarget e, edgeRelation e)) es
+
+    it "returns identical semantic doc-code edges across repeated runs" $ do
+      let g = buildGraph False (extractionFromLists ([codeNode "c1" "a", docNode "d1" "b"] :: [Node]) [])
+          embs = Map.fromList [("c1", [1.0, 0.0]), ("d1", [1.0, 0.0])]
+          g' = g { gEmbeddings = Just embs }
+          se = defaultSemanticEdgesConfig
+          runs = replicate 5 (inferSemanticCodeDocEdges se g' embs)
+      length (nub runs) `shouldBe` 1
+
+    it "is deterministic over randomly constructed graphs" $ property $
+      \(_seed :: Integer) ->
+        let base = 2 + fromIntegral (_seed `mod` 6)
+            ns = [docNode "doc1" "parseConfig", docNode "doc2" "runTask"]
+               ++ [codeNode (T.pack ("c" ++ show i)) (T.pack ("parseConfig" ++ show (i `mod` base)))
+                   | i <- [1 .. 80 :: Int]]
+            g = buildGraph False (extractionFromLists (ns :: [Node]) [])
+        in length (nub [inferCodeDocEdges g, inferCodeDocEdges g, inferCodeDocEdges g]) `shouldBe` 1
 
   describe "isSingleCorpus" $ do
     it "returns True for empty graph" $ do
