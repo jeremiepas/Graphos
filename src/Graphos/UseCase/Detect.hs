@@ -30,7 +30,8 @@ import System.FilePath (takeExtension, (</>))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline
-  ( FileMeta(..) )
+  ( FileClass(..), FileMeta(..)
+  , isSourceClass )
 import Graphos.Domain.Config.Detection
   ( DetectionConfig(..), DetectionMode(..), defaultDetectionConfig )
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
