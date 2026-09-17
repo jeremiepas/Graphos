@@ -35,12 +35,14 @@ import Graphos.UseCase.Query
   )
 import Graphos.UseCase.Query.Refine (defaultRefineConfig, refineResponse)
 import Graphos.UseCase.Query.Render
-  ( renderQueryResponseJSON
-  , renderPathResultJSON
-  , renderExplainResultJSON
-  , renderSymbolResultJSON
-  , renderNeighborsResultJSON
-  )
+   ( renderQueryResponseJSON
+   , renderPathResultJSON
+   , renderExplainResultJSON
+   , renderSymbolResultJSON
+   , renderNeighborsResultJSON
+   , enforceResponseBudget
+   )
+import Graphos.Domain.Graph.Score (defaultMaxLabelChars)
 import Graphos.Infrastructure.Server.QueryAPI (apiApp)
 
 -- ───────────────────────────────────────────────
@@ -171,6 +173,7 @@ spec = do
       let g = fixtureGraph
           idx = lrIndex fixtureLoadResult
           expected = renderQueryResponseJSON
+                       $ enforceResponseBudget defaultMaxLabelChars 2000 0
                        $ refineResponse defaultRefineConfig (gNodes g)
                        $ queryGraphWithIndexScored g idx "Auth" "bfs" 2000
       (status, _headers, body) <- runApi methodGet "/api/query?q=Auth&mode=bfs&budget=2000"
@@ -181,6 +184,7 @@ spec = do
       let g = fixtureGraph
           idx = lrIndex fixtureLoadResult
           expected = renderQueryResponseJSON
+                       $ enforceResponseBudget defaultMaxLabelChars 100 0
                        $ refineResponse defaultRefineConfig (gNodes g)
                        $ queryGraphWithIndexScored g idx "Auth" "bfs" 100
       (status, _headers, body) <- runApi methodGet "/api/query?q=Auth&mode=bfs&budget=100"
@@ -275,6 +279,7 @@ spec = do
             (status, _headers, body) <- runApi methodGet path
             status `shouldBe` status200
             let expected = renderQueryResponseJSON
+                             $ enforceResponseBudget defaultMaxLabelChars 2000 0
                              $ refineResponse defaultRefineConfig (gNodes g)
                              $ queryGraphWithIndexScored g idx queryStr "bfs" 2000
                 expectedText = encodeExpected expected
