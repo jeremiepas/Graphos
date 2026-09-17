@@ -22,7 +22,6 @@ module Graphos.Domain.Graph.Score
     -- * Scoring helpers
   , normalizeScore
   , computeScore
-  , fullLabelBoost
   , fullLabelBoostForTerms
 
     -- * Hash
@@ -173,15 +172,6 @@ normalizeScore matched queryTotal
 computeScore :: [Text] -> GraphIndex -> NodeId -> Int
 computeScore terms idx nid =
   length $ filter (\t -> nid `elem` lookupTerm t idx) terms
-
--- | Full-label exact match boost.
---
--- When a query term exactly matches the lowercased full label of a node,
--- give it a small boost (+0.1) to rank it higher.
-fullLabelBoost :: Text -> Text -> Double
-fullLabelBoost queryTerm label
-  | T.toLower queryTerm == T.toLower label = 0.1
-  | otherwise = 0
 
 -- | Full-label exact match boost across a whole query term list.
 --

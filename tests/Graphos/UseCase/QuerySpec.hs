@@ -8,8 +8,9 @@ import qualified Data.Map.Strict as Map
 import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
+import Graphos.Domain.Graph.Analysis (toCachedFGL)
 import Graphos.Domain.Graph.Index (buildIndexWithLabels)
-import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, pathQuery, explainNode, QueryResult(..), QueryResponse(..), ScoredNode(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..), resolveNodeArg, NodeResolution(..))
+import Graphos.UseCase.Query (queryGraph, queryGraphWithIndexScored, queryGraphWithIndexScoredScoped, pathQuery, explainNode, QueryResult(..), QueryResponse(..), ScoredNode(..), symbolLookup, neighborhoodExpansion, SymbolResult(..), NeighborsResult(..), resolveNodeArg, NodeResolution(..))
 import Graphos.UseCase.Query.Render (renderPathResultJSON, renderExplainResultJSON, renderQueryResponseJSON)
 import Graphos.Domain.Graph.Score (MatchVerdict(..))
 
@@ -29,8 +30,20 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodePresentBits  = 0
-  }
+   , nodePresentBits  = 0
+   }
+
+-- | Extract the 'preview' snippet from a compact node-list JSON document.
+-- The rendered JSON is aeson-compact and the preview value never contains an
+-- embedded quote, so we locate the "preview": key, skip it, and read up to the
+-- next quote. Returns "" if the key is absent (never throws).
+extractNodePreview :: Text -> Text
+extractNodePreview t =
+  let afterKey = snd (T.breakOn previewKey t)
+      (value, _) = T.breakOn (T.singleton '"') (T.drop (T.length previewKey + 1) afterKey)
+  in value
+  where
+    previewKey = T.pack ['"', 'p', 'r', 'e', 'v', 'i', 'e', 'w', '"', ':']
 
 -- helper: generate a unique EdgeId from source and target
 edgeIdFrom :: Text -> Text -> EdgeId
@@ -358,3 +371,53 @@ spec = do
       result `shouldSatisfy` (T.pack "\"label\"" `T.isInfixOf`)
       result `shouldSatisfy` (T.pack "\"source_file\"" `T.isInfixOf`)
       result `shouldSatisfy` (T.pack "\"community\"" `T.isInfixOf`)
+
+  describe "queryGraphWithIndexScoredScoped (REQ-S2)" $ do
+    it "restricts candidate matches to nodes under the path glob" $ do
+      let ext = extractionFromLists
+            [ (testNode "CliCommand") { nodeSourceFile = "src/cli/Main.hs" }
+            , (testNode "DbPool")     { nodeSourceFile = "src/db/Pool.hs" }
+            ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          scoped = queryGraphWithIndexScoredScoped g idx (toCachedFGL g) "Cli" "bfs" 2000 (Just "src/cli/**")
+      map snLabel (qrespNodes scoped) `shouldSatisfy`
+        (\ls -> "CliCommand" `elem` ls && "DbPool" `notElem` ls)
+
+    it "reports verdict none with empty nodes when no node falls under the scope" $ do
+      let ext = extractionFromLists
+            [ (testNode "CliCommand") { nodeSourceFile = "src/cli/Main.hs" } ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          scoped = queryGraphWithIndexScoredScoped g idx (toCachedFGL g) "Cli" "bfs" 2000 (Just "src/db/**")
+      qrespVerdict scoped `shouldBe` NoMatch
+      qrespNodes scoped `shouldBe` []
+
+    it "returns the same result as the unscoped query when scope is Nothing" $ do
+      let ext = extractionFromLists
+            [ (testNode "CliCommand") { nodeSourceFile = "src/cli/Main.hs" } ]
+            []
+          g = buildGraph False ext
+          idx = buildIndexWithLabels g Map.empty Map.empty
+          unscoped = queryGraphWithIndexScored g idx "Cli" "bfs" 2000
+          scoped = queryGraphWithIndexScoredScoped g idx (toCachedFGL g) "Cli" "bfs" 2000 Nothing
+      qrespNodes scoped `shouldBe` qrespNodes unscoped
+
+  describe "round-trip projection (REQ-S3)" $ do
+    it "emits a bounded preview while the identity fetch returns the full label byte-exact" $ do
+       let longLabel = "AuthModule_" <> T.replicate 140 "x"
+           ext = extractionFromLists [testNode longLabel] []
+           g = buildGraph False ext
+           idx = buildIndexWithLabels g Map.empty Map.empty
+           resp = queryGraphWithIndexScored g idx longLabel "bfs" 2000
+           json = renderQueryResponseJSON resp
+           preview = extractNodePreview json
+           fetched = symbolLookup longLabel g idx
+       -- Projection: emitted preview is truncated below the full label length ...
+       T.length preview `shouldSatisfy` (< T.length longLabel)
+       -- ... and terminated with the ellipsis marker.
+       T.last preview `shouldBe` '…'
+       -- Round-trip: the node store retains the exact original label for the fetch path.
+       map snLabel (srFound fetched) `shouldBe` [longLabel]

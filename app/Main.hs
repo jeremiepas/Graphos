@@ -33,7 +33,7 @@ import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck, renderSpecReport, reportGates)
 import Graphos.Infrastructure.SpecParse (parseSpecDir)
-import Graphos.UseCase.Query (queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
+import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, queryGraphWithIndexScored, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
@@ -43,7 +43,7 @@ import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import qualified Graphos.UseCase.Merge as Merge (mrGraph)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors, degree)
-import Graphos.Domain.Graph.Analysis (articulationPoints)
+import Graphos.Domain.Graph.Analysis (articulationPoints, toCachedFGL)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
@@ -299,7 +299,7 @@ main = do
         Right loaded -> do
            let g = lrGraph loaded
                idx = lrIndex loaded
-               scoredResp0 = queryGraphWithIndexScored g idx question mode budget
+               scoredResp0 = queryGraphWithIndexScoredScoped g idx (toCachedFGL g) question mode budget (cqoPath qopts)
                scoredResp = case cqoMaxNodes qopts of
                  Just n | n > 0 -> scoredResp0 { qrespNodes = take n (qrespNodes scoredResp0) }
                  _ -> scoredResp0

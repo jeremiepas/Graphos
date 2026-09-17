@@ -49,6 +49,7 @@ data CommonQueryOpts = CommonQueryOpts
   , cqoStrictGraph   :: !Bool
   , cqoMaxNodes      :: Maybe Int
   , cqoMaxLabelChars :: Maybe Int
+  , cqoPath          :: Maybe Text
   } deriving (Eq, Show)
 
 defaultCommonQueryOpts :: CommonQueryOpts
@@ -61,6 +62,7 @@ defaultCommonQueryOpts = CommonQueryOpts
   , cqoStrictGraph   = False
   , cqoMaxNodes      = Nothing
   , cqoMaxLabelChars = Nothing
+  , cqoPath          = Nothing
   }
 
 -- | Estimate token count from character count (rough: chars / 4).

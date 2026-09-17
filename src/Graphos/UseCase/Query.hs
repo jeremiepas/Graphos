@@ -9,8 +9,9 @@ module Graphos.UseCase.Query
   ( queryGraph
   , queryGraphWithIndex
   , queryGraphWithIndexScored
-  , queryGraphWithIndexScoredCached
-  , pathQuery
+   , queryGraphWithIndexScoredCached
+   , queryGraphWithIndexScoredScoped
+   , pathQuery
   , pathQueryWithIndex
   , pathQueryWithIndexCached
   , explainNode
@@ -54,7 +55,7 @@ import Data.Graph.Inductive.Query.BFS ()
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, shortestPath, depthFirstSearch, gNodes, gEdges
                             , articulationPoints, biconnectedComponents, dominators)
-import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet, bfsFrom, giLabelIndex, giAdj)
+import Graphos.Domain.Graph.Index (GraphIndex(..), buildIndex, findMatchingNodes, bfsFromSet, bfsFrom, giLabelIndex, giAdj, pathGlobFilter)
 import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
 import Graphos.Domain.Graph.Query (shortestPathWithCached, depthFirstSearchWithCached)
 import Graphos.Domain.Graph.Score
@@ -130,24 +131,42 @@ unConfidence (Confidence d) = d
 -- Verdict thresholds: strong ≥ 0.5, weak > 0, none = 0.
 queryGraphWithIndexScored :: Graph -> GraphIndex -> Text -> Text -> Int -> QueryResponse
 queryGraphWithIndexScored g idx query mode budget =
-  queryGraphWithIndexScoredCached g idx (toCachedFGL g) query mode budget
+  queryGraphWithIndexScoredScoped g idx (toCachedFGL g) query mode budget Nothing
+
+-- | Scored query path restricted to a source-path glob (REQ-S2).
+--
+-- When @mScope@ is 'Just' a glob, candidate matches are filtered to
+-- @C_g = { n : nodeSourceFile n ≡ g }@ before scoring/traversal, so the
+-- token budget is spent only on in-scope nodes. A scope with no in-scope
+-- match yields verdict 'NoMatch' with an empty node list.
+queryGraphWithIndexScoredScoped :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Int -> Maybe Text -> QueryResponse
+queryGraphWithIndexScoredScoped g idx cfg query mode budget mScope =
+  queryGraphWithIndexScoredCached g idx cfg query mode budget mScope
 
 -- | Scored query path using a prebuilt CachedFGL — no per-call FGL rebuild.
 -- The dfs-mode expansion reads from the cached FGL instead of rebuilding it.
-queryGraphWithIndexScoredCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Int -> QueryResponse
-queryGraphWithIndexScoredCached g idx cfg query mode budget =
+queryGraphWithIndexScoredCached :: Graph -> GraphIndex -> CachedFGL -> Text -> Text -> Int -> Maybe Text -> QueryResponse
+queryGraphWithIndexScoredCached g idx cfg query mode budget mScope =
   let terms = filter ((> 2) . T.length) (T.words (T.toLower query))
       -- Scored term matching via inverted index
       matched :: [(NodeId, Int)]
       matched = findMatchingNodes terms idx
+      -- REQ-S2 path scope: restrict candidate matches to C_g before scoring.
+      scopedMatched :: [(NodeId, Int)]
+      scopedMatched = case mScope of
+        Just glob ->
+          let candidates = Set.fromList [nid | (nid, _) <- matched]
+              inScope = pathGlobFilter (gNodes g) glob candidates
+          in filter (\(nid, _) -> nid `Set.member` inScope) matched
+        Nothing -> matched
       -- Build score map: NodeId -> raw score
       scoreMap :: Map NodeId Int
-      scoreMap = Map.fromList matched
+      scoreMap = Map.fromList scopedMatched
       -- Compute normalized scores with full-label boost
       scoredPairs :: [(NodeId, Double)]
       scoredPairs =
         [ (nid, normalizeScore rawScore (length terms) + fullLabelBoostForTerms terms (toText (nodeLabel n)))
-        | (nid, rawScore) <- matched
+        | (nid, rawScore) <- scopedMatched
         , Just n <- [Map.lookup nid (gNodes g)]
         ]
       bestScore :: Double
