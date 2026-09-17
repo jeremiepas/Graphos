@@ -38,7 +38,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL (decodeUtf8)
 
-import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict, defaultMaxLabelChars, truncateLabel, enforceByteBudget)
+import Graphos.Domain.Graph.Score (ScoredNode(..), QueryResponse(..), showVerdict, truncateLabel, enforceByteBudget)
 import Graphos.Domain.Query.Cypher.Eval (CypherResult(..), MutationResult(..), MutationSummary(..))
 import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
