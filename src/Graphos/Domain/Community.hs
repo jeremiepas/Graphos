@@ -80,6 +80,15 @@ defaultResolution = Resolution
 detectCommunities :: Graph -> CommunityMap
 detectCommunities g = detectCommunitiesWithResolution g defaultResolution
 
+-- | Detect communities with a fixed resolution.
+--
+-- Deterministic function of its arguments: for a fixed graph and resolution it
+-- always returns the same @CommunityMap@, and — because every internal step
+-- orders nodes, neighbours, and community ids canonically ('Data.Map'\/'Data.Set'
+-- keys and 'IntMap' keys) — the same graph produced by any order of a consistent
+-- merge yields identical community labels per node. This is the graph\/community
+-- half of view-permutation invariance (theorem T3) and INV-DETERMINISTIC-CLUSTER
+-- in the @merge-cluster-determinism-graph-half@ change design.
 detectCommunitiesWithResolution :: Graph -> Resolution -> CommunityMap
 detectCommunitiesWithResolution g res =
   let raw = leidenPhase g res
@@ -591,6 +600,15 @@ cohesionToCommunityIdx st assign i cid =
   in fromIntegral sameCommunity / fromIntegral totalNbs
 
 leidenPhase :: Graph -> Resolution -> CommunityMap
+-- | Run the Leiden local-moving pass to a fixed point and map the resulting
+-- assignment to a community map.
+--
+-- Deterministic given the graph: 'buildLeidenState' assigns node indices via
+-- sorted 'Data.Map' keys and neighbour order via sorted 'Data.Set' listing, the
+-- local-moving pass visits nodes in index order, and 'leidenStateToCommunityMap'
+-- sorts community ids. The loop is strictly bounded by @resMaxIterations@ and
+-- stops early when a pass performs no move, so every input resolves to exactly
+-- one assignment vector.
 leidenPhase g res =
   -- Edge case: empty graph (no nodes) → no communities
   if Map.null (gNodes g)
@@ -617,6 +635,10 @@ leidenLoop st0 maxIter = go st0 maxIter (lsAssignment st0)
                  else go st'' (remaining - 1) (lsAssignment st'')
 
 leidenStateToCommunityMap :: LeidenState -> CommunityMap
+-- | Map a Leiden assignment to a community map. Community ids are assigned by
+-- ascending internal index ('IntMap.toList'), so identical assignments always
+-- produce identical cid-labelled maps — no relabelling depending on traversal
+-- order.
 leidenStateToCommunityMap st =
   let assign  = lsAssignment st
       n       = lsN st

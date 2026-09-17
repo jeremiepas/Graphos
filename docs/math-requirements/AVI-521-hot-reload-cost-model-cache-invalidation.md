@@ -199,8 +199,8 @@ Deterministic stages give local confluence provided each fold is a commutative i
 operator (a semi-lattice): then any interleaving/reduction of folds collapses to a canonical
 order, so the final `(V,E)` is independent of batching/order. Idempotency absorbs re-processing
 of unchanged files; commutativity absorbs reorderings; associativity absorbs different debounce
-batchings. On conflicting `NodeId` labels the merge is *not* commutative (last-write-wins breaks
-symmetry) — this matches the CTO architecture note that `merge ∘ cluster` is non-commutative;
+batchings. On conflicting `NodeId` labels the merge is *not* commutative (old-wins / left-operand wins
+breaks symmetry) — this matches the CTO architecture note that `merge ∘ cluster` is non-commutative;
 confluence is asserted only for the consistent-view layer, exactly as [AVI-512](/AVI/issues/AVI-512) rev 2
 requires. If `Merge` is **not** applied (the batch is built in isolation and never folded into
 `G_prev`), the rewrite system does not accumulate; the running graph drifts toward the batch, and
