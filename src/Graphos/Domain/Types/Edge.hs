@@ -44,6 +44,8 @@ data Relation
   | Satisfies
   | Supersedes
   | Constrains
+  | Documents
+  deriving (Eq, Show, Generic, Ord, Bounded, Enum)
   deriving (Eq, Show, Generic, Ord, Bounded, Enum)
 
 instance NFData Relation
@@ -72,6 +74,7 @@ relationToText = \case
   Satisfies     -> "satisfies"
   Supersedes    -> "supersedes"
   Constrains    -> "constrains"
+  Documents     -> "documents"
 
 textToRelation :: Text -> Maybe Relation
 textToRelation = \case
@@ -88,6 +91,7 @@ textToRelation = \case
   "satisfies"      -> Just Satisfies
   "supersedes"     -> Just Supersedes
   "constrains"     -> Just Constrains
+  "documents"      -> Just Documents
   _            -> Nothing
 
 newtype Confidence = Confidence Double

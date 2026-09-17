@@ -215,8 +215,9 @@ inferCodeDocEdges g =
         , notEdgeAlready g docNid codeNid
         ]
 
-  in dedupOn (\e -> (edgeSource e, edgeTarget e))
-       (nameAlignEdges ++ pathAlignEdges)
+  in sortOn edgeSortKey
+       (dedupOn (\e -> (edgeSource e, edgeTarget e))
+         (nameAlignEdges ++ pathAlignEdges))
 
 -- | Semantic edge inference mode, determined by config + force flag + graph shape.
 data SemanticMode
@@ -273,7 +274,8 @@ inferSemanticCodeDocEdges se g embs
              ]
         | (docNid, docEmb) <- docWithEmb
         ]
-  in dedupOn (\e -> (edgeSource e, edgeTarget e)) semanticEdges
+  in sortOn edgeSortKey
+       (dedupOn (\e -> (edgeSource e, edgeTarget e)) semanticEdges)
 
 fileBaseName :: Text -> Text
 fileBaseName path =
@@ -345,3 +347,13 @@ makeInferredEdge src tgt rel w = Edge
   , edgeConfidence = Confidence w
   , edgeExtra     = Nothing
   }
+
+-- | Canonical ordering key for an inferred edge: '(source, target, relation)'.
+--
+-- Inference passes build edges by folding over 'Data.Map' traversal order, which
+-- is already stable, but this key makes the guarantee explicit and independent of
+-- any incidental node iteration or hash-bucket order. Sorting inferred edges on
+-- it means the same input graph always yields a byte-identical edge list across
+-- runs, which is what reproducibility of graph construction depends on.
+edgeSortKey :: Edge -> (NodeId, NodeId, Relation)
+edgeSortKey e = (edgeSource e, edgeTarget e, edgeRelation e)
