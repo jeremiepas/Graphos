@@ -320,6 +320,7 @@ test-suite graphos-test
     Graphos.Domain.Community.LabelSpec
     Graphos.Domain.Community.ClusterInvarianceSpec
     Graphos.Domain.Community.DeterminismSpec
+    Graphos.Domain.Community.PermutationSpec
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
@@ -381,7 +382,6 @@ test-suite graphos-test
     Graphos.UseCase.PipelineIncrementalSpec
     Graphos.UseCase.InferBetweennessWiringSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
-
   build-depends:
       base
     , graphos
