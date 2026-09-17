@@ -17,7 +17,7 @@ import Data.Text.Short (fromText, toText)
 import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidence(..),
                             FileType(..), CommunityId, CommunityMap, CohesionMap,
                             SurprisingConnection(..), SuggestedQuestion(..),
-                            Analysis(..), relationToText)
+                            Analysis(..), NullModel(..), relationToText)
 import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, gNodes, gEdges, degree)
 import Graphos.Domain.Community (cohesionScore)
 
@@ -40,8 +40,9 @@ analyze g commMap cohesionMap =
       labels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- Map.keys commMap]
       questions = suggestQuestions g commMap labels
   in Analysis
-    { analysisCommunities = commMap
-    , analysisCohesion     = cohesionMap
+    { analysisCommunities   = commMap
+    , analysisNullModel     = DefaultNullModel
+    , analysisCohesion      = cohesionMap
     , analysisGodNodes     = gods
     , analysisSurprises    = surprises
     , analysisQuestions    = questions
