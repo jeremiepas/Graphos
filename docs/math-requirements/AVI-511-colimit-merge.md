@@ -25,8 +25,8 @@ One notation throughout, sourced from the Graphos domain types. This is the same
 | Name | Signature | Semantics (core) | Source |
 |---|---|---|---|
 | `buildGraph` | `Bool -> Extraction -> Graph` | drops dangling edges; builds adjacency; takes `directed` flag | `Core.hs:96` |
-| `mergeExtractions` | `Extraction -> Extraction -> Extraction` | `Map.union` on nodes and edges — **second wins** on key conflict | `Core.hs:129` |
-| `mergeGraphs` | `Graph -> Graph -> Graph` | `gNodes old <> gNodes new` (new/second wins), edges unioned then filtered to drop dangling, adjacency unioned, `gDirected old` preserved, hash recomputed | `Core.hs:140` |
+| `mergeExtractions` | `Extraction -> Extraction -> Extraction` | `Map.union` on nodes and edges — **(old / left operand) wins** on key conflict | `Core.hs:129` |
+| `mergeGraphs` | `Graph -> Graph -> Graph` | `gNodes old <> gNodes new` (old/left wins), edges unioned then filtered to drop dangling, adjacency unioned, `gDirected old` preserved, hash recomputed | `Core.hs:140` |
 | `mergeGraphsAndAnalyze` | `Graph -> Graph -> ... -> MergeResult` | `mergeGraphs → clusterGraphWithResolution → inferEdges → analyze`; source community IDs discarded and re-detected | `Merge.hs:37` |
 | `GraphDiff` | `{diffAddedNodes, diffRemovedNodes, diffAddedEdges, diffRemovedEdges}` | per-file add/remove delta for incremental rebuild | `Types/Graph.hs:127` |
 
@@ -116,18 +116,18 @@ i.e. `mergeGraphs old new` is the colimit of the two-object consistent diagram, 
    A ∩ B  ─▶  A
      ▟          ▟
     ▟           ▶  A ⊔_(A∩B) B  =  mergeGraphs A B
-    ▟            (new wins on conflict)
+    ▟            (old / left operand wins on conflict)
    B  ─▶  B
 ```
 The pushout square commutes (`ι_A ∘ inA = ι_B ∘ inB` on the shared keys) and is universal: any co-square (pairs of morphisms `A → Q`, `B → Q` agreeing on `A ∩ B`) factors uniquely through it. Pushout is the colimit over the span category `• ← • → •` (standard; Lemmermeyer, *graph pushouts*; Freyjá–Lack–Morrison, cospan gluing). When `A ∩ B = ∅` the pushout degenerates to the coproduct (disjoint-file merge).
 
-### 3.3 ⚠️ Conflict case — "new wins" is a chosen cocone, not a universal property
+### 3.3 ⚠️ Conflict case — "old wins" is a chosen cocone, not a universal property
 
-**Honesty clause (required).** When `A` and `B` share a key `k` with **different** `Node` values, no value-preserving embedding `A ↪ B` or `B ↪ A` exists, so the pair is **not an object of 𝔻** and §3.1/§3.2 do not apply. `mergeGraphs` still returns a graph via `gNodes old <> gNodes new` (`Core.hs:142`) — `Data.Map.union` takes the **right/new** operand's value on conflict. This is a **resolution policy**: it selects a specific cocone apex (the "new wins" object) rather than a universal one.
+**Honesty clause (required).** When `A` and `B` share a key `k` with **different** `Node` values, no value-preserving embedding `A ↪ B` or `B ↪ A` exists, so the pair is **not an object of 𝔻** and §3.1/§3.2 do not apply. `mergeGraphs` still returns a graph via `gNodes old <> gNodes new` (`Core.hs:142`) — `Data.Map.union` keeps the **left/first** operand's value on conflict. This is a **resolution policy**: it selects a specific cocone apex (the "old wins" object) rather than a universal one.
 
-**Consequence.** With conflicts, the merge result **depends on merge order** (the last merge partner's value wins at each conflicting key). This order-dependence is a **policy choice**, not a violation of the universal property (which pins results only up to canonical iso for consistent diagrams). The mediating-morphism universal property still holds *from* the chosen apex to any other cocone whose legs agree with "new wins" on the overlap.
+**Consequence.** With conflicts, the merge result **depends on merge order** (the old (left/first) merge partner's value wins at each conflicting key). This order-dependence is a **policy choice**, not a violation of the universal property (which pins results only up to canonical iso for consistent diagrams). The mediating-morphism universal property still holds *from* the chosen apex to any other cocone whose legs agree with "old wins" on the overlap.
 
-> **Constrains:** `mergeGraphs` (`Core.hs:140-142`, `gNodes old <> gNodes new`), `mergeExtractions` (`Core.hs:131-132`). 🔧 Requires a loop with [Graphos Dev](/AVI/agents/graphos-dev) to confirm the second-wins semantics is intended for every conflicting key (node *and* edge), since `Map.union` second-wins on both.
+> **Constrains:** `mergeGraphs` (`Core.hs:140-142`, `gNodes old <> gNodes new`), `mergeExtractions` (`Core.hs:131-132`). 🔧 Requires a loop with [Graphos Dev](/AVI/agents/graphos-dev) to confirm the old-wins semantics is intended for every conflicting key (node *and* edge), since `Map.union` keeps the left/first operand on both.
 
 ---
 
@@ -219,7 +219,7 @@ After `mergeGraphs A B`: (a) every edge's `edgeRelation`, `edgeWeight`, `edgeCon
 The colimit is realized by `Data.Map.union` at **O(n₁ + n₂)** per binary merge (`mergeExtractions` comment `Core.hs:124-128`), i.e. the categorical colimit adds **no asymptotic cost** over the concrete Map union. Consequently the n-way colimit must be a **single left-fold** `foldl' mergeExtractions` costing **O(Σᵢ |Vᵢ|)** total — linear in input — **not** a nested/right-fold, which the `Core.hs:127` comment flags as OOM-inducing over 1000+ files. Requirement: the n-way colimit cost = Σ of per-view sizes; verify no quadratic blowup in a benchmark over many views.
 
 ### AC-4 — Haskell-constraint statement per requirement (loop with Graphos Dev)
-Every requirement in §1–§6 names its constrained surface (table in §0) and carries the acceptance test above. 🔧-marked requirements (§3.3 second-wins on both node and edge keys; §5 discarded-source-communities) must be **looped with [Graphos Dev](/AVI/agents/graphos-dev) before finalizing any behavior-constraining requirement** — this doc constrains behavior only after that confirmation. Until then, the 🔧 requirements are stated as *proposed* semantics pending developer confirmation.
+Every requirement in §1–§6 names its constrained surface (table in §0) and carries the acceptance test above. 🔧-marked requirements (§3.3 old-wins on both node and edge keys; §5 discarded-source-communities) must be **looped with [Graphos Dev](/AVI/agents/graphos-dev) before finalizing any behavior-constraining requirement** — this doc constrains behavior only after that confirmation. Until then, the 🔧 requirements are stated as *proposed* semantics pending developer confirmation.
 
 ---
 
@@ -231,7 +231,7 @@ Every requirement in §1–§6 names its constrained surface (table in §0) and 
 | R2 | n-way colimit = coproduct (disjoint) or union-over-cover (§1.2) | `mergeExtractions`, `GraphDiff` | AC-1 | structural |
 | R3 | `mergeGraphs` = colimit of F (§3.1) | `mergeGraphs`, `buildGraph` | AC-1, AC-2 | structural |
 | R4 | 2-way merge = pushout over consistent overlap (§3.2) | `mergeGraphs` | AC-1 | structural |
-| R5 | "new wins" = chosen cocone, order-dependent on conflict (§3.3) | `Core.hs:142` | AC-2 | 🔧 loop w/ Dev |
+| R5 | "old wins" = chosen cocone, order-dependent on conflict (§3.3) | `Core.hs:142` | AC-2 | 🔧 loop w/ Dev |
 | R6 | Dedup = coequalizer; unique mediating morphism (§4) | `mergeExtractions` | AC-2 | structural |
 | R7 | Structural naturality (nodes/edges/weight/directed preserved) (§5) | `mergeGraphs` | AC-2 | structural |
 | R8 | Communities discarded, re-detected; non-natural (§5, §6.1) | `mergeGraphsAndAnalyze` | behavior | 🔧 loop w/ Dev |
@@ -245,11 +245,11 @@ Every requirement in §1–§6 names its constrained surface (table in §0) and 
 - **Colimit = coequalizer of a coproduct;** pushout = colimit over the span category — standard categorical facts (Riehl, *Categorical Topology and Logic*, Ch. 2; Borceux & Brumberg, *Category Theory*, vol. II).
 - **Graph gluing via pushout / cospan semantics** (Lemmermeyer, *Graph Categories* / graph pushouts; Freyjá, Lack & Morrison, "Cospan Semantics for Relational Systems") — the reference for "merge as pushout."
 - **Sheaf-style local-to-global as a colimit over a cover** (Mac Lane & Moerdahl, *Sheaves in Geometry and Logic*; the global sections of a presheaf over a cover are its colimit, and the sheaf condition is the descent/colimit equality) — the reference for "merged graph = colimit of local views; local and global truth agree on overlaps."
-- **`Data.Map.union` second-wins** — library semantics, not invented here (`containers`); the "new wins" policy (§3.3) is a Graphos choice layered on top.
+- **`Data.Map.union` keeps the left/first operand (old-wins)** — library semantics, not invented here (`containers`); the "old wins" policy (§3.3) is a Graphos choice layered on top.
 
 ---
 
 ## 10. Determinism Lens
 
 - **Consistent diagrams:** `mergeGraphs`/`mergeExtractions` are associative and commutative up to canonical iso, so the merge result is **order-independent** (sheaf local-to-global consistency, AC-1).
-- **Conflicting diagrams:** `Map.union` second-wins makes the result **order-dependent** on conflicting keys (§3.3) — a documented policy choice, not a universal-property violation. Requirement: the order-dependence is explicit and tested (AC-2 asserts the surviving value equals the *last* merge partner's value at each conflict).
+- **Conflicting diagrams:** `Map.union` (old-wins, keeping the left/first operand) makes the result **order-dependent** on conflicting keys (§3.3) — a documented policy choice, not a universal-property violation. Requirement: the order-dependence is explicit and tested (AC-2 asserts the surviving value equals the *old* (left/first) merge partner's value at each conflict).
