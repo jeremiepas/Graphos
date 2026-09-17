@@ -1,5 +1,6 @@
 module Studio.Api exposing
     ( Capabilities
+    , fetchOverview
     , fetchGraphString
     , groupCount
     , mutate
@@ -98,7 +99,36 @@ fetchGraphString origin toMsg =
 
 
 
--- MUTATION (cypher-mutation write subset)
+{-| Fetch the overview (`GET /api/overview`, progressive-graph-interface). The
+only data a fresh slices-mode load requires: aggregates + totals + graph hash.
+Returns the raw body; `Main` decodes it with `Studio.Data.Source.overviewDecoder`. -}
+fetchOverview : String -> (Result String String -> msg) -> Cmd msg
+fetchOverview origin toMsg =
+    Http.get
+        { url = origin ++ "/api/overview"
+        , expect =
+            Http.expectStringResponse toMsg
+                (\resp ->
+                    case resp of
+                        Http.GoodStatus_ _ body ->
+                            Ok body
+
+                        Http.BadStatus_ meta _ ->
+                            Err ("overview: HTTP " ++ String.fromInt meta.statusCode)
+
+                        Http.NetworkError_ ->
+                            Err "network error — is graphos serve running?"
+
+                        Http.Timeout_ ->
+                            Err "timeout fetching overview"
+
+                        Http.BadUrl_ u ->
+                            Err ("bad URL: " ++ u)
+                )
+        }
+
+
+
 
 
 mutate : String -> String -> (Result String () -> msg) -> Cmd msg

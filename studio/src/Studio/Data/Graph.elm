@@ -5,6 +5,7 @@ module Studio.Data.Graph exposing
     , Graph
     , Node
     , adjacency
+    , aggregateDecoder
     , aggregateFor
     , communityLabel
     , communityMembers
