@@ -369,18 +369,18 @@ test-suite graphos-test
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
-     Graphos.Infrastructure.Export.PersistMutationSpec
-     Graphos.Infrastructure.Export.ResearchHTMLSpec
-     Graphos.UseCase.SubgraphSpec
-     Graphos.UseCase.ResearchSpec
-     Graphos.UseCase.DetectSpec
-     Graphos.UseCase.DetectClassificationSpec
-     Graphos.Fidelity.ImportEdgesSpec
-     Graphos.Fidelity.GraphCoverageSpec
-     Graphos.UseCase.ExportSpec
-     Graphos.UseCase.PipelineIncrementalSpec
-      Graphos.UseCase.InferBetweennessWiringSpec
-     Graphos.Infrastructure.FileSystem.CacheSpec
+    Graphos.Infrastructure.Export.PersistMutationSpec
+    Graphos.Infrastructure.Export.ResearchHTMLSpec
+    Graphos.UseCase.SubgraphSpec
+    Graphos.UseCase.ResearchSpec
+    Graphos.UseCase.DetectSpec
+    Graphos.UseCase.DetectClassificationSpec
+    Graphos.Fidelity.ImportEdgesSpec
+    Graphos.Fidelity.GraphCoverageSpec
+    Graphos.UseCase.ExportSpec
+    Graphos.UseCase.PipelineIncrementalSpec
+    Graphos.UseCase.InferBetweennessWiringSpec
+    Graphos.Infrastructure.FileSystem.CacheSpec
 
   build-depends:
       base
