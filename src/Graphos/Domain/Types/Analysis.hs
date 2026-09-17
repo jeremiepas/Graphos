@@ -15,14 +15,15 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Graphos.Domain.Types.Edge (Confidence)
-import Graphos.Domain.Types.Graph (CommunityMap, CohesionMap)
+import Graphos.Domain.Types.Graph (CommunityMap, CohesionMap, NullModel(..))
 import Graphos.Domain.Types.Node (NodeId)
 
 -- | Analysis results
 data Analysis = Analysis
-  { analysisCommunities :: !CommunityMap
-  , analysisCohesion     :: !CohesionMap
-  , analysisGodNodes     :: ![GodNode]
+  { analysisCommunities   :: !CommunityMap
+  , analysisNullModel     :: !NullModel
+  , analysisCohesion      :: !CohesionMap
+  , analysisGodNodes      :: ![GodNode]
   , analysisSurprises    :: ![SurprisingConnection]
   , analysisQuestions    :: ![SuggestedQuestion]
   } deriving (Eq, Show)

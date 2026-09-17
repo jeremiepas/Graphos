@@ -11,10 +11,11 @@ module Graphos.Domain.Types.Graph
    , LabeledGraph(..)
 
 
-    -- * Community types
-  , CommunityId
-  , CommunityMap
-  , CohesionMap
+     -- * Community types
+   , CommunityId
+   , CommunityMap
+   , CohesionMap
+   , NullModel(..)
 
     -- * Push mode
   , PushMode(..)
@@ -27,7 +28,7 @@ module Graphos.Domain.Types.Graph
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject, withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject, withText, Value(..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -43,6 +44,26 @@ type CommunityId = Int
 type CommunityMap = Map CommunityId [NodeId]
 
 type CohesionMap = Map CommunityId Double
+
+-- | Null models for the weighted modularity baseline (AVI-535 §5).
+--
+-- Both are degree-preserving configuration null models; they differ only in how
+-- self-loops and cross-community edges are counted (undirected vs. directed).
+data NullModel
+  = DefaultNullModel        -- ^ Undirected degree-preserving configuration null model (§5.1)
+  | DirectedNullModel       -- ^ Directed degree-preserving configuration null model (§5.3)
+  deriving (Eq, Show, Generic)
+
+instance ToJSON NullModel where
+  toJSON DefaultNullModel = String "degree_config_undirected"
+  toJSON DirectedNullModel = String "degree_config_directed"
+
+instance FromJSON NullModel where
+  parseJSON (String s) = case s of
+    "degree_config_undirected" -> pure DefaultNullModel
+    "degree_config_directed"   -> pure DirectedNullModel
+    _                        -> fail ("unknown NullModel tag: " ++ T.unpack s)
+  parseJSON _                = fail "expected a string tag for NullModel"
 
 data Extraction = Extraction
   { extractionNodes :: !(Map NodeId Node)
