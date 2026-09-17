@@ -107,7 +107,6 @@ mutationRenderSpec = describe "renderMutationResult" $ do
       renderMutationResultJSON mr `shouldBe`
         "{\"columns\":[\"n.status\"],\"rows\":[[7]],\"summary\":{\"nodes_created\":1,\"nodes_deleted\":0,\"properties_removed\":1,\"properties_set\":3,\"rels_created\":0,\"rels_deleted\":0,\"rels_upserted\":2},\"truncated\":false}"
 
-<<<<<<< HEAD
 -- * Budget-aware serialization helpers
 renderBudgetSpec :: Spec
 renderBudgetSpec = describe "budget-aware serialization" $ do
@@ -187,7 +186,6 @@ renderBudgetSpec = describe "budget-aware serialization" $ do
             Just (String p) -> T.length p < 500
             _               -> False
         _ -> expectationFailure "node is not a JSON object"
-=======
 -- | Focused tests for the byte-budget response controls (task group 5).
 mkNode :: Text -> Text -> Text -> Double -> Text -> ScoredNode
 mkNode nid lbl src score kind = ScoredNode
@@ -260,4 +258,3 @@ budgetRenderSpec = describe "query response budget" $ do
                                   qrespSuggestions = [], qrespOmittedNodes = 0, qrespOmittedEdges = 0 }
           out = enforceResponseBudget defaultMaxLabelChars 100000 1 resp0
       (qrespOmittedEdges out == 2 && length (qrespEdges out) == 0) `shouldBe` True
->>>>>>> AVI-74-sprint-enforce-query-token-budget

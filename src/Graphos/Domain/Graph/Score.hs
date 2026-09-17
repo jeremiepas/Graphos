@@ -104,7 +104,6 @@ data ScoredNode = ScoredNode
   , snLabel       :: !Text
   , snScore       :: !Double
   , snSourceFile  :: !Text
-  , snKind        :: !Text
   , snCommunityId :: !(Maybe Int)
   , snKind        :: Maybe Text
   } deriving (Eq, Show, Generic)
