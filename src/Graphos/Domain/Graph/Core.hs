@@ -135,7 +135,9 @@ mergeExtractions a b =
     , extractionEdges = mergedEdges
     }
 
--- | Merge two graphs (OLD graph takes precedence — left/first operand wins — for overlapping nodes). `Data.Map.union` / `< >` keeps the left operand.
+-- | Merge two graphs (old graph takes precedence for overlapping nodes;
+-- the new graph's exclusive keys are unioned in). `Data.Map.union` / `<>`
+-- keeps the left operand.
 -- Dangling edges are removed to keep adjacency lists consistent.
 mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =

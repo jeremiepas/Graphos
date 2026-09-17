@@ -24,7 +24,7 @@ Combine two knowledge graphs and re-cluster the result as a unified graph.
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  Merge graphs (Domain.Graph.mergeGraphs)             │  │
 │  │  → Deduplicate nodes by NodeId                       │  │
-│  │  → Merge edges (union, last-write on collision)     │  │
+│  │  → Merge edges (union, old-wins on collision)    │  │
 │  │  → Preserve directed flag from graph A               │  │
 │  └──────────────┬───────────────────────────────────────┘  │
 │                 │                                            │
@@ -68,7 +68,7 @@ Use cases:
 
 ## Key Behavior
 
-- **Node deduplication**: Nodes with the same NodeId are merged (last-write wins from graph B)
+- **Node deduplication**: Nodes with the same NodeId are merged (old-wins: view A / left operand wins on conflict; B's exclusive nodes and all edges are unioned)
 - **Community invalidation**: Community IDs from the source graphs are discarded. The merged graph is re-clustered because combined edges change the optimal community structure
 - **Directed flag**: The first graph's directed setting is preserved
 
