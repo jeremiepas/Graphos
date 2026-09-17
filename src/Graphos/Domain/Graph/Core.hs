@@ -139,9 +139,23 @@ mergeExtractions a b =
 -- the new graph's exclusive keys are unioned in). `Data.Map.union` / `<>`
 -- keeps the left operand.
 -- Dangling edges are removed to keep adjacency lists consistent.
+--
+-- The 'gDirected' flag is pinned by a canonical, order-independent rule: the
+-- result is directed iff either input view is directed. This makes the merge
+-- content-confluent (AVI-658, M1 — design.md §3 theorem T1): for consistent
+-- views the result is identical up to NodeId+weight iso regardless of operand
+-- order, because node maps ('Map.union'), edge maps (filtered 'Map.union'),
+-- 'adjFwd'/'adjBack' ('Set.union' over the shared edge set) and
+-- 'computeGraphHash' (sorted keys) are each order-independent, so the formerly
+-- operand-order-dependent 'gDirected' field was the sole blocker.
+--
+-- Caveat: 'gEmbeddingsPath' still follows the 'old' operand. It is transient
+-- sidecar metadata excluded from the content-confluence iso notion and left
+-- unchanged here (out of scope for M1).
 mergeGraphs :: Graph -> Graph -> Graph
 mergeGraphs old new =
-  let mergedNodes = gNodes old <> gNodes new
+  let directed = gDirected old || gDirected new -- canonical: directed iff any input view is directed (order-independent)
+      mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
                       (gEdges old <> gEdges new)
       mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
@@ -156,7 +170,7 @@ mergeGraphs old new =
      , gEdges         = mergedEdges
      , gAdjFwd        = mergedFwd
      , gAdjBack       = mergedBwd
-     , gDirected      = gDirected old
+     , gDirected      = directed
      , gCompositions  = Nothing
      , gHash          = computeGraphHash mergedNodes mergedEdges
      , gEmbeddings    = mergedEmbs
