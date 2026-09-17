@@ -1,0 +1,5 @@
+name = "IntentGraph"
+defaultTargets = ["IntentGraph"]
+
+[[lean_lib]]
+name = "IntentGraph"
