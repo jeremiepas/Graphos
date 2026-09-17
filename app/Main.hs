@@ -46,7 +46,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors
 import Graphos.Domain.Graph.Analysis (articulationPoints, toCachedFGL)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, enforceResponseBudget, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)

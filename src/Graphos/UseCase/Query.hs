@@ -196,6 +196,7 @@ queryGraphWithIndexScoredCached g idx cfg query mode budget mScope =
             , snLabel       = toText (nodeLabel n)
             , snScore       = fromIntegral (Map.findWithDefault 0 nid scoreMap) / max 1 (fromIntegral (length terms)) + fullLabelBoostForTerms terms (toText (nodeLabel n))
             , snSourceFile  = toText (nodeSourceFile n)
+            , snKind        = case nodeKind n of Just k -> toText k; Nothing -> ""
             , snCommunityId = nodeCommunityId n
             , snKind        = fmap toText (nodeKind n)
             }
