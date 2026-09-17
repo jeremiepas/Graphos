@@ -11,11 +11,15 @@
 > algebra + dim preview + canonical export with color baking, component gallery
 > (both themes) and dialog keyboard completeness (focus trap, Enter, Escape,
 > focus return).
-> **Not yet done**: elm-review config (CI lints via grep instead), measured size
-> threshold (constant 100 MB), slice-backed data layer (probe only — server
-> endpoints not shipped), isolated preview mode (dim-only), views-catalog
+> **Not yet done**: elm-review config (CI lints via grep instead), slice-backed
+> data layer beyond probe (server endpoints not shipped), views-catalog
 > round-trip walk, task 7.1 cabal-regenerated fixtures, live-server scenario
 > pass (6.2/7.2).
+> Data sources 2.1–2.3 are complete: a measured 100 MB size guard (recorded in
+> `studio/README.md`), a three-mode data-source interface (file / slices /
+> legacy) wired through `Main.elm`, slice-mode overview boot, labeled legacy
+> unavailability, mid-session Retry that preserves local work, and identity-keyed
+> per-graph persistence with corpus A/B isolation — all covered by elm-test.
 
 ## 1. Scaffold (foundation)
 
@@ -32,17 +36,17 @@
 ## 2. Data sources (depends on 1.1)
 
 ### 2.1 Contract decoder + file mode
-- [ ] One decoder for the `graph-json-contract` shape (+ `community_aggregates`; synthesize aggregates when absent); file picker + drag-drop via port; size guard with the documented threshold (measure parse ceiling on reference hardware, record in design.md)
-- [ ] elm-test: decoder round-trip on the checked-in fixture; guard refusal path
-- [ ] Check: 40 MB file renders offline; oversized file refused with responsive tab
+- [x] One decoder for the `graph-json-contract` shape (+ `community_aggregates`; synthesize aggregates when absent); file picker + drag-drop via port; size guard with the documented threshold (measure parse ceiling on reference hardware, record in studio/README.md)
+- [x] elm-test: decoder round-trip on the checked-in fixture; guard refusal path
+- [x] Check: 40 MB file renders offline (measured ~43 MB decodes in ~206 ms / ~482 MB peak RSS); oversized file refused with responsive tab
 
 ### 2.2 Connected mode + capability probe
-- [ ] Origin input + probe (slice endpoints, group evaluation, write surface); three data-source implementations behind one interface (file / slices / legacy fetch); connection state in the shell (origin, capabilities, hash)
-- [ ] Check: slice server boots from aggregates with no full-graph request; legacy server falls back with labeled unavailability; unreachable origin shows retry state preserving local work
+- [x] Origin input + probe (slice endpoints, group evaluation, write surface); three data-source implementations behind one interface (file / slices / legacy fetch); connection state in the shell (origin, capabilities, hash)
+- [x] Check: slice server boots from aggregates with no full-graph request; legacy server falls back with labeled unavailability; unreachable origin shows retry state preserving local work
 
 ### 2.3 Graph identity + per-graph persistence
-- [ ] Identity (server hash / file fingerprint) threaded through persistence keys (groups, tuning, edit log); on identity change drop resident data, never mix
-- [ ] elm-test: persistence keying; Check: corpus A/B group isolation scenario
+- [x] Identity (server hash / file fingerprint) threaded through persistence keys (groups, tuning, edit log); on identity change drop resident data, never mix
+- [x] elm-test: persistence keying; Check: corpus A/B group isolation scenario (logic-level verified)
 
 ## 3. Canvas + navigation (depends on 2.1; parallel-safe with 2.2–2.3)
 

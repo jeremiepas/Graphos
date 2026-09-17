@@ -9,6 +9,7 @@ import Json.Decode as D
 import Json.Encode as E
 import Set
 import Studio.Data.Graph as Graph
+import Studio.Data.Source as Source
 import Test exposing (Test, describe, test)
 
 
@@ -99,5 +100,36 @@ suite =
                 \_ ->
                     Graph.fingerprint "graph A"
                         |> Expect.notEqual (Graph.fingerprint "graph B")
+            ]
+        , describe "checked-in fixture shape (studio/tests/fixtures/graph.json)"
+            [ test "round-trips through the contract decoder" <|
+                \_ ->
+                    case D.decodeString Graph.decoder Fixtures.fixtureJson of
+                        Err err ->
+                            Expect.fail (D.errorToString err)
+
+                        Ok g ->
+                            Expect.all
+                                [ \_ -> Graph.nodeCount g |> Expect.equal 12
+                                , \_ -> Graph.edgeCount g |> Expect.equal 11
+                                , \_ -> List.length g.aggregates |> Expect.equal 4
+                                , \_ -> Graph.communityLabel g 483 |> Expect.equal "Authentication"
+                                , \_ ->
+                                    -- community_aggregates present: no synthesis needed,
+                                    -- so the decoded aggregate matches the fixture exactly.
+                                    Graph.aggregateFor g 7
+                                        |> Expect.equal (Just { id = 7, memberCount = 3, cohesion = 0.71, bridgeCount = 0, color = "hsl(140,62%,52%)", label = "Config", representativeLabels = [ "parseFlags", "README" ] })
+                                ]
+                                ()
+            ]
+        , describe "file-mode size guard"
+            [ test "refuses above the documented threshold" <|
+                \_ ->
+                    Source.exceedsSizeLimit Source.sizeThresholdBytes (Source.sizeThresholdBytes + 1)
+                        |> Expect.equal True
+            , test "accepts a 40 MB offline file (the offline scenario)" <|
+                \_ ->
+                    Source.exceedsSizeLimit Source.sizeThresholdBytes (40 * 1024 * 1024)
+                        |> Expect.equal False
             ]
         ]
