@@ -45,6 +45,7 @@ module Graphos.Domain.Config
       -- * Embedding configuration
   , EmbeddingConfig(..)
   , defaultEmbeddingConfig
+  , validateEmbeddingConfig
 
       -- * Semantic edge inference configuration
   , SemanticEdgesConfig(..)

@@ -26,6 +26,8 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Yaml (FromJSON(..), withObject, (.:?))
 import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
+import System.Exit (exitWith, ExitCode(..))
+import System.IO (hPutStrLn, stderr)
 import System.FilePath ((</>))
 import qualified Data.Yaml as Yaml
 
@@ -35,14 +37,16 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , MemgraphConfig(..)
                              , LabelingConfig(..)
                              , ObservabilityConfig(..)
-                              , EmbeddingConfig(..)
-                              , SemanticEdgesConfig(..)
-                              , VisionConfig(..)
-                             , FileExtensionConfig(..)
-                             , ExtractorConfig(..)
-                             , Granularity(..)
-                             , LSPServerConfig(..)
-                             , IngestConfig(..)
+                               , EmbeddingConfig(..)
+                               , defaultEmbeddingConfig
+                               , SemanticEdgesConfig(..)
+                               , VisionConfig(..)
+                               , FileExtensionConfig(..)
+                               , ExtractorConfig(..)
+                               , Granularity(..)
+                               , LSPServerConfig(..)
+                               , IngestConfig(..)
+                               , validateEmbeddingConfig
    , defaultGraphosConfig
    , mergeGraphosConfig
    )
@@ -131,7 +135,9 @@ loadConfigWithGlobal projectPath = do
       pure merged
 
 -- | Load Graphos configuration from a specific file path.
--- Falls back to defaults if the file doesn't exist or has parse errors.
+-- Falls back to defaults if the file doesn't exist or has parse errors,
+-- EXCEPT for semantically invalid values (e.g. @embedding.batchSize < 1@),
+-- which fail the load outright with an error naming the offending key.
 loadConfigFrom :: FilePath -> IO GraphosConfig
 loadConfigFrom path = do
   exists <- doesFileExist path
@@ -150,7 +156,15 @@ loadConfigFrom path = do
           putStrLn $ "[config] " ++ path ++ ": " ++ err ++ " — using defaults"
           pure defaultGraphosConfig
         Right cfgFile ->
-          pure $ mergeConfig cfgFile defaultGraphosConfig
+          case validateEmbeddingConfig (cfEmbeddingOrDefault cfgFile) of
+            Left (key, val) -> do
+              hPutStrLn stderr $ "[config] " ++ path ++ ": invalid value for key \""
+                ++ key ++ "\": " ++ show val ++ " (must be >= 1)"
+              exitWith (ExitFailure 1)
+            Right () ->
+              pure $ mergeConfig cfgFile defaultGraphosConfig
+  where
+    cfEmbeddingOrDefault cfgFile = maybe defaultEmbeddingConfig id (cfEmbedding cfgFile)
 
 -- | Merge user config overrides onto defaults.
 -- User values take precedence; missing fields fall back to defaults.

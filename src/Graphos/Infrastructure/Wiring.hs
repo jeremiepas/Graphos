@@ -262,11 +262,17 @@ loadCheckpointFromPath path = do
       pure (Right (UEP.LoadedCheckpoint (lrGraph lr) mSrc))
 
 -- | Production LLM port — delegates to Infrastructure.LLM.*.
+--
+-- Embedding calls reuse the module-level shared 'Emb.embeddingManager'
+-- (created lazily once per process, per design D9): no 'newManager' sits on
+-- the per-call path, so consecutive batch calls reuse the same connection
+-- pool.
 productionLLMPort :: LLMPort
 productionLLMPort = LLMPort
   { lpCallLLM = \lCfg prompt -> OpenAI.callLLM lCfg prompt
   , lpParseLabelsFromResponse = OpenAI.parseLabelsFromResponse
   , lpGenerateEmbedding = \eCfg text -> Emb.generateEmbedding eCfg text
+  , lpGenerateEmbeddings = \eCfg texts -> Emb.generateEmbeddings eCfg texts
   , lpAnalyzeImage = \vCfg lCfg fp -> do
       result <- Vision.analyzeImage vCfg lCfg fp
       case result of

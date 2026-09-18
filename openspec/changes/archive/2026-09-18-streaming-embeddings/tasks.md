@@ -1,0 +1,33 @@
+## 1. Lean 4 equivalence model (verification instrument first)
+
+- [x] 1.1 Review `lean/EmbedPipeline.lean` against the design theorems map (D3, D10): `chunks_flatten`, `lookup_table`, `dedup` (`mem_dedup`), `distribute_table_eq_baseline`, `pipeline_eq_baseline`, `pipeline_batch_size_irrelevant`, `pipeline_keys_irrelevant`, `runCached_sound`, `runCached_fst`, plus the toy `example`s. Confirm every theorem the spec's "Sequential-equivalence" requirement relies on is present and stated generically in `f` and `β`. Check: file lists all ten; each names the pipeline stage it justifies.
+- [x] 1.2 Machine-check the artifact: install Lean 4 (elan/lake from nixpkgs or upstream) and run `lake build` / `lean lean/EmbedPipeline.lean` with zero errors zero warnings. Check: command exits 0; record the exact command in the change (no Mathlib dependency allowed).
+- [x] 1.3 Add a per-text-failure toy instance (`β := Option Nat`, one text maps to `none`) and a `decide`-checked `example` showing `pipeline` and `baseline` agree on *which* nodes lack vectors. Check: `example : pipeline 1 g none nodes = baseline g nodes` compiles.
+
+## 2. Infrastructure: batched HTTP client (D1, D2, D9)
+
+- [x] 2.1 Rewrite `Infrastructure/LLM/Embedding.hs` on `http-client`: module creates/accepts one shared `Manager` (created once in `Wiring.hs`, threaded via a module-level lazy `Manager` or port closure — per D9); request built with `parseRequest`, JSON body in memory; custom headers from `embHeaders` applied to every request. Delete `/tmp/graphos-embed-payload.json` and all `System.Process`/`System.Exit` usage. Check: `rg "graphos-embed-payload|readProcessWithExitCode" src/` returns nothing in Embedding.hs; `cabal build` passes.
+- [x] 2.2 Implement `generateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])`: payload `{"model": …, "input": [t1, …, tn]}`; parse the `data` array, sort items by the `index` field, reject non-permutation index sets and length mismatches; return vectors in input order. Keep `generateEmbedding` as `generateEmbeddings cfg [t]` projected to the single vector. Check: unit Hspec spec against a stub HTTP server (or a pure response-parser spec: order permutation, missing `data`, wrong arity) passes via `cabal test`.
+- [x] 2.3 Wire `Wiring.hs`: create the `Manager` once (`newManager defaultManagerSettings` with sane timeouts), close it only at shutdown; bind `lpGenerateEmbedding` and the new plural field. Check: `cabal build`; two sequential batch calls reuse the manager (code review: no `newManager` inside the per-call path).
+
+## 3. Domain + UseCase: dedup, batch, redistribute (D3, D6, D7, D8)
+
+- [x] 3.1 Extend `EmbeddingConfig` (Domain/Config/Vision.hs): `embBatchSize :: Int` (default 64), `embConcurrency :: Int` (default 1); FromJSON `.:? … .!=`; validation `embBatchSize >= 1` and `embConcurrency >= 1` at config load with named-key error. Check: Hspec — defaults when keys absent; `batchSize: 0` rejected; `concurrency: 4` parsed.
+- [x] 3.2 Add `lpGenerateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])` to `Port/LLMPort.hs`; keep `lpGenerateEmbedding` (delegate or leave; production singular = batch of one). Update test doubles in `tests/…/PipelineSpec.hs` with a plural stub. Check: `cabal build` + `cabal test` (pipeline specs green with stub).
+- [x] 3.3 Rewrite `generateGraphEmbeddings` (UseCase/Pipeline/Core.hs): text per node = `nodeLabel <> " " <> nodeSourceFile` (unchanged); dedup via `Set`; chunk unique texts by `embBatchSize`; call `lpGenerateEmbeddings` per chunk; on chunk failure log and continue (metadata-only for those nodes), mirroring today's per-node failure behavior; redistribute vectors to all nodes sharing a text. Check: Hspec with a fake port capturing calls — 5,000 duplicate-label nodes + 100 uniques ⇒ ≤ 101 texts submitted; assignment equals the sequential loop's on a small fixture.
+- [x] 3.4 Apply the same dedup+batch switch to `generateEmbeddingsForNodes` / `embedNode` (UseCase/Ingest.hs): `ieSourceHash` becomes `sha256hex(model <> embeddedText)` (D7); metadata-only entries keep that same hash with empty vector. Check: Hspec — two same-text nodes from different files produce equal `ieSourceHash` values distinct from any path; failed chunk ⇒ empty-vector entries for exactly those nodes.
+
+## 4. Infrastructure: content-addressed embedding cache (D4)
+
+- [x] 4.1 New `Infrastructure/LLM/EmbeddingCache.hs`: `cacheKey :: Text -> Text -> String` (sha256 hex of model<>text, reusing `cryptohash-sha256`), `loadVector :: FilePath -> Text -> Text -> IO (Maybe [Double])`, `saveVector :: FilePath -> Text -> Text -> [Double] -> IO ()` writing `<cacheRoot>/embeddings/<key>.json` (`{\"vector\": [...]}`) atomically via existing `writeFileAtomic`; undecodable file ⇒ `Nothing` (miss). Check: Hspec — save then load round-trips; corrupt file yields miss; different model ⇒ different key ⇒ miss.
+- [x] 4.2 Integrate the cache into `generateEmbeddings`: partition the unique-text chunk into cached/miss before the HTTP call; only misses go on the wire; every vector (hit or fresh) is written back to the cache (idempotent). Check: Hspec with a temp cache dir — first call hits API once for text T, second call issues zero API calls for T; assignment identical across both calls.
+
+## 5. Concurrency (D5)
+
+- [x] 5.1 Bounded parallel chunk processing: `async` worker pool of `embConcurrency` over chunks (default 1 keeps sequential order); failure of one batch never cancels others; result assembly order-independent. Check: Hspec fake port with `concurrency: 4` and 3 chunks completing in reversed order ⇒ assignment identical to `concurrency: 1`; `cabal test` full suite green.
+
+## 6. End-to-end verification + docs
+
+- [x] 6.1 E2E: run the pipeline with `--embed` against local Ollama; observe: no `/tmp/graphos-embed-payload.json` appears, dedup+batching active, total time drops; rerun ⇒ cache hits and near-zero embedding time. Check: run log excerpts captured in `lean/E2E_LOG.md`; `embeddings.json` sidecar identical between runs (verified on a 4-node fixture; 3 runs incl. selective invalidation).
+- [x] 6.2 Lean re-verification after any proof-affecting edit: rerun 1.2's exact command; zero errors. Check: exit 0 recorded.
+- [x] 6.3 Update docs: `graphos.yaml` example gains `batchSize`/`concurrency` under `embedding:`; one line in the output-directory docs for `graphos-out/cache/embeddings/`; note `ieSourceHash` is now a SHA256 content hash. Check: `rg "batchSize" docs/ README.md` finds the documented keys.

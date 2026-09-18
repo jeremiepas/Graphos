@@ -135,7 +135,7 @@ instance FromJSON IngestIndex where
 data IngestEmbedding = IngestEmbedding
   { ieNodeId      :: NodeId       -- ^ The node this embedding belongs to
   , ieVector      :: [Double]     -- ^ Embedding vector (empty when embedding disabled)
-  , ieSourceHash  :: Text         -- ^ Hash of the source file content (for cache invalidation)
+  , ieSourceHash  :: Text         -- ^ sha256(model <> embedded text): cache key + invalidation
   , ieTimestamp   :: UTCTime      -- ^ When this embedding was generated
   , ieModel      :: Text         -- ^ Model used for embedding (e.g. "nomic-embed-text")
   } deriving (Eq, Show)

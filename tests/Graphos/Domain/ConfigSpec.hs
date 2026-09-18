@@ -9,6 +9,30 @@ import Graphos.Domain.Config
 
 spec :: Spec
 spec = do
+  describe "EmbeddingConfig batchSize/concurrency (streaming-embeddings)" $ do
+    it "defaults batchSize to 64 and concurrency to 1 when keys are absent" $ do
+      decode "{\"enabled\": true}" `shouldBe` Just
+        (defaultEmbeddingConfig { embEnabled = True })
+
+    it "parses explicit batchSize and concurrency values" $ do
+      let cfg = defaultEmbeddingConfig { embBatchSize = 128, embConcurrency = 4 }
+      decode "{\"batchSize\": 128, \"concurrency\": 4}" `shouldBe` Just cfg
+
+    it "validation accepts the defaults" $
+      validateEmbeddingConfig defaultEmbeddingConfig `shouldBe` Right ()
+
+    it "validation accepts explicit valid values" $
+      validateEmbeddingConfig defaultEmbeddingConfig { embBatchSize = 1, embConcurrency = 8 }
+        `shouldBe` Right ()
+
+    it "validation rejects batchSize below 1, naming the key" $
+      validateEmbeddingConfig defaultEmbeddingConfig { embBatchSize = 0 }
+        `shouldBe` Left ("embedding.batchSize", 0)
+
+    it "validation rejects concurrency below 1, naming the key" $
+      validateEmbeddingConfig defaultEmbeddingConfig { embConcurrency = 0 }
+        `shouldBe` Left ("embedding.concurrency", 0)
+
   describe "Granularity JSON round-trip" $ do
     it "round-trips fine" $
       decode (encode GranularityFine) `shouldBe` Just GranularityFine

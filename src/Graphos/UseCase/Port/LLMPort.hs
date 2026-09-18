@@ -40,8 +40,10 @@ data LLMPort = LLMPort
     lpCallLLM              :: LabelingConfig -> Text -> IO (Either Text Text)
     -- | Parse labels from LLM response
   , lpParseLabelsFromResponse :: Text -> Map CommunityId Text
-    -- | Generate embeddings for text
+    -- | Generate an embedding for a single text
   , lpGenerateEmbedding    :: EmbeddingConfig -> Text -> IO (Either Text [Double])
+    -- | Generate embeddings for a batch of texts (one vector per input, in input order)
+  , lpGenerateEmbeddings   :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])
     -- | Analyze image with vision model
   , lpAnalyzeImage         :: VisionConfig -> LabelingConfig -> FilePath -> IO (Either Text ImageAnalysis)
     -- | Validate a URL string

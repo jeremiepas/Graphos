@@ -35,7 +35,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articul
 import Graphos.Domain.Analysis (analyze)
 import Graphos.Domain.Context (QueryComplexity(..), ConversationNode(..), budgetForComplexity, SelectedContext(..)
                                , chatCommunityId, enrichWithChatHistory)
-import Graphos.UseCase.Query (queryGraphWithIndexScored, queryGraphWithIndexScoredScoped, pathQueryWithIndexCached, QueryResponse(..))
+import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndexCached, QueryResponse(..))
 import Graphos.UseCase.Query.Budget (BudgetCtl(..), defaultBudgetCtl, boundedNodes, boundedEdges, nodeJsonBytes, capLabel)
 import Graphos.UseCase.Load (loadGraphFromFile, lrGraph, lrCommunities, lrCohesion, lrIndex, lrCachedFGL, LoadResult(..))
 import Graphos.UseCase.SelectContext (selectContextWithHistory, classifyComplexity)

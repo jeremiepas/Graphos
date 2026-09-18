@@ -8,7 +8,6 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.Char (chr)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text (Text)
 
 import Graphos.UseCase.Query.Render
   ( renderCypherResultText
@@ -110,8 +109,8 @@ mutationRenderSpec = describe "renderMutationResult" $ do
 -- * Budget-aware serialization helpers
 renderBudgetSpec :: Spec
 renderBudgetSpec = describe "budget-aware serialization" $ do
-  let node :: Text -> Double -> ScoredNode
-      node lbl sc = ScoredNode
+  let mkScored :: Text -> Double -> ScoredNode
+      mkScored lbl sc = ScoredNode
         { snNodeId = lbl
         , snLabel  = lbl
         , snScore  = sc
@@ -119,7 +118,7 @@ renderBudgetSpec = describe "budget-aware serialization" $ do
         , snCommunityId = Nothing
         , snKind = Just "Function"
         }
-      ranked = [ node (T.pack ("fn-" ++ show i)) (1.0 - 0.5 * fromIntegral i) | i <- ([0 :: Int .. 2]) ]
+      ranked = [ mkScored (T.pack ("fn-" ++ show i)) (1.0 - 0.5 * fromIntegral i) | i <- ([0 :: Int .. 2]) ]
       generous = defaultBudgetCtl { bcByteBudget = 100000 }
       oneNodeBytes = case ranked of
         (h : _) -> T.length (encodeText (toJSON h))
@@ -127,18 +126,18 @@ renderBudgetSpec = describe "budget-aware serialization" $ do
 
   describe "capLabel" $ do
     it "leaves a label untouched when the cap is non-positive" $ do
-      let out = capLabel defaultBudgetCtl { bcMaxLabelChars = 0 } (node "short" 0.9)
+      let out = capLabel defaultBudgetCtl { bcMaxLabelChars = 0 } (mkScored "short" 0.9)
           result = snLabel out
       result `shouldBe` "short"
 
     it "leaves a short label untouched under the default cap" $ do
-      let out = capLabel defaultBudgetCtl (node "short" 0.9)
+      let out = capLabel defaultBudgetCtl (mkScored "short" 0.9)
           result = snLabel out
       result `shouldBe` "short"
 
     it "applies word-boundary truncation through the budget cap" $ do
       let ctl = defaultBudgetCtl { bcMaxLabelChars = 5 }
-          out = capLabel ctl (node "this-is-a-very-long-label" 0.9)
+          out = capLabel ctl (mkScored "this-is-a-very-long-label" 0.9)
           result = snLabel out
       T.isSuffixOf "…" result `shouldBe` True
       T.length result `shouldSatisfy` (\l -> l < 23)
@@ -174,13 +173,13 @@ renderBudgetSpec = describe "budget-aware serialization" $ do
 
   describe "compact node JSON shape" $ do
     it "emits exactly id, label, score, source_file, kind, preview" $ do
-      case toJSON (node "some-identifier" 0.9) of
+      case toJSON (mkScored "some-identifier" 0.9) of
         Object obj ->
-          (L.sort (KM.keys obj)) `shouldBe` L.sort [Key.fromText "id", Key.fromText "label", Key.fromText "score", Key.fromText "source_file", Key.fromText "kind", Key.fromText "preview"]
+          (L.sort (KM.keys obj)) `shouldBe` L.sort [Key.fromText "id", Key.fromText "label", Key.fromText "score", Key.fromText "source_file", Key.fromText "kind", Key.fromText "preview", Key.fromText "community"]
         _ -> expectationFailure "node is not a JSON object"
 
     it "never leaks the raw label when it is long (preview is truncated)" $ do
-      case toJSON (node (T.replicate 500 "x") 0.9) of
+      case toJSON (mkScored (T.replicate 500 "x") 0.9) of
         Object obj ->
           KM.lookup (Key.fromText "preview") obj `shouldSatisfy` \case
             Just (String p) -> T.length p < 500
@@ -193,7 +192,7 @@ mkNode nid lbl src score kind = ScoredNode
   , snLabel = lbl
   , snScore = score
   , snSourceFile = src
-  , snKind = kind
+  , snKind = if T.null kind then Nothing else Just kind
   , snCommunityId = Nothing
   }
 

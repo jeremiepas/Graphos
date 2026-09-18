@@ -7,6 +7,7 @@ module Graphos.Domain.Config.Vision
   , defaultVisionConfig
   , EmbeddingConfig(..)
   , defaultEmbeddingConfig
+  , validateEmbeddingConfig
   , LabelingConfig(..)
   , defaultLabelingConfig
   , SemanticEdgesConfig(..)
@@ -78,6 +79,8 @@ data EmbeddingConfig = EmbeddingConfig
   , embBaseUrl   :: String             -- ^ Ollama API base URL (e.g. "http://localhost:11434/v1")
   , embDimension :: Int                -- ^ Embedding vector dimension (0 = auto-detect from model)
   , embHeaders   :: Map String String  -- ^ Custom HTTP headers for embedding API calls
+  , embBatchSize :: Int                -- ^ Max texts per embedding API request (default: 64)
+  , embConcurrency :: Int              -- ^ Max batches processed concurrently (default: 1 = sequential)
   } deriving (Eq, Show, Generic)
 
 instance ToJSON EmbeddingConfig where
@@ -91,6 +94,8 @@ instance FromJSON EmbeddingConfig where
     <*> v .:? "baseUrl"   .!= "http://localhost:11434/v1"
     <*> v .:? "dimension" .!= 0
     <*> v .:? "headers"   .!= Map.empty
+    <*> v .:? "batchSize"   .!= 64
+    <*> v .:? "concurrency" .!= 1
 
 -- | Default embedding configuration (disabled, local Ollama).
 defaultEmbeddingConfig :: EmbeddingConfig
@@ -101,7 +106,18 @@ defaultEmbeddingConfig = EmbeddingConfig
   , embBaseUrl   = "http://localhost:11434/v1"
   , embDimension = 0
   , embHeaders   = Map.empty
+  , embBatchSize = 64
+  , embConcurrency = 1
   }
+
+-- | Validate embedding batch/concurrency bounds.
+-- Returns @Left (key, value)@ naming the offending key when a value is below
+-- the minimum of 1; the config loader turns this into a load-time error.
+validateEmbeddingConfig :: EmbeddingConfig -> Either (String, Int) ()
+validateEmbeddingConfig cfg
+  | embBatchSize cfg < 1     = Left ("embedding.batchSize", embBatchSize cfg)
+  | embConcurrency cfg < 1   = Left ("embedding.concurrency", embConcurrency cfg)
+  | otherwise                = Right ()
 
 -- ───────────────────────────────────────────────
 -- Semantic Edge Inference Configuration
