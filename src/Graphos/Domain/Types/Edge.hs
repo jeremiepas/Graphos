@@ -46,7 +46,6 @@ data Relation
   | Constrains
   | Documents
   deriving (Eq, Show, Generic, Ord, Bounded, Enum)
-  deriving (Eq, Show, Generic, Ord, Bounded, Enum)
 
 instance NFData Relation
 

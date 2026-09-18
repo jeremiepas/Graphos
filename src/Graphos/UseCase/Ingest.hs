@@ -18,10 +18,14 @@ module Graphos.UseCase.Ingest
     -- * Single-file ingestion
   , ingestFile
   , FileIngestResult(..)
+
+    -- * Node embedding generation
+  , generateEmbeddingsForNodes
   ) where
 
 import Control.Exception (SomeException, catch)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
@@ -38,7 +42,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Graphos.Domain.Types
   ( Node(..), Extraction(..)
   , FileCategory(..), Detection(..), emptyExclusionCounts
-  , IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex
+  , IngestEmbedding(..), IngestIndex(..), emptyIngestIndex, addToIndex
   , PipelineConfig(..), EmbeddingConfig(..)
   )
 import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtensionConfig(..))
@@ -47,6 +51,7 @@ import Graphos.Domain.Config.Ingest (IngestCategories(..), IngestCategoryConfig(
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
+import Graphos.Infrastructure.LLM.EmbeddingCache (embeddingSourceHash)
 import qualified Graphos.UseCase.Extract as Extract
 
 -- ───────────────────────────────────────────────
@@ -217,7 +222,15 @@ ingestFile appEnv config filePath = do
         else do
           -- Store metadata-only entries (no vector) for index lookups
           now <- getCurrentTime
-          let metaEmbs = [emptyIngestEmbedding (nodeId n) (toText (nodeSourceFile n)) now | n <- nodes]
+          let model = T.pack (embModel embCfg)
+              metaEmbs = [ IngestEmbedding
+                             { ieNodeId     = nodeId n
+                             , ieVector     = []
+                             , ieSourceHash = embeddingSourceHash model (nodeEmbedText n)
+                             , ieTimestamp  = now
+                             , ieModel      = model
+                             }
+                         | n <- nodes ]
               idx' = foldr addToIndex emptyIngestIndex metaEmbs
           pure (metaEmbs, idx')
 
@@ -247,36 +260,49 @@ detectFileCategory ext fec
 
 -- | Generate embeddings for a list of extracted nodes.
 -- Creates a text representation of each node and calls the embedding API.
+-- Texts are deduplicated, so each unique text costs one embedding; the
+-- resulting vectors are shared by every node carrying the same text. A
+-- failed batch withholds vectors only for the nodes whose texts belong to
+-- it (metadata-only entries, as before).
 generateEmbeddingsForNodes :: AppEnv -> EmbeddingConfig -> [Node] -> IO [IngestEmbedding]
 generateEmbeddingsForNodes appEnv cfg nodes = do
   now <- getCurrentTime
   let model = T.pack (embModel cfg)
-  -- Process nodes sequentially to avoid overwhelming local Ollama
-  mapM (embedNode appEnv cfg model now) nodes
-
--- | Generate embedding for a single node.
-embedNode :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> Node -> IO IngestEmbedding
-embedNode appEnv cfg model ts node = do
-  let inputText = toText (nodeLabel node) <> " " <> toText (nodeSourceFile node)
-  result <- lpGenerateEmbedding (llmPort appEnv) cfg inputText
-  case result of
-    Left _err ->
-      -- On failure, store a metadata-only entry (no vector)
-      pure IngestEmbedding
-        { ieNodeId     = nodeId node
-        , ieVector     = []
-        , ieSourceHash = toText (nodeSourceFile node)
-        , ieTimestamp  = ts
-        , ieModel      = model
-        }
-    Right vec ->
-      pure IngestEmbedding
-        { ieNodeId     = nodeId node
+      nodeTexts = [ (n, nodeEmbedText n) | n <- nodes ]
+      uniqueTexts = Set.toList (Set.fromList (map snd nodeTexts))
+      chunks = chunkBy (max 1 (embBatchSize cfg)) uniqueTexts
+  chunkResults <- mapM (embedChunk appEnv cfg model now) chunks
+  let vecTable = Map.fromList (concat chunkResults) :: Map.Map Text [Double]
+  pure
+    [ IngestEmbedding
+        { ieNodeId     = nodeId n
         , ieVector     = vec
-        , ieSourceHash = toText (nodeSourceFile node)
-        , ieTimestamp  = ts
+        , ieSourceHash = embeddingSourceHash model (nodeEmbedText n)
+        , ieTimestamp  = now
         , ieModel      = model
         }
+    | (n, t) <- nodeTexts
+    , let vec = Map.findWithDefault [] t vecTable
+    ]
+
+-- | The text embedded for a node (unchanged from the sequential loop).
+nodeEmbedText :: Node -> Text
+nodeEmbedText n = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
+
+-- | Embed one chunk of unique texts; a transport or API failure yields an
+-- empty contribution for this chunk only (per-batch failure isolation).
+embedChunk :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> [Text] -> IO [(Text, [Double])]
+embedChunk appEnv cfg _model _ts chunk = do
+  r <- lpGenerateEmbeddings (llmPort appEnv) cfg chunk
+  pure $ case r of
+    Left _err  -> []
+    Right vecs -> zip chunk vecs
+
+-- | Split a list into consecutive chunks of at most @n@ elements
+-- (list-level analogue of @T.chunksOf@; @n >= 1@).
+chunkBy :: Int -> [a] -> [[a]]
+chunkBy _ [] = []
+chunkBy n xs = let (c, rest) = splitAt n xs in c : chunkBy n rest
 
 -- ───────────────────────────────────────────────
 -- Category resolution helpers

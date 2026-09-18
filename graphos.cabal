@@ -166,7 +166,8 @@ library
                        -- Infrastructure - LLM
                        Graphos.Infrastructure.LLM.OpenAI
                        Graphos.Infrastructure.LLM.Vision
-                       Graphos.Infrastructure.LLM.Embedding
+                        Graphos.Infrastructure.LLM.Embedding
+                       Graphos.Infrastructure.LLM.EmbeddingCache
                     -- Infrastructure - Export
                      Graphos.Infrastructure.Export.JSON
                      Graphos.Infrastructure.Export.HTML
@@ -358,6 +359,8 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
+    Graphos.Infrastructure.LLM.EmbeddingSpec
+    Graphos.Infrastructure.LLM.EmbeddingCacheSpec
     Graphos.Infrastructure.Observability.SDKSpec
     Graphos.Infrastructure.Server.MCPQuerySpec
     Graphos.Infrastructure.Server.QueryAPISpec
@@ -381,6 +384,7 @@ test-suite graphos-test
     Graphos.UseCase.ExportSpec
     Graphos.UseCase.PipelineIncrementalSpec
     Graphos.UseCase.InferBetweennessWiringSpec
+    Graphos.UseCase.IngestSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
   build-depends:
       base
@@ -402,6 +406,7 @@ test-suite graphos-test
     , text
      , text-short           >= 0.1.6
      , temporary            >= 1.3
+    , vector               >= 0.12
      , time                 >= 1.12
      , wai                  >= 3.2
     , http-types           >= 0.12

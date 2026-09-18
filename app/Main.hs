@@ -1035,6 +1035,8 @@ defaultConfigYaml = unlines
   , "  model: nomic-embed-text       # default: nomic-embed-text"
   , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
   , "  dimension: 0                  # 0 = auto-detect from model"
+  , "  # batchSize: 64               # max texts per API request (default: 64, must be >= 1)"
+  , "  # concurrency: 1              # batches processed in parallel (default: 1 = sequential)"
   , "  # headers:                    # custom HTTP headers for auth (default: none)"
   , "  #   X-API-Key: \"${MY_TOKEN}\""
   , ""

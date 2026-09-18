@@ -12,10 +12,16 @@ module Graphos.UseCase.Pipeline.Core
   , logSemanticInference
   ) where
 
+import Control.Concurrent.STM
+  ( atomically
+  , newTBQueueIO, readTBQueue, writeTBQueue
+  )
+import Control.Concurrent.Async (mapConcurrently)
 import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate)
 import Control.Monad (when)
 import Data.Maybe (isJust, fromJust)
+import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON, encode)
@@ -41,6 +47,7 @@ import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.Infrastructure.FileSystem.Ignore (apPriority)
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
+import Graphos.Infrastructure.LLM.EmbeddingCache (loadVector, saveVector)
 import Graphos.UseCase.Pipeline.Staging
   ( withStagedOutput
   , relocateStagedPath
@@ -65,17 +72,106 @@ edgeCollapseThreshold :: Double
 edgeCollapseThreshold = 0.05
 
 -- | Generate embeddings for all nodes in a graph.
--- Nodes whose embedding call fails are omitted from the result.
-generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> IO (Map NodeId [Double])
-generateGraphEmbeddings llm cfg graph = do
+--
+-- Text per node is @nodeLabel <> " " <> nodeSourceFile@ (unchanged from the
+-- sequential loop). Embedded texts are deduplicated and served through the
+-- content-addressed disk cache ('loadVector'): only cache misses go on the
+-- wire, chunked by 'embBatchSize'; every vector (hit or fresh) is written
+-- back to the cache idempotently. A failed chunk withholds vectors only for
+-- the nodes whose texts belong to it (mirroring the historical per-node
+-- failure behavior). The cache is a pure optimization: with a sound cache
+-- the assignment is baseline-equal (@runCached_fst@ in the Lean artifact).
+generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> FilePath -> IO (Map NodeId [Double])
+generateGraphEmbeddings llm cfg graph cacheRoot = do
   let nodes = Map.elems (gNodes graph)
-  results <- mapM genNodeEmbedding nodes
-  let embs = Map.fromList [ (nodeId n, v) | (n, r) <- zip nodes results, Right v <- [r] ]
-  pure embs
-  where
-    genNodeEmbedding n = do
-      let inputText = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
-      lpGenerateEmbedding llm cfg inputText
+      -- Assignment text per node (unchanged from the sequential loop).
+      nodeTexts = [ (nodeId n, toText (nodeLabel n) <> " " <> toText (nodeSourceFile n))
+                  | n <- nodes ]
+      -- Dedup: embed each unique text once (Set.toList of Set.fromList keeps
+      -- ascending order; the assignment is order-independent per
+      -- pipeline_keys_irrelevant).
+      uniqueTexts = Set.toList (Set.fromList (map snd nodeTexts))
+  -- Cache lookup for every unique text.
+  cachedVecs <- mapM (loadVector cacheRoot (T.pack (embModel cfg))) uniqueTexts
+  let cachedTable = Map.fromList [ (t, v) | (t, Just v) <- zip uniqueTexts cachedVecs ]
+      misses = [ t | (t, Nothing) <- zip uniqueTexts cachedVecs ]
+      chunks = chunkBy (max 1 (embBatchSize cfg)) misses
+  lpLogDebug (loggingPortOf llm) $ T.pack $
+    "  Embedding " ++ show (length nodeTexts) ++ " nodes -> "
+      ++ show (length uniqueTexts) ++ " unique texts ("
+      ++ show (Map.size cachedTable) ++ " cached, "
+      ++ show (length misses) ++ " to embed) in "
+      ++ show (length chunks) ++ " batch(es) of <= " ++ show (embBatchSize cfg)
+  -- Embed only the misses with a bounded worker pool: 'embConcurrency'
+  -- batches may be in flight at once (default 1 = sequential, preserving
+  -- order). A failed batch contributes no vectors for its own texts and
+  -- never cancels its siblings; assembly is order-independent per
+  -- 'pipeline_keys_irrelevant'.
+  chunkResults <- pooledMapConcurrently (max 1 (embConcurrency cfg))
+                                        (embedChunk llm cfg) chunks
+  let freshTable = Map.fromList (concat chunkResults) :: Map Text [Double]
+      vecTable = Map.union freshTable cachedTable
+  -- Write back every vector (hits are idempotent, fresh ones cached).
+  mapM_ (\(t, v) -> saveVector cacheRoot (T.pack (embModel cfg)) t v)
+        (Map.toList vecTable)
+  -- Redistribute: every node sharing a text receives that text's vector.
+  pure $ Map.fromList
+    [ (nid, v)
+    | (nid, t) <- nodeTexts
+    , Just v <- [Map.lookup t vecTable]
+    ]
+
+-- | Embed one chunk of unique texts; a transport or API failure yields an
+-- empty contribution for this chunk only (per-text failure isolation).
+embedChunk :: LLMPort -> EmbeddingConfig -> [Text] -> IO [(Text, [Double])]
+embedChunk llm cfg chunk = do
+  r <- lpGenerateEmbeddings llm cfg chunk
+  pure $ case r of
+    Left _     -> []
+    Right vecs -> zip chunk vecs
+
+-- | Split a list into consecutive chunks of at most @n@ elements
+-- (list-level analogue of @T.chunksOf@; @n >= 1@).
+chunkBy :: Int -> [a] -> [[a]]
+chunkBy _ [] = []
+chunkBy n xs = let (c, rest) = splitAt n xs in c : chunkBy n rest
+
+-- | Map an IO action over a list with at most @limit@ actions in flight
+-- (a bounded worker pool over the input items, each producing a list of
+-- results). @limit 1@ runs sequentially in input order. An exception in one
+-- worker is caught and degrades that task to an empty contribution, so one
+-- failed batch never cancels its siblings.
+pooledMapConcurrently :: Int -> (a -> IO [(Text, [Double])]) -> [a] -> IO [[(Text, [Double])]]
+pooledMapConcurrently limit action items
+  | limit <= 1 = mapM safeAction items
+  | otherwise = do
+      queue <- newTBQueueIO (fromIntegral (max 1 (length items)) + fromIntegral limit)
+      atomically $ mapM_ (writeTBQueue queue . Just) items
+      -- One sentinel per worker: every worker drains until it sees its own
+      -- Nothing, so none can block forever on an empty queue.
+      atomically $ mapM_ (writeTBQueue queue) (replicate limit Nothing)
+      concat <$> mapConcurrently (\_ -> worker queue) [1 .. limit]
+      where
+        safeAction x = action x `catch` \(_ :: SomeException) -> pure []
+        worker queue = do
+          mItem <- atomically (readTBQueue queue)
+          case mItem of
+            Nothing -> pure []
+            Just x  -> do
+              r <- safeAction x
+              rest <- worker queue
+              pure (r : rest)
+
+-- | Placeholder accessor: LLMPort carries no logging port; debug noise is
+-- routed through the module-level no-op unless wired otherwise.
+loggingPortOf :: LLMPort -> LoggingPort
+loggingPortOf _ = LoggingPort
+  { lpLogTrace = \_ -> pure ()
+  , lpLogDebug = \_ -> pure ()
+  , lpLogInfo  = \_ -> pure ()
+  , lpLogWarn  = \_ -> pure ()
+  , lpLogError = \_ -> pure ()
+  }
 
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
 writeEmbeddingsSidecar :: FilePath -> Map NodeId [Double] -> IO ()
@@ -314,8 +410,9 @@ runPipelineBody appEnv config = catch (do
       graph <- if cfgEmbed configWithStreaming
         then do
           let embCfg = gcEmbedding (cfgGraphosConfig configWithStreaming)
+              embCacheRoot = cfgOutputDir configWithStreaming ++ "/cache"
           lpLogInfo lp "  Generating node embeddings..."
-          embs <- generateGraphEmbeddings (llmPort appEnv) embCfg builtGraph
+          embs <- generateGraphEmbeddings (llmPort appEnv) embCfg builtGraph embCacheRoot
           let sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
           writeEmbeddingsSidecar sidecar embs
           lpLogInfo lp $ T.pack $ "  Wrote " ++ show (Map.size embs) ++ " node embeddings to embeddings.json"

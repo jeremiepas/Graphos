@@ -93,6 +93,37 @@ src/Graphos/
 | Maintenance | Grammar per language | Zero — LSP servers maintained by language teams |
 | Offline | Works without language server | Requires LSP server installed |
 
+## Node Embeddings
+
+Graphos supports node-level embeddings for semantic edge inference. When enabled,
+the pipeline generates a vector embedding for every node and writes them to an
+`embeddings.json` sidecar file alongside `graph.json`.
+
+```bash
+graphos . --embed          # or embedding.enabled: true in graphos.yaml
+```
+
+Embeddings are generated in **batches** (`embedding.batchSize`, default 64 texts
+per API request) with **bounded parallelism** (`embedding.concurrency`, default 1
+= sequential). Identical node texts are embedded only once and their vectors
+shared.
+
+```yaml
+embedding:
+  enabled: true
+  model: nomic-embed-text
+  batchSize: 64        # max texts per API request (>= 1)
+  concurrency: 1       # batches in flight in parallel (>= 1)
+```
+
+**Disk cache.** Results are cached on disk under
+`graphos-out/cache/embeddings/` (one JSON file per entry, keyed by
+`sha256(model <> text)`): a model change invalidates stale entries for free,
+and unchanged nodes cost zero API calls on reruns. A failed batch withholds
+vectors only for its own texts; the rest of the graph completes. Ingest
+records (`ingest-embeddings`) persist `source_hash` as the same SHA256
+content hash of the model and embedded text.
+
 ## Install
 
 ```bash
