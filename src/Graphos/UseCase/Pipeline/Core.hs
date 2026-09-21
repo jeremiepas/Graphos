@@ -59,7 +59,7 @@ import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
 import Graphos.UseCase.Analyze (analyzeGraph)
-import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
+import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
 import Graphos.UseCase.Report (generateReport)
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.UseCase.Load (validateGraphFile, corruptGraphMessage)
@@ -532,7 +532,7 @@ clusterGraph appEnv graph config = do
           force = cfgForceSemanticEdges config
           mode = semanticMode seCfg force graph
           semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-          allInferred = inferNonSemanticEdges (cfgEdgeDensity config) graph commMap ++ semanticEdges
+          allInferred = inferNonSemanticEdgesWith (cfgEdgeDensity config) seCfg Map.empty graph commMap ++ semanticEdges
           enrichedGraph' = (if null allInferred
             then graph
             else addEdges graph allInferred)

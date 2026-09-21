@@ -17,6 +17,8 @@ import Control.Exception (SomeException, catch, evaluate)
 import Data.Char (isAlphaNum, isSpace)
 import Data.List (nub)
 import Data.Bits ((.|.))
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as Key
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
 import System.IO (withFile, IOMode(ReadMode), hGetContents')
@@ -28,6 +30,10 @@ import Graphos.Infrastructure.Logging (LogEnv, logDebug)
 -- | Extract concepts and relationships from a document file.
 -- Uses strict IO (withFile + hGetContents') to avoid lazy file handle leaks
 -- that cause EMFILE "read error" when processing 1000+ files concurrently.
+--
+-- The file node carries the raw document body in @nodeExtra.doc_body@ so the
+-- deterministic doc-code linking passes (symbol-mention, path-reference) can
+-- read the text without re-reading the file.
 extractDocFile :: LogEnv -> FilePath -> IO Extraction
 extractDocFile env filePath = catch (do
   content <- withFile filePath ReadMode $ \h -> do
@@ -42,14 +48,22 @@ extractDocFile env filePath = catch (do
   logDebug env $ T.pack $ "  [doc] " ++ filePath ++ " → stub (read error)"
   pure (extractionFromLists [makeStubNode filePath] [])
 
+-- | Attach a document body to a doc file node's @nodeExtra@ (key @doc_body@).
+-- Pure so it is testable; used by 'docNodes'.
+withDocBody :: T.Text -> Node -> Node
+withDocBody body n = n
+  { nodeExtra       = Just (Aeson.object [ Key.fromText "doc_body" Aeson..= body ])
+  , nodePresentBits = nodePresentBits n .|. bitNodeExtra
+  }
+
 -- ───────────────────────────────────────────────
 -- Node extraction
 -- ───────────────────────────────────────────────
 
--- | Parse a document for nodes: file node, headers, tags
+-- | Parse a document for nodes: file node (with doc body), headers, tags
 docNodes :: FilePath -> T.Text -> [Node]
 docNodes filePath content =
-  let fileNode = docFileNode filePath
+  let fileNode = withDocBody content (docFileNode filePath)
       headerNodes = docHeaderNodes filePath content
       tagNodes = docTagNodes filePath content
   in fileNode : headerNodes ++ tagNodes

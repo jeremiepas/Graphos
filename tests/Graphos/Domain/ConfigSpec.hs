@@ -80,19 +80,19 @@ spec = do
       decode (encode defaultSemanticEdgesConfig) `shouldBe` Just defaultSemanticEdgesConfig
 
     it "round-trips a custom config" $ do
-      let cfg = SemanticEdgesConfig False 10 0.7
+      let cfg = SemanticEdgesConfig False 10 0.7 6 [".hs", ".rs"]
       decode (encode cfg) `shouldBe` Just cfg
 
     it "serializes to snake_case keys" $ do
       encode defaultSemanticEdgesConfig `shouldBe`
-        "{\"enabled\":true,\"max_fan_out\":50,\"threshold\":0.5}"
+        "{\"enabled\":true,\"max_fan_out\":50,\"threshold\":0.5,\"min_ident_length\":4,\"path_extensions\":[\".ts\",\".tsx\",\".js\",\".jsx\",\".mjs\",\".cjs\",\".hs\",\".lhs\",\".rs\",\".py\",\".pyx\",\".go\",\".java\",\".kt\",\".scala\",\".sc\",\".kts\",\".rb\",\".php\",\".cpp\",\".cc\",\".cxx\",\".c++\",\".hpp\",\".hh\",\".h\",\".cs\",\".swift\",\".m\",\".mm\",\".ml\",\".mli\",\".ex\",\".exs\",\".erl\",\".clj\",\".sh\",\".bash\",\".yaml\",\".yml\",\".toml\",\".json\",\".md\",\".markdown\"]}"
 
     it "parses explicit values" $ do
       decode "{\"enabled\":false,\"max_fan_out\":10,\"threshold\":0.7}" `shouldBe`
-        Just (SemanticEdgesConfig False 10 0.7)
+        Just (SemanticEdgesConfig False 10 0.7 4 defaultPathExtensions)
 
     it "defaults a missing section to enabled/50/0.5" $ do
       decode "{}" `shouldBe` Just defaultSemanticEdgesConfig
 
     it "fills partial keys with defaults" $ do
-      decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5)
+      decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5 4 defaultPathExtensions)

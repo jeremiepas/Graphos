@@ -12,12 +12,14 @@ module Graphos.Domain.Config.Vision
   , defaultLabelingConfig
   , SemanticEdgesConfig(..)
   , defaultSemanticEdgesConfig
+  , defaultPathExtensions
   ) where
 
 import Data.Aeson (ToJSON(..), FromJSON(..), genericToJSON, withObject, object, (.:?), (.!=), (.=))
 import Data.Aeson.Types (defaultOptions, fieldLabelModifier)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Text (Text)
 import Graphos.Domain.Config.Extraction (lowerFirst)
 import GHC.Generics (Generic)
 
@@ -127,10 +129,15 @@ validateEmbeddingConfig cfg
 -- Enabled by default — only runs when the graph has embeddings AND is a
 -- mixed corpus (code + docs). Override with --no-semantic-edges or
 -- --force-semantic-edges.
+--
+-- Also carries the deterministic doc-link thresholds (doc-code-linking):
+-- minimum whole-word identifier length and accepted source-path extensions.
 data SemanticEdgesConfig = SemanticEdgesConfig
   { seEnabled   :: Bool       -- ^ Enable semantic edge inference (default: True)
   , seMaxFanOut :: Int        -- ^ Max semantic edges per doc node (default: 50)
   , seThreshold :: Double     -- ^ Min cosine similarity (default: 0.5)
+  , seMinIdentLength :: Int   -- ^ Min whole-word identifier length for symbol-mention doc links (default: 4)
+  , sePathExtensions :: [Text] -- ^ Accepted source-path extensions for path-reference doc links (default: Graphos defaults)
   } deriving (Eq, Show, Generic)
 
 instance ToJSON SemanticEdgesConfig where
@@ -138,6 +145,8 @@ instance ToJSON SemanticEdgesConfig where
     [ "enabled"     .= seEnabled cfg
     , "max_fan_out" .= seMaxFanOut cfg
     , "threshold"   .= seThreshold cfg
+    , "min_ident_length" .= seMinIdentLength cfg
+    , "path_extensions" .= sePathExtensions cfg
     ]
 
 instance FromJSON SemanticEdgesConfig where
@@ -145,13 +154,33 @@ instance FromJSON SemanticEdgesConfig where
     <$> v .:? "enabled"   .!= True
     <*> v .:? "max_fan_out" .!= 50
     <*> v .:? "threshold" .!= 0.5
+    <*> v .:? "min_ident_length" .!= 4
+    <*> v .:? "path_extensions" .!= defaultPathExtensions
 
--- | Default semantic edges configuration (enabled, fan-out 50, threshold 0.5).
+-- | Default path extensions for path-reference doc links (shared with the
+-- linker's own default list).
+defaultPathExtensions :: [Text]
+defaultPathExtensions =
+  [ ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"
+  , ".hs", ".lhs"
+  , ".rs", ".py", ".pyx"
+  , ".go", ".java", ".kt", ".scala", ".sc", ".kts"
+  , ".rb", ".php"
+  , ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".h"
+  , ".cs", ".swift", ".m", ".mm"
+  , ".ml", ".mli", ".ex", ".exs", ".erl", ".clj"
+  , ".sh", ".bash", ".yaml", ".yml", ".toml", ".json", ".md", ".markdown"
+  ]
+
+-- | Default semantic edges configuration (enabled, fan-out 50, threshold 0.5,
+-- doc-link identifier length 4, default path extensions).
 defaultSemanticEdgesConfig :: SemanticEdgesConfig
 defaultSemanticEdgesConfig = SemanticEdgesConfig
   { seEnabled   = True
   , seMaxFanOut = 50
   , seThreshold = 0.5
+  , seMinIdentLength = 4
+  , sePathExtensions = defaultPathExtensions
   }
 
 -- ───────────────────────────────────────────────

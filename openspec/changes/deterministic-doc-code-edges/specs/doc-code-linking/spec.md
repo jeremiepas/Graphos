@@ -54,3 +54,20 @@ the `documents` relation and high confidence, distinct from similarity-based
 - **WHEN** a query is run with `edges = semantic`
 - **THEN** `documents` edges are retained
 - **AND** low-confidence `inferred` doc↔code edges may be dropped
+
+### Requirement: Formal verification of the linking guarantees
+
+The change SHALL ship a Lean 4 model of the three passes that compiles clean
+(zero errors, zero warnings, zero `sorry`) under the pinned core toolchain, and
+whose guarantee theorems are kernel-checked: co-location edges stay within the
+doc's directory subtree, symbol-mention edges target the unique definition of a
+whole-word identifier, and path-reference edges resolve to an existing source
+file.
+
+#### Scenario: Clean rebuild of the Lean model is green
+- **WHEN** `lake clean && lake build` is run in the change's `lean/` directory with the pinned Lean 4 core toolchain
+- **THEN** the command exits 0 with zero errors, zero warnings, and zero `sorry`, per `lean-proof-methodology`
+
+#### Scenario: Domain passes match the Lean model
+- **WHEN** the Domain linking passes run on the Lean model's toy fixtures
+- **THEN** the Haskell verdicts are identical to the Lean model's verdicts
