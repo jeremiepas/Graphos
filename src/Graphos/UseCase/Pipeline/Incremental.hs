@@ -32,7 +32,7 @@ import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
-import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
+import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.Domain.Labeling (LabelingResult(..))
@@ -141,12 +141,12 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
 -- input: folding incremental batches into the running graph yields the same enriched
 -- graph as a full build over the merged source (AVI-533 / G2 confluence).
 clusterAndInfer :: Resolution -> SemanticEdgesConfig -> Bool -> EdgeDensity -> Bool -> Graph 
-                -> (Graph, CommunityMap, SemanticMode, [Edge])
+                 -> (Graph, CommunityMap, SemanticMode, [Edge])
 clusterAndInfer res seCfg force density directed graph =
   let (commMap, _cohesion) = clusterGraphWithResolution graph res
       mode = semanticMode seCfg force graph
       semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-      allInferred = inferNonSemanticEdges density graph commMap ++ semanticEdges
+      allInferred = inferNonSemanticEdgesWith density seCfg Map.empty graph commMap ++ semanticEdges
       enriched = if null allInferred
         then graph
         else buildGraphFromExtractions directed
@@ -219,7 +219,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
                     force = cfgForceSemanticEdges config
                     mode = semanticMode seCfg force graph
                     semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-                    allInferred = inferNonSemanticEdges (cfgEdgeDensity config) graph commMap ++ semanticEdges
+                    allInferred = inferNonSemanticEdgesWith (cfgEdgeDensity config) seCfg Map.empty graph commMap ++ semanticEdges
                     enriched = if null allInferred
                       then graph
                       else buildGraphFromExtractions (cfgDirected config)

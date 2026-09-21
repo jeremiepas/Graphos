@@ -50,6 +50,7 @@ module Graphos.Domain.Config
       -- * Semantic edge inference configuration
   , SemanticEdgesConfig(..)
   , defaultSemanticEdgesConfig
+  , defaultPathExtensions
 
      -- * Vision configuration
   , VisionConfig(..)

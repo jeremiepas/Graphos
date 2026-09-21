@@ -18,6 +18,34 @@ citations in doc prose — a strong, unambiguous signal — are likewise unused.
 - Natural-language understanding of documentation.
 - Removing existing similarity inference (kept, but clearly separated).
 
+## Formal model (Lean 4)
+
+Following the `spec-graph-verification` / `intent-graph-verification`
+precedent, the deterministic passes are mirrored in a Lean 4 model
+(`lean/DocLink.lean`, Lean 4 core only, no Mathlib) *before* the Domain
+implementation, and the Domain passes are gated on parity with it.
+
+- The model defines a typed `CodeGraph` (doc/code kinds, source paths, symbol
+  definitions, doc text) and the three edge constructors, then proves the
+  guarantee theorems: (a) `colocation_subtree` — every co-location edge stays in
+  the doc's directory subtree; (b) `symbolMention_uniqueDef` — every
+  symbol-mention edge targets the unique definition of a whole-word identifier
+  of length ≥ 4; (c) `pathRef_resolves` — every path-reference edge resolves to
+  an existing `source_file` and carries the `documents` relation; (d)
+  `documents_semanticSafe` — every emitted edge has confidence ≥ 0.7, so it
+  survives the semantic filter.
+- Proof style is pinned by `lean-proof-methodology`: goal-guided invocation of
+  cache-bearing theorems (`rw [theorem]` or defeq-forcing `have`), no `by
+  decide` over `List.lookup`-bearing statements, file-wide
+  `set_option linter.unusedSectionVars false`.
+- `lean/VERIFICATION.md` records the toolchain (`nix run nixpkgs#lean4`; never
+  `nixpkgs#lean`, which is Lean 3) and the exact `lake clean && lake build`
+  command; the change is complete only when it is green with zero `sorry`.
+- *Alternative considered:* prove nothing, test only in Hspec — rejected; the
+  subtree guard and unique-definition rules are exactly the invariants that
+  silent regressions erode, and the repo already has the Lean discipline and
+  toolchain in place.
+
 ## Decisions
 
 - **Co-location scoped to same-or-descendant directory of the doc file.**
@@ -55,5 +83,6 @@ citations in doc prose — a strong, unambiguous signal — are likewise unused.
 
 - Additive; regenerate graph to populate `documents` edges.
 - Rollback: disable the co-location/symbol/path-reference passes via config.
-- Verify with `cabal test` (linking suites) and a query with `edges=semantic`
-  returning both doc and code nodes for a documented component.
+- Verify with `cabal test` (linking suites), the Lean parity fixtures, and a
+  query with `edges=semantic` returning both doc and code nodes for a
+  documented component.

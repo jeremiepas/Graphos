@@ -97,8 +97,9 @@ library
                      Graphos.UseCase.Analyze
                      Graphos.UseCase.Report
                      Graphos.UseCase.Export
-                     Graphos.UseCase.Infer
-                     Graphos.UseCase.Label
+                      Graphos.UseCase.Infer
+                      Graphos.UseCase.Infer.Document
+                      Graphos.UseCase.Label
                        Graphos.UseCase.Query
                      Graphos.UseCase.Load
                      Graphos.UseCase.Merge
@@ -328,8 +329,10 @@ test-suite graphos-test
      Graphos.UseCase.PipelineSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
-    Graphos.UseCase.InferSpec
-    Graphos.UseCase.Extract.HaskellSpec
+     Graphos.UseCase.InferSpec
+     Graphos.UseCase.InferDocumentSpec
+     Graphos.UseCase.DocLinkParitySpec
+     Graphos.UseCase.Extract.HaskellSpec
     Graphos.UseCase.Extract.ImageSpec
     Graphos.UseCase.QuerySpec
     Graphos.UseCase.Query.RefineSpec
@@ -409,5 +412,39 @@ test-suite graphos-test
     , vector               >= 0.12
      , time                 >= 1.12
      , wai                  >= 3.2
+     , http-types           >= 0.12
+     , yaml                 >= 0.11
+
+test-suite graphos-test-focus
+  import:         shared
+  type:           exitcode-stdio-1.0
+  main-is:        FocusMain.hs
+  hs-source-dirs: tests
+  other-modules:
+    Graphos.Domain.TypesSpec
+    Graphos.UseCase.DocLinkParitySpec
+    Graphos.UseCase.FormatContextSpec
+    Graphos.UseCase.InferDocumentSpec
+  build-depends:
+      base
+    , graphos
+    , hspec                >= 2.10
+    , hspec-discover       >= 2.10
+    , QuickCheck           >= 2.14
+    , aeson
+    , bytestring           >= 0.11
+    , containers
+    , text-short           >= 0.1
+    , deepseq              >= 1.4
+    , directory            >= 1.3
+    , filepath             >= 1.4
+    , fgl                  >= 5.8
+    , optparse-applicative >= 0.17
+    , process              >= 1.6
+    , text
+    , temporary            >= 1.3
+    , vector               >= 0.12
+    , time                 >= 1.12
+    , wai                  >= 3.2
     , http-types           >= 0.12
     , yaml                 >= 0.11

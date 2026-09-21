@@ -21,6 +21,17 @@ a doc naming a symbol — are not used, so doc↔code matching is effectively us
   existing similarity-based `inferred` edges.
 - Keep `documents` edges in the `semantic` (non-ambiguous) edge set so they
   survive filtering.
+- Add a **Lean 4 formal model** of the three passes (`lean/DocLink.lean`,
+  Lean 4 core only, no Mathlib) with kernel-checked theorem gates: co-location
+  edges stay inside the doc's directory subtree, symbol-mention edges name
+  identifiers with exactly one definition, path-reference edges resolve to an
+  existing `source_file`, and `documents` edges carry confidence ≥ 0.7 so they
+  survive the semantic filter. The methodology follows `lean-proof-methodology`
+  (goal-guided invocation of cache-bearing theorems; no `by decide` over
+  `List.lookup`-bearing statements); `lean/VERIFICATION.md` records the pinned
+  toolchain (`nix run nixpkgs#lean4`; `nixpkgs#lean` is Lean 3 and must not be
+  used) and the exact `lake clean && lake build` command, which must exit 0
+  with zero errors, zero warnings, and zero `sorry`.
 
 ## Capabilities
 
@@ -38,4 +49,8 @@ a doc naming a symbol — are not used, so doc↔code matching is effectively us
 - **UseCase/Infer** stage: add co-location, symbol-mention, and path-reference passes.
 - **Domain/Graph**: new `documents` edge relation and confidence tagging.
 - **Domain/Context / query**: `documents` edges included in semantic edge set.
+- **Formal**: `lean/DocLink.lean` mirrors the Domain linking logic; the Haskell
+  passes must match the Lean model's verdicts on the Lean toy fixtures (same
+  discipline as `intent-graph-verification`'s checker-parity gate). The change is
+  complete only when `lake clean && lake build` is green with zero `sorry`.
 - Improves doc↔code retrieval quality; no user-facing breaking change.
