@@ -42,6 +42,10 @@ module Graphos.Domain.SpecCheck
   , constrainsTargets
   , areCandidates
   , candidatePairs
+    -- * Duplication and single-point-of-failure findings
+  , cosineSimilarity
+  , duplicationCandidates
+  , spofDecisions
     -- * Stale supersession
   , staleSupersessions
     -- * Adjudication gate
@@ -53,6 +57,7 @@ import qualified Data.Aeson as A
 import qualified Data.Aeson.KeyMap as KM
 import Data.List (elemIndex, find)
 import Data.Maybe (fromMaybe, isNothing, mapMaybe)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Text.Short (toText)
@@ -263,6 +268,83 @@ candidatePairs ns es =
   ]
   where
     rs = activeRequirementIds ns
+
+-- ── Duplication and single-point-of-failure findings ─────────────────────────
+
+-- | Cosine similarity between two equal-length vectors; 0 when either is
+-- empty or lengths differ. Mirrors LLMPort.cosineSimilarity (kept local to
+-- keep Domain IO-free and dependency-minimal).
+cosineSimilarity :: [Double] -> [Double] -> Double
+cosineSimilarity a b
+  | null a || null b || length a /= length b = 0
+  | denom == 0 = 0
+  | otherwise = dot / denom
+  where
+    dot = sum (zipWith (*) a b)
+    na = sqrt (sum [ x * x | x <- a ])
+    nb = sqrt (sum [ x * x | x <- b ])
+    denom = na * nb
+
+-- | Duplication candidates: pairs of distinct nodes in the same community
+-- whose embedding similarity exceeds the configured threshold. Only
+-- Requirement / Decision nodes are compared; requires embeddings for both
+-- members and the same (present) community id. Pure.
+duplicationCandidates :: Double -> [Node] -> Map.Map NodeId [Double] -> [(NodeId, NodeId, Double)]
+duplicationCandidates threshold ns embs =
+  [ (a, b, sim)
+  | (a, b) <- pairs
+  , Just va <- [Map.lookup a embs]
+  , Just vb <- [Map.lookup b embs]
+  , communityOf a == communityOf b
+  , communityOf a /= Nothing
+  , let sim = cosineSimilarity va vb
+  , sim >= threshold
+  ]
+  where
+    specNodes = [ n | n <- ns, isRequirementNode n || isDecisionNode n ]
+    ids = [ nodeId n | n <- specNodes ]
+    communityOf nid =
+      case [ nodeCommunityId n | n <- specNodes, nodeId n == nid ] of
+        (mc : _) -> mc
+        []       -> Nothing
+    pairs = [ (a, b) | (i, a) <- zip [0 :: Int ..] ids
+                     , (j, b) <- zip [0 :: Int ..] ids
+                     , i < j ]
+
+-- | Single-point-of-failure decisions: Decision nodes that are articulation
+-- points of the undirected spec graph (their removal disconnects it).
+-- Pure — a small iterative DFS over the spec-node adjacency, restricted to
+-- Decision nodes.
+spofDecisions :: [Node] -> [Edge] -> [NodeId]
+spofDecisions ns es =
+  [ d | d <- decisionIds, isArticulation d ]
+  where
+    decisionIds = [ nodeId n | n <- ns, isDecisionNode n ]
+    specIds = [ nodeId n | n <- ns, isRequirementNode n || isDecisionNode n ]
+    adj = Map.fromListWith (++)
+          [ (edgeSource e, [edgeTarget e]) | e <- es, inSpec (edgeSource e), inSpec (edgeTarget e) ]
+          <> Map.fromListWith (++)
+          [ (edgeTarget e, [edgeSource e]) | e <- es, inSpec (edgeSource e), inSpec (edgeTarget e) ]
+    inSpec nid = nid `elem` specIds
+    isArticulation root =
+      let nbrs = [ c | c <- Map.findWithDefault [] root adj, c /= root, inSpec c ]
+          -- DFS avoiding the root entirely: if the remaining graph is
+          -- connected, every neighbour is reachable from the first one.
+          reachable = case nbrs of
+            (first : _) -> dfs root (Set.singleton first) (Set.fromList [first])
+            []          -> Set.empty
+          stranded = [ c | c <- nbrs, Set.notMember c reachable ]
+      in length nbrs >= 2 && not (null stranded)
+    dfs _root visited frontier = case Set.toList frontier of
+      [] -> visited
+      (x : _) ->
+        let visited' = Set.insert x visited
+            frontier' = Set.delete x frontier
+                         `Set.union` Set.fromList
+                              [ n | n <- Map.findWithDefault [] x adj
+                                  , inSpec n, n /= _root
+                                  , Set.notMember n visited' ]
+        in dfs _root visited' frontier'
 
 -- ── Stale supersession ───────────────────────────────────────────────────────
 

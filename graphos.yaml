@@ -234,15 +234,22 @@ labeling:
   # base_url: "https://api.openai.com/v1"
 
 # ──── Embedding ───────────────────────────────────
-# Local embedding generation via Ollama. Disabled by default.
+# Local embedding generation. Disabled by default.
 # Enable with --embed flag or embedding.enabled: true.
-# Targets small local models (nomic-embed-text, all-minilm).
+# Default model: LFM2.5-Embedding-350M GGUF (512-token fit, optional
+# asymmetric document:/query: prefixes; benchmark-cited — see the
+# lfm-embedding-optimization change's bench/BENCHMARK.md).
 embedding:
   enabled: false # default: false (enable with --embed)
   provider: ollama # ollama (default, only local for now)
-  model: nomic-embed-text # default: nomic-embed-text
-  base_url: "http://localhost:11434/v1" # default: ollama local
+  # model: "hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M" # default (e.g. nomic-embed-text keeps previous behavior + cache keys)
+  base_url: "http://localhost:11434/v1" # default: ollama local (also works against a standalone llama-server)
   dimension: 0 # 0 = auto-detect from model
+  maxTokens: 512 # token-fit truncation (default: 512; 0 = model-table default)
+  # docPrefix: ""               # prepended to every embedded text (e.g. "document: ")
+  # queryPrefix: ""             # prepended to query-time text (e.g. "query: ")
+  # streaming: true             # staged per-batch sidecar write + atomic rename (default: true)
+  # concurrency: 1              # batches processed in parallel (benchmark-pinned: 1)
   # headers:                    # custom HTTP headers for auth (default: none)
   #   X-API-Key: "${MY_TOKEN}"
 

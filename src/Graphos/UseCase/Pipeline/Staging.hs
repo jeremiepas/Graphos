@@ -35,7 +35,8 @@ import Data.Text (Text)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import System.Directory
-  ( createDirectoryIfMissing
+  ( copyFile
+  , createDirectoryIfMissing
   , doesDirectoryExist
   , listDirectory
   , removeDirectoryRecursive
@@ -82,6 +83,13 @@ withStagedOutput final action = do
   createDirectoryIfMissing True parentDir
   staging <- newStagingPath final
   createDirectoryIfMissing False staging
+  -- Seed the staging cache from the previous output *before* the rebuild runs,
+  -- so cache-backed steps (notably embedding generation) reuse prior results
+  -- instead of recomputing them. Originals are left in place, so a failed
+  -- rebuild — whose staging dir is deleted — never loses the previous cache.
+  -- (carryOverState below still moves the remaining persistent state after a
+  -- successful build; it no-ops on 'cache', which is already seeded here.)
+  seedCacheFromPrevious final staging
   result <- action staging `catch` \e -> cleanupStaging staging >> throwIO (e :: SomeException)
   case result of
     Left err -> do
@@ -111,6 +119,34 @@ carryOverState oldOut staging =
       srcExists <- doesDirectoryExist src
       when srcExists $
         renameDirectory src dst `catch` ignoreErr
+
+-- | Copy the previous output's @cache/@ directory into the staging directory
+-- before the rebuild runs, so cache-backed steps (notably embedding
+-- generation) reuse prior results instead of recomputing them. Originals are
+-- left in place: a failed rebuild — whose staging dir is deleted — never
+-- loses the previous cache. Best-effort: a failing seed is skipped (the
+-- rebuild then recomputes, as before this helper existed).
+seedCacheFromPrevious :: FilePath -> FilePath -> IO ()
+seedCacheFromPrevious oldOut staging = do
+  let src = oldOut </> "cache"
+      dst = staging </> "cache"
+  srcExists <- doesDirectoryExist src
+  when srcExists $ do
+    createDirectoryIfMissing True dst
+    copyDirEntries src dst
+  where
+    copyDirEntries from to = do
+      entries <- listDirectory from
+      mapM_ (\e -> do
+               let from' = from </> e
+                   to' = to </> e
+               isDir <- doesDirectoryExist from'
+               if isDir
+                 then do
+                   createDirectoryIfMissing True to'
+                   copyDirEntries from' to'
+                 else copyFile from' to' `catch` ignoreErr)
+            entries
 
 -- | Unique staging directory path: @<final>.staging-<timestamp>-<pid>@.
 newStagingPath :: FilePath -> IO FilePath

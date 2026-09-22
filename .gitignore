@@ -17,6 +17,7 @@ result
 result-*
 .tmp/
 tmp/
+graphos-out.staging-*/
 .worktrees/
 .paperclip/worktrees/
 # .opencode local dev config (agent + skills tracked, rest ignored)

@@ -18,7 +18,7 @@ import Control.Concurrent.STM
   )
 import Control.Concurrent.Async (mapConcurrently)
 import Control.DeepSeq (deepseq)
-import Control.Exception (catch, SomeException, evaluate)
+import Control.Exception (catch, SomeException, evaluate, bracket)
 import Control.Monad (when)
 import Data.Maybe (isJust, fromJust)
 import qualified Data.Set as Set
@@ -28,15 +28,19 @@ import Data.Aeson (toJSON, encode)
 import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text.Short (toText)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Directory (createDirectoryIfMissing)
 import System.Mem (performGC)
+import qualified Data.ByteString.Lazy as BSL
+import System.IO (Handle, hFlush)
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), PipelineStep(..), PipelineCheckpoint(..))
 import Graphos.Domain.Config (FileExtensionConfig(..), SemanticEdgesConfig(..))
 import Graphos.Domain.Config.Detection (DetectionConfig(..), DetectionMode(..), applyDetectionOverrides)
+import Graphos.Domain.Embedding (prepare)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
 import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
 import qualified Graphos.Domain.Graph.Analysis as GAnalysis
@@ -46,7 +50,13 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.Infrastructure.FileSystem.Ignore (apPriority)
-import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
+import Graphos.Infrastructure.FileSystem.AtomicWrite
+  ( writeFileAtomic
+  , commitAtomicHandle
+  , discardAtomicHandle
+  , openAtomicHandle
+  )
+import qualified Data.Aeson.Key as AKey (fromText)
 import Graphos.Infrastructure.LLM.EmbeddingCache (loadVector, saveVector)
 import Graphos.UseCase.Pipeline.Staging
   ( withStagedOutput
@@ -75,14 +85,27 @@ edgeCollapseThreshold = 0.05
 --
 -- Text per node is @nodeLabel <> " " <> nodeSourceFile@ (unchanged from the
 -- sequential loop). Embedded texts are deduplicated and served through the
--- content-addressed disk cache ('loadVector'): only cache misses go on the
--- wire, chunked by 'embBatchSize'; every vector (hit or fresh) is written
--- back to the cache idempotently. A failed chunk withholds vectors only for
--- the nodes whose texts belong to it (mirroring the historical per-node
--- failure behavior). The cache is a pure optimization: with a sound cache
--- the assignment is baseline-equal (@runCached_fst@ in the Lean artifact).
-generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> FilePath -> IO (Map NodeId [Double])
-generateGraphEmbeddings llm cfg graph cacheRoot = do
+-- content-addressed disk cache ('loadVector', keyed over the prepared text):
+-- only cache misses go on the wire, chunked by 'embBatchSize'; only fresh
+-- (miss) vectors are written back to the cache — hits are read-only (D5).
+-- A failing chunk degrades per-input (D2 bisection): its own text gets no
+-- vector, siblings keep theirs. The cache is a pure optimization: with a
+-- sound cache the assignment is baseline-equal (@runCached_fst@ in the Lean
+-- artifact).
+--
+-- Sidecar write (D9): with 'embStreaming' (default True) the sidecar at
+-- @sidecarPath@ is built by appending each completed batch's entries to a
+-- staged file (created via 'openAtomicHandle') which is atomically renamed
+-- into place when the pass completes; a caught abort discards the staged
+-- file without renaming, leaving the prior sidecar intact (and a process
+-- kill leaves a temp file, never a partial final path — the
+-- atomic-output-writes convention). With 'embStreaming == False' the
+-- sidecar is assembled in memory and written once at the end
+-- ('writeEmbeddingsSidecar', today's behavior). Both paths produce the same
+-- /content/ (a JSON object node-id → vector); batch completion order may
+-- differ from write-at-end key order, which is immaterial for JSON objects.
+generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> FilePath -> FilePath -> IO (Map NodeId [Double])
+generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
   let nodes = Map.elems (gNodes graph)
       -- Assignment text per node (unchanged from the sequential loop).
       nodeTexts = [ (nodeId n, toText (nodeLabel n) <> " " <> toText (nodeSourceFile n))
@@ -91,8 +114,10 @@ generateGraphEmbeddings llm cfg graph cacheRoot = do
       -- ascending order; the assignment is order-independent per
       -- pipeline_keys_irrelevant).
       uniqueTexts = Set.toList (Set.fromList (map snd nodeTexts))
-  -- Cache lookup for every unique text.
-  cachedVecs <- mapM (loadVector cacheRoot (T.pack (embModel cfg))) uniqueTexts
+  -- Cache lookup for every unique text — over the *prepared* text (D4):
+  -- the key hashes (model, docPrefix, prepared), so two raw texts that
+  -- prepare identically converge on one entry.
+  cachedVecs <- mapM (loadVector cacheRoot (T.pack (embModel cfg)) (embDocPrefix cfg) . prepare cfg) uniqueTexts
   let cachedTable = Map.fromList [ (t, v) | (t, Just v) <- zip uniqueTexts cachedVecs ]
       misses = [ t | (t, Nothing) <- zip uniqueTexts cachedVecs ]
       chunks = chunkBy (max 1 (embBatchSize cfg)) misses
@@ -102,33 +127,146 @@ generateGraphEmbeddings llm cfg graph cacheRoot = do
       ++ show (Map.size cachedTable) ++ " cached, "
       ++ show (length misses) ++ " to embed) in "
       ++ show (length chunks) ++ " batch(es) of <= " ++ show (embBatchSize cfg)
-  -- Embed only the misses with a bounded worker pool: 'embConcurrency'
-  -- batches may be in flight at once (default 1 = sequential, preserving
-  -- order). A failed batch contributes no vectors for its own texts and
-  -- never cancels its siblings; assembly is order-independent per
-  -- 'pipeline_keys_irrelevant'.
-  chunkResults <- pooledMapConcurrently (max 1 (embConcurrency cfg))
-                                        (embedChunk llm cfg) chunks
-  let freshTable = Map.fromList (concat chunkResults) :: Map Text [Double]
-      vecTable = Map.union freshTable cachedTable
-  -- Write back every vector (hits are idempotent, fresh ones cached).
-  mapM_ (\(t, v) -> saveVector cacheRoot (T.pack (embModel cfg)) t v)
-        (Map.toList vecTable)
-  -- Redistribute: every node sharing a text receives that text's vector.
-  pure $ Map.fromList
-    [ (nid, v)
-    | (nid, t) <- nodeTexts
-    , Just v <- [Map.lookup t vecTable]
-    ]
+  -- Nodes served straight from the cache (no API call): their entries join
+  -- the sidecar up front in both paths.
+  let cachedEntries =
+        [ (nid, v)
+        | (nid, t) <- nodeTexts
+        , Just v <- [Map.lookup t cachedTable]
+        ]
+      -- Nodes whose text is a miss, grouped by chunk index so each batch's
+      -- completion maps back to its nodes.
+      missNodesByChunk =
+        [ [ (nid, t)
+          | (nid, t) <- nodeTexts
+          , t `Set.member` Set.fromList c
+          ]
+        | c <- chunks
+        ]
+  if embStreaming cfg
+    then
+      -- Streaming path (D9): staged append per batch + atomic rename. The
+      -- bracket's cleanup discards the staged temp file; by the time cleanup
+      -- runs on the success path the file has already been renamed away
+      -- (discard's removeFile is best-effort and ignores the missing temp).
+      bracket
+        (openAtomicHandle sidecarPath)
+        (\(tmpPath, h) -> discardAtomicHandle tmpPath h)
+        (\(tmpPath, h) -> do
+            BSL.hPut h "{"
+            seenRef <- newIORef False
+            -- Cache-hit entries append first (they are already in hand).
+            writeEntries seenRef h cachedEntries
+            -- Embed only the misses; each completed batch appends its own
+            -- entries. A failed batch contributes nothing for its texts.
+            chunkResults <- pooledMapConcurrently'
+                              (max 1 (embConcurrency cfg))
+                              (\c nodes' -> appendChunk seenRef h c nodes' llm cfg)
+                              (zip chunks missNodesByChunk)
+            let freshTable = Map.fromList (concat chunkResults) :: Map Text [Double]
+                vecTable = Map.union freshTable cachedTable
+            writeBackFresh cfg cacheRoot freshTable
+            -- Close the JSON object and flush; commitSidecar fsyncs + renames.
+            BSL.hPut h "}"
+            hFlush h
+            let assignment = Map.fromList
+                  [ (nid, v)
+                  | (nid, t) <- nodeTexts
+                  , Just v <- [Map.lookup t vecTable]
+                  ]
+            -- Atomic rename into place (D9): only reached on the success
+            -- path — an exception inside the body skips it entirely, so the
+            -- prior sidecar is untouched and the temp file is discarded.
+            commitSidecar tmpPath sidecarPath h
+            pure assignment
+        )
+    else do
+      -- Write-at-end path (today's behavior): assemble, then write once.
+      chunkResults <- pooledMapConcurrently (max 1 (embConcurrency cfg))
+                                            (embedChunk llm cfg) chunks
+      let freshTable = Map.fromList (concat chunkResults) :: Map Text [Double]
+          vecTable = Map.union freshTable cachedTable
+          assignment = Map.fromList
+            [ (nid, v)
+            | (nid, t) <- nodeTexts
+            , Just v <- [Map.lookup t vecTable]
+            ]
+      writeEmbeddingsSidecar sidecarPath assignment
+      writeBackFresh cfg cacheRoot freshTable
+      pure assignment
 
--- | Embed one chunk of unique texts; a transport or API failure yields an
--- empty contribution for this chunk only (per-text failure isolation).
+-- | Append @(node, vector)@ pairs to a handle as comma-separated JSON
+-- object members, using an IORef "seen a member yet?" flag shared by every
+-- append into the same staged object (cache-hit entries first, then each
+-- completed batch). This keeps @{@ ++ members-with-comma-between ++ @}@
+-- syntactically valid regardless of how many batches append, in what order,
+-- or how many succeed.
+writeEntries :: IORef Bool -> Handle -> [(NodeId, [Double])] -> IO ()
+writeEntries seenRef h entries =
+  mapM_ one entries
+  where
+    one (nid, v) = do
+      seen <- readIORef seenRef
+      BSL.hPut h (commaPrefix seen <> encode (AKey.fromText nid) <> ":" <> encode v)
+      writeIORef seenRef True
+      where commaPrefix seen = if seen then BSL.singleton 44 else BSL.empty
+
+-- | Embed one chunk (its unique texts) with D2 bisection and append the
+-- chunk's nodes' entries to the staged sidecar handle as the batch completes
+-- (streaming, D9). Returns the batch's fresh @(text, vector)@ pairs for
+-- cache write-back.
+appendChunk :: IORef Bool -> Handle -> [Text] -> [(NodeId, Text)] -> LLMPort -> EmbeddingConfig -> IO [(Text, [Double])]
+appendChunk seenRef h chunkTexts chunkNodes llm cfg = do
+  fresh <- embedChunk llm cfg chunkTexts
+  writeEntries seenRef h [ (nid, v) | (nid, v) <- distribute chunkNodes fresh ]
+  pure fresh
+  where
+    distribute nodes fresh =
+      [ (nid, v)
+      | (nid, t) <- nodes
+      , Just v <- [lookup t fresh]
+      ]
+
+-- | Rename the staged sidecar into place after fsync (the @}@ is already
+-- written and flushed by the caller).
+commitSidecar :: FilePath -> FilePath -> Handle -> IO ()
+commitSidecar = commitAtomicHandle
+
+-- | Write back only the fresh (miss) vectors — hits are read-only (D5),
+-- so a warm re-run performs zero cache writes.
+writeBackFresh :: EmbeddingConfig -> FilePath -> Map Text [Double] -> IO ()
+writeBackFresh cfg cacheRoot freshTable =
+  mapM_ (\(t, v) -> saveVector cacheRoot (T.pack (embModel cfg)) (embDocPrefix cfg) (prepare cfg t) v)
+        (Map.toList freshTable)
+
+-- | Embed one chunk of unique texts with per-input failure isolation
+-- (design D2): on a whole-request failure with more than one text, the batch
+-- is bisected and the halves retried independently (recursion depth
+-- ≤ log2(batchSize)); at batch size 1 the failing text is logged (first 200
+-- chars) with its error and contributes no vector — its siblings' vectors
+-- survive regardless of where the culprit sits in the batch.
 embedChunk :: LLMPort -> EmbeddingConfig -> [Text] -> IO [(Text, [Double])]
-embedChunk llm cfg chunk = do
-  r <- lpGenerateEmbeddings llm cfg chunk
-  pure $ case r of
-    Left _     -> []
-    Right vecs -> zip chunk vecs
+embedChunk llm cfg chunk = case chunk of
+  []  -> pure []
+  [t] -> do
+    r <- lpGenerateEmbeddings llm cfg [t]
+    case r of
+      Left err -> do
+        -- Per-input failure, reported (never silently dropped): the text's
+        -- truncated form (first 200 chars) and the error go to the log.
+        lpLogWarn (loggingPortOf llm) $ T.pack $
+          "embedding failed for input (batch-size 1, no vector): "
+            ++ take 200 (T.unpack t) ++ " — " ++ T.unpack err
+        pure []
+      Right vecs -> pure (zip chunk vecs)
+  _ -> do
+    r <- lpGenerateEmbeddings llm cfg chunk
+    case r of
+      Right vecs -> pure (zip chunk vecs)
+      Left _ -> do
+        let (half1, half2) = splitAt (length chunk `div` 2) chunk
+        (<>) <$> embedChunk llm cfg half1
+             <*> embedChunk llm cfg half2
 
 -- | Split a list into consecutive chunks of at most @n@ elements
 -- (list-level analogue of @T.chunksOf@; @n >= 1@).
@@ -153,6 +291,29 @@ pooledMapConcurrently limit action items
       concat <$> mapConcurrently (\_ -> worker queue) [1 .. limit]
       where
         safeAction x = action x `catch` \(_ :: SomeException) -> pure []
+        worker queue = do
+          mItem <- atomically (readTBQueue queue)
+          case mItem of
+            Nothing -> pure []
+            Just x  -> do
+              r <- safeAction x
+              rest <- worker queue
+              pure (r : rest)
+
+-- | Generalized worker pool over paired inputs (streaming variant): items
+-- carry their own payload, the action receives @(item, context)@ and returns
+-- a list of results; an exception in one worker degrades that task to an
+-- empty contribution. @limit 1@ runs sequentially in input order.
+pooledMapConcurrently' :: Int -> (a -> b -> IO [c]) -> [(a, b)] -> IO [[c]]
+pooledMapConcurrently' limit action items
+  | limit <= 1 = mapM safeAction items
+  | otherwise = do
+      queue <- newTBQueueIO (fromIntegral (max 1 (length items)) + fromIntegral limit)
+      atomically $ mapM_ (writeTBQueue queue . Just) items
+      atomically $ mapM_ (writeTBQueue queue) (replicate limit Nothing)
+      concat <$> mapConcurrently (\_ -> worker queue) [1 .. limit]
+      where
+        safeAction (x, y) = action x y `catch` \(_ :: SomeException) -> pure []
         worker queue = do
           mItem <- atomically (readTBQueue queue)
           case mItem of
@@ -411,10 +572,11 @@ runPipelineBody appEnv config = catch (do
         then do
           let embCfg = gcEmbedding (cfgGraphosConfig configWithStreaming)
               embCacheRoot = cfgOutputDir configWithStreaming ++ "/cache"
+              sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
           lpLogInfo lp "  Generating node embeddings..."
-          embs <- generateGraphEmbeddings (llmPort appEnv) embCfg builtGraph embCacheRoot
-          let sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
-          writeEmbeddingsSidecar sidecar embs
+          -- generateGraphEmbeddings writes the sidecar itself (streaming
+          -- staged path when embStreaming, write-at-end otherwise, D9).
+          embs <- generateGraphEmbeddings (llmPort appEnv) embCfg builtGraph embCacheRoot sidecar
           lpLogInfo lp $ T.pack $ "  Wrote " ++ show (Map.size embs) ++ " node embeddings to embeddings.json"
           pure (builtGraph { gEmbeddings = Just embs, gEmbeddingsPath = Just "embeddings.json" })
         else pure builtGraph

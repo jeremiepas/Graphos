@@ -72,8 +72,21 @@ defaultLabelingConfig = LabelingConfig
 -- Disabled by default — only runs when --embed flag is passed or
 -- embedding.enabled is set in graphos.yaml.
 --
--- Targets small local models (nomic-embed-text, all-minilm) via
--- Ollama's OpenAI-compatible /embeddings endpoint.
+-- Targets small local models (nomic-embed-text, all-minilm) via an
+-- OpenAI-compatible /embeddings endpoint (Ollama or a standalone
+-- llama-server).
+--
+-- 'embMaxTokens' bounds the input length: small encoders reject documents
+-- past their context window (e.g. a 512-token model served by llama-server
+-- returns HTTP 500 on oversized inputs), so each text is truncated to fit
+-- before the request — see 'Graphos.Domain.Embedding.prepare' (model-table
+-- default limit with @maxTokens@ override) — and
+-- 'Graphos.Infrastructure.LLM.Embedding.truncateForEmbedding'.
+--
+-- 'embDocPrefix' / 'embQueryPrefix' support asymmetric bi-encoders
+-- (e.g. LFM2.5 @document:@ / @query:@ prefixes): the doc prefix is prepended
+-- to every embedded text before the API call, empty default = passthrough
+-- (byte-identical to unprefixed behavior).
 data EmbeddingConfig = EmbeddingConfig
   { embEnabled   :: Bool               -- ^ Enable embedding generation (default: False)
   , embProvider  :: String             -- ^ Provider: "ollama" (only local for now)
@@ -83,6 +96,10 @@ data EmbeddingConfig = EmbeddingConfig
   , embHeaders   :: Map String String  -- ^ Custom HTTP headers for embedding API calls
   , embBatchSize :: Int                -- ^ Max texts per embedding API request (default: 64)
   , embConcurrency :: Int              -- ^ Max batches processed concurrently (default: 1 = sequential)
+  , embMaxTokens :: Int                -- ^ Truncate each input to ~this many tokens before the API call (default: 512; 0 = no truncation)
+  , embDocPrefix :: Text               -- ^ Prepended to every embedded text sent to the API (default: empty = passthrough)
+  , embQueryPrefix :: Text             -- ^ Prepended to query-time text for search/similarity (default: empty = passthrough)
+  , embStreaming :: Bool               -- ^ Append batches to a staged sidecar as they complete, atomically renamed at the end (default: True; False = write-at-end)
   } deriving (Eq, Show, Generic)
 
 instance ToJSON EmbeddingConfig where
@@ -92,33 +109,51 @@ instance FromJSON EmbeddingConfig where
   parseJSON = withObject "EmbeddingConfig" $ \v -> EmbeddingConfig
     <$> v .:? "enabled"   .!= False
     <*> v .:? "provider"  .!= "ollama"
-    <*> v .:? "model"     .!= "nomic-embed-text"
+    <*> v .:? "model"     .!= defaultEmbeddingModel
     <*> v .:? "baseUrl"   .!= "http://localhost:11434/v1"
     <*> v .:? "dimension" .!= 0
     <*> v .:? "headers"   .!= Map.empty
     <*> v .:? "batchSize"   .!= 64
     <*> v .:? "concurrency" .!= 1
+    <*> v .:? "maxTokens"   .!= 512
+    <*> v .:? "docPrefix"   .!= ""
+    <*> v .:? "queryPrefix" .!= ""
+    <*> v .:? "streaming"   .!= True
 
--- | Default embedding configuration (disabled, local Ollama).
+-- | Default embedding model: the LFM2.5-Embedding-350M GGUF reference.
+-- Cited by the recorded benchmark (change lfm-embedding-optimization,
+-- bench/BENCHMARK.md): 512-token fit, asymmetric @document:@/@query:@
+-- prefixes, and llama-server proven throughput on the target hardware.
+-- A config naming @nomic-embed-text@ explicitly continues to work unchanged
+-- (and its cache keys are unchanged).
+defaultEmbeddingModel :: String
+defaultEmbeddingModel = "hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M"
+
+-- | Default embedding configuration (disabled, LFM2.5 GGUF reference).
 defaultEmbeddingConfig :: EmbeddingConfig
 defaultEmbeddingConfig = EmbeddingConfig
   { embEnabled   = False
   , embProvider  = "ollama"
-  , embModel     = "nomic-embed-text"
+  , embModel     = defaultEmbeddingModel
   , embBaseUrl   = "http://localhost:11434/v1"
   , embDimension = 0
   , embHeaders   = Map.empty
   , embBatchSize = 64
   , embConcurrency = 1
+  , embMaxTokens = 512
+  , embDocPrefix = ""
+  , embQueryPrefix = ""
+  , embStreaming = True
   }
 
--- | Validate embedding batch/concurrency bounds.
--- Returns @Left (key, value)@ naming the offending key when a value is below
--- the minimum of 1; the config loader turns this into a load-time error.
+-- | Validate embedding batch/concurrency/token bounds.
+-- Returns @Left (key, value)@ naming the offending key when a value is out
+-- of range; the config loader turns this into a load-time error.
 validateEmbeddingConfig :: EmbeddingConfig -> Either (String, Int) ()
 validateEmbeddingConfig cfg
   | embBatchSize cfg < 1     = Left ("embedding.batchSize", embBatchSize cfg)
   | embConcurrency cfg < 1   = Left ("embedding.concurrency", embConcurrency cfg)
+  | embMaxTokens cfg < 0     = Left ("embedding.maxTokens", embMaxTokens cfg)
   | otherwise                = Right ()
 
 -- ───────────────────────────────────────────────

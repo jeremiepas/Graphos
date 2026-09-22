@@ -117,3 +117,33 @@ spec = do
           vd1 `shouldBe` vd2
           vd1 `shouldNotBe` vo
         _ -> expectationFailure "expected 3 vectors"
+
+  describe "ieSourceHash over prepared text (lfm-embedding-optimization 2.3)" $ do
+    it "same raw text + changed docPrefix ⇒ different hash (prefix participates)" $ do
+      callsRef <- newIORef []
+      let llm = fakeLLM callsRef (pure . Right . (: []) . fromIntegral . T.length)
+          env = stubEnv llm
+          ns = [ testNode "n1" "getUser" "a.hs" ]
+          cfgPlain = defaultEmbeddingConfig
+          cfgPrefixed = cfgPlain { embDocPrefix = "document: " }
+      embsPlain <- generateEmbeddingsForNodes env cfgPlain ns
+      embsPref <- generateEmbeddingsForNodes env cfgPrefixed ns
+      case (embsPlain, embsPref) of
+        ([p], [q]) -> ieSourceHash p `shouldNotBe` ieSourceHash q
+        _ -> expectationFailure "expected one embedding per run"
+
+    it "two raw texts differing only past the truncation point ⇒ equal hash (convergence)" $ do
+      callsRef <- newIORef []
+      let llm = fakeLLM callsRef (pure . Right . (: []) . fromIntegral . T.length)
+          env = stubEnv llm
+          headText = T.replicate 4000 "word "
+          ns = [ testNode "n1" headText "a.hs"
+               , testNode "n2" (headText <> " tail-only-difference") "b.hs" ]
+          -- 512-token default limit ⇒ both truncate to the same head.
+          cfg = defaultEmbeddingConfig { embModel = "LFM2.5-Embedding-350M"
+                                       , embMaxTokens = 512
+                                       , embBatchSize = 64 }
+      embs <- generateEmbeddingsForNodes env cfg ns
+      case map ieSourceHash embs of
+        [h1, h2] -> h1 `shouldBe` h2
+        _ -> expectationFailure "expected 2 embeddings with converging hashes"

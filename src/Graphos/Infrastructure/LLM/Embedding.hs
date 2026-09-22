@@ -9,6 +9,8 @@ module Graphos.Infrastructure.LLM.Embedding
   , generateEmbeddings
   , embeddingManager
   , parseEmbeddingsResponse
+  , truncateForEmbedding
+  , prepareEmbed
   , cosineSimilarity
   ) where
 
@@ -46,7 +48,21 @@ import Network.HTTP.Types.Status (statusCode)
 import System.IO.Unsafe (unsafePerformIO)
 
 import Graphos.Domain.Config (EmbeddingConfig(..))
+import Graphos.Domain.Embedding (prepare)
 import Graphos.Infrastructure.LLM.OpenAI (resolveEnvVars)
+
+-- | Prepare one embed input for the API (Domain 'prepare', re-exported
+-- under a local name so this module's interface stays explicit).
+prepareEmbed :: EmbeddingConfig -> Text -> Text
+prepareEmbed = prepare
+
+-- | Tokens-per-word factor used to size the truncation budget. Kept in sync
+-- with 'Graphos.UseCase.FormatContext.countContextTokens' (~1.33 tokens per
+-- whitespace word) so the estimate matches the rest of the codebase; it is
+-- duplicated here (rather than imported) to keep this Infrastructure module
+-- from depending on UseCase.
+tokensPerWord :: Double
+tokensPerWord = 1.33
 
 -- | Shared connection manager (design D9): created lazily once per process
 -- and reused by every embedding call, so connections are kept alive across
@@ -110,15 +126,49 @@ generateEmbedding cfg inputText = do
 -- | Generate embedding vectors for a list of texts in one API call.
 -- Payload: @{"model": …, "input": [t1, …, tn]}@ (OpenAI-compatible batch
 -- endpoint); returns one vector per input text, in input order.
+--
+-- Each input is /prepared/ ('Graphos.Domain.Embedding.prepare': doc-prefix
+-- prepend + token-fit truncation per 'embMaxTokens' and the model table)
+-- before it is sent — the original unprepared text MUST NOT reach the API.
+-- Small encoders reject documents past their context window, so an
+-- unprepared document would fail the whole request. Preparation preserves
+-- list length (one output text per input), so the response arity contract
+-- is unchanged.
 generateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])
 generateEmbeddings cfg inputTexts = do
-  r <- postEmbeddings cfg (length inputTexts) $ Aeson.object
+  let texts = map (prepareEmbed cfg) inputTexts
+  r <- postEmbeddings cfg (length texts) $ Aeson.object
         [ "model" Aeson..= embModel cfg
-        , "input" Aeson..= inputTexts
+        , "input" Aeson..= texts
         ]
   pure $ case r of
     Left err -> Left err
-    Right v  -> parseEmbeddingsResponse (length inputTexts) v
+    Right v  -> parseEmbeddingsResponse (length texts) v
+
+-- | Truncate an embedding input to at most @maxTokens@ estimated tokens so a
+-- long document never overflows a small encoder's context window. A
+-- BERT-class embedding model served by llama-server (e.g. a 512-token
+-- LFM2.5 / all-MiniLM encoder) answers HTTP 500 for oversized inputs — and
+-- because a failed batch withholds vectors for every sibling text, one
+-- oversized document can silently cost a whole batch. Bounding the input up
+-- front keeps every request within the model's contract.
+--
+-- @maxTokens <= 0@ disables truncation (unbounded, the historical behavior).
+-- Otherwise the leading @floor(maxTokens / 1.33)@ whitespace words are kept,
+-- mirroring 'Graphos.UseCase.FormatContext.countContextTokens' so the result
+-- fits that estimate. This is a coarse word-heuristic, not a real subword
+-- tokenizer: dense code or non-Latin text may still count more tokens per
+-- word, so lower @embedding.maxTokens@ if a model rejects inputs at the
+-- default.
+truncateForEmbedding :: Int -> Text -> Text
+truncateForEmbedding maxTokens t
+  | maxTokens <= 0 = t
+  | otherwise =
+      let wordBudget = max 1 (floor (fromIntegral maxTokens / tokensPerWord :: Double))
+          ws         = T.words t
+      in if length ws <= wordBudget
+           then t
+           else T.unwords (take wordBudget ws)
 
 -- | Parse an OpenAI-compatible batch embeddings response, validating the
 -- OpenAI @index@ contract before trusting element order:
