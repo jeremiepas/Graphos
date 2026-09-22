@@ -54,7 +54,7 @@ data Command
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
-  | SpeccheckCmd FilePath Bool Bool
+  | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
   | LServers
    | Serve FilePath FilePath Int Bool Bool
 
@@ -294,9 +294,13 @@ subgraphOpts = SubgraphCmd
 
 speccheckOpts :: Parser Command
 speccheckOpts = SpeccheckCmd
-  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec)")
+  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec; ADRs under ../docs/proposals are included automatically)")
   <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
   <*> switch (long "strict-coverage" <> help "Gate on unimplemented requirements too (default: warn only)")
+  <*> many (strOption (long "check" <> metavar "NAME" <> help "Restrict to one check: cycles|coverage|candidates|stale|duplicates|spof (repeatable)"))
+  <*> switch (long "strict-duplicates" <> help "Gate on duplication candidates too (default: advisory)")
+  <*> optional (strOption (long "graph" <> metavar "G" <> help "Load spec artifacts from a graph.json instead of parsing the openspec/ tree"))
+  <*> switch (long "adjudicate" <> help "Adjudicate contradiction candidates pairwise via the configured LLM")
 
 commandOpts :: Parser Command
 commandOpts = subparser

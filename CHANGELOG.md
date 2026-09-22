@@ -26,6 +26,12 @@
   `suggestions`. `traverse` field kept as `mode` echo for one release.
 
 ### Fixed
+- **`--embed` no longer sends arbitrary-length documents to `/v1/embeddings`.**
+  Each input is now truncated to `embedding.maxTokens` (default 512) before the
+  request, so a long document can no longer overflow a small encoder's context
+  window and be rejected (e.g. a 512-token model served by llama-server
+  answering HTTP 500 on oversized inputs). Set `embedding.maxTokens: 0` to
+  restore the previous unbounded behavior.
 - `mergeSmallCommunities` no longer silently drops nodes when a community that
   received members from an earlier merge is itself merged.
 - Haskell stub extraction: cross-file `imports` edges now resolve via canonical

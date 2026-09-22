@@ -64,6 +64,8 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.SpecCheck
                     Graphos.UseCase.SpecCheck
+                    Graphos.UseCase.SpecExtract
+                    Graphos.UseCase.SpecAdjudicate
                     Graphos.Infrastructure.SpecParse
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
@@ -210,6 +212,8 @@ library
                        Graphos.Domain.Config.Ingest
                        Graphos.Domain.Config.Observability
                        Graphos.Domain.Config.Vision
+                       -- Domain - Embedding preparation
+                       Graphos.Domain.Embedding
                      -- Domain - Scaffold
                      Graphos.Domain.Scaffold
                      -- CLI
@@ -315,6 +319,7 @@ test-suite graphos-test
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
     Graphos.Domain.ConfigSpec
+    Graphos.Domain.EmbeddingSpec
     Graphos.Domain.Config.IngestSpec
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
@@ -363,6 +368,7 @@ test-suite graphos-test
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
     Graphos.Infrastructure.LLM.EmbeddingSpec
+    Graphos.Domain.EmbeddingSpec
     Graphos.Infrastructure.LLM.EmbeddingCacheSpec
     Graphos.Infrastructure.Observability.SDKSpec
     Graphos.Infrastructure.Server.MCPQuerySpec

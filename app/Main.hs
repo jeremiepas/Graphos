@@ -31,8 +31,11 @@ import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncreme
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
-import Graphos.UseCase.SpecCheck (runSpecCheck, renderSpecReport, reportGates)
-import Graphos.Infrastructure.SpecParse (parseSpecDir)
+import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
+import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
+import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
+import Graphos.Infrastructure.Wiring (productionLLMPort)
+import Graphos.Domain.Config (defaultLabelingConfig)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
@@ -660,17 +663,44 @@ main = do
           when (sfrEmbeddingCount res > 0) $
             logInfo env $ T.pack $ "  Embeddings: " ++ show (sfrEmbeddingCount res) ++ " vectors"
 
-    SpeccheckCmd specsDir asJson strictCov -> do
-      parsed <- parseSpecDir specsDir
+    SpeccheckCmd specsDir asJson strictCov checkNames strictDups mGraph adjudicate -> do
+      parsed <- case mGraph of
+        Just graphPath -> do
+          loadResult <- loadGraphFromFile graphPath
+          pure $ case loadResult of
+            Left err -> Left err
+            Right loaded -> Right
+              ( Map.elems (gNodes (lrGraph loaded))
+              , Map.elems (gEdges (lrGraph loaded))
+              )
+        Nothing -> parseSpecCorpus specsDir
       case parsed of
         Left err -> do
           hPutStrLn stderr $ "[graphos] speccheck: " ++ T.unpack err
           exitWith (ExitFailure 1)
         Right (specNodes, specEdges) -> do
-          let report = runSpecCheck specNodes specEdges strictCov
+          let checks = [ c | Just c <- map parseCheckName checkNames ]
+              -- Duplication candidates need node embeddings; the structural
+              -- corpus parse carries none, so they only appear when a graph
+              -- with an embeddings sidecar is loaded (future: --embeddings).
+              dups = []
+              spofs = spofDecisions specNodes specEdges
+          madj <- if adjudicate
+            then do
+              let report0 = runSpecCheck'
+                              specNodes specEdges strictCov strictDups dups spofs Nothing
+              adjns <- SpecAdjudicate.adjudicateCandidates
+                         productionLLMPort defaultLabelingConfig specNodes
+                         (srCandidates report0) 2
+              pure (Just
+                [ (SpecAdjudicate.adjPair a, SpecAdjudicate.adjVerdict a, SpecAdjudicate.adjRationale a)
+                | a <- adjns ])
+            else pure Nothing
+          let report = runSpecCheck'
+                         specNodes specEdges strictCov strictDups dups spofs madj
           if asJson
-            then BL.putStr (encode report) >> putStrLn ""
-            else TIO.putStrLn (renderSpecReport report)
+            then BL.putStr (encode (filterReport checks report)) >> putStrLn ""
+            else TIO.putStrLn (renderSpecReport (filterReport checks report))
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
@@ -1026,17 +1056,24 @@ defaultConfigYaml = unlines
   , "  # base_url: \"https://api.openai.com/v1\""
   , ""
   , "# ──── Embedding ───────────────────────────────────"
-  , "# Local embedding generation via Ollama. Disabled by default."
+  , "# Local embedding generation. Disabled by default."
   , "# Enable with --embed flag or embedding.enabled: true."
-  , "# Targets small local models (nomic-embed-text, all-minilm)."
+  , "# Default model: LFM2.5-Embedding-350M GGUF (512-token fit, optional"
+  , "# asymmetric document:/query: prefixes; benchmark-cited — see the"
+  , "# lfm-embedding-optimization change's bench/BENCHMARK.md)."
   , "embedding:"
   , "  enabled: false               # default: false (enable with --embed)"
   , "  provider: ollama              # ollama (default, only local for now)"
-  , "  model: nomic-embed-text       # default: nomic-embed-text"
-  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
+  , "  # model: \"hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M\"  # default"
+  , "  #   (e.g. nomic-embed-text keeps previous behavior + cache keys)"
+  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local (or a standalone llama-server)"
   , "  dimension: 0                  # 0 = auto-detect from model"
   , "  # batchSize: 64               # max texts per API request (default: 64, must be >= 1)"
-  , "  # concurrency: 1              # batches processed in parallel (default: 1 = sequential)"
+  , "  # concurrency: 1              # batches processed in parallel (benchmark-pinned: 1)"
+  , "  # maxTokens: 512              # token-fit truncation (0 = model-table default)"
+  , "  # docPrefix: \"\"               # prepended to every embedded text (e.g. \"document: \")"
+  , "  # queryPrefix: \"\"             # prepended to query-time text (e.g. \"query: \")"
+  , "  # streaming: true             # staged per-batch sidecar write + atomic rename (default: true)"
   , "  # headers:                    # custom HTTP headers for auth (default: none)"
   , "  #   X-API-Key: \"${MY_TOKEN}\""
   , ""

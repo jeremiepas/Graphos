@@ -10,9 +10,14 @@
 module Graphos.Infrastructure.SpecParse
   ( parseSpecDir
   , parseSpecFile
+  , parseAdrDir
+  , parseAdrFile
+  , parseSpecCorpus
   ) where
 
 import Control.Monad (filterM, forM)
+import qualified Data.Aeson as A
+import qualified Data.Aeson.KeyMap as KM
 import Data.Char (isAlphaNum, toLower)
 import Data.List (isPrefixOf, nub)
 import Data.Text (Text)
@@ -97,6 +102,129 @@ crossReferences caps files = nub
 
 slug :: Text -> Text
 slug = T.pack . map (\c -> if isAlphaNum c then toLower c else '-') . T.unpack
+
+-- ── ADR files (decision records) ─────────────────────────────────────────────
+
+-- | Parse every @*.md@ ADR under @dir@ (non-recursive). ADR identity comes
+-- from the filename (@adr-007-….md@ → @adr-007@); status and supersession
+-- come from the @**Status**: …@ line, so node existence is never modelled.
+parseAdrDir :: FilePath -> IO (Either Text ([Node], [Edge]))
+parseAdrDir dir = do
+  exists <- doesDirectoryExist dir
+  if not exists
+    then pure (Left ("no such directory: " <> T.pack dir))
+    else do
+      entries <- listDirectory dir
+      let adrs = [ dir </> e
+                 | e <- entries
+                 , ".md" `T.isSuffixOf` T.pack e
+                 , isAdrName (T.pack e)
+                 ]
+      if null adrs
+        then pure (Left ("no ADR files under " <> T.pack dir))
+        else do
+          (nodes, edgess) <- unzip <$> forM adrs (\fp -> do
+            content <- T.pack <$> readFile fp
+            pure (parseAdrFile fp content))
+          pure (Right (concat nodes, concat edgess))
+
+-- | A filename is an ADR when it starts with @adr-@ or has a >=3-digit
+-- numeric lead (classic MADR numbering, e.g. @0007-foo.md@).
+isAdrName :: Text -> Bool
+isAdrName name =
+  ("adr-" `T.isPrefixOf` base) || (T.length (T.takeWhile isDigit base) >= 3)
+  where
+    base = T.toLower (T.pack (takeFileName (T.unpack name)))
+    isDigit c = c >= '0' && c <= '9'
+
+-- | Parse one ADR markdown file into (Decision node, structural edges).
+--
+-- * The file itself becomes a @Decision@ node (id @adr-NNN@), with an
+--   @active@ flag in @extra@: @false@ only when the status line reads
+--   @Superseded@ (case-insensitive).
+-- * A @**Supersedes**: ADR-NNN@ line yields @supersedes@ edges from this
+--   decision to the named predecessors (Decision nodes referenced by id).
+parseAdrFile :: FilePath -> Text -> ([Node], [Edge])
+parseAdrFile fp content =
+  let ls = zip [1 :: Int ..] (T.lines content)
+      title = case [ T.stripPrefix "# " l | (_, l) <- ls ] of
+        (Just t : _) -> T.strip t
+        _            -> T.pack (takeFileName fp)
+      baseName = T.toLower (T.pack (takeFileName (takeBaseName' fp)))
+      adrId = case T.stripPrefix "adr-" baseName of
+        Just rest | not (T.null (T.takeWhile (/= '-') rest)) ->
+          T.takeWhile (/= '-') rest
+        _ -> baseName
+      statusLine = firstMatch [ T.stripPrefix "**Status**:" l >>= pure . T.strip | (_, l) <- ls ]
+      supersedesLine = firstMatch [ T.stripPrefix "**Supersedes**:" l >>= pure . T.strip | (_, l) <- ls ]
+      supersededTargets =
+        [ "adr:" <> normalizeAdr (takeWord (T.stripStart t))
+        | Just body <- [supersedesLine]
+        , t <- T.splitOn "," body
+        , not (T.null (takeWord (T.stripStart t)))
+        ]
+      node = mkDecision adrId title fp statusLine
+      edges = [ mkEdge ("adr:" <> adrId) Supersedes tgt | tgt <- supersededTargets ]
+  in ([node], edges)
+  where
+    firstMatch xs = case [ x | Just x <- xs ] of
+      (x : _) -> Just x
+      []      -> Nothing
+    takeWord t = T.takeWhile (\c -> c /= ' ' && c /= '*' && c /= '`' && c /= '.') t
+    -- "ADR-004" → "004" (same id derivation as the file's own name)
+    normalizeAdr t = case T.stripPrefix "adr-" (T.toLower t) of
+      Just rest | not (T.null (T.takeWhile (/= '-') rest)) ->
+        T.takeWhile (/= '-') rest
+      _ -> T.toLower t
+    takeBaseName' p = T.unpack . T.pack . fst . break (== '.') $ takeFileName p
+
+-- | Full spec corpus: openspec @spec.md@ files plus ADRs under
+-- @\<root\>/../docs/proposals@ (or any explicit ADR directory), cross-linked.
+-- Falls back to specs-only when no ADR directory exists.
+parseSpecCorpus :: FilePath -> IO (Either Text ([Node], [Edge]))
+parseSpecCorpus openspecRoot = do
+  specs <- parseSpecDir openspecRoot
+  case specs of
+    Left err -> pure (Left err)
+    Right (specNodes, specEdges) -> do
+      let repoRoot = takeDirectory openspecRoot
+          adrDirs = [ repoRoot </> "docs" </> "proposals"
+                    , repoRoot </> "docs" </> "adr"
+                    , openspecRoot </> "adrs"
+                    ]
+      adrResults <- mapM parseAdrDirIfExists adrDirs
+      let (adrNodes, adrEdges) = concatPairs [ r | Just r <- adrResults ]
+      pure (Right (specNodes ++ adrNodes, specEdges ++ adrEdges))
+  where
+    parseAdrDirIfExists d = do
+      exists <- doesDirectoryExist d
+      if not exists then pure Nothing else either (const Nothing) Just <$> parseAdrDir d
+    concatPairs :: [([a], [b])] -> ([a], [b])
+    concatPairs xs = (concat [ a | (a, _) <- xs ], concat [ b | (_, b) <- xs ])
+
+-- | ADR Decision node: @extra@ carries the raw status text plus the
+-- @active@ boolean (false iff status is Superseded).
+mkDecision :: Text -> Text -> FilePath -> Maybe Text -> Node
+mkDecision nid title fp mstatus =
+  let active = maybe True (\s -> not ("superseded" `T.isPrefixOf` T.toLower s)) mstatus
+      extraVal = A.toJSON (KM.fromList ([ ("active", A.toJSON active) ]
+        ++ [ ("status", A.toJSON s) | Just s <- [mstatus] ] :: [(A.Key, A.Value)]))
+      n = Node
+        { nodeId = "adr:" <> nid
+        , nodeLabel = fromText title
+        , nodeFileType = DocFile
+        , nodeSourceFile = fromText (T.pack fp)
+        , nodeLineStart = Just 1
+        , nodeLineEnd = Nothing
+        , nodeSignature = Nothing
+        , nodeCommunityId = Nothing
+        , nodeKind = Just (fromText "Decision" :: ShortText)
+        , nodeDegree = Nothing
+        , nodeIsBridge = Nothing
+        , nodeExtra = Just extraVal
+        , nodePresentBits = 0
+        }
+  in n { nodePresentBits = computePresentBits n }
 
 mkNode :: Text -> Text -> Text -> FilePath -> Int -> Node
 mkNode nid label kind fp line =
