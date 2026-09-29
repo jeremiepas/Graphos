@@ -66,6 +66,8 @@ parserAnalysis = Analysis
   , analysisGodNodes    = [GodNode "n3" "Main" 246]
   , analysisSurprises   = []
   , analysisQuestions   = []
+  , analysisArticulation = []
+  , analysisBccCount    = 0
   }
 
 budget :: ContextBudget

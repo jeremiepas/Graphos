@@ -17,10 +17,15 @@
 -- lookups appear only at the CachedFGL boundary, never inside an algorithm
 -- loop).
 --
--- * 'articulationPoints' / @ap@ (FGL Tarjan low-link, single DFS pass):
---   __O(N + M)__ (Theorem 2.1; Tarjan 1972).
--- * 'biconnectedComponents' / @bcc@ (stack-based DFS, each arc once):
---   __O(N + M)__ (Theorem 2.1).
+-- * 'articulationPoints' / 'biconnectedComponentCount' (own iterative
+--   Tarjan low-link via 'connectivityWithCached', ST vectors, single DFS
+--   pass, all components): __O(N + M)__ (Theorem 2.1; Tarjan 1972). fgl's
+--   @ap@/@bcc@ are NOT used on this path: their inductive @match@
+--   decomposition measured 164 s on a 410k-edge enriched graph
+--   (bounded-report-export).
+-- * 'biconnectedComponents' (fgl @bcc@, member lists, connected graphs
+--   only — kept for list consumers): __O(N + M)__ graph-theoretically, with
+--   large inductive-decomposition constants; avoid on enriched graphs.
 -- * 'dominators' / @dom@ (Cooper–Harvey–Kennedy iterative reduction):
 --   __O(N + M)__ on reducible graphs; __O(N·M)__ worst-case on irreducible
 --   inputs (Theorem 2.2; CHW 1982). Graphos code-dependency graphs are
@@ -57,6 +62,9 @@ module Graphos.Domain.Graph.Analysis
   , articulationPointsWithCached
   , biconnectedComponents
   , biconnectedComponentsWithCached
+  , biconnectedComponentCount
+  , biconnectedComponentCountWithCached
+  , connectivityWithCached
   , dominators
   , dominatorsWithCached
   , edgeBetweenness
@@ -68,7 +76,7 @@ module Graphos.Domain.Graph.Analysis
   ) where
 
 import Control.DeepSeq (deepseq)
-import Control.Monad (foldM)
+import Control.Monad (foldM, when)
 import Control.Monad.ST (runST)
 import Data.List (sortOn, nub, sort, group)
 import Data.Map.Strict (Map)
@@ -78,7 +86,6 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import qualified Data.Graph.Inductive.Graph as FGL
-import Data.Graph.Inductive.Query.ArtPoint (ap)
 import Data.Graph.Inductive.Query.BCC (bcc)
 import Data.Graph.Inductive.Query.Dominators (dom)
 
@@ -175,13 +182,18 @@ godNodes g topN =
 articulationPoints :: Graph -> [NodeId]
 articulationPoints g = articulationPointsWithCached (toCachedFGL g)
 
--- | Find articulation points using a pre-built CachedFGL
+-- | Find articulation points using a pre-built CachedFGL.
+--
+-- Own Tarjan pass ('connectivityWithCached'), not fgl's
+-- 'Data.Graph.Inductive.Query.ArtPoint.ap': on the 410k-edge
+-- inference-enriched repo graph fgl's @ap@ measured 164 s (inductive @match@
+-- decomposition copies the Patricia tree per DFS step) versus < 1 s here,
+-- and fgl's @ap@ only inspects the first connected component of a
+-- disconnected graph while this pass covers all of them. Output is in
+-- ascending 'NodeId' order (which fgl's @ap@ also produced on connected
+-- graphs, so report bytes are unchanged there).
 articulationPointsWithCached :: CachedFGL -> [NodeId]
-articulationPointsWithCached cfg =
-  let gr = cfgGraph cfg
-      nidMap = cfgNidMap cfg
-      artPointIdxs = ap gr
-  in artPointIdxs `deepseq` [nidMap V.! idx | idx <- artPointIdxs]
+articulationPointsWithCached = fst . connectivityWithCached
 
 -- | Find biconnected components of the graph.
 biconnectedComponents :: Graph -> [[NodeId]]
@@ -194,6 +206,88 @@ biconnectedComponentsWithCached cfg =
       nidMap = cfgNidMap cfg
       components = bcc gr
   in components `deepseq` [nub [nidMap V.! idx | idx <- FGL.nodes comp] | comp <- components]
+
+-- | Number of biconnected components — same figure as
+-- @length . biconnectedComponents@ without materializing the member lists
+-- or fgl's per-block embedded subgraphs (bounded-report-export).
+biconnectedComponentCount :: Graph -> Int
+biconnectedComponentCount = biconnectedComponentCountWithCached . toCachedFGL
+
+-- | 'biconnectedComponentCount' over a pre-built CachedFGL.
+biconnectedComponentCountWithCached :: CachedFGL -> Int
+biconnectedComponentCountWithCached = snd . connectivityWithCached
+
+-- | Articulation points and biconnected-component (block) count in a single
+-- iterative Tarjan low-link pass over the shared CachedFGL (ST vectors,
+-- explicit frame stack, the same deterministic sorted-distinct successor
+-- reads as 'brandesSource'). One block is counted per tree edge @(v, w)@
+-- with @low(w) >= disc(v)@; @v@ is an articulation point on that event
+-- unless it is the DFS root, which is one iff it has two or more tree
+-- children. Covers every connected component (fgl's @ap@/@bcc@ are
+-- documented connected-graph-only and lump or skip further components).
+-- True __O(N + M)__ time, O(N) extra space — replacing fgl's inductive
+-- decomposition here removed a measured 164 s / multi-GB cost on the 410k-edge
+-- enriched repo graph (bounded-report-export). Self-loops and (deduplicated)
+-- reciprocal arcs do not open blocks, matching the reverse-embedded shape
+-- 'toCachedFGL' produces. Articulation points are returned in ascending
+-- 'NodeId' order.
+connectivityWithCached :: CachedFGL -> ([NodeId], Int)
+connectivityWithCached cfg = runST $ do
+  let gr = cfgGraph cfg
+      nidMap = cfgNidMap cfg
+      n = FGL.order gr
+      succsOf v = [g' | g <- group (sort (FGL.suc' (FGL.context gr v))), g' <- take 1 g]
+  discV  <- VUM.replicate n (-1 :: Int)
+  lowV   <- VUM.replicate n (0 :: Int)
+  artV   <- VUM.replicate n False
+  childV <- VUM.replicate n (0 :: Int)
+  let -- Explicit DFS frames: (vertex, its DFS parent, pending successors).
+      -- Popping an exhausted frame merges its low into the parent frame,
+      -- counts a block when low(v) >= disc(parent), and marks the parent as
+      -- an articulation point on that event (non-root parents only).
+      go !time !count [] = pure (time, count)
+      go !time !count ((v, parent, ws) : frames) = case ws of
+        [] -> case frames of
+          [] -> pure (time, count)
+          ((p, pp, pws) : rest) -> do
+            lv <- VUM.read lowV v
+            lp <- VUM.read lowV p
+            dp <- VUM.read discV p
+            VUM.write lowV p (min lp lv)
+            VUM.modify childV (+ 1) p
+            count' <- if lv >= dp
+              then do
+                when (pp /= -1) (VUM.write artV p True)
+                pure (count + 1)
+              else pure count
+            go time count' ((p, pp, pws) : rest)
+        (w : ws')
+          | w == v || w == parent -> go time count ((v, parent, ws') : frames)
+          | otherwise -> do
+              dw <- VUM.read discV w
+              if dw >= 0
+                then do
+                  lv <- VUM.read lowV v
+                  VUM.write lowV v (min lv dw)
+                  go time count ((v, parent, ws') : frames)
+                else do
+                  VUM.write discV w time
+                  VUM.write lowV w time
+                  go (time + 1) count ((w, v, succsOf w) : (v, parent, ws') : frames)
+      dfsRoot (!time, !count) root = do
+        d <- VUM.read discV root
+        if d >= 0
+          then pure (time, count)
+          else do
+            VUM.write discV root time
+            VUM.write lowV root time
+            r <- go (time + 1) count [(root, -1, succsOf root)]
+            rootChildren <- VUM.read childV root
+            when (rootChildren >= 2) (VUM.write artV root True)
+            pure r
+  (_, total) <- foldM dfsRoot (0, 0) [0 .. n - 1]
+  arts <- mapM (VUM.read artV) [0 .. n - 1]
+  pure ([nidMap V.! i | (i, isArt) <- zip [0 ..] arts, isArt], total)
 
 -- | Compute the dominator tree for a given start node.
 dominators :: Graph -> NodeId -> Map NodeId (Maybe NodeId)

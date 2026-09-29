@@ -105,6 +105,9 @@ data PipelineConfig = PipelineConfig
      , cfgDetectionMode      :: Maybe DetectionMode       -- ^ CLI --detect-mode override (exclude|collapse|off)
      , cfgDetectDisabled     :: Bool                      -- ^ --no-detect: force detection off
      , cfgMinifiedThreshold  :: Maybe Int                 -- ^ CLI --minified-threshold override
+     , cfgFailOnLowMemory    :: Bool                      -- ^ --fail-on-low-memory: abort (instead of warn) when available memory is below the budget
+     , cfgNoMemoryBudget     :: Bool                      -- ^ --no-memory-budget: opt out of the derived default heap budget (uncapped run + WARN)
+     , cfgActiveBudgetBytes  :: Maybe Integer             -- ^ Active RTS heap budget in bytes (set by Main after budget establishment; not a CLI flag)
      } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -194,6 +197,9 @@ defaultConfig = PipelineConfig
      , cfgDetectionMode      = Nothing
     , cfgDetectDisabled     = False
     , cfgMinifiedThreshold  = Nothing
+    , cfgFailOnLowMemory    = False
+    , cfgNoMemoryBudget     = False
+    , cfgActiveBudgetBytes  = Nothing
     }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

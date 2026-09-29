@@ -1,0 +1,48 @@
+## 1. Domain: memory policy (pure)
+
+- [x] 1.1 Add `MemInfo` and `MemoryPolicy` to `Domain.Config`: `miMemAvailable :: Bytes`, `deriveBudget :: Maybe MemInfo -> Maybe Bytes -> Bytes -> Maybe Bytes` (explicit wins, clamps to [512 MB, 32 GB], 4 GB reserve), `preFlightVerdict :: Bytes -> Maybe MemInfo -> Verdict` (`Ok | Warn | Abort`). No IO. Verify: Hspec — deriveBudget with explicit value ignores MemInfo; derived = available − 4 GB clamped at both bounds; Nothing MemInfo → Nothing budget; preFlight verdicts at 2 GB/8 GB/16 GB available vs 8 GB budget (Abort/Warn/Ok).
+  - Notes: implemented as `Graphos.Domain.Config.Memory` (re-exported from `Domain.Config`); tests in `tests/Graphos/Domain/Config/MemorySpec.hs` (all green).
+- [x] 1.2 Export the new types from `Domain.Config` and `Domain.Types`. Verify: `cabal build lib:graphos` clean under `-Werror`.
+  - Notes: `Domain.Types` re-exports the memory types except `Verdict`/`preFlightVerdict` (name collision with `Domain.SpecCheck.Verdict`; both remain exported from `Domain.Config`, the canonical home). Build clean, no new warnings.
+
+## 2. Infrastructure: MemAvailable reader
+
+- [x] 2.1 Create `Infrastructure.System.Memory` with `readMemInfo :: IO (Maybe MemInfo)` parsing `MemAvailable` from `/proc/meminfo` (kB units); `Nothing` on any read/parse failure or missing file. Verify: Hspec — parses fixture meminfo text (pure parser `parseMemInfo :: String -> Maybe MemInfo`), skips unknown lines, `readMemInfo` returns Just on this machine.
+  - Notes: `tests/Graphos/Infrastructure/System/MemorySpec.hs`; `readMemInfo` returned `Just` (≈38 GiB available) on the dev machine.
+- [x] 2.2 Wire the module into `graphos.cabal` exposed-modules. Verify: `cabal build` clean; `cabal test` all green.
+  - Notes: all new specs green; 8 pre-existing failures in the full suite reproduce identically at HEAD (5 from the untracked JGF change, aeson key-order in ConfigSpec, PipelineIncremental confluence, StagingSpec /tmp permission) — none introduced by this change.
+
+## 3. Derived default budget in Main (re-exec extension)
+
+- [x] 3.1 Extend `stripRTSFlags`/`reexecWithRTS` in `app/Main.hs` with `BudgetSource` (Explicit | Derived | None): when no explicit `--max-heap`, call `readMemInfo`, derive via MemoryPolicy, re-exec with `-M<derived>` and log `[memory] budget: <N> (derived from available <avail>)` at INFO; log `[memory] no budget applied (source unavailable)` WARN when Nothing; honor new `--no-memory-budget` opt-out (WARN + uncapped). Verify: `graphos .` without flags logs the `[memory]` derived line and re-execs (stderr shows the RTS line); `ps` shows `-M<derived>`; `--max-heap 2G` skips derivation; `--no-memory-budget` skips re-exec entirely.
+  - Notes: observed `[memory] budget: 32.0 GiB (derived from available 38.6 GiB)` + `Re-executing with RTS flags: +RTS -M34359738368`; child carries `cfgActiveBudgetBytes = Just 34359738368` (config dump). `--max-heap 2G` → `[memory] budget: 2.0 GiB (explicit)`, no derivation. `--no-memory-budget` → uncapped WARN, no re-exec. The child is marked via the `GRAPHOS_MEMORY_BUDGET` env var (carries the budget in bytes), since the RTS consumes the `+RTS … --` prefix. `reexecWithRTS` now waits for the child and propagates its exit code (required so pre-flight exit 1 / heap-exhaustion exit 2 survive the re-exec; previously the parent exited 0 immediately).
+- [x] 3.2 Add `--no-memory-budget` to `CLI.Parser` (and graphos.yaml key `memory.budget: auto|off|<size>`, parsed in Domain.Config loader; `auto` default). Verify: Hspec config-parse test for the three forms; `graphos . --no-memory-budget` shows the uncapped WARN.
+  - Notes: `MemoryConfig`/`MemoryBudgetSetting` FromJSON in `Domain.Config.Memory`, wired through `Infrastructure.Config` (`memory:` key) and `GraphosConfig.gcMemory`; three-form parse tests in MemorySpec; `graphos init` template documents the section. CLI precedence: `--max-heap` > `--no-memory-budget` / `memory.budget: off` > yaml fixed size > derived.
+
+## 4. Pre-flight guard (UseCase)
+
+- [x] 4.1 In `UseCase.Pipeline.Core` startup (after budget establishment, before Detect): compute `preFlightVerdict`; log WARNING (warn path) or exit 1 with the budget/available/flag error (abort path when `--fail-on-low-memory` set). Add the flag to `CLI.Parser` (default off). Verify: Hspec with injected MemInfo — warn path logs and continues; abort path exits before any stage log; flag absent → warn-only.
+  - Notes: `preFlightMemoryGuard :: LoggingPort -> Maybe MemInfo -> Maybe Bytes -> Bool -> IO (Either Text ())` (injected MemInfo, tested in PipelineSpec); wired at the top of `runPipelineBody` before Detect. Abort path returns Left → `Pipeline failed: …` → exit 1.
+- [x] 4.2 Apply the same guard to `--cluster-only` and `graphos ingest` entry points. Verify: Hspec per entry point; manual: `--fail-on-low-memory` with an artificially tiny budget (e.g. `--max-heap 8M --fail-on-low-memory`) exits before stage output.
+  - Notes: wired into `runClusterOnlyPipeline` and `runSingleFilePipeline`. Manual abort verified with the inverse setup that actually triggers the low-memory verdict (budget above available): `--max-heap 100G --fail-on-low-memory` → `[memory] available memory 38.3 GiB is below the heap budget 100.0 GiB and --fail-on-low-memory is set — aborting before any stage`, exit 1, no stage output. (A tiny budget like 8M makes available ≥ budget, so pre-flight passes by design; tiny budgets exercise the task-5 heap-exhaustion path instead.)
+
+## 5. Graceful heap-exhaustion failure (stage boundary)
+
+- [x] 5.1 Wrap each of the 7 stage runners in `UseCase.Pipeline.Core`/`Pipeline.Incremental` with a HeapOverflow handler: ERROR log naming the stage, the active budget, "checkpoint preserved — rerun to resume", exit code 2. Verify: Hspec with a synthetic HeapOverflow thrown in a stage stub — message names the stage, exit 2, checkpoint file untouched.
+  - Notes: `withHeapGuard` wraps detect/extract/build/embed/cluster/infer/analyze/export (Core) and extract/cluster/export (Incremental) plus ingest. The pipeline catch-alls now rethrow `ExitCode` (`pipelineErrorHandler`) so the controlled exit 2 reaches the process boundary. Hspec: synthetic HeapOverflow → stage-named ERROR with budget, `ExitFailure 2`, checkpoint bytes untouched; other async exceptions propagate unchanged.
+- [x] 5.2 Manual heap-exhaustion drill: run the 50k-node synthetic corpus with `--max-heap 512M`; confirm the controlled stage-named failure (no kernel kill, no RTS core dump text), checkpoint preserved, rerun with `--max-heap 6G` resumes and completes. Verify: command + observed exit code recorded in this task's notes.
+  - Notes (scaled drill — the 50k corpus at /tmp/opencode/bdd-corpus is not present on this machine): `graphos ./src -o <tmp>/oom-drill-out --no-viz --max-heap 150M` → `[memory] heap budget (150.0 MiB) exhausted during stage export — checkpoint preserved, rerun to resume; raise --max-heap or reduce the input scope`, observed exit code 2, no kernel kill / no RTS abort text; prior output untouched (staging discarded). Rerun `--max-heap 2G` → completes, exit 0 (4234 nodes / 15246 edges / 140 communities).
+
+## 6. Embedding projection gate
+
+- [x] 6.1 In `UseCase.Pipeline.Core.generateGraphEmbeddings`: before the first batch, compute projected = nodeCount × dims × 8 B (dims from first response; conservative 1024 when unknown pre-flight) and log INFO `[memory] embedding projection: <n> nodes × <dims> dims ≈ <bytes>`; abort with stage-named error when projection > active budget (sidecar not created). Verify: Hspec — fixture with tiny budget aborts before sidecar creation; normal budget logs the projection line and proceeds (mock LLM).
+  - Notes: implemented as `generateGraphEmbeddingsGuarded` (wraps the unchanged `generateGraphEmbeddings`, keeping existing tests/callers intact); the gate runs before the first batch, so dims come from `embDimension` when set, conservative 1024 otherwise. Hspec: tiny budget → Left naming projection+budget, sidecar absent; normal/no budget → projection INFO line + assignment.
+- [x] 6.2 Verify dims detection from a real response: point embedding config at the local llama-server (LFM2.5, n_embd 1024) on a small fixture; projection line reports 1024 dims. Verify: manual run log excerpt in task notes; `cabal test` embedding suite unaffected.
+  - Notes: `graphos <fixture> --embed` against the local llama-server (`http://localhost:8080/v1`, LFM2.5-350M) → `[memory] embedding projection: 4 nodes × 1024 dims ≈ 32768 B`; sidecar vectors are genuinely 1024-dim (n_embd match). Embedding suite green.
+
+## 7. Integration verification
+
+- [x] 7.1 Full `cabal test` suite green; `graphos .` on the Graphos repo logs the `[memory]` budget line and completes with results identical to a `--no-memory-budget` run (diff graph.json). Verify: commands + diff outcome in task notes.
+  - Notes: all new specs green (36 examples); the 8 pre-existing full-suite failures reproduce identically on a stashed HEAD baseline (none related). Identity check on `./src`: derived-budget run vs `--no-memory-budget` run → `diff graph.json` identical, both exit 0.
+- [ ] 7.2 End-to-end guard on the 50k synthetic corpus: `graphos /tmp/opencode/bdd-corpus --embed --max-heap 6G` completes or fails gracefully (never kernel-killed); `--rts-profile --max-heap 6G` peak RSS recorded in task notes for the record. Verify: documented command + observed result in task notes.
+  - Notes: blocked — `/tmp/opencode/bdd-corpus` does not exist on this machine; regenerate the synthetic corpus to run this drill. The scaled equivalents (task 5.2 drill on `./src`, real-embedding run in 6.2) both behaved as specified.

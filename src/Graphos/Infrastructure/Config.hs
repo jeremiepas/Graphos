@@ -6,6 +6,7 @@
 module Graphos.Infrastructure.Config
   ( -- * Loading
     loadConfig
+  , loadConfigSilent
   , loadConfigFrom
   , loadConfigWithGlobal
   , globalConfigPath
@@ -46,6 +47,7 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                                , Granularity(..)
                                , LSPServerConfig(..)
                                , IngestConfig(..)
+                               , MemoryConfig(..)
                                , validateEmbeddingConfig
    , defaultGraphosConfig
    , mergeGraphosConfig
@@ -75,6 +77,7 @@ data ConfigFile = ConfigFile
   , cfVision            :: Maybe VisionConfig
    , cfIngest            :: Maybe IngestConfig
    , cfDetection         :: Maybe DetectionConfig
+   , cfMemory            :: Maybe MemoryConfig
    } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -94,6 +97,7 @@ instance FromJSON ConfigFile where
      <*> v .:? "vision"
      <*> v .:? "ingest"
      <*> v .:? "detection"
+     <*> v .:? "memory"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -116,11 +120,20 @@ globalConfigPath = do
 -- Project values override global; global values fill in defaults.
 -- This is the main entry point used by the CLI.
 loadConfig :: IO GraphosConfig
-loadConfig = loadConfigWithGlobal "graphos.yaml"
+loadConfig = loadConfigWithGlobal' True "graphos.yaml"
+
+-- | Like 'loadConfig' but without the "[config] ..." provenance lines.
+-- Used before the RTS re-exec, where the child process loads (and reports)
+-- the same config again moments later.
+loadConfigSilent :: IO GraphosConfig
+loadConfigSilent = loadConfigWithGlobal' False "graphos.yaml"
 
 -- | Load with a custom project config path (e.g. for testing).
 loadConfigWithGlobal :: FilePath -> IO GraphosConfig
-loadConfigWithGlobal projectPath = do
+loadConfigWithGlobal = loadConfigWithGlobal' True
+
+loadConfigWithGlobal' :: Bool -> FilePath -> IO GraphosConfig
+loadConfigWithGlobal' verbose projectPath = do
   globalPath <- globalConfigPath
   globalCfg <- loadConfigFrom globalPath
   projectCfg <- loadConfigFrom projectPath
@@ -128,9 +141,9 @@ loadConfigWithGlobal projectPath = do
     then pure defaultGraphosConfig
     else do
       let merged = mergeGraphosConfig globalCfg projectCfg
-      when (globalCfg /= defaultGraphosConfig) $
+      when (verbose && globalCfg /= defaultGraphosConfig) $
         putStrLn $ "[config] Global: " ++ globalPath
-      when (projectCfg /= defaultGraphosConfig) $
+      when (verbose && projectCfg /= defaultGraphosConfig) $
         putStrLn $ "[config] Project: " ++ projectPath
       pure merged
 
@@ -215,6 +228,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcDetection = case cfDetection cfgFile of
       Just det -> det
       Nothing   -> gcDetection defaults
+  , gcMemory = case cfMemory cfgFile of
+      Just mem -> mem
+      Nothing  -> gcMemory defaults
   }
 
 -- ───────────────────────────────────────────────

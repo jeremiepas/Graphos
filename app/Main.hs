@@ -8,14 +8,15 @@ import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
 import Data.Maybe (isJust)
-import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
 import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
-import System.Process (createProcess, proc)
-import System.Environment (getArgs, getExecutablePath, withArgs)
+import System.Process (createProcess, proc, waitForProcess)
+import qualified System.Process as Process
+import System.Environment (getArgs, getExecutablePath, withArgs, lookupEnv, getEnvironment)
+import Text.Read (readMaybe)
 import System.FilePath ((</>))
 import qualified Data.Time.Clock as TCC (getCurrentTime)
 import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
@@ -63,8 +64,9 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges)
-import Graphos.Infrastructure.Config (loadConfig)
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes)
+import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent)
+import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
@@ -92,15 +94,6 @@ loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
 loadGraphOpt strict path =
   if strict then loadGraphFromFileStrict path else loadGraphFromFile path
 
-parseHeapSize :: String -> Maybe Int
-parseHeapSize s = case reads s of
-  [(n, "")] -> case () of
-    _ | 'g' `elem` lower || 'G' `elem` s -> Just (round (n * 1024 :: Double))
-    _ | 'm' `elem` lower || 'M' `elem` s -> Just (round n)
-    _ -> Just (round n)
-  _ -> Nothing
-  where lower = map toLower s
-
 stripRTSFlags :: [String] -> ([String], Bool, Maybe String)
 stripRTSFlags args = go args False Nothing
   where
@@ -114,25 +107,75 @@ stripRTSFlags args = go args False Nothing
       other -> let (rest, p, h) = go as profile heap
                in (other : rest, p, h)
 
-reexecWithRTS :: Bool -> Maybe String -> IO ()
-reexecWithRTS profile heapStr = do
+-- | Environment marker set on the re-exec'd child process: its presence means
+-- budget establishment already happened in the parent (never derive or
+-- re-exec again); its value carries the active heap budget in bytes (empty
+-- when the parent re-exec'd for profiling only, with no budget).
+reexecEnvVar :: String
+reexecEnvVar = "GRAPHOS_MEMORY_BUDGET"
+
+-- | Establish the active heap budget before the pipeline starts (Workflow 01,
+-- memory-budget-guard): an explicit @--max-heap@ (or fixed graphos.yaml
+-- @memory.budget@) wins; otherwise a default is derived from MemAvailable
+-- minus the safety reserve; otherwise the run is uncapped with a WARN.
+-- Re-executes the binary under the corresponding RTS @-M@ cap — in that case
+-- this never returns (the parent waits for the child and exits with its
+-- code). Returns the active budget when execution continues in-process.
+establishMemoryBudget :: PipelineConfig -> IO (Maybe Integer)
+establishMemoryBudget config = do
+  let profile = cfgRtsProfile config
+      cliBytes = fmap (\mb -> fromIntegral mb * 1024 * 1024) (cfgMaxHeap config) :: Maybe Integer
+  yamlSetting <- if isJust cliBytes
+    then pure BudgetAuto  -- the CLI flag decides; skip the config read
+    else memBudget . gcMemory <$> loadConfigSilent
+  let explicitBytes = case (cliBytes, yamlSetting) of
+        (Just b, _)             -> Just b
+        (Nothing, BudgetFixed b) -> Just b
+        _                        -> Nothing
+      optOut = cfgNoMemoryBudget config || yamlSetting == BudgetOff
+      uncapped reason = do
+        hPutStrLn stderr $ "[memory] WARNING: no budget applied (" ++ reason ++ ") — the run is uncapped"
+        if profile then reexecWithRTS profile Nothing else pure Nothing
+  case explicitBytes of
+    Just b -> do
+      hPutStrLn stderr $ "[memory] budget: " ++ formatBytes b ++ " (explicit)"
+      reexecWithRTS profile (Just b)
+    Nothing
+      | optOut -> uncapped (if cfgNoMemoryBudget config
+                              then "--no-memory-budget"
+                              else "memory.budget: off")
+      | otherwise -> do
+          mInfo <- readMemInfo
+          case (deriveBudget mInfo Nothing memorySafetyReserve, mInfo) of
+            (Just derived, Just mi) -> do
+              hPutStrLn stderr $ "[memory] budget: " ++ formatBytes derived
+                ++ " (derived from available " ++ formatBytes (miMemAvailable mi) ++ ")"
+              reexecWithRTS profile (Just derived)
+            _ -> uncapped "memory info unavailable"
+
+-- | Re-execute the binary with RTS flags (@-M@ heap cap and/or profiling),
+-- marking the child via 'reexecEnvVar', then wait and exit with the child's
+-- exit code — so heap-exhaustion (2) and pre-flight (1) exits survive the
+-- re-exec unchanged.
+reexecWithRTS :: Bool -> Maybe Integer -> IO a
+reexecWithRTS profile mBudgetBytes = do
   originalArgs <- getArgs
   exePath <- getExecutablePath
+  envs <- getEnvironment
   let rtsFlags = concat
-        [ if profile then "-s -hT" else ""
-        , if profile && isJust heapStr then " " else ""
-        , maybe "" (\sz -> "-M" ++ sz) heapStr
+        [ if profile then ["-s", "-hT"] else []
+        , maybe [] (\b -> ["-M" ++ show b]) mBudgetBytes
         ]
-  case rtsFlags of
-    "" -> pure ()
-    _ -> do
-      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ rtsFlags
-      hFlush stderr
-      let (cleanArgs, _, _) = stripRTSFlags originalArgs
-          finalArgs = words ("+RTS " ++ rtsFlags ++ " --") ++ cleanArgs
-      let spec = proc exePath finalArgs
-      _ <- createProcess spec
-      exitSuccess
+  hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ unwords rtsFlags
+  hFlush stderr
+  let (cleanArgs, _, _) = stripRTSFlags originalArgs
+      finalArgs = ["+RTS"] ++ rtsFlags ++ ["--"] ++ cleanArgs
+      childEnv = (reexecEnvVar, maybe "" show mBudgetBytes)
+                   : filter ((/= reexecEnvVar) . fst) envs
+      spec = (proc exePath finalArgs) { Process.env = Just childEnv }
+  (_, _, _, ph) <- createProcess spec
+  code <- waitForProcess ph
+  exitWith code
 
 runClusterOnlyMode :: AppEnv -> LogEnv -> ObservabilityEnv -> PipelineConfig -> IO ()
 runClusterOnlyMode appEnv env obsEnv config' = do
@@ -169,9 +212,13 @@ main = do
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
-      let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
-      when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
-        reexecWithRTS (cfgRtsProfile config) heapStr
+      -- Budget establishment (memory-budget-guard): the parent derives (or
+      -- takes the explicit) heap budget and re-execs under RTS -M; the child
+      -- recognizes the env marker and reads the active budget from it.
+      reexecMarker <- lookupEnv reexecEnvVar
+      activeBudget <- case reexecMarker of
+        Just v  -> pure (readMaybe v :: Maybe Integer)
+        Nothing -> establishMemoryBudget config
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg
@@ -198,6 +245,7 @@ main = do
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
+                            , cfgActiveBudgetBytes = activeBudget
                             }
       -- Fail-fast on a corrupt existing graph.json before doing any work.
       -- Strict by default; pass --no-strict-graph for tolerant loading.
@@ -1090,6 +1138,15 @@ defaultConfigYaml = unlines
   , "  batch_size: 5                 # images per batch with GC between"
   , "  # headers:                    # custom HTTP headers for auth (default: none)"
   , "  #   X-API-Key: \"${MY_TOKEN}\""
+  , ""
+  , "# ──── Memory budget ─────────────────────────────────"
+  , "# RTS heap budget for pipeline runs (fix-oom-memory-budget-guard)."
+  , "# auto   — derive from available memory minus a 4 GB reserve (default)"
+  , "# off    — run uncapped (same as --no-memory-budget)"
+  , "# <size> — fixed budget, e.g. 8G or 512M (same as --max-heap)"
+  , "# CLI flags (--max-heap, --no-memory-budget) override this value."
+  , "memory:"
+  , "  budget: auto"
   , ""
   , "# ──── Observability ─────────────────────────────────"
   , "# Tracing, metrics, and debug instrumentation."

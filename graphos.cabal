@@ -141,6 +141,8 @@ library
                        Graphos.Infrastructure.LSP.Extraction
                          -- Infrastructure - Config
                          Graphos.Infrastructure.Config
+                         -- Infrastructure - System
+                         Graphos.Infrastructure.System.Memory
                       -- Infrastructure - Wiring
                       Graphos.Infrastructure.Wiring
                           -- Infrastructure - TreeSitter
@@ -210,6 +212,7 @@ library
                        Graphos.Domain.Config.Extraction
                        Graphos.Domain.Config.Export
                        Graphos.Domain.Config.Ingest
+                       Graphos.Domain.Config.Memory
                        Graphos.Domain.Config.Observability
                        Graphos.Domain.Config.Vision
                        -- Domain - Embedding preparation
@@ -321,6 +324,8 @@ test-suite graphos-test
     Graphos.Domain.ConfigSpec
     Graphos.Domain.EmbeddingSpec
     Graphos.Domain.Config.IngestSpec
+    Graphos.Domain.Config.MemorySpec
+    Graphos.Infrastructure.System.MemorySpec
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
     Graphos.Domain.CommunitySpec
@@ -349,6 +354,7 @@ test-suite graphos-test
     Graphos.UseCase.FormatContextHintsSpec
     Graphos.UseCase.ConversationSpec
     Graphos.UseCase.LoadSpec
+    Graphos.UseCase.ReportSpec
     Graphos.UseCase.StartupValidationSpec
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec

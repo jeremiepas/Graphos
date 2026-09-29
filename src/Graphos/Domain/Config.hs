@@ -68,6 +68,22 @@ module Graphos.Domain.Config
   , FileEntry(..)
   , defaultIngestConfig
 
+     -- * Memory budget policy
+  , Bytes
+  , MemInfo(..)
+  , Verdict(..)
+  , MemoryBudgetSetting(..)
+  , MemoryConfig(..)
+  , defaultMemoryConfig
+  , memorySafetyReserve
+  , memoryBudgetFloor
+  , memoryBudgetCeiling
+  , deriveBudget
+  , preFlightVerdict
+  , projectedEmbeddingBytes
+  , parseByteSize
+  , formatBytes
+
      -- * Config merging
   , mergeGraphosConfig
   , mergeObservabilityConfig
@@ -77,5 +93,6 @@ import Graphos.Domain.Config.Core
 import Graphos.Domain.Config.Extraction
 import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest
+import Graphos.Domain.Config.Memory
 import Graphos.Domain.Config.Observability
 import Graphos.Domain.Config.Vision
