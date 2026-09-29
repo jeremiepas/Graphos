@@ -4,6 +4,7 @@ module Graphos.Domain.Analysis
   , surprisingConnections
   , suggestQuestions
   , dedupOn
+  , selectTopNOn
   ) where
 
 import Data.List (sortOn)
@@ -19,7 +20,7 @@ import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidenc
                             SurprisingConnection(..), SuggestedQuestion(..),
                             Analysis(..), NullModel(..), relationToText)
 import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, gNodes, gEdges, degree)
-import Graphos.Domain.Community (cohesionScore)
+import Graphos.Domain.Graph.Analysis (toCachedFGL, connectivityWithCached)
 
 -- | Order-preserving, first-occurrence-wins deduplication by key.
 -- O(k log k) replacement for @nubBy (\\a b -> key a == key b)@, which is
@@ -33,12 +34,33 @@ dedupOn key = go Set.empty
       | otherwise           = x : go (Set.insert k seen) xs
       where k = key x
 
+-- | Stable bounded top-N selection: identical output to
+-- @take n . sortOn key@ (including tie order, which stable sort resolves by
+-- original position), but with O(length · n) time and O(n) residency instead
+-- of materializing and sorting the full candidate list
+-- (bounded-report-export).
+selectTopNOn :: Ord k => Int -> (a -> k) -> [a] -> [a]
+selectTopNOn n key xs
+  | n <= 0 = []
+  | otherwise = [x | (_, _, x) <- foldl' step [] (zipWith (\i x -> (key x, i, x)) [0 :: Int ..] xs)]
+  where
+    step acc e = take n (insertAsc e acc)
+    insertAsc e [] = [e]
+    insertAsc e@(k, i, _) (y@(k', i', _) : rest)
+      | (k, i) < (k', i') = e : y : rest
+      | otherwise         = y : insertAsc e rest
+
+-- | Analyze a graph. Articulation points and the biconnected-component count
+-- are computed here, once, from a single shared FGL conversion, and carried
+-- on the result so report/export consume them without recomputation
+-- (bounded-report-export D1/D2).
 analyze :: Graph -> CommunityMap -> CohesionMap -> Analysis
 analyze g commMap cohesionMap =
-  let gods = godNodes g 10
+  let (artPoints, bccCount) = connectivityWithCached (toCachedFGL g)
+      gods = godNodes g 10
       surprises = surprisingConnections g commMap 5
       labels = Map.fromList [(cid, T.pack ("Community " ++ show cid)) | cid <- Map.keys commMap]
-      questions = suggestQuestions g commMap labels
+      questions = suggestQuestions g commMap cohesionMap labels
   in Analysis
     { analysisCommunities   = commMap
     , analysisNullModel     = DefaultNullModel
@@ -46,6 +68,8 @@ analyze g commMap cohesionMap =
     , analysisGodNodes     = gods
     , analysisSurprises    = surprises
     , analysisQuestions    = questions
+    , analysisArticulation = artPoints
+    , analysisBccCount     = bccCount
     }
 
 surprisingConnections :: Graph -> CommunityMap -> Int -> [SurprisingConnection]
@@ -57,8 +81,11 @@ surprisingConnections g commMap topN =
      then crossFileSurprises g nodeComm topN
      else crossCommunitySurprises g nodeComm topN
 
-suggestQuestions :: Graph -> CommunityMap -> Map CommunityId Text -> [SuggestedQuestion]
-suggestQuestions g commMap labels =
+-- | Suggested questions. Cohesion is read from the provided map (the values
+-- computed during clustering), never recomputed per community
+-- (bounded-report-export).
+suggestQuestions :: Graph -> CommunityMap -> CohesionMap -> Map CommunityId Text -> [SuggestedQuestion]
+suggestQuestions g commMap cohesionMap labels =
   let nodeComm = nodeCommunityMap commMap
       ambiguousEdges = [(u, v, d) | (u, v, d) <- allEdges g
                                    , let Confidence c = edgeConfidence d
@@ -69,7 +96,7 @@ suggestQuestions g commMap labels =
         , sqWhy = "Low confidence edge (relation: " <> relationToText (edgeRelation d) <> ") - confidence is low."
         } | (u, v, d) <- take 3 ambiguousEdges]
       bridgeQs = bridgeNodeQuestions g nodeComm labels
-      lowCohesionQs = lowCohesionQuestions g commMap labels
+      lowCohesionQs = lowCohesionQuestions commMap cohesionMap labels
   in take 7 (ambiguousQs ++ bridgeQs ++ lowCohesionQs)
 
 nodeCommunityMap :: CommunityMap -> Map NodeId CommunityId
@@ -89,7 +116,9 @@ crossFileSurprises g nodeComm topN =
                    , not (isConceptNode (nodeData g v))
                    , let (score, reasons) = surpriseScore g d nodeComm uSrc vSrc u v
                    ]
-      sorted = sortOn (\(_, _, _, s, _) -> Down s) candidates
+      -- Bounded selection: only topN candidates are ever resident, instead
+      -- of sorting the full O(E) list (bounded-report-export D3).
+      sorted = selectTopNOn topN (\(_, _, _, s, _) -> Down s) candidates
   in take topN [SurprisingConnection
     { scSource      = nodeLabel' g u
     , scTarget      = nodeLabel' g v
@@ -110,8 +139,22 @@ crossCommunitySurprises g nodeComm topN =
                    , not (isFileNode g (nodeData g v))
                    , edgeRelation d `notElem` [Imports, Contains]
                    ]
-      sorted = sortOn (\(_, _, d, _, _) -> Down (edgeConfidence d)) candidates
-      deduped = dedupOn (\(_,_,_,cu,cv) -> (cu,cv)) sorted
+      -- Best candidate per community pair, then bounded top-N over those
+      -- bests: output-equal to sorting all candidates by descending
+      -- confidence (stable) and deduplicating first-occurrence-wins per
+      -- (cid_u, cid_v) — the first sorted occurrence of a pair IS its
+      -- max-confidence candidate, ties resolved by original position — but
+      -- with O(pairs) residency instead of a full O(E) sort
+      -- (bounded-report-export D3).
+      conf (_, _, d, _, _) = edgeConfidence d
+      better a@(i, ca) b@(j, cb)
+        | (Down (conf ca), i) < (Down (conf cb), j) = a
+        | otherwise = b
+      bests = Map.elems (Map.fromListWith better
+                [ ((cu, cv), (i, c))
+                | (i, c@(_, _, _, cu, cv)) <- zip [0 :: Int ..] candidates
+                ])
+      deduped = map snd (selectTopNOn topN (\(i, c) -> (Down (conf c), i)) bests)
   in take topN [SurprisingConnection
     { scSource      = nodeLabel' g u
     , scTarget      = nodeLabel' g v
@@ -149,15 +192,19 @@ bridgeNodeQuestions g _nodeComm _labels =
      , sqWhy = "High betweenness centrality - this node is a cross-community bridge."
      } | (nid, _) <- topBridges]
 
-lowCohesionQuestions :: Graph -> CommunityMap -> Map CommunityId Text -> [SuggestedQuestion]
-lowCohesionQuestions g commMap labels =
+-- | Low-cohesion questions read the clustering-time cohesion map; a
+-- community absent from the map is treated as cohesive (no question) rather
+-- than recomputed (bounded-report-export). Producers construct the map over
+-- the same community keys, so the miss case does not arise in the pipeline.
+lowCohesionQuestions :: CommunityMap -> CohesionMap -> Map CommunityId Text -> [SuggestedQuestion]
+lowCohesionQuestions commMap cohesionMap labels =
   [SuggestedQuestion
    { sqType = "low_cohesion"
    , sqQuestion = Just $ "Should `" <> lbl <> "` be split into smaller, more focused modules?"
    , sqWhy = "Cohesion score is low - nodes in this community are weakly interconnected."
    } | (cid, members) <- Map.toList commMap
     , length members >= 5
-    , let score = cohesionScore g members
+    , let score = Map.findWithDefault 1.0 cid cohesionMap
     , score < 0.15
     , let lbl = Map.findWithDefault (T.pack ("Community " ++ show cid)) cid labels]
 

@@ -29,6 +29,7 @@ import Graphos.Domain.Config.Extraction ( PdfExtractionMode(..)
                                         )
 import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest (IngestConfig(..), defaultIngestConfig, mergeIngestConfig)
+import Graphos.Domain.Config.Memory (MemoryConfig(..), defaultMemoryConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import Graphos.Domain.Config.Vision
 import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
@@ -55,6 +56,7 @@ data GraphosConfig = GraphosConfig
   , gcVision           :: VisionConfig                  -- ^ Vision analysis settings
    , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
    , gcDetection        :: DetectionConfig               -- ^ Generated/vendored/minified code detection settings
+   , gcMemory           :: MemoryConfig                  -- ^ Memory budget settings (memory.budget: auto|off|<size>)
    } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -75,6 +77,7 @@ defaultGraphosConfig = GraphosConfig
    , gcVision           = defaultVisionConfig
    , gcIngest           = defaultIngestConfig
    , gcDetection        = defaultDetectionConfig
+   , gcMemory           = defaultMemoryConfig
    }
 
 -- ───────────────────────────────────────────────
@@ -126,4 +129,7 @@ mergeGraphosConfig global project = GraphosConfig
    , gcDetection = if gcDetection project == defaultDetectionConfig
                      then gcDetection global
                      else gcDetection project
+   , gcMemory = if gcMemory project == defaultMemoryConfig
+                  then gcMemory global
+                  else gcMemory project
    }

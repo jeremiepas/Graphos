@@ -8,7 +8,7 @@ module Graphos.UseCase.Pipeline.Incremental
   , cleanInferred
   ) where
 
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch, evaluate)
 import Control.Monad (when, void)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -20,7 +20,6 @@ import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
 import Graphos.Domain.Config (SemanticEdgesConfig(..))
 import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected)
-import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..))
@@ -30,14 +29,21 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Extract (extractChangedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
-import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
+import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), scoreAllCohesion)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.Domain.Labeling (LabelingResult(..))
 import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
-import Graphos.UseCase.Pipeline.Core (PipelineResult(..), logSemanticInference)
+import Graphos.UseCase.Pipeline.Core
+  ( PipelineResult(..)
+  , logSemanticInference
+  , preFlightMemoryGuard
+  , withHeapGuard
+  , pipelineErrorHandler
+  )
+import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 
 -- | Run incremental pipeline for --watch mode.
@@ -64,7 +70,8 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
 
   lpLogInfo lp $ T.pack $ "[watch] Re-extracting " ++ show (length changedFiles) ++ " changed files..."
 
-  extraction <- extractChangedFiles appEnv configWithStreaming changedFiles
+  extraction <- withHeapGuard lp (cfgActiveBudgetBytes config) "extract" $
+    extractChangedFiles appEnv configWithStreaming changedFiles
 
   let directed = cfgDirected configWithStreaming
       baseGraph = buildGraphFromExtractions directed [extraction]
@@ -100,11 +107,16 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
             density = cfgEdgeDensity configWithStreaming
             (enriched, commMap, mode, semanticEdges) = clusterAndInfer res seCfg force density directed graph
         logSemanticInference lp seCfg mode semanticEdges
-        pure (enriched, commMap)
+        withHeapGuard lp (cfgActiveBudgetBytes config) "cluster" $ do
+          _ <- evaluate (Map.size (gNodes enriched) + Map.size commMap)
+          pure (enriched, commMap)
 
   createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
-  let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
-  exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing []
+  -- Cohesion on the enriched graph, computed once and read by the report
+  -- (bounded-report-export; previously the report recomputed per community).
+  let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
+  exports <- withHeapGuard lp (cfgActiveBudgetBytes config) "export" $
+    UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing []
 
   when (cfgNeo4j configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
     let n4cfg = gcNeo4j (cfgGraphosConfig configWithStreaming)
@@ -119,7 +131,7 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
         lpLogInfo lp "[neo4j] Push mode: full (incremental)"
         void $ epPushToNeo4jFull ep enrichedGraph finalCommMap cohesion uri user pass
       SubgraphPush -> do
-        let artPoints = GAnalysis.articulationPoints enrichedGraph
+        let artPoints = analysisArticulation analysis
         void $ epPushToNeo4jSubgraph ep enrichedGraph finalCommMap cohesion (cfgNeo4jSubgraphSize configWithStreaming) artPoints uri user pass
       CommunityPush ->
         void $ epPushToNeo4jCommunity ep enrichedGraph finalCommMap cohesion uri user pass
@@ -135,7 +147,7 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
         }
   lpLogInfo lp "[watch] Incremental pipeline complete!"
   pure $ Right result
-  ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Incremental pipeline error: " ++ show e
+  ) (pipelineErrorHandler "Incremental pipeline error")
 
 -- | Cluster then infer edges on a single graph. Pure and deterministic in its graph
 -- input: folding incremental batches into the running graph yields the same enriched
@@ -191,12 +203,18 @@ runSingleFilePipeline appEnv config filePath = catch (do
       fsp = fileSystemPort appEnv
       ep = exportPort appEnv
 
-  lpLogInfo lp $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
+  mInfo <- readMemInfo
+  preFlight <- preFlightMemoryGuard lp mInfo (cfgActiveBudgetBytes config) (cfgFailOnLowMemory config)
+  case preFlight of
+   Left pfErr -> pure (Left pfErr)
+   Right () -> do
+    lpLogInfo lp $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
 
-  ingestResult <- ingestFile appEnv config filePath
-  case ingestResult of
-    Left err -> pure $ Left err
-    Right fir -> do
+    ingestResult <- withHeapGuard lp (cfgActiveBudgetBytes config) "extract" $
+      ingestFile appEnv config filePath
+    case ingestResult of
+     Left err -> pure $ Left err
+     Right fir -> do
       let graph = buildGraphFromExtractions (cfgDirected config) [firExtraction fir]
 
       lpLogInfo lp $ T.pack $ "  Graph: " ++ show (Map.size (gNodes graph)) ++ " nodes, "
@@ -244,7 +262,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
           pure $ if Map.null (lrLabels result) then Nothing else Just (lrLabels result)
         else pure Nothing
 
-      let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
+      let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
           detection = Detection
             { detectionTotalFiles = 1
             , detectionTotalWords = 0
@@ -270,4 +288,4 @@ runSingleFilePipeline appEnv config filePath = catch (do
         , sfrIndexPath   = indexPath
         , sfrEmbeddingCount = embWithVectors
         }
-  ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Single-file pipeline error: " ++ show e
+  ) (pipelineErrorHandler "Single-file pipeline error")

@@ -1,6 +1,6 @@
 module Graphos.UseCase.PipelineSpec where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, throwIO, AsyncException(..))
 import Data.Aeson (eitherDecode)
 import Data.List (isInfixOf, sort)
 import qualified Data.ByteString.Lazy as BSL
@@ -11,7 +11,8 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text.Short (fromText, toText)
 import Control.Monad (forM)
-import System.Directory (listDirectory, getModificationTime, createDirectory)
+import System.Directory (listDirectory, getModificationTime, createDirectory, doesFileExist)
+import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 
@@ -19,8 +20,15 @@ import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph.Core (Graph(..))
-import Graphos.UseCase.Pipeline.Core (generateGraphEmbeddings, writeEmbeddingsSidecar)
+import Graphos.UseCase.Pipeline.Core
+  ( generateGraphEmbeddings
+  , generateGraphEmbeddingsGuarded
+  , writeEmbeddingsSidecar
+  , preFlightMemoryGuard
+  , withHeapGuard
+  )
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
+import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Infrastructure.Export.JSON (saveCheckpoint, loadCheckpointInputSource)
 
 spec :: Spec
@@ -280,6 +288,120 @@ spec = do
         -- Only the final sidecar (and the cache dir); no staging remnants.
         sort entries `shouldBe` ["cache", "embeddings.json"]
 
+  describe "preFlightMemoryGuard (memory-budget-guard)" $ do
+    let gib n = n * 1024 * 1024 * 1024 :: Integer
+
+    it "passes silently without a budget" $ do
+      (logs, r) <- withCapturedLogs $ \lp ->
+        preFlightMemoryGuard lp (Just (MemInfo (gib 2))) Nothing True
+      r `shouldBe` Right ()
+      logs `shouldBe` []
+
+    it "passes silently without memory info" $ do
+      (logs, r) <- withCapturedLogs $ \lp ->
+        preFlightMemoryGuard lp Nothing (Just (gib 8)) True
+      r `shouldBe` Right ()
+      logs `shouldBe` []
+
+    it "warns and continues when available is below the budget (flag off)" $ do
+      (logs, r) <- withCapturedLogs $ \lp ->
+        preFlightMemoryGuard lp (Just (MemInfo (gib 2))) (Just (gib 8)) False
+      r `shouldBe` Right ()
+      logs `shouldSatisfy` any ("[memory]" `T.isInfixOf`)
+      logs `shouldSatisfy` any ("below the heap budget" `T.isInfixOf`)
+
+    it "aborts before any stage when --fail-on-low-memory is set" $ do
+      (_, r) <- withCapturedLogs $ \lp ->
+        preFlightMemoryGuard lp (Just (MemInfo (gib 2))) (Just (gib 8)) True
+      case r of
+        Left err -> do
+          err `shouldSatisfy` ("--fail-on-low-memory" `T.isInfixOf`)
+          err `shouldSatisfy` ("8.0 GiB" `T.isInfixOf`)
+          err `shouldSatisfy` ("2.0 GiB" `T.isInfixOf`)
+        Right () -> expectationFailure "expected the strict pre-flight to abort"
+
+    it "warns on thin headroom (budget fits, less than the reserve to spare)" $ do
+      (logs, r) <- withCapturedLogs $ \lp ->
+        preFlightMemoryGuard lp (Just (MemInfo (gib 8))) (Just (gib 8)) True
+      r `shouldBe` Right ()
+      logs `shouldSatisfy` any ("thin headroom" `T.isInfixOf`)
+
+  describe "withHeapGuard (graceful heap exhaustion)" $ do
+    it "turns HeapOverflow into a stage-named ERROR and exit code 2, leaving the checkpoint untouched" $ do
+      withSystemTempDirectory "graphos-heap-guard" $ \dir -> do
+        let checkpoint = dir </> "graph.checkpoint.json"
+        writeFile checkpoint "{\"checkpoint\":true}"
+        logsRef <- newIORef ([] :: [Text])
+        r <- try $ withHeapGuard (capturingLP logsRef) (Just (6 * 1024 * 1024 * 1024)) "cluster" $
+               throwIO HeapOverflow :: IO (Either ExitCode ())
+        r `shouldBe` Left (ExitFailure 2)
+        logs <- readIORef logsRef
+        logs `shouldSatisfy` any ("cluster" `T.isInfixOf`)
+        logs `shouldSatisfy` any ("6.0 GiB" `T.isInfixOf`)
+        logs `shouldSatisfy` any ("checkpoint preserved" `T.isInfixOf`)
+        -- The checkpoint file was not touched by the failure path.
+        content <- readFile checkpoint
+        content `shouldBe` "{\"checkpoint\":true}"
+
+    it "lets other exceptions propagate unchanged" $ do
+      logsRef <- newIORef ([] :: [Text])
+      r <- try (withHeapGuard (capturingLP logsRef) Nothing "extract" (throwIO ThreadKilled))
+      case r :: Either AsyncException () of
+        Left ThreadKilled -> pure ()
+        other -> expectationFailure ("expected ThreadKilled to propagate, got " ++ show other)
+
+    it "returns the action's result when no overflow occurs" $ do
+      logsRef <- newIORef ([] :: [Text])
+      n <- withHeapGuard (capturingLP logsRef) Nothing "build" (pure (42 :: Int))
+      n `shouldBe` 42
+
+  describe "generateGraphEmbeddingsGuarded (embedding projection gate)" $ do
+    it "logs the projection and proceeds under a comfortable budget" $ do
+      withSystemTempDirectory "graphos-embed-gate-ok" $ \dir -> do
+        logsRef <- newIORef ([] :: [Text])
+        let llm = stubLLM (const (const (pure (Right [1.0, 2.0] :: Either Text [Double]))))
+            graph = testGraph [testNode "a" "A" "a.hs", testNode "b" "B" "b.hs"]
+            sidecar = dir </> "embeddings.json"
+        r <- generateGraphEmbeddingsGuarded (capturingLP logsRef)
+               (Just (8 * 1024 * 1024 * 1024)) llm defaultEmbeddingConfig graph (dir </> "cache") sidecar
+        case r of
+          Left err -> expectationFailure ("expected the gate to pass: " ++ T.unpack err)
+          Right embs -> Map.size embs `shouldBe` 2
+        logs <- readIORef logsRef
+        logs `shouldSatisfy` any ("[memory] embedding projection: 2 nodes" `T.isInfixOf`)
+        -- Conservative 1024 dims when the config leaves dimension at 0.
+        logs `shouldSatisfy` any ("1024 dims" `T.isInfixOf`)
+        doesFileExist sidecar >>= (`shouldBe` True)
+
+    it "refuses to start and creates no sidecar when the projection exceeds the budget" $ do
+      withSystemTempDirectory "graphos-embed-gate-abort" $ \dir -> do
+        logsRef <- newIORef ([] :: [Text])
+        let llm = stubLLM (const (const (error "the gate must abort before any batch")))
+            graph = testGraph [testNode "a" "A" "a.hs", testNode "b" "B" "b.hs"]
+            sidecar = dir </> "embeddings.json"
+        -- Projection is 2 nodes × 1024 dims × 8 B = 16 KiB; budget 1 KiB.
+        r <- generateGraphEmbeddingsGuarded (capturingLP logsRef)
+               (Just 1024) llm defaultEmbeddingConfig graph (dir </> "cache") sidecar
+        case r of
+          Left err -> do
+            err `shouldSatisfy` ("exceeds the heap budget" `T.isInfixOf`)
+            err `shouldSatisfy` ("[embed]" `T.isInfixOf`)
+          Right _ -> expectationFailure "expected the projection gate to refuse"
+        doesFileExist sidecar >>= (`shouldBe` False)
+
+    it "without a budget only logs the projection and proceeds" $ do
+      withSystemTempDirectory "graphos-embed-gate-nobudget" $ \dir -> do
+        logsRef <- newIORef ([] :: [Text])
+        let llm = stubLLM (const (const (pure (Right [1.0] :: Either Text [Double]))))
+            graph = testGraph [testNode "a" "A" "a.hs"]
+        r <- generateGraphEmbeddingsGuarded (capturingLP logsRef)
+               Nothing llm defaultEmbeddingConfig graph (dir </> "cache") (dir </> "embeddings.json")
+        case r of
+          Left err -> expectationFailure ("expected no gating without a budget: " ++ T.unpack err)
+          Right embs -> Map.size embs `shouldBe` 1
+        logs <- readIORef logsRef
+        logs `shouldSatisfy` any ("[memory] embedding projection" `T.isInfixOf`)
+
   describe "checkpoint provenance (AC#3)" $ do
     it "records input_source via saveCheckpoint and restores it via loadCheckpointInputSource" $ do
       withSystemTempDirectory "graphos-checkpoint-roundtrip" $ \dir -> do
@@ -321,6 +443,26 @@ testGraph ns = Graph
   , gEmbeddings = Nothing
   , gEmbeddingsPath = Nothing
   }
+
+-- | A logging port that records every line (all levels) into an IORef.
+capturingLP :: IORef [Text] -> LoggingPort
+capturingLP ref = LoggingPort
+  { lpLogTrace = add
+  , lpLogDebug = add
+  , lpLogInfo  = add
+  , lpLogWarn  = add
+  , lpLogError = add
+  }
+  where add t = modifyIORef' ref (t :)
+
+-- | Run an action against a capturing logging port, returning its log lines
+-- (oldest first) alongside the result.
+withCapturedLogs :: (LoggingPort -> IO a) -> IO ([Text], a)
+withCapturedLogs action = do
+  ref <- newIORef []
+  r <- action (capturingLP ref)
+  logs <- readIORef ref
+  pure (reverse logs, r)
 
 stubLLM :: (EmbeddingConfig -> Text -> IO (Either Text [Double])) -> LLMPort
 stubLLM gen = LLMPort

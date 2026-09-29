@@ -124,6 +124,9 @@ pipelineOpts = PipelineConfig
       <*> optional (option detectModeReader (long "detect-mode" <> metavar "MODE" <> help "Generated/vendored/minified detection mode: exclude|collapse|off (default: exclude)"))
       <*> switch (long "no-detect" <> help "Disable generated/vendored/minified detection (equivalent to --detect-mode off)")
       <*> optional (option auto (long "minified-threshold" <> help "Longest allowed line length before a file is classified as Minified (default: 5000)"))
+      <*> switch (long "fail-on-low-memory" <> help "Abort before any stage (exit 1) when available memory is below the heap budget (default: warn only)")
+      <*> switch (long "no-memory-budget" <> help "Disable the machine-derived default heap budget (run uncapped; --max-heap still applies when given)")
+      <*> pure Nothing
 
 
 granularityReader :: ReadM Granularity

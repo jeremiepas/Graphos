@@ -12,10 +12,14 @@ import qualified Data.Text as T
 import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, articulationPoints, biconnectedComponents)
-import Graphos.Domain.Community (cohesionScore)
+import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 
--- | Generate a markdown report
+-- | Generate a markdown report.
+--
+-- Pure rendering (bounded-report-export): connectivity figures and cohesion
+-- come from the 'Analysis' record — the values computed once during
+-- clustering/analysis — never recomputed here, so rendering does no
+-- whole-graph work.
 generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Text
 generateReport g analysis _config _detection mLabels =
   T.unlines
@@ -27,11 +31,11 @@ generateReport g analysis _config _detection mLabels =
     , T.pack $ "Edges: " ++ show (Map.size (gEdges g))
     , T.pack $ "Communities: " ++ show (Map.size (analysisCommunities analysis))
     , T.pack $ "Articulation points: " ++ show (length artPoints)
-    , T.pack $ "Biconnected components: " ++ show (length bccs)
+    , T.pack $ "Biconnected components: " ++ show (analysisBccCount analysis)
     , ""
     , "## Communities"
     , ""
-    , communitiesSection (analysisCommunities analysis) g mLabels
+    , communitiesSection (analysisCommunities analysis) (analysisCohesion analysis) g mLabels
     , ""
     , "## God Nodes (Top Hubs)"
     , ""
@@ -50,19 +54,22 @@ generateReport g analysis _config _detection mLabels =
     , questionsSection (analysisQuestions analysis)
     ]
   where
-    artPoints = articulationPoints g
-    bccs = biconnectedComponents g
+    artPoints = analysisArticulation analysis
 
 -- | Format cohesion score to 2 decimal places
 fmtCohesion :: Double -> String
 fmtCohesion d = take 5 (show d)
 
-communitiesSection :: CommunityMap -> Graph -> Maybe (Map.Map CommunityId Text) -> Text
-communitiesSection commMap g mLabels =
+-- | Communities table. Cohesion comes from the clustering-time map (same
+-- keys as the community map by construction: producers derive it with
+-- @scoreAllCohesion@ / @fmap@ over the same communities); a missing key
+-- renders 0.0 rather than triggering a whole-graph recomputation.
+communitiesSection :: CommunityMap -> CohesionMap -> Graph -> Maybe (Map.Map CommunityId Text) -> Text
+communitiesSection commMap cohesionMap g mLabels =
   let header = "| Community | Members | Cohesion | Top Nodes |"
       sep    = "|-----------|---------|----------|-----------|"
       rows   = [T.pack $ "| " ++ show cid ++ " | " ++ show (length members)
-                       ++ " | " ++ fmtCohesion (cohesionScore g members)
+                       ++ " | " ++ fmtCohesion (Map.findWithDefault 0.0 cid cohesionMap)
                        ++ " | " ++ intercalate ", " (take 3 [T.unpack (toText (nodeLabel n)) | nid <- members, Just n <- [Map.lookup nid (gNodes g)]])
                        ++ " |"
                 | (cid, members) <- Map.toList commMap]
