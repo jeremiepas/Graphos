@@ -44,5 +44,30 @@
 
 - [x] 7.1 Full `cabal test` suite green; `graphos .` on the Graphos repo logs the `[memory]` budget line and completes with results identical to a `--no-memory-budget` run (diff graph.json). Verify: commands + diff outcome in task notes.
   - Notes: all new specs green (36 examples); the 8 pre-existing full-suite failures reproduce identically on a stashed HEAD baseline (none related). Identity check on `./src`: derived-budget run vs `--no-memory-budget` run → `diff graph.json` identical, both exit 0.
-- [ ] 7.2 End-to-end guard on the 50k synthetic corpus: `graphos /tmp/opencode/bdd-corpus --embed --max-heap 6G` completes or fails gracefully (never kernel-killed); `--rts-profile --max-heap 6G` peak RSS recorded in task notes for the record. Verify: documented command + observed result in task notes.
-  - Notes: blocked — `/tmp/opencode/bdd-corpus` does not exist on this machine; regenerate the synthetic corpus to run this drill. The scaled equivalents (task 5.2 drill on `./src`, real-embedding run in 6.2) both behaved as specified.
+- [x] 7.2 End-to-end guard on the 50k synthetic corpus: `graphos /tmp/opencode/bdd-corpus --embed --max-heap 6G` completes or fails gracefully (never kernel-killed); `--rts-profile --max-heap 6G` peak RSS recorded in task notes for the record. Verify: documented command + observed result in task notes.
+  - Notes: corpus unblocked — `/tmp/opencode/bdd-corpus` regenerated as 5,000 deterministic Java files in 10 packages
+    (79,500 nodes / 79,500 edges after extraction; generator `/tmp/opencode/gen-bdd-corpus.py`; layers: same-package
+    previous-index dep + one cross-package dep per class).
+    1. E2E run `graphos /tmp/opencode/bdd-corpus --embed --no-viz --max-heap 6G -o /tmp/opencode/e2e-embed` →
+       **exit 0, Graph complete** in ~96 min: `[memory] budget: 6.0 GiB (explicit)` → re-exec `+RTS -M6442450944` →
+       pre-flight WARN (thin headroom) → `[memory] embedding projection: 79500 nodes × 1024 dims ≈ 621.1 MiB` →
+       `Wrote 79500 node embeddings to embeddings.json` (1024-dim, LFM2.5 via Ollama; staged sidecar atomically
+       renamed) → 10000 communities → report rendered 0.19 s. Peak RSS 6.30 GiB external (5 s ps sampling, 707
+       samples; log `/tmp/opencode/e2e-embed4.log`). No kernel OOM, no RTS abort, output staged-swap clean.
+       First attempt of this run was SIGTERM'd at 55 min by the operator's own `timeout 3300` wrapper (not an OOM);
+       rerun resumed through the warm `cache/` and completed. Note: the default LFM2.5 model was missing from
+       Ollama initially — every `/v1/embeddings` batch 404'd and per-input isolation correctly degraded the run to
+       0 vectors (no crash); after `ollama pull hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M` the pass wrote
+       real vectors (finding worth a check-level error for all-batches-failed, but per-input isolation behaved as
+       specced).
+    2. Heap-exhaustion drill on the same corpus `--max-heap 1G` → `[memory] heap budget (1.0 GiB) exhausted during
+       stage extract — checkpoint preserved, rerun to resume…`, **exit 2**, checkpoint intact, no RTS abort text,
+       no kernel kill; rerun with `--max-heap 6G` proceeds (tasks 5.1/5.2 behavior confirmed at 50k scale).
+    3. `--rts-profile --max-heap 6G` (`+RTS -s -hT -M6442450944`): killed at 00:44 by **systemd-oomd (global
+       desktop pressure, exit 137)** during the single-threaded post-embedding cache write-back (~4 vector files/s),
+       peak external RSS 6.13 GiB, `+RTS -s` summary never flushed. Not a guard failure (the cap held at 6.13 GiB;
+       the kill fired machine-wide while co-tenant processes squeezed available memory to ~4 GB), but it exposes a
+       real follow-up: write-back of ~79.5k individual cache JSONs takes hours and holds the assignment live for
+       the whole time — batch the cache writes (bounded-embedding-memory) and/or poll RSS less aggressively.
+    4. A co-tenant agent re-launched the identical 6G corpus drill with warm cache (in progress at update time);
+       evidence above stands on the completed run + graceful-exhaustion drill.
