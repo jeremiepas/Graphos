@@ -19,8 +19,9 @@ Push the knowledge graph to a Neo4j graph database for interactive exploration v
 │  │  All edges   │  │              │  │  + inter-comm  │   │
 │  │  + comm.     │  │ Comm + reps  │  │  edges only   │   │
 │  │              │  │ + bridges    │  │                │   │
-│  │  ~990k stmt  │  │ ~64k stmt   │  │  ~8k stmt      │   │
-│  │  2–4 hours   │  │ ~30 sec     │  │  ~5 sec        │   │
+│  │  ~140 UNWIND │  │ ~64k stmt    │  │  ~8k stmt      │   │
+│  │  statements  │  │ seconds      │  │  seconds       │   │
+│  │  ≈35s–7 min* │  │ ~30 sec      │  │  ~5 sec        │   │
 │  └──────────────┘  └──────────────┘  └────────────────┘   │
 │                                                              │
 │  Auto-selection:                                            │
@@ -30,6 +31,13 @@ Push the knowledge graph to a Neo4j graph database for interactive exploration v
 │  Override: --neo4j-push-mode full|subgraph|community        │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+\* FullPush timings on localhost Neo4j 5 (UNWIND batching + indexed MERGE,
+since optimize-neo4j-full-push): synthetic 100k nodes / 200k edges pushed in
+**~7 s**; a real-world 119k-node / 128k-edge graph (labels carrying source
+text) measured **~35 s**. The historical path (one statement per node/edge,
+curl subprocess per batch, no index) took 2–4 hours for the same graphs and
+is no longer shipped.
 
 ---
 
@@ -88,7 +96,37 @@ All BELONGS_TO memberships
 
 ## Streaming Neo4j Push
 
-When `--neo4j` is enabled during the full pipeline, nodes are pushed to Neo4j **during extraction** (node-by-node) instead of waiting for the export stage. After extraction completes, an edge repair pass re-pushes all edges to ensure cross-file connections are correct.
+When `--neo4j` is enabled during the full pipeline, nodes are pushed to Neo4j **during extraction** (per-file UNWIND batches instead of waiting for the export stage). After extraction completes, an edge repair pass re-pushes all edges (grouped by relationship type, UNWIND batches) to ensure cross-file connections are correct.
+
+---
+
+## The id_hash Key Scheme
+
+Pushed nodes are keyed on `id_hash = sha1(id)` — lowercase hex over the id's UTF-8 bytes — never on raw `id`:
+
+```
+(:Node {id_hash: "a9993e36...", id: "original raw id", label: ..., ...})
+```
+
+Why not raw `id`: some ids (e.g. `External` nodes embedding whole source snippets) exceed Neo4j's ~8 KB RANGE-index key limit. A uniqueness constraint on `id` fails to populate (state FAILED) and every lookup silently degrades to a label scan. `id_hash` is always 40 chars, always indexable.
+
+Before the first data statement the push:
+
+1. **Backfills** `id_hash` on any pre-existing hashless `:Node` rows (client-side hashing in batched read/write windows — vanilla Neo4j has no `sha1()` function, and APOC is not a dependency).
+2. **Creates** uniqueness constraints `node_id_hash_unique` on `:Node(id_hash)` and `community_id_unique` on `:Community(id)` with `IF NOT EXISTS` — each schema statement in its own transaction.
+3. Only then sends data: community nodes, `BELONGS_TO` memberships, graph nodes (chunks of ≤1,000 rows or ≤4 MB payload), then edges grouped by relationship type (chunks of ≤5,000 rows), all as parameterized `UNWIND $rows` statements over one persistent HTTP connection.
+
+If constraint creation fails (pre-existing duplicate `id_hash` rows from past unconstrained pushes), the push aborts with an error naming the constraint — deduplicate (e.g. `apoc.refactor.mergeNodes`) and re-run. No data is sent on schema failure.
+
+**Migration note for consumers**: queries that `MERGE`d nodes by raw `id` still work (`id` remains a regular property), but they label-scan. Migrate such queries to key on `id_hash`:
+
+```cypher
+-- before
+MERGE (n:Node {id: $id})
+-- after
+MERGE (n:Node {id_hash: $id_hash}) ON CREATE SET n.id = $id
+-- with $id_hash = sha1($id) computed client-side (lowercase hex, UTF-8)
+```
 
 ---
 
@@ -118,3 +156,11 @@ neo4j:
 
 - A running Neo4j instance (local or remote)
 - Full pipeline completed (graph with communities)
+- Neo4j 5.x (community edition is sufficient — no APOC, no plugins)
+
+Quick start (disposable local instance):
+
+```bash
+docker run -d --name graphos-neo4j -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/graphos_dev neo4j:5-community
+```

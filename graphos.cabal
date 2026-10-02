@@ -57,6 +57,7 @@ library
                     Graphos.Domain.Types.Writer
                     Graphos.Domain.Types.GraphFile
                     -- Domain - Graph
+                    Graphos.Domain.CypherHash
                     Graphos.Domain.Graph
                     Graphos.Domain.Graph.Core
                     Graphos.Domain.Graph.Query
@@ -205,8 +206,10 @@ library
                      Graphos.Domain.Context
                        -- Domain - PDF structure
                        Graphos.Domain.PdfStructure
-                       -- Domain - Config
-                       Graphos.Domain.Config
+                      -- Domain - JGF serialization
+                      Graphos.Domain.Types.JGF
+                      -- Domain - Config
+                      Graphos.Domain.Config
                        Graphos.Domain.Config.Core
                        Graphos.Domain.Config.Detection
                        Graphos.Domain.Config.Extraction
@@ -280,7 +283,8 @@ library
      , xml-types             >= 0.3
      , base16-bytestring     >= 1.0
     , base64-bytestring     >= 1.0
-      , cryptohash-sha256     >= 0.11
+      , cryptohash-sha256    >= 0.11
+      , cryptohash-sha1      >= 0.11
      , file-embed            >= 0.0.15
     , text-short            >= 0.1
     , unix                  >= 2.8
@@ -388,6 +392,8 @@ test-suite graphos-test
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
+    Graphos.Infrastructure.Export.JGFSpec
+    Graphos.Infrastructure.Export.Neo4jSpec
     Graphos.Infrastructure.Export.PersistMutationSpec
     Graphos.Infrastructure.Export.ResearchHTMLSpec
     Graphos.UseCase.SubgraphSpec
