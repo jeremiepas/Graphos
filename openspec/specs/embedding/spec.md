@@ -27,6 +27,9 @@ via an optional `embeddings_path` field. The graph loader SHALL follow the point
 embeddings when the sidecar exists, returning `gEmbeddings = Nothing` when the pointer is
 absent or the file is missing. The existing `index.json` ingest sidecar SHALL continue to be
 written for backward compatibility with the ingest-index capability.
+Before generating the first batch, the embedding pass SHALL log a projected
+in-memory footprint (entries × vector byte size) and SHALL abort with a
+stage-named error when the projection exceeds the active memory budget.
 
 #### Scenario: Pipeline writes embeddings sidecar
 - **WHEN** the pipeline runs with `--embed` on a graph with 1,000 nodes
@@ -40,6 +43,11 @@ written for backward compatibility with the ingest-index capability.
 #### Scenario: Sidecar missing but pointer present
 - **WHEN** `graph.json` has `"embeddings_path": "embeddings.json"` but the file is missing
 - **THEN** the loader logs a warning and returns `gEmbeddings = Nothing` (not an error)
+
+#### Scenario: Embedding projection exceeds budget
+- **WHEN** the projected assignment footprint exceeds the active heap budget before the first batch
+- **THEN** the embedding pass aborts with an error naming the projection and the budget
+- **AND** the sidecar file is not created
 
 ### Requirement: Batched embedding API surface
 
