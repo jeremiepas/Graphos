@@ -20,8 +20,7 @@ import System.FilePath ((</>))
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
 import Graphos.Domain.Config (SemanticEdgesConfig(..))
-import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected, gEmbeddings)
-import qualified Graphos.Domain.Graph.Analysis as GAnalysis
+import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected, gEmbeddings, gEmbeddingsPath)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..))
@@ -44,6 +43,7 @@ import Graphos.UseCase.Pipeline.Core
   , preFlightMemoryGuard
   , withHeapGuard
   , pipelineErrorHandler
+  , generateGraphEmbeddings
   )
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
@@ -82,6 +82,24 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
         Just old -> mergeGraphs old baseGraph
         Nothing  -> baseGraph
 
+  -- Wire-incremental-update 5.2: when embeddings are enabled, generate
+  -- embeddings for the merged graph through the content-addressed cache.
+  -- Unchanged texts are disk hits; only changed nodes' texts reach the API.
+  -- Vectors go into the sidecar and the sidecar pointer travels with the
+  -- graph (bounded-embedding-memory: the in-memory table is detached by
+  -- clusterAndInfer after semantic inference consumed it).
+  graphWithEmbs <- if not (cfgEmbed configWithStreaming)
+    then pure graph
+    else do
+      let embCfg = gcEmbedding (cfgGraphosConfig configWithStreaming)
+          embCacheRoot = cfgOutputDir configWithStreaming ++ "/cache"
+          sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
+      lpLogInfo lp "[watch] Generating embeddings for changed nodes..."
+      embs <- generateGraphEmbeddings (llmPort appEnv) embCfg graph embCacheRoot sidecar
+      lpLogInfo lp $ T.pack $ "  [watch] Wrote " ++ show (Map.size embs)
+                       ++ " node embeddings to embeddings.json"
+      pure graph { gEmbeddings = Just embs, gEmbeddingsPath = Just "embeddings.json" }
+
   when (cfgNeo4jStreaming configWithStreaming /= Nothing) $ do
     lpLogInfo lp "  [neo4j-stream] Running edge repair pass for incremental update..."
     (_msg, stmts, batches) <- epPushEdgeRepair ep graph
@@ -107,7 +125,7 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
             seCfg = (gcSemanticEdges (cfgGraphosConfig configWithStreaming)) { seEnabled = not (cfgNoSemanticEdges configWithStreaming) }
             force = cfgForceSemanticEdges configWithStreaming
             density = cfgEdgeDensity configWithStreaming
-            (enriched, commMap, mode, semanticEdges) = clusterAndInfer res seCfg force density directed graph
+            (enriched, commMap, mode, semanticEdges) = clusterAndInfer res seCfg force density directed graphWithEmbs
         logSemanticInference lp seCfg mode semanticEdges
         withHeapGuard lp (cfgActiveBudgetBytes config) "cluster" $ do
           _ <- evaluate (Map.size (gNodes enriched) + Map.size commMap)

@@ -228,15 +228,23 @@ instance FromJSON Node where
           , if isJust degreeVal      then bitNodeDegree            else 0
           , if isJust isBridgeVal    then bitNodeIsBridge          else 0
           , if isJust extraVal       then bitNodeExtra             else 0
-          , if isJust sourceVal      then bitNodeSource            else 0
+          -- The writer always emits the nullable "source" key; a JSON null is
+          -- absence (cache-tolerant multi-source round-trip), not presence.
+          , if sourceIsText then bitNodeSource else 0
           ]
+        sourceIsText = case sourceVal of
+          Just (String _) -> True
+          _               -> False
+        sourceVal' = case sourceVal of
+          Just (String s) -> Just s
+          _               -> Nothing
 
     pure Node
       { nodeId           = nodeIdVal
       , nodeLabel        = fromText labelVal
       , nodeFileType     = fileTypeVal
       , nodeSourceFile   = fromText sourceFileVal
-      , nodeSource       = fmap fromText sourceVal
+      , nodeSource       = fromText <$> sourceVal'
       , nodeLineStart    = lineStartVal
       , nodeLineEnd      = lineEndVal
       , nodeSignature    = fmap fromText signatureVal

@@ -226,7 +226,6 @@ spec = do
       -- the test binary's RTS configuration varies by environment.
       let mkNode :: Text -> Text -> Text -> Node
           mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
-          vec = VU.replicate 256 (1.0 :: Double)
           -- Deterministic stub: one distinct 256-dim vector per text; the
           -- whole assignment is 12k × 256 doubles ≈ 24.6 MB in the compact
           -- representation (vs ~200 MB boxed before this change).

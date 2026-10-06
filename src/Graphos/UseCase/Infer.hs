@@ -20,7 +20,7 @@ module Graphos.UseCase.Infer
     , module Graphos.UseCase.Infer.Document
     ) where
 
-import Data.List (foldl', sortOn)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
