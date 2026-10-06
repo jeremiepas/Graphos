@@ -125,15 +125,19 @@ spec = do
     it "returns Left instead of throwing when the swap into place fails" $ do
       -- Regression (AVI-567): a post-success swap IO failure must come back
       -- through the Either channel, not escape as a thrown exception.
+      -- The sabotaged parent is a dedicated subdirectory owned by the test —
+      -- never /tmp itself, whose permissions are outside the test's control.
       withSystemTempDirectory "graphos-staging" $ \root -> do
-        let out = root </> "out"
+        let lockedParent = root </> "locked"
+            out = lockedParent </> "out"
+        createDir lockedParent
         -- Establish a prior good output so the swap takes the two-rename path.
         _ <- withStagedOutput out $ \staging -> do
           writeFile (staging </> "graph.json") "old-good"
           pure (Right ())
-        -- Stage the new build inside a writable root so the action succeeds;
+        -- Stage the new build inside a writable parent so the action succeeds;
         -- the sabotage applies only to the swap itself.
-        result <- rootSabotagedSwap root $ \staging -> do
+        result <- rootSabotagedSwap out $ \staging -> do
           writeFile (staging </> "graph.json") "new"
           pure (Right ())
         case result of
@@ -141,11 +145,12 @@ spec = do
             err `shouldSatisfy` \t -> any (`T.isInfixOf` t) ["failed to swap", "permission denied"]
           Right () ->
             fail "expected the swap to fail"
-        -- The prior output is intact and no staging leftovers remain.
+        -- The prior output is intact (a read-only parent still allows reads).
         content <- TIO.readFile (out </> "graph.json")
         content `shouldBe` "old-good"
+        -- No staging leftovers leak outside the sabotaged parent.
         siblings <- listDirectory root
-        siblings `shouldSatisfy` all (== "out")
+        siblings `shouldSatisfy` all (== "locked")
 
   describe "relocateStagedPath" $ do
     it "rewrites staged paths to final paths after the swap" $ do
