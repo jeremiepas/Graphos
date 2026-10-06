@@ -48,6 +48,7 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                                , LSPServerConfig(..)
                                , IngestConfig(..)
                                , MemoryConfig(..)
+                               , SourceConfig(..)
                                , validateEmbeddingConfig
    , defaultGraphosConfig
    , mergeGraphosConfig
@@ -78,6 +79,8 @@ data ConfigFile = ConfigFile
    , cfIngest            :: Maybe IngestConfig
    , cfDetection         :: Maybe DetectionConfig
    , cfMemory            :: Maybe MemoryConfig
+   , cfSources           :: Maybe [SourceConfig]
+   , cfOutput            :: Maybe FilePath
    } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -98,6 +101,8 @@ instance FromJSON ConfigFile where
      <*> v .:? "ingest"
      <*> v .:? "detection"
      <*> v .:? "memory"
+     <*> v .:? "sources"
+     <*> v .:? "output"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -231,6 +236,12 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcMemory = case cfMemory cfgFile of
       Just mem -> mem
       Nothing  -> gcMemory defaults
+  , gcSources = case cfSources cfgFile of
+      Just srcs -> srcs
+      Nothing   -> gcSources defaults
+  , gcOutput = case cfOutput cfgFile of
+      Just out -> Just out
+      Nothing  -> gcOutput defaults
   }
 
 -- ───────────────────────────────────────────────
