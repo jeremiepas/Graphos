@@ -43,3 +43,4 @@ __pycache__/
 .lake/
 elm-stuff/
 studio/public/studio.js
+.hermes/
