@@ -240,6 +240,7 @@ externalPackageNode pkg = Node
   , nodeLabel      = Data.Text.Short.fromText pkg
   , nodeFileType   = CodeFile
   , nodeSourceFile = Data.Text.Short.fromText ""
+  , nodeSource = Nothing
   , nodeLineStart  = Nothing
   , nodeLineEnd    = Nothing
   , nodeSignature  = Nothing

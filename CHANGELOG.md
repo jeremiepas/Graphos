@@ -3,6 +3,29 @@
 ## Unreleased
 
 ### Changed
+- **`graph.json` is now a JSON Graph Format (JGF) document** (media type
+  `application/vnd.jgf+json`, spec at jsongraphformat.info): the graph lives
+  under a top-level `graph` object with `directed: true`,
+  `type: "graphos.code-knowledge-graph"`, `nodes` (object keyed by id),
+  `edges` (array), and `metadata`.
+  - Node `id`/`label` stay top-level; `file_type`, `source_file`,
+    `community_id`, `line_start`/`line_end`, `signature`, `kind`, `degree`,
+    `is_bridge` and `extra` moved under node `metadata`.
+  - Edge `source`/`relation`/`target` stay top-level; `id`, `weight`,
+    `confidence` and `extra` moved under edge `metadata`.
+  - Graph-level `communities`, `cohesion`, `god_nodes`, `community_labels`,
+    `community_aggregates`, `compositions`, `embeddings_path`, `null_model`,
+    `graph_hash` and a new `schemaVersion` ("1.0") live under
+    `graph.metadata.graphos`.
+  - **Compatibility**: the reader still loads legacy top-level `nodes`/`edges`
+    files during a deprecation window (detected by the absence of the
+    top-level `graph` key). JGF documents whose major `schemaVersion` is
+    unsupported are rejected with a clear error.
+  - **Migration**: `graphos migrate-graph <file>` rewrites a legacy graph to
+    the JGF envelope (in place, or via `--output`); the next full run also
+    rewrites files automatically.
+  - The checkpoint file (`graph.checkpoint.json`) carries the same envelope.
+  - Files are now readable by any standard JGF tooling.
 - **Tree-sitter extraction granularity is now configurable and defaults to `function` level.**
   Statement-level nodes (assignments, returns, conditionals, parameters, local
   variables, JSON key-value pairs) are no longer extracted by default. This

@@ -87,6 +87,11 @@ module Graphos.Domain.Config
      -- * Config merging
   , mergeGraphosConfig
   , mergeObservabilityConfig
+
+     -- * Multi-source configuration
+  , SourceConfig(..)
+  , mkSourceConfig
+  , validSources
   ) where
 
 import Graphos.Domain.Config.Core
@@ -95,4 +100,5 @@ import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest
 import Graphos.Domain.Config.Memory
 import Graphos.Domain.Config.Observability
+import Graphos.Domain.Config.Source
 import Graphos.Domain.Config.Vision

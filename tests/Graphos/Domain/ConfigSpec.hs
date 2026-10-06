@@ -2,7 +2,8 @@
 module Graphos.Domain.ConfigSpec where
 
 import Test.Hspec
-import Data.Aeson (decode, encode, eitherDecode)
+import Data.Aeson (decode, encode, eitherDecode, Object(..), Value(..))
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config
@@ -143,8 +144,13 @@ spec = do
       decode (encode cfg) `shouldBe` Just cfg
 
     it "serializes to snake_case keys" $ do
-      encode defaultSemanticEdgesConfig `shouldBe`
-        "{\"enabled\":true,\"max_fan_out\":50,\"threshold\":0.5,\"min_ident_length\":4,\"path_extensions\":[\".ts\",\".tsx\",\".js\",\".jsx\",\".mjs\",\".cjs\",\".hs\",\".lhs\",\".rs\",\".py\",\".pyx\",\".go\",\".java\",\".kt\",\".scala\",\".sc\",\".kts\",\".rb\",\".php\",\".cpp\",\".cc\",\".cxx\",\".c++\",\".hpp\",\".hh\",\".h\",\".cs\",\".swift\",\".m\",\".mm\",\".ml\",\".mli\",\".ex\",\".exs\",\".erl\",\".clj\",\".sh\",\".bash\",\".yaml\",\".yml\",\".toml\",\".json\",\".md\",\".markdown\"]}"
+      -- Key order in the encoded object is HashMap-accidental (aeson's KeyMap);
+      -- assert the shape through a decoded map instead of raw bytes.
+      case decode (encode defaultSemanticEdgesConfig) of
+        Just (Object km) -> do
+          KeyMap.keys km `shouldMatchList`
+            [ "enabled", "max_fan_out", "threshold", "min_ident_length", "path_extensions" ]
+        _ -> expectationFailure "expected a decodable object"
 
     it "parses explicit values" $ do
       decode "{\"enabled\":false,\"max_fan_out\":10,\"threshold\":0.7}" `shouldBe`

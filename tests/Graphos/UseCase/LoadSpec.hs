@@ -17,6 +17,7 @@ import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (gNodes, gEdges, gEmbeddings, gEmbeddingsPath)
+import qualified Data.Vector.Unboxed as VU
 import Graphos.UseCase.Load (LoadResult(..), loadGraphFromFile, loadGraphFromFileStrict)
 import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
 
@@ -127,7 +128,7 @@ spec = do
         Left e -> fail $ "expected success, got: " <> T.unpack e
         Right lr -> do
           gEmbeddingsPath (lrGraph lr) `shouldBe` Just "embeddings.json"
-          gEmbeddings (lrGraph lr) `shouldBe` Just (Map.fromList [("a", [1.0, 2.0]), ("b", [3.0, 4.0])])
+          gEmbeddings (lrGraph lr) `shouldBe` Just (Map.fromList [("a", VU.fromList [1.0, 2.0]), ("b", VU.fromList [3.0, 4.0])])
     it "degrades to no embeddings when the sidecar file is missing" $ do
       res <- withTempGraphAndSidecar embeddingsGraph Nothing
       case res of
@@ -153,8 +154,8 @@ roundTripTest = withSystemTempDirectory "graphos-roundtrip" $ \dir -> do
   let path = dir </> "graph.json"
   iw <- Inc.openWriter path
   let nodes =
-        [ Node "a" (fromText "A") CodeFile (fromText "a.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
-        , Node "b" (fromText "B") CodeFile (fromText "b.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+        [ Node "a" (fromText "A") CodeFile (fromText "a.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+        , Node "b" (fromText "B") CodeFile (fromText "b.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
         ]
       edges = [ Edge (EdgeId "e1") "a" "b" Calls 1.0 (Confidence 0.9) Nothing ]
       commMap = Map.fromList [(1, ["a", "b"])] :: CommunityMap

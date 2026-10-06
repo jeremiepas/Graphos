@@ -16,7 +16,7 @@ type NSpec = (NodeId, Text, FileType, Text)
 
 mkNode :: NSpec -> Node
 mkNode (nid, lbl, ft, sf) =
-  Node nid (fromText lbl) ft (fromText sf)
+  Node nid (fromText lbl) ft (fromText sf) Nothing
     (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 mkGraph :: [NSpec] -> Graph

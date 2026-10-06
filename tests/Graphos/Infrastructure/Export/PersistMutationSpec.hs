@@ -35,6 +35,7 @@ mkNode nid kind srcFile = Node
   , nodeLabel       = fromText nid
   , nodeFileType    = CodeFile
   , nodeSourceFile  = fromText srcFile
+,   nodeSource = Nothing
   , nodeLineStart   = Just 1
   , nodeLineEnd     = Just 10
   , nodeSignature   = Nothing
@@ -99,7 +100,7 @@ spec = describe "persistMutatedGraph" $ do
                   backupContent `shouldBe` baselineJson
                   persisted <- readFile path
                   persisted `shouldSatisfy` isInfixOf "m9"
-                  persisted `shouldSatisfy` isInfixOf "\"schema_version\""
+                  persisted `shouldSatisfy` isInfixOf "\"schemaVersion\""
                   lr1 <- loadGraphFromFile path
                   case lr1 of
                     Left e -> fail (T.unpack e)

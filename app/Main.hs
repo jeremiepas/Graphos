@@ -8,6 +8,7 @@ import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
 import Data.Maybe (isJust)
+import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
 import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
@@ -23,10 +24,10 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
-import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
+import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
-import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON)
+import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
@@ -93,6 +94,31 @@ import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFac
 loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
 loadGraphOpt strict path =
   if strict then loadGraphFromFileStrict path else loadGraphFromFile path
+
+-- | Empty analysis payload for 'exportGraphWithLabels' (migrate-graph):
+-- the loaded analysis sections are carried by 'LoadResult' fields that the
+-- JGF writer takes from the graph itself; only the community labels are
+-- preserved explicitly.
+emptyAnalysisForMigrate :: LoadResult -> Analysis
+emptyAnalysisForMigrate lr = Analysis
+  { analysisCommunities   = lrCommunities lr
+  , analysisNullModel     = DefaultNullModel
+  , analysisCohesion      = lrCohesion lr
+  , analysisGodNodes      = lrGodNodes lr
+  , analysisSurprises     = []
+  , analysisQuestions     = []
+  , analysisArticulation  = []
+  , analysisBccCount      = 0
+  }
+
+parseHeapSize :: String -> Maybe Int
+parseHeapSize s = case reads s of
+  [(n, "")] -> case () of
+    _ | 'g' `elem` lower || 'G' `elem` s -> Just (round (n * 1024 :: Double))
+    _ | 'm' `elem` lower || 'M' `elem` s -> Just (round n)
+    _ -> Just (round n)
+  _ -> Nothing
+  where lower = map toLower s
 
 stripRTSFlags :: [String] -> ([String], Bool, Maybe String)
 stripRTSFlags args = go args False Nothing
@@ -786,6 +812,22 @@ main = do
           putStrLn $ "  Found " ++ show (length servers) ++ " LSP server(s):"
           mapM_ (\s -> putStrLn $ "    " ++ T.unpack (lsiName s) ++ " (" ++ lsiCommand s ++ ") - " ++ show (lsiExtensions s)) servers
 
+    MigrateGraphCmd graphPath mOutputPath -> do
+      let outPath = maybe graphPath id mOutputPath
+      putStrLn $ "[graphos] Migrate-graph: loading " ++ graphPath
+      loadResult <- loadGraphFromFile graphPath
+      case loadResult of
+        Left err -> do
+          putStrLn $ "Error: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right loaded -> do
+          let g = lrGraph loaded
+          exportGraphWithLabels g (emptyAnalysisForMigrate loaded) (Just (lrCommunityLabels loaded)) outPath
+          putStrLn $ "[graphos] Migrated " ++ graphPath ++ " -> " ++ outPath
+                     ++ " (JGF envelope, application/vnd.jgf+json)"
+          putStrLn $ "[graphos] Nodes: " ++ show (Map.size (gNodes g))
+                     ++ ", edges: " ++ show (Map.size (gEdges g))
+
     Serve dir graphPath port apiOnly noApi -> do
       putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
       startServeServer dir graphPath port apiOnly noApi
@@ -1121,7 +1163,7 @@ defaultConfigYaml = unlines
   , "  # maxTokens: 512              # token-fit truncation (0 = model-table default)"
   , "  # docPrefix: \"\"               # prepended to every embedded text (e.g. \"document: \")"
   , "  # queryPrefix: \"\"             # prepended to query-time text (e.g. \"query: \")"
-  , "  # streaming: true             # staged per-batch sidecar write + atomic rename (default: true)"
+  , "  # streaming: true             # legacy key, ignored: sidecar is always streaming (staged per-batch write + atomic rename)"
   , "  # headers:                    # custom HTTP headers for auth (default: none)"
   , "  #   X-API-Key: \"${MY_TOKEN}\""
   , ""

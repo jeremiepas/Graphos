@@ -8,6 +8,7 @@ import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=), object)
 import Data.Either (isLeft)
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -37,12 +38,12 @@ spec = do
 
     it "returns vectors in input order for an in-order response" $ do
       let r = respBody [0, 1, 2] [[1], [2], [3]] :: Aeson.Value
-          expected = Right [[1], [2], [3]] :: Either Text [[Double]]
+          expected = Right (map VU.singleton [1, 2, 3]) :: Either Text [VU.Vector Double]
       parseEmbeddingsResponse n r `shouldBe` expected
 
     it "sorts by 'index' when data arrives out of order (permutation)" $ do
       let r = respBody [2, 0, 1] [[3], [1], [2]] :: Aeson.Value
-          expected = Right [[1], [2], [3]] :: Either Text [[Double]]
+          expected = Right (map VU.singleton [1, 2, 3]) :: Either Text [VU.Vector Double]
       parseEmbeddingsResponse n r `shouldBe` expected
 
     it "rejects a response whose indices are not a permutation of [0..n-1]" $ do
@@ -75,12 +76,12 @@ spec = do
 
     it "accepts a singleton batch (n = 1) and projects to one vector" $ do
       let r = respBody [0] [[7.5]] :: Aeson.Value
-          expected = Right [[7.5]] :: Either Text [[Double]]
+          expected = Right [VU.fromList [7.5]] :: Either Text [VU.Vector Double]
       parseEmbeddingsResponse 1 r `shouldBe` expected
 
     it "returns an empty result for an empty input batch" $ do
       let r = object ["data" .= Aeson.Array V.empty]
-          expected = Right [] :: Either Text [[Double]]
+          expected = Right [] :: Either Text [VU.Vector Double]
       parseEmbeddingsResponse 0 r `shouldBe` expected
 
     it "rejects non-numeric entries inside an embedding array" $ do

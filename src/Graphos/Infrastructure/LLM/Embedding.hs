@@ -12,6 +12,7 @@ module Graphos.Infrastructure.LLM.Embedding
   , truncateForEmbedding
   , prepareEmbed
   , cosineSimilarity
+  , cosineSimilarityU
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -22,6 +23,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.List (sortBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -114,7 +116,7 @@ postEmbeddings cfg nTexts payload = catch (do
 -- | Generate an embedding vector for a single text input using Ollama.
 -- Equivalent to a batch of one ('generateEmbeddings' with a singleton list,
 -- projected to its only vector); kept for tests and external callers.
-generateEmbedding :: EmbeddingConfig -> Text -> IO (Either Text [Double])
+generateEmbedding :: EmbeddingConfig -> Text -> IO (Either Text (VU.Vector Double))
 generateEmbedding cfg inputText = do
   r <- generateEmbeddings cfg [inputText]
   pure $ case r of
@@ -134,7 +136,7 @@ generateEmbedding cfg inputText = do
 -- unprepared document would fail the whole request. Preparation preserves
 -- list length (one output text per input), so the response arity contract
 -- is unchanged.
-generateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])
+generateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [VU.Vector Double])
 generateEmbeddings cfg inputTexts = do
   let texts = map (prepareEmbed cfg) inputTexts
   r <- postEmbeddings cfg (length texts) $ Aeson.object
@@ -179,7 +181,7 @@ truncateForEmbedding maxTokens t
 --
 -- Items are sorted by @index@ so the returned vectors are in input order
 -- regardless of the order the server chose to send them.
-parseEmbeddingsResponse :: Int -> Aeson.Value -> Either Text [[Double]]
+parseEmbeddingsResponse :: Int -> Aeson.Value -> Either Text [VU.Vector Double]
 parseEmbeddingsResponse n v = do
   obj     <- asObject v "response"
   dataVal <- maybe (Left (missingDataMsg v)) Right (KeyMap.lookup "data" obj)
@@ -200,7 +202,7 @@ parseEmbeddingsResponse n v = do
     sortByIndex = sortBy (comparing fst)
 
 -- | Parse one @data@ item into its @(index, vector)@ pair.
-parseEmbeddingItem :: Aeson.Value -> Either Text (Int, [Double])
+parseEmbeddingItem :: Aeson.Value -> Either Text (Int, VU.Vector Double)
 parseEmbeddingItem item = do
   iobj   <- asObject item "data item"
   idxVal <- maybe (Left "Missing 'index' in embedding data item") Right
@@ -210,7 +212,7 @@ parseEmbeddingItem item = do
                   (KeyMap.lookup "embedding" iobj)
   vec    <- asArray embVal "embedding"
   ds     <- mapM numToDouble (V.toList vec)
-  Right (idx, ds)
+  Right (idx, VU.fromList ds)
 
 -- | Extract the integer @index@ field from a JSON number.
 indexToInt :: Aeson.Value -> Either Text Int
@@ -239,6 +241,21 @@ cosineSimilarity a b
       let dot = sum (zipWith (*) a b)
           normA = sqrt (sum (map (\x -> x * x) a))
           normB = sqrt (sum (map (\x -> x * x) b))
+      in if normA == 0.0 || normB == 0.0
+         then 0.0
+         else dot / (normA * normB)
+
+-- | Cosine similarity over unboxed vectors (the in-memory representation).
+-- Kept in sync with 'cosineSimilarity' (which now exists for legacy callers);
+-- the UseCase port delegates here via 'Graphos.UseCase.Port.LLMPort'.
+cosineSimilarityU :: VU.Vector Double -> VU.Vector Double -> Double
+cosineSimilarityU a b
+  | VU.length a /= VU.length b = 0.0
+  | VU.null a = 0.0
+  | otherwise =
+      let dot = VU.sum (VU.zipWith (*) a b)
+          normA = sqrt (VU.sum (VU.map (\x -> x * x) a))
+          normB = sqrt (VU.sum (VU.map (\x -> x * x) b))
       in if normA == 0.0 || normB == 0.0
          then 0.0
          else dot / (normA * normB)

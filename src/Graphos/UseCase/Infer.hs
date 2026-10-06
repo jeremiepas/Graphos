@@ -20,7 +20,7 @@ module Graphos.UseCase.Infer
     , module Graphos.UseCase.Infer.Document
     ) where
 
-import Data.List (sortOn)
+import Data.List (foldl', sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -28,6 +28,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
+import qualified Data.Vector.Unboxed as VU
 
 import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
@@ -256,29 +257,44 @@ isSingleCorpus g =
 -- | Infer code↔doc edges via cosine similarity on node embeddings.
 -- For each doc node with an embedding, find the top-k code nodes (by similarity)
 -- that exceed the threshold, and create a References edge.
-inferSemanticCodeDocEdges :: SemanticEdgesConfig -> Graph -> Map NodeId [Double] -> [Edge]
+--
+-- Bounded-memory formulation (bounded-embedding-memory): doc vectors are
+-- consumed one doc at a time through a strict fold, so peak live vectors are
+-- bounded by one doc row plus the code table — never the whole embedding map
+-- forced as a list. Output equals the all-pairs formulation for the same
+-- inputs (verified by property test).
+inferSemanticCodeDocEdges :: SemanticEdgesConfig -> Graph -> Map NodeId (VU.Vector Double) -> [Edge]
 inferSemanticCodeDocEdges se g embs
   | Map.null embs = []
   | otherwise =
-  let docNodes = [(nid, n) | (nid, n) <- Map.toList (gNodes g), nodeFileType n == DocFile]
-      codeNodes = [(nid, n) | (nid, n) <- Map.toList (gNodes g), nodeFileType n == CodeFile]
-
-      docWithEmb = [(nid, e) | (nid, _) <- docNodes, Just e <- [Map.lookup nid embs], not (null e)]
-      codeWithEmb = [(nid, e) | (nid, _) <- codeNodes, Just e <- [Map.lookup nid embs], not (null e)]
-
-      semanticEdges = concat
-        [ let docVec = docEmb
-              candidates = [ (cosineSimilarity docVec codeVec, codeNid)
-                            | (codeNid, codeVec) <- codeWithEmb
-                            , notEdgeAlready g docNid codeNid
-                            ]
-              filtered = [(sim, codeNid) | (sim, codeNid) <- candidates, sim >= seThreshold se]
-              top = take (seMaxFanOut se) $ sortOn (\(sim, _) -> negate sim) filtered
-          in [ makeInferredEdge codeNid docNid References sim
-             | (sim, codeNid) <- top
-             ]
-        | (docNid, docEmb) <- docWithEmb
-        ]
+  let codeWithEmb = [ (nid, e)
+                    | (nid, n) <- Map.toList (gNodes g), nodeFileType n == CodeFile
+                    , Just e <- [Map.lookup nid embs], not (VU.null e)
+                    ]
+      docNidsWithEmb = [ nid
+                       | (nid, n) <- Map.toList (gNodes g), nodeFileType n == DocFile
+                       , Just e <- [Map.lookup nid embs], not (VU.null e)
+                       ]
+      -- Match one doc against the code table (unchanged matching logic).
+      matchedFor :: NodeId -> VU.Vector Double -> [Edge]
+      matchedFor docNid docVec =
+        let candidates = [ (cosineSimilarity docVec codeVec, codeNid)
+                         | (codeNid, codeVec) <- codeWithEmb
+                         , notEdgeAlready g docNid codeNid
+                         ]
+            filtered = [(sim, codeNid) | (sim, codeNid) <- candidates, sim >= seThreshold se]
+            top = take (seMaxFanOut se) $ sortOn (\(sim, _) -> negate sim) filtered
+        in [ makeInferredEdge codeNid docNid References sim | (sim, codeNid) <- top ]
+      -- Strict fold: one doc row at a time; the accumulator is forced each step
+      -- so completed edges do not pile up as thunks.
+      step acc docNid =
+        let newEdges = case Map.lookup docNid embs of
+              Just docVec | not (VU.null docVec) -> matchedFor docNid docVec
+              _ -> []
+        in case newEdges of
+             [] -> acc
+             _  -> newEdges `seq` (acc ++ newEdges)
+      semanticEdges = foldl' step [] docNidsWithEmb
   in sortOn edgeSortKey
        (dedupOn (\e -> (edgeSource e, edgeTarget e)) semanticEdges)
 

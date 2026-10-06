@@ -24,7 +24,7 @@ module Graphos.Domain.Types.Node
     -- * Compact representation helpers
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-  , bitNodeIsBridge, bitNodeExtra
+  , bitNodeIsBridge, bitNodeExtra, bitNodeSource
   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
   ) where
@@ -110,6 +110,10 @@ bitNodeIsBridge = 1 `shiftL` 6
 bitNodeExtra :: Word64
 bitNodeExtra = 1 `shiftL` 7
 
+{-# NOINLINE bitNodeSource #-}
+bitNodeSource :: Word64
+bitNodeSource = 1 `shiftL` 8
+
 -- | A node in the knowledge graph
 --
 -- Compact representation:
@@ -123,6 +127,7 @@ data Node = Node
   , nodeLabel        :: !ShortText
   , nodeFileType     :: !FileType
   , nodeSourceFile   :: !ShortText
+  , nodeSource       :: !(Maybe ShortText)
     -- Optional fields (tracked via nodePresentBits)
   , nodeLineStart    :: !(Maybe Int)
   , nodeLineEnd      :: !(Maybe Int)
@@ -159,6 +164,7 @@ computePresentBits n = foldr (.|.) 0
     , if isJust (nodeDegree n)    then bitNodeDegree            else 0
     , if isJust (nodeIsBridge n)  then bitNodeIsBridge          else 0
     , if isJust (nodeExtra n)     then bitNodeExtra             else 0
+    , if isJust (nodeSource n)    then bitNodeSource            else 0
     ]
 
 instance NFData FileType
@@ -169,6 +175,7 @@ instance NFData Node where
        rnf (nodeLabel n) `seq`
        rnf (nodeFileType n) `seq`
        rnf (nodeSourceFile n) `seq`
+    rnf (nodeSource n) `seq`
        rnf (nodeLineStart n) `seq`
        rnf (nodeLineEnd n) `seq`
        rnf (nodeSignature n) `seq`
@@ -185,6 +192,7 @@ instance ToJSON Node where
     , "label"         .= toText (nodeLabel n)
     , "file_type"     .= nodeFileType n
     , "source_file"   .= toText (nodeSourceFile n)
+    , "source"        .= fmap toText (nodeSource n)
     , "line_start"   .= nodeLineStart n
     , "line_end"     .= nodeLineEnd n
     , "signature"    .= fmap toText (nodeSignature n)
@@ -201,6 +209,7 @@ instance FromJSON Node where
     labelVal       <- v .:  "label"
     fileTypeVal    <- v .:  "file_type"
     sourceFileVal  <- v .:? "source_file" .!= ""
+    sourceVal      <- v .:? "source"
     lineStartVal   <- v .:? "line_start"
     lineEndVal     <- v .:? "line_end"
     signatureVal   <- v .:? "signature"
@@ -219,6 +228,7 @@ instance FromJSON Node where
           , if isJust degreeVal      then bitNodeDegree            else 0
           , if isJust isBridgeVal    then bitNodeIsBridge          else 0
           , if isJust extraVal       then bitNodeExtra             else 0
+          , if isJust sourceVal      then bitNodeSource            else 0
           ]
 
     pure Node
@@ -226,6 +236,7 @@ instance FromJSON Node where
       , nodeLabel        = fromText labelVal
       , nodeFileType     = fileTypeVal
       , nodeSourceFile   = fromText sourceFileVal
+      , nodeSource       = fmap fromText sourceVal
       , nodeLineStart    = lineStartVal
       , nodeLineEnd      = lineEndVal
       , nodeSignature    = fmap fromText signatureVal

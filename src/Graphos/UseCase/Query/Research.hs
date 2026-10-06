@@ -199,6 +199,7 @@ foldQueryResponses entries =
           , nodeLabel = fromText (snLabel sn)
           , nodeFileType = CodeFile
           , nodeSourceFile = fromText (snSourceFile sn)
+          , nodeSource = Nothing
           , nodeLineStart = Nothing
           , nodeLineEnd = Nothing
           , nodeSignature = Nothing

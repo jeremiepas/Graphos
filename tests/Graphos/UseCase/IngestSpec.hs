@@ -9,6 +9,7 @@ import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
+import qualified Data.Vector.Unboxed as VU
 
 import Test.Hspec
 
@@ -20,7 +21,7 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Ingest (generateEmbeddingsForNodes)
 
 testNode :: Text -> Text -> Text -> Node
-testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 -- | AppEnv whose only meaningful part is an LLMPort; every other port is
 -- unused by 'generateEmbeddingsForNodes'.
@@ -41,7 +42,7 @@ stubEnv llm = AppEnv
   }
 
 -- | A port answering each text with @perText@, recording submitted batches.
-fakeLLM :: IORef [[Text]] -> (Text -> IO (Either Text [Double])) -> LLMPort
+fakeLLM :: IORef [[Text]] -> (Text -> IO (Either Text (VU.Vector Double))) -> LLMPort
 fakeLLM callsRef perText = LLMPort
   { lpCallLLM = error "not used"
   , lpParseLabelsFromResponse = const Map.empty
@@ -58,7 +59,7 @@ spec = do
   describe "generateEmbeddingsForNodes" $ do
     it "gives equal ieSourceHash to same-text nodes, distinct from any path" $ do
       callsRef <- newIORef []
-      let llm = fakeLLM callsRef (pure . Right . (: []) . fromIntegral . T.length)
+      let llm = fakeLLM callsRef (pure . Right . VU.singleton . fromIntegral . T.length)
           env = stubEnv llm
           -- Two nodes sharing the same embedded text (label + source file
           -- are content-identical even if they live in different files);
@@ -80,10 +81,10 @@ spec = do
 
     it "yields empty vectors for exactly the nodes of a failed batch" $ do
       callsRef <- newIORef []
-      let perText :: Text -> IO (Either Text [Double])
+      let perText :: Text -> IO (Either Text (VU.Vector Double))
           perText t = pure $ if "fail" `T.isInfixOf` t
                         then Left "boom"
-                        else Right [fromIntegral (T.length t)]
+                        else Right (VU.singleton (fromIntegral (T.length t)))
           llm = fakeLLM callsRef perText
           env = stubEnv llm
           ns = [ testNode "n1" "getUser" "a.hs"
@@ -93,9 +94,9 @@ spec = do
       case embs of
         [e1, e4] -> do
           ieNodeId e1 `shouldBe` "n1"
-          ieVector e1 `shouldBe` [fromIntegral (T.length ("getUser a.hs" :: Text))]
+          ieVector e1 `shouldBe` VU.singleton (fromIntegral (T.length ("getUser a.hs" :: Text)))
           ieNodeId e4 `shouldBe` "n4"
-          ieVector e4 `shouldBe` []          -- failed batch ⇒ metadata-only
+          ieVector e4 `shouldBe` VU.empty    -- failed batch ⇒ metadata-only
           -- Even the failed entry carries the content hash, not the path.
           T.length (ieSourceHash e4) `shouldBe` 64
           ieSourceHash e4 `shouldNotBe` "fail.hs"
@@ -103,7 +104,7 @@ spec = do
 
     it "submits only unique texts and redistributes their vectors" $ do
       callsRef <- newIORef []
-      let llm = fakeLLM callsRef (pure . Right . (: []) . fromIntegral . T.length)
+      let llm = fakeLLM callsRef (pure . Right . VU.singleton . fromIntegral . T.length)
           env = stubEnv llm
           dup1 = testNode "d1" "Dup" "x.hs"
           dup2 = testNode "d2" "Dup" "x.hs"
@@ -121,7 +122,7 @@ spec = do
   describe "ieSourceHash over prepared text (lfm-embedding-optimization 2.3)" $ do
     it "same raw text + changed docPrefix ⇒ different hash (prefix participates)" $ do
       callsRef <- newIORef []
-      let llm = fakeLLM callsRef (pure . Right . (: []) . fromIntegral . T.length)
+      let llm = fakeLLM callsRef (pure . Right . VU.singleton . fromIntegral . T.length)
           env = stubEnv llm
           ns = [ testNode "n1" "getUser" "a.hs" ]
           cfgPlain = defaultEmbeddingConfig
@@ -134,7 +135,7 @@ spec = do
 
     it "two raw texts differing only past the truncation point ⇒ equal hash (convergence)" $ do
       callsRef <- newIORef []
-      let llm = fakeLLM callsRef (pure . Right . (: []) . fromIntegral . T.length)
+      let llm = fakeLLM callsRef (pure . Right . VU.singleton . fromIntegral . T.length)
           env = stubEnv llm
           headText = T.replicate 4000 "word "
           ns = [ testNode "n1" headText "a.hs"

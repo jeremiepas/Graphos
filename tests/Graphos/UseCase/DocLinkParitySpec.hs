@@ -43,6 +43,7 @@ leanNode nid ft sf = Node
   , nodeLabel     = fromText nid
   , nodeFileType  = ft
   , nodeSourceFile = fromText sf
+,   nodeSource = Nothing
   , nodeLineStart = Just 1
   , nodeLineEnd   = Nothing
   , nodeSignature = Nothing

@@ -79,7 +79,7 @@ src/Graphos/
 1. **Dependencies point inward**: Domain ← UseCase ← Infrastructure. Domain knows nothing about LSP, IO, or any library.
 2. **All domain logic is pure**: Graph operations, community detection, analysis — all pure functions. Testable without mocks.
 3. **LSP is an adapter**: The domain doesn't know about LSP. It just receives extraction results. The LSP client adapter produces those results.
-4. **Standard output format**: `graph.json` for interoperability with visualization tools and queries.
+4. **Standard output format**: `graph.json` is a versioned [JSON Graph Format (JGF)](https://jsongraphformat.info) document (`application/vnd.jgf+json`) for interoperability with visualization tools, queries, and any standard JGF reader. Legacy (pre-JGF) files keep loading during a deprecation window; `graphos migrate-graph <file>` upgrades them.
 
 ## Why LSP Instead of tree-sitter?
 
