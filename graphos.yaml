@@ -248,7 +248,7 @@ embedding:
   maxTokens: 512 # token-fit truncation (default: 512; 0 = model-table default)
   # docPrefix: ""               # prepended to every embedded text (e.g. "document: ")
   # queryPrefix: ""             # prepended to query-time text (e.g. "query: ")
-  # streaming: true             # staged per-batch sidecar write + atomic rename (default: true)
+  # streaming: true             # legacy key, ignored: sidecar is always streaming (staged per-batch write + atomic rename)
   # concurrency: 1              # batches processed in parallel (benchmark-pinned: 1)
   # headers:                    # custom HTTP headers for auth (default: none)
   #   X-API-Key: "${MY_TOKEN}"

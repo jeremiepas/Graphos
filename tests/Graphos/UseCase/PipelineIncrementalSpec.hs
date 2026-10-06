@@ -23,6 +23,7 @@ node nid = Node
   , nodeLabel        = fromText (T.toUpper nid)
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing

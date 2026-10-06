@@ -32,6 +32,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -75,7 +76,7 @@ byteToHex w = case showHex (fromIntegral w :: Integer) "" of
 -- Returns 'Nothing' on a miss: absent key, undecodable file, or missing
 -- @vector@ field (corrupt or truncated writes are misses, never errors).
 -- Any filesystem exception is also a miss — the cache must never break a run.
-loadVector :: FilePath -> Text -> Text -> Text -> IO (Maybe [Double])
+loadVector :: FilePath -> Text -> Text -> Text -> IO (Maybe (VU.Vector Double))
 loadVector cacheRoot model docPrefix preparedText = do
   let entry = embeddingCacheDir cacheRoot </> cacheKey model docPrefix preparedText ++ ".json"
   exists <- doesFileExist entry
@@ -87,7 +88,7 @@ loadVector cacheRoot model docPrefix preparedText = do
         Just (Aeson.Object obj) ->
           case KeyMap.lookup "vector" obj of
             Just (Aeson.Array arr) ->
-              Just [ realToFrac n | Aeson.Number n <- V.toList arr ]
+              Just (VU.fromList [ realToFrac n | Aeson.Number n <- V.toList arr ])
             _ -> Nothing
         _ -> Nothing
 
@@ -95,11 +96,13 @@ loadVector cacheRoot model docPrefix preparedText = do
 -- Idempotent: the same key is written with the same value under the
 -- API-determinism assumption, so concurrent writers are benign. Best-effort:
 -- a failing cache write is swallowed (the API vector is already in hand).
-saveVector :: FilePath -> Text -> Text -> Text -> [Double] -> IO ()
+-- The persisted format is unchanged: a JSON array of numbers over the
+-- unboxed in-memory representation.
+saveVector :: FilePath -> Text -> Text -> Text -> VU.Vector Double -> IO ()
 saveVector cacheRoot model docPrefix preparedText vec =
   (do
     createDirectoryIfMissing True (embeddingCacheDir cacheRoot)
-    writeFileAtomic entry (Aeson.encode (Aeson.object ["vector" Aeson..= vec]))
+    writeFileAtomic entry (Aeson.encode (Aeson.object ["vector" Aeson..= VU.toList vec]))
   ) `catch` \(_ :: SomeException) -> pure ()
   where
     entry = embeddingCacheDir cacheRoot </> cacheKey model docPrefix preparedText ++ ".json"

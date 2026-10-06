@@ -217,6 +217,7 @@ library
                        Graphos.Domain.Config.Ingest
                        Graphos.Domain.Config.Memory
                        Graphos.Domain.Config.Observability
+                       Graphos.Domain.Config.Source
                        Graphos.Domain.Config.Vision
                        -- Domain - Embedding preparation
                        Graphos.Domain.Embedding
@@ -328,6 +329,7 @@ test-suite graphos-test
     Graphos.Domain.ConfigSpec
     Graphos.Domain.EmbeddingSpec
     Graphos.Domain.Config.IngestSpec
+    Graphos.Domain.Config.SourceSpec
     Graphos.Domain.Config.MemorySpec
     Graphos.Infrastructure.System.MemorySpec
     Graphos.Domain.Types.IngestSpec

@@ -13,6 +13,7 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.List (find)
 import Data.Maybe (isJust)
+import qualified Data.Vector.Unboxed as VU
 import System.IO.Temp (withSystemTempDirectory)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -45,6 +46,7 @@ mkN nid kind ft active =
         , nodeLabel = fromText nid
         , nodeFileType = ft
         , nodeSourceFile = fromText "fixture.md"
+,         nodeSource = Nothing
         , nodeLineStart = Just 1
         , nodeLineEnd = Nothing
         , nodeSignature = Nothing
@@ -270,9 +272,9 @@ spec = do
 
   describe "self-corpus parser fixtures (openspec/ of this repo)" $ do
     it "parses this change's own spec.md artifacts into requirements/scenarios" $ do
-      content <- T.pack <$> readFile "openspec/changes/spec-graph-verification/specs/spec-graph-checks/spec.md"
+      content <- T.pack <$> readFile "openspec/changes/archive/2026-09-30-spec-graph-verification/specs/spec-graph-checks/spec.md"
       let (cap, ns, _es) = parseSpecFile
-            "openspec/changes/spec-graph-verification/specs/spec-graph-checks/spec.md" content
+            "openspec/changes/archive/2026-09-30-spec-graph-verification/specs/spec-graph-checks/spec.md" content
       cap `shouldBe` "spec-graph-checks"
       length [ n | n <- ns, isRequirementNode n ] `shouldBe` 4
       length [ n | n <- ns, isDecisionNode n ] `shouldBe` 0
@@ -309,9 +311,9 @@ spec = do
     let nodeWithComm nid c = (reqN nid) { nodeCommunityId = Just c }
         ns = [ nodeWithComm "A" 1, nodeWithComm "B" 1, nodeWithComm "C" 2 ]
         embs = Map.fromList
-          [ ("A", [1, 0])
-          , ("B", [1, 0])          -- identical to A → sim 1
-          , ("C", [0, 1])          -- different community
+          [ ("A", VU.fromList [1, 0])
+          , ("B", VU.fromList [1, 0])          -- identical to A → sim 1
+          , ("C", VU.fromList [0, 1])          -- different community
           ]
     it "flags same-community pairs above the threshold" $
       duplicationCandidates 0.9 ns embs `shouldBe` [ ("A", "B", 1.0) ]

@@ -33,6 +33,7 @@ import Graphos.Domain.Config.Memory (MemoryConfig(..), defaultMemoryConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import Graphos.Domain.Config.Vision
 import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
+import Graphos.Domain.Config.Source (SourceConfig(..))
 
 -- ───────────────────────────────────────────────
 -- Top-level Configuration
@@ -57,6 +58,8 @@ data GraphosConfig = GraphosConfig
    , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
    , gcDetection        :: DetectionConfig               -- ^ Generated/vendored/minified code detection settings
    , gcMemory           :: MemoryConfig                  -- ^ Memory budget settings (memory.budget: auto|off|<size>)
+   , gcSources          :: [SourceConfig]                -- ^ Named multi-source roots ([] = single positional path)
+   , gcOutput           :: Maybe FilePath                -- ^ Graph output directory override (Nothing = "graphos-out")
    } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -78,6 +81,8 @@ defaultGraphosConfig = GraphosConfig
    , gcIngest           = defaultIngestConfig
    , gcDetection        = defaultDetectionConfig
    , gcMemory           = defaultMemoryConfig
+   , gcSources          = []
+   , gcOutput           = Nothing
    }
 
 -- ───────────────────────────────────────────────
@@ -130,6 +135,10 @@ mergeGraphosConfig global project = GraphosConfig
                      then gcDetection global
                      else gcDetection project
    , gcMemory = if gcMemory project == defaultMemoryConfig
-                  then gcMemory global
-                  else gcMemory project
+                   then gcMemory global
+                   else gcMemory project
+   , gcSources = if null (gcSources project)
+                   then gcSources global
+                   else gcSources project
+   , gcOutput = maybe (gcOutput global) Just (gcOutput project)
    }

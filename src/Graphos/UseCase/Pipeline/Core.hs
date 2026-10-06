@@ -33,9 +33,10 @@ import Data.Aeson (toJSON, encode)
 import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef, atomicModifyIORef')
 import Data.Text.Short (toText)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
+import qualified Data.Vector.Unboxed as VU
 import System.Directory (createDirectoryIfMissing)
 import System.Mem (performGC)
 import qualified Data.ByteString.Lazy as BSL
@@ -157,18 +158,19 @@ pipelineErrorHandler label e = case fromException e of
 -- sound cache the assignment is baseline-equal (@runCached_fst@ in the Lean
 -- artifact).
 --
--- Sidecar write (D9): with 'embStreaming' (default True) the sidecar at
--- @sidecarPath@ is built by appending each completed batch's entries to a
--- staged file (created via 'openAtomicHandle') which is atomically renamed
--- into place when the pass completes; a caught abort discards the staged
--- file without renaming, leaving the prior sidecar intact (and a process
--- kill leaves a temp file, never a partial final path — the
--- atomic-output-writes convention). With 'embStreaming == False' the
--- sidecar is assembled in memory and written once at the end
--- ('writeEmbeddingsSidecar', today's behavior). Both paths produce the same
--- /content/ (a JSON object node-id → vector); batch completion order may
--- differ from write-at-end key order, which is immaterial for JSON objects.
-generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> FilePath -> FilePath -> IO (Map NodeId [Double])
+-- Sidecar write (D9, streaming-only per bounded-embedding-memory): the
+-- sidecar at @sidecarPath@ is built by appending each completed batch's
+-- entries to a staged file (created via 'openAtomicHandle') which is
+-- atomically renamed into place when the pass completes; a caught abort
+-- discards the staged file without renaming, leaving the prior sidecar
+-- intact (and a process kill leaves a temp file, never a partial final path
+-- — the atomic-output-writes convention). The node-to-vector assignment is
+-- folded into a running IORef map as batches complete: the only full copy of
+-- the embedding set is the final assignment itself, plus one in-flight
+-- batch — no fresh-table/union-table intermediates are ever materialized
+-- (bounded-embedding-memory). The legacy write-at-end mode was removed; an
+-- 'embStreaming == False' config is ignored at load time (always-streaming).
+generateGraphEmbeddings :: LLMPort -> EmbeddingConfig -> Graph -> FilePath -> FilePath -> IO (Map NodeId (VU.Vector Double))
 generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
   let nodes = Map.elems (gNodes graph)
       -- Assignment text per node (unchanged from the sequential loop).
@@ -178,6 +180,9 @@ generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
       -- ascending order; the assignment is order-independent per
       -- pipeline_keys_irrelevant).
       uniqueTexts = Set.toList (Set.fromList (map snd nodeTexts))
+  -- Running assignment: the single full copy of the embedding set, folded
+  -- incrementally as batches complete (cache hits first, then per chunk).
+  assignRef <- newIORef (Map.empty :: Map NodeId (VU.Vector Double))
   -- Cache lookup for every unique text — over the *prepared* text (D4):
   -- the key hashes (model, docPrefix, prepared), so two raw texts that
   -- prepare identically converge on one entry.
@@ -192,7 +197,7 @@ generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
       ++ show (length misses) ++ " to embed) in "
       ++ show (length chunks) ++ " batch(es) of <= " ++ show (embBatchSize cfg)
   -- Nodes served straight from the cache (no API call): their entries join
-  -- the sidecar up front in both paths.
+  -- the assignment and the sidecar up front.
   let cachedEntries =
         [ (nid, v)
         | (nid, t) <- nodeTexts
@@ -207,57 +212,45 @@ generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
           ]
         | c <- chunks
         ]
-  if embStreaming cfg
-    then
-      -- Streaming path (D9): staged append per batch + atomic rename. The
-      -- bracket's cleanup discards the staged temp file; by the time cleanup
-      -- runs on the success path the file has already been renamed away
-      -- (discard's removeFile is best-effort and ignores the missing temp).
-      bracket
-        (openAtomicHandle sidecarPath)
-        (\(tmpPath, h) -> discardAtomicHandle tmpPath h)
-        (\(tmpPath, h) -> do
-            BSL.hPut h "{"
-            seenRef <- newIORef False
-            -- Cache-hit entries append first (they are already in hand).
-            writeEntries seenRef h cachedEntries
-            -- Embed only the misses; each completed batch appends its own
-            -- entries. A failed batch contributes nothing for its texts.
-            chunkResults <- pooledMapConcurrently'
-                              (max 1 (embConcurrency cfg))
-                              (\c nodes' -> appendChunk seenRef h c nodes' llm cfg)
-                              (zip chunks missNodesByChunk)
-            let freshTable = Map.fromList (concat chunkResults) :: Map Text [Double]
-                vecTable = Map.union freshTable cachedTable
-            writeBackFresh cfg cacheRoot freshTable
-            -- Close the JSON object and flush; commitSidecar fsyncs + renames.
-            BSL.hPut h "}"
-            hFlush h
-            let assignment = Map.fromList
-                  [ (nid, v)
-                  | (nid, t) <- nodeTexts
-                  , Just v <- [Map.lookup t vecTable]
-                  ]
-            -- Atomic rename into place (D9): only reached on the success
-            -- path — an exception inside the body skips it entirely, so the
-            -- prior sidecar is untouched and the temp file is discarded.
-            commitSidecar tmpPath sidecarPath h
-            pure assignment
-        )
-    else do
-      -- Write-at-end path (today's behavior): assemble, then write once.
-      chunkResults <- pooledMapConcurrently (max 1 (embConcurrency cfg))
-                                            (embedChunk llm cfg) chunks
-      let freshTable = Map.fromList (concat chunkResults) :: Map Text [Double]
-          vecTable = Map.union freshTable cachedTable
-          assignment = Map.fromList
-            [ (nid, v)
-            | (nid, t) <- nodeTexts
-            , Just v <- [Map.lookup t vecTable]
-            ]
-      writeEmbeddingsSidecar sidecarPath assignment
-      writeBackFresh cfg cacheRoot freshTable
-      pure assignment
+  -- Cache-hit entries fold into the running assignment up front (no API call).
+  foldIORef assignRef cachedEntries
+  -- Streaming path (D9): staged append per batch + atomic rename. The
+  -- bracket's cleanup discards the staged temp file; by the time cleanup
+  -- runs on the success path the file has already been renamed away
+  -- (discard's removeFile is best-effort and ignores the missing temp).
+  bracket
+    (openAtomicHandle sidecarPath)
+    (\(tmpPath, h) -> discardAtomicHandle tmpPath h)
+    (\(tmpPath, h) -> do
+        BSL.hPut h "{"
+        seenRef <- newIORef False
+        -- Cache-hit entries append first (they are already in hand).
+        writeEntries seenRef h cachedEntries
+        -- Embed only the misses; each completed batch appends its own
+        -- entries and folds its vectors into the running assignment. A
+        -- failed batch contributes nothing for its texts. Cache write-back
+        -- also happens per batch (hits stay read-only, D5), so no full
+        -- fresh table is ever assembled.
+        pooledMapConcurrently'
+                          (max 1 (embConcurrency cfg))
+                          (\c nodes' -> appendChunk assignRef seenRef h c nodes' llm cfg cacheRoot >> pure [])
+                          (zip chunks missNodesByChunk)
+        -- Close the JSON object and flush; commitSidecar fsyncs + renames.
+        BSL.hPut h "}"
+        hFlush h
+        -- Atomic rename into place (D9): only reached on the success
+        -- path — an exception inside the body skips it entirely, so the
+        -- prior sidecar is untouched and the temp file is discarded.
+        commitSidecar tmpPath sidecarPath h
+        readIORef assignRef
+    )
+
+-- | Fold @(node, vector)@ pairs into the running assignment map. Uses
+-- 'atomicModifyIORef'' — batches may complete concurrently, so the fold must
+-- be thread-safe; plain 'modifyIORef'' can lose updates under contention.
+foldIORef :: IORef (Map NodeId (VU.Vector Double)) -> [(NodeId, VU.Vector Double)] -> IO ()
+foldIORef ref entries =
+  mapM_ (\(nid, v) -> atomicModifyIORef' ref (\m -> (Map.insert nid v m, ()))) entries
 
 -- | 'generateGraphEmbeddings' behind the embedding projection gate
 -- (memory-budget-guard D5): before the first batch, compute the unboxed-floor
@@ -265,7 +258,7 @@ generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
 -- 1024 otherwise) and log it at INFO. When the projection already exceeds the
 -- active budget the pass refuses to start (Left, stage-named) and the sidecar
 -- is not created; without a budget the projection is logged and the pass runs.
-generateGraphEmbeddingsGuarded :: LoggingPort -> Maybe Bytes -> LLMPort -> EmbeddingConfig -> Graph -> FilePath -> FilePath -> IO (Either Text (Map NodeId [Double]))
+generateGraphEmbeddingsGuarded :: LoggingPort -> Maybe Bytes -> LLMPort -> EmbeddingConfig -> Graph -> FilePath -> FilePath -> IO (Either Text (Map NodeId (VU.Vector Double)))
 generateGraphEmbeddingsGuarded lp mBudget llm cfg graph cacheRoot sidecarPath = do
   let nodeCount = Map.size (gNodes graph)
       dims = if embDimension cfg > 0 then embDimension cfg else 1024
@@ -289,43 +282,40 @@ generateGraphEmbeddingsGuarded lp mBudget llm cfg graph cacheRoot sidecarPath = 
 -- completed batch). This keeps @{@ ++ members-with-comma-between ++ @}@
 -- syntactically valid regardless of how many batches append, in what order,
 -- or how many succeed.
-writeEntries :: IORef Bool -> Handle -> [(NodeId, [Double])] -> IO ()
+writeEntries :: IORef Bool -> Handle -> [(NodeId, VU.Vector Double)] -> IO ()
 writeEntries seenRef h entries =
   mapM_ one entries
   where
     one (nid, v) = do
       seen <- readIORef seenRef
-      BSL.hPut h (commaPrefix seen <> encode (AKey.fromText nid) <> ":" <> encode v)
+      BSL.hPut h (commaPrefix seen <> encode (AKey.fromText nid) <> ":" <> encode (VU.toList v))
       writeIORef seenRef True
       where commaPrefix seen = if seen then BSL.singleton 44 else BSL.empty
 
--- | Embed one chunk (its unique texts) with D2 bisection and append the
--- chunk's nodes' entries to the staged sidecar handle as the batch completes
--- (streaming, D9). Returns the batch's fresh @(text, vector)@ pairs for
--- cache write-back.
-appendChunk :: IORef Bool -> Handle -> [Text] -> [(NodeId, Text)] -> LLMPort -> EmbeddingConfig -> IO [(Text, [Double])]
-appendChunk seenRef h chunkTexts chunkNodes llm cfg = do
+-- | Embed one chunk (its unique texts) with D2 bisection, fold the chunk's
+-- node vectors into the running assignment, append them to the staged
+-- sidecar handle as the batch completes (streaming, D9), and write the
+-- batch's fresh vectors back to the cache (D5: hits are read-only, so only
+-- this batch's misses are written — no whole-run fresh table is assembled).
+appendChunk :: IORef (Map NodeId (VU.Vector Double)) -> IORef Bool -> Handle -> [Text] -> [(NodeId, Text)] -> LLMPort -> EmbeddingConfig -> FilePath -> IO ()
+appendChunk assignRef seenRef h chunkTexts chunkNodes llm cfg cacheRoot = do
   fresh <- embedChunk llm cfg chunkTexts
-  writeEntries seenRef h [ (nid, v) | (nid, v) <- distribute chunkNodes fresh ]
-  pure fresh
-  where
-    distribute nodes fresh =
-      [ (nid, v)
-      | (nid, t) <- nodes
-      , Just v <- [lookup t fresh]
-      ]
+  let nodeVecs = [ (nid, v) | (nid, t) <- chunkNodes, Just v <- [lookup t fresh] ]
+  foldIORef assignRef nodeVecs
+  writeEntries seenRef h nodeVecs
+  writeBackFresh cfg cacheRoot fresh
 
 -- | Rename the staged sidecar into place after fsync (the @}@ is already
 -- written and flushed by the caller).
 commitSidecar :: FilePath -> FilePath -> Handle -> IO ()
 commitSidecar = commitAtomicHandle
 
--- | Write back only the fresh (miss) vectors — hits are read-only (D5),
--- so a warm re-run performs zero cache writes.
-writeBackFresh :: EmbeddingConfig -> FilePath -> Map Text [Double] -> IO ()
-writeBackFresh cfg cacheRoot freshTable =
-  mapM_ (\(t, v) -> saveVector cacheRoot (T.pack (embModel cfg)) (embDocPrefix cfg) (prepare cfg t) v)
-        (Map.toList freshTable)
+-- | Write back fresh (miss) vectors for one batch — hits are read-only (D5),
+-- so a warm re-run performs zero cache writes. Called per batch so no
+-- full-run fresh table is ever materialized (bounded-embedding-memory).
+writeBackFresh :: EmbeddingConfig -> FilePath -> [(Text, VU.Vector Double)] -> IO ()
+writeBackFresh cfg cacheRoot fresh =
+  mapM_ (\(t, v) -> saveVector cacheRoot (T.pack (embModel cfg)) (embDocPrefix cfg) (prepare cfg t) v) fresh
 
 -- | Embed one chunk of unique texts with per-input failure isolation
 -- (design D2): on a whole-request failure with more than one text, the batch
@@ -333,7 +323,7 @@ writeBackFresh cfg cacheRoot freshTable =
 -- ≤ log2(batchSize)); at batch size 1 the failing text is logged (first 200
 -- chars) with its error and contributes no vector — its siblings' vectors
 -- survive regardless of where the culprit sits in the batch.
-embedChunk :: LLMPort -> EmbeddingConfig -> [Text] -> IO [(Text, [Double])]
+embedChunk :: LLMPort -> EmbeddingConfig -> [Text] -> IO [(Text, VU.Vector Double)]
 embedChunk llm cfg chunk = case chunk of
   []  -> pure []
   [t] -> do
@@ -367,7 +357,7 @@ chunkBy n xs = let (c, rest) = splitAt n xs in c : chunkBy n rest
 -- results). @limit 1@ runs sequentially in input order. An exception in one
 -- worker is caught and degrades that task to an empty contribution, so one
 -- failed batch never cancels its siblings.
-pooledMapConcurrently :: Int -> (a -> IO [(Text, [Double])]) -> [a] -> IO [[(Text, [Double])]]
+pooledMapConcurrently :: Int -> (a -> IO [c]) -> [a] -> IO [[c]]
 pooledMapConcurrently limit action items
   | limit <= 1 = mapM safeAction items
   | otherwise = do
@@ -423,8 +413,11 @@ loggingPortOf _ = LoggingPort
   }
 
 -- | Write the embeddings map to a JSON sidecar file (object: node id -> vector).
-writeEmbeddingsSidecar :: FilePath -> Map NodeId [Double] -> IO ()
-writeEmbeddingsSidecar path embs = writeFileAtomic path (encode embs)
+-- Retained as a small internal helper for tests of sidecar content; the
+-- pipeline itself always writes via the streaming staged path.
+writeEmbeddingsSidecar :: FilePath -> Map NodeId (VU.Vector Double) -> IO ()
+writeEmbeddingsSidecar path embs =
+  writeFileAtomic path (encode (fmap VU.toList embs))
 
 -- | Log the semantic edge inference decision (mode + inferred count) for the current run.
 logSemanticInference :: LoggingPort -> SemanticEdgesConfig -> SemanticMode -> [Edge] -> IO ()
@@ -683,7 +676,7 @@ runPipelineStages appEnv config = do
               sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
           lpLogInfo lp "  Generating node embeddings..."
           -- generateGraphEmbeddings writes the sidecar itself (streaming
-          -- staged path when embStreaming, write-at-end otherwise, D9).
+          -- staged path, always — the legacy write-at-end mode was removed).
           -- The guarded variant logs the projected footprint and refuses to
           -- start (Left) when it exceeds the active budget.
           embsE <- withHeapGuard lp mBudget "embed" $
@@ -692,12 +685,12 @@ runPipelineStages appEnv config = do
             Left err -> pure (Left err)
             Right embs -> do
               lpLogInfo lp $ T.pack $ "  Wrote " ++ show (Map.size embs) ++ " node embeddings to embeddings.json"
-              pure (Right (builtGraph { gEmbeddings = Just embs, gEmbeddingsPath = Just "embeddings.json" }))
-        else pure (Right builtGraph)
+              pure (Right (builtGraph { gEmbeddings = Just embs, gEmbeddingsPath = Just "embeddings.json" }, Just "embeddings.json"))
+        else pure (Right (builtGraph, Nothing))
 
       case graphE of
        Left embedErr -> pure (Left embedErr)
-       Right graph -> do
+       Right (graph, embeddingsPath) -> do
         lpLogInfo lp $ T.pack $ "  Streaming graph data to " ++ cfgOutputDir configWithStreaming ++ "/graph.json"
         iw <- epOpenIncrementalWriter ep (cfgOutputDir configWithStreaming ++ "/graph.json")
 
@@ -708,7 +701,10 @@ runPipelineStages appEnv config = do
         performGC
 
         -- Step 4/5: clustering + analysis (shared with --cluster-only).
-        clusterOut <- clusterGraph appEnv graph configWithStreaming
+        -- clusterGraph consumes gEmbeddings for semantic inference and then
+        -- detaches the vector table (bounded-embedding-memory), so clustering
+        -- and export do not retain it; the sidecar pointer stays.
+        clusterOut <- clusterGraph appEnv graph configWithStreaming embeddingsPath
         let enrichedGraph     = coEnrichedGraph clusterOut
             finalCommMap      = coCommunities clusterOut
             analysis          = coAnalysis clusterOut
@@ -723,7 +719,7 @@ runPipelineStages appEnv config = do
         epWriteGodNodes ep iw (analysisGodNodes analysis)
         epWriteCommunityAggregates ep iw (coAggregates clusterOut)
         epWriteCompositions ep iw (gCompositions enrichedGraph)
-        epWriteEmbeddingsPath ep iw (fmap T.pack (gEmbeddingsPath enrichedGraph))
+        epWriteEmbeddingsPath ep iw (fmap T.pack embeddingsPath)
         epWriteAnalysisTail ep iw llmLabelsResult
         epFlushWriter ep iw
         epCloseWriter ep iw
@@ -775,8 +771,14 @@ runPipelineStages appEnv config = do
 -- | Shared clustering + analysis stage (Steps 4-5). Used by both the full
 -- pipeline and --cluster-only so neither duplicates community detection, edge
 -- inference, re-clustering, analysis, labeling, or aggregation logic.
-clusterGraph :: AppEnv -> Graph -> PipelineConfig -> IO ClusterOutput
-clusterGraph appEnv graph config = do
+--
+-- Bounded-embedding-memory: after the semantic-edge inference pass consumes
+-- the graph's embedding table, the table is detached (set to Nothing) so the
+-- Leiden re-clustering, analysis, and export stages never retain the full
+-- vector set. The @embeddingsPath@ argument preserves the sidecar pointer
+-- for checkpoints and downstream loads (vectors remain on disk).
+clusterGraph :: AppEnv -> Graph -> PipelineConfig -> Maybe FilePath -> IO ClusterOutput
+clusterGraph appEnv graph config embeddingsPath = do
   let lp = loggingPort appEnv
       op = observabilityPort appEnv
       mBudget = cfgActiveBudgetBytes config
@@ -820,10 +822,13 @@ clusterGraph appEnv graph config = do
           mode = semanticMode seCfg force graph
           semanticEdges = inferSemanticEdgesForMode mode seCfg graph
           allInferred = inferNonSemanticEdgesWith (cfgEdgeDensity config) seCfg Map.empty graph commMap ++ semanticEdges
+          -- Detach the embedding table after semantic inference consumed it:
+          -- the enriched graph (re-clustered, analyzed, exported below) never
+          -- retains the vector set; the sidecar pointer preserves access.
           enrichedGraph' = (if null allInferred
-            then graph
-            else addEdges graph allInferred)
-            { gEmbeddings = gEmbeddings graph
+            then graph { gEmbeddings = Nothing }
+            else addEdges (graph { gEmbeddings = Nothing }) allInferred)
+            { gEmbeddings = Nothing
             , gEmbeddingsPath = gEmbeddingsPath graph }
       withHeapGuard lp mBudget "infer" (enrichedGraph' `deepseq` pure ())
       logSemanticInference lp seCfg mode semanticEdges
@@ -908,7 +913,10 @@ runClusterOnlyPipeline appEnv config = catch (do
       lpLogInfo lp $ T.pack $ "  Loaded checkpoint: " ++ show (Map.size (gNodes graph)) ++ " nodes, "
                        ++ show (Map.size (gEdges graph)) ++ " edges"
       lpLogInfo lp "Step 2: Clustering..."
-      clusterOut <- clusterGraph appEnv graph config
+      -- Cluster-only resume: vectors load from the sidecar via the
+      -- checkpoint's embeddings_path pointer when present (the checkpoint
+      -- itself does not carry vectors).
+      clusterOut <- clusterGraph appEnv graph config (gEmbeddingsPath graph)
       let commCount = Map.size (coCommunities clusterOut)
       lpLogInfo lp $ T.pack $ "  Clustered into " ++ show commCount ++ " communities. Exiting (--cluster-only)."
       pure $ Right commCount

@@ -24,6 +24,7 @@ testNode nid = Node
   , nodeLabel = fromText nid
   , nodeFileType = CodeFile
   , nodeSourceFile = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing

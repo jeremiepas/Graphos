@@ -58,6 +58,7 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.List (elemIndex, find)
 import Data.Maybe (fromMaybe, isNothing, mapMaybe)
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector.Unboxed as VU
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Text.Short (toText)
@@ -273,23 +274,24 @@ candidatePairs ns es =
 
 -- | Cosine similarity between two equal-length vectors; 0 when either is
 -- empty or lengths differ. Mirrors LLMPort.cosineSimilarity (kept local to
--- keep Domain IO-free and dependency-minimal).
-cosineSimilarity :: [Double] -> [Double] -> Double
+-- keep Domain IO-free and dependency-minimal). Operates on the unboxed
+-- in-memory embedding representation (bounded-embedding-memory).
+cosineSimilarity :: VU.Vector Double -> VU.Vector Double -> Double
 cosineSimilarity a b
-  | null a || null b || length a /= length b = 0
+  | VU.null a || VU.null b || VU.length a /= VU.length b = 0
   | denom == 0 = 0
   | otherwise = dot / denom
   where
-    dot = sum (zipWith (*) a b)
-    na = sqrt (sum [ x * x | x <- a ])
-    nb = sqrt (sum [ x * x | x <- b ])
+    dot = VU.sum (VU.zipWith (*) a b)
+    na = sqrt (VU.sum (VU.map (\x -> x * x) a))
+    nb = sqrt (VU.sum (VU.map (\x -> x * x) b))
     denom = na * nb
 
 -- | Duplication candidates: pairs of distinct nodes in the same community
 -- whose embedding similarity exceeds the configured threshold. Only
 -- Requirement / Decision nodes are compared; requires embeddings for both
 -- members and the same (present) community id. Pure.
-duplicationCandidates :: Double -> [Node] -> Map.Map NodeId [Double] -> [(NodeId, NodeId, Double)]
+duplicationCandidates :: Double -> [Node] -> Map.Map NodeId (VU.Vector Double) -> [(NodeId, NodeId, Double)]
 duplicationCandidates threshold ns embs =
   [ (a, b, sim)
   | (a, b) <- pairs

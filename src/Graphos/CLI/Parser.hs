@@ -18,6 +18,7 @@ module Graphos.CLI.Parser
   , mergeOpts
   , ingestOpts
   , subgraphOpts
+  , migrateGraphOpts
   , commandOpts
   , granularityReader
     -- * Install-skill target
@@ -56,7 +57,9 @@ data Command
   | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
   | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
   | LServers
-   | Serve FilePath FilePath Int Bool Bool
+ | Serve FilePath FilePath Int Bool Bool
+
+  | MigrateGraphCmd FilePath (Maybe FilePath)
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
@@ -305,6 +308,11 @@ speccheckOpts = SpeccheckCmd
   <*> optional (strOption (long "graph" <> metavar "G" <> help "Load spec artifacts from a graph.json instead of parsing the openspec/ tree"))
   <*> switch (long "adjudicate" <> help "Adjudicate contradiction candidates pairwise via the configured LLM")
 
+migrateGraphOpts :: Parser Command
+migrateGraphOpts = MigrateGraphCmd
+  <$> strArgument (metavar "GRAPH" <> help "Path to a graph.json in the legacy top-level format")
+  <*> optional (strOption (long "output" <> short 'o' <> metavar "PATH" <> help "Output path (default: overwrite GRAPH in place)"))
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
@@ -318,6 +326,7 @@ commandOpts = subparser
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
+  <> command "migrate-graph" (info migrateGraphOpts (progDesc "Upgrade a legacy graph.json to the JGF envelope format (in place unless --output)" <> footer "Example: graphos migrate-graph graphos-out/graph.json"))
   <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
@@ -398,6 +407,9 @@ renderCommandReference = unlines $
   , "graphos subgraph                Extract a path-driven subgraph"
   , "  --graph FILE / --config CONFIG / --out, -o FILE"
   , "  --boundary-hops N / --no-derive"
+  , ""
+  , "graphos migrate-graph GRAPH      Upgrade a legacy graph.json to the JGF format"
+  , "  --output, -o PATH              (default: overwrite in place)"
   , ""
   , "graphos init                    Generate graphos.yaml"
   , ""

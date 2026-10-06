@@ -43,6 +43,7 @@ mkNode nid = Node
   , nodeLabel        = TS.fromText ("label:" <> nid)
   , nodeFileType     = CodeFile
   , nodeSourceFile   = TS.fromText "test.hs"
+,   nodeSource = Nothing
   , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing

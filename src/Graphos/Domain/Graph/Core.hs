@@ -36,6 +36,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
 import Data.Word (Word32)
+import qualified Data.Vector.Unboxed as VU
 
 import Graphos.Domain.Types
 
@@ -52,7 +53,7 @@ data Graph = Graph
   , gDirected      :: Bool
   , gCompositions  :: Maybe Value               -- per-community composition metadata
   , gHash          :: !Text                     -- deterministic hash over graph structure
-  , gEmbeddings    :: Maybe (Map NodeId [Double])  -- node embeddings (transient; loaded from sidecar)
+  , gEmbeddings    :: Maybe (Map NodeId (VU.Vector Double))  -- node embeddings (transient; loaded from sidecar)
   , gEmbeddingsPath :: Maybe FilePath          -- pointer to embeddings.json sidecar
   } deriving (Eq, Show)
 
@@ -84,7 +85,7 @@ instance FromJSON Graph where
     <*> v .: "directed"
     <*> v .: "compositions"
     <*> v .: "hash"
-    <*> pure (Nothing :: Maybe (Map NodeId [Double]))
+    <*> pure (Nothing :: Maybe (Map NodeId (VU.Vector Double)))
      <*> v .:? "embeddings_path"
 
 -- ───────────────────────────────────────────────
@@ -158,10 +159,18 @@ mergeGraphs old new =
       mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
                       (gEdges old <> gEdges new)
-      mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
-      mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
+      -- Rebuild adjacency from the merged edges using the exact buildGraph
+      -- construction, so a folded incremental merge is structurally identical
+      -- to a full build over the same edges (AVI-559 / G2 confluence) while
+      -- staying order-independent (AVI-658 / M1 content-confluence).
+      fwdAdj        = Map.fromListWith Set.union
+          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems mergedEdges]
+      reverseParts  = Map.fromListWith Set.union
+          [(edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems mergedEdges]
+      mergedFwd     = fwdAdj
+      mergedBwd     = if directed then reverseParts else reverseParts <> fwdAdj
       mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
-                      (Just a, Just b) -> Just (a <> b)
+                      (Just a, Just b) -> Just (Map.union a b)
                       (Just a, Nothing) -> Just a
                       (Nothing, Just b) -> Just b
                       (Nothing, Nothing) -> Nothing
@@ -233,6 +242,7 @@ makeStubNode filePath =
      , nodeLabel        = fromText name
      , nodeFileType     = CodeFile
       , nodeSourceFile   = fromText (T.pack filePath)
+      , nodeSource       = Nothing
      , nodeLineStart    = Nothing
      , nodeCommunityId  = Nothing
      , nodeDegree       = Nothing

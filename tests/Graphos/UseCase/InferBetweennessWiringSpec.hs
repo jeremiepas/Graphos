@@ -16,6 +16,7 @@ wireNode nid = Node
   , nodeLabel = fromText nid
   , nodeFileType = CodeFile
   , nodeSourceFile = fromText "t.hs"
+,   nodeSource = Nothing
   , nodeCommunityId = Nothing
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing

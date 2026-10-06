@@ -17,6 +17,7 @@ testNode nid lbl line src = Node
   , nodeLabel        = fromText lbl
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText src
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Just 3
   , nodeIsBridge     = Nothing

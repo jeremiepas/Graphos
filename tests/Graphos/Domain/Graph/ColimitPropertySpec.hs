@@ -34,6 +34,7 @@ mkNode nid lbl ft src = Node
   , nodeLabel = fromText lbl
   , nodeFileType = ft
   , nodeSourceFile = fromText src
+,   nodeSource = Nothing
   , nodeCommunityId = Nothing
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing

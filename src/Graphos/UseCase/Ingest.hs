@@ -30,6 +30,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
 import Data.Time (getCurrentTime, UTCTime, formatTime, defaultTimeLocale)
+import qualified Data.Vector.Unboxed as VU
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeExtension, (</>))
 import Network.HTTP.Client
@@ -226,12 +227,12 @@ ingestFile appEnv config filePath = do
           let model = T.pack (embModel embCfg)
               metaEmbs = [ IngestEmbedding
                              { ieNodeId     = nodeId n
-                             , ieVector     = []
+                             , ieVector     = VU.empty
                              , ieSourceHash = embeddingSourceHash model (embDocPrefix embCfg) (nodeEmbedText n)
                              , ieTimestamp  = now
                              , ieModel      = model
                              }
-                         | n <- nodes ]
+                          | n <- nodes ]
               idx' = foldr addToIndex emptyIngestIndex metaEmbs
           pure (metaEmbs, idx')
 
@@ -274,7 +275,7 @@ generateEmbeddingsForNodes appEnv cfg nodes = do
       uniqueTexts = Set.toList (Set.fromList (map snd nodeTexts))
       chunks = chunkBy (max 1 (embBatchSize cfg)) uniqueTexts
   chunkResults <- mapM (embedChunk appEnv cfg model now) chunks
-  let vecTable = Map.fromList (concat chunkResults) :: Map.Map Text [Double]
+  let vecTable = Map.fromList (concat chunkResults) :: Map.Map Text (VU.Vector Double)
   pure
     [ IngestEmbedding
         { ieNodeId     = nodeId n
@@ -284,7 +285,7 @@ generateEmbeddingsForNodes appEnv cfg nodes = do
         , ieModel      = model
         }
     | (n, t) <- nodeTexts
-    , let vec = Map.findWithDefault [] t vecTable
+    , let vec = Map.findWithDefault VU.empty t vecTable
     ]
 
 -- | The text embedded for a node (unchanged from the sequential loop).
@@ -296,7 +297,7 @@ nodeEmbedText n = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
 -- whole-request failure with more than one text, bisect and retry the halves
 -- independently; at batch size 1 the failing text is logged (first 200
 -- chars) with its error and contributes no vector.
-embedChunk :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> [Text] -> IO [(Text, [Double])]
+embedChunk :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> [Text] -> IO [(Text, VU.Vector Double)]
 embedChunk appEnv cfg _model _ts chunk = case chunk of
   []  -> pure []
   [t] -> do

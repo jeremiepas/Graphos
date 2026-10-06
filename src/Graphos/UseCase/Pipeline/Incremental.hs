@@ -13,13 +13,15 @@ import Control.Monad (when, void)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Vector.Unboxed as VU
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath ((</>))
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
 import Graphos.Domain.Config (SemanticEdgesConfig(..))
-import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected)
+import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected, gEmbeddings)
+import qualified Graphos.Domain.Graph.Analysis as GAnalysis
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..))
@@ -159,11 +161,14 @@ clusterAndInfer res seCfg force density directed graph =
       mode = semanticMode seCfg force graph
       semanticEdges = inferSemanticEdgesForMode mode seCfg graph
       allInferred = inferNonSemanticEdgesWith density seCfg Map.empty graph commMap ++ semanticEdges
+      -- Detach the embedding table after semantic inference consumed it
+      -- (bounded-embedding-memory): the enriched graph never retains vectors.
       enriched = if null allInferred
-        then graph
-        else buildGraphFromExtractions directed
-             [extractionFromLists (Map.elems (gNodes graph))
-                                 (Map.elems (gEdges graph) ++ allInferred)]
+        then graph { gEmbeddings = Nothing }
+        else (buildGraphFromExtractions directed
+              [extractionFromLists (Map.elems (gNodes graph))
+                                  (Map.elems (gEdges graph) ++ allInferred)])
+             { gEmbeddings = Nothing }
   in (enriched, commMap, mode, semanticEdges)
 
 -- | Load the persisted graph from the output directory (if present), stripping any
@@ -239,10 +244,11 @@ runSingleFilePipeline appEnv config filePath = catch (do
                     semanticEdges = inferSemanticEdgesForMode mode seCfg graph
                     allInferred = inferNonSemanticEdgesWith (cfgEdgeDensity config) seCfg Map.empty graph commMap ++ semanticEdges
                     enriched = if null allInferred
-                      then graph
-                      else buildGraphFromExtractions (cfgDirected config)
-                           [extractionFromLists (Map.elems (gNodes graph))
-                                                (Map.elems (gEdges graph) ++ allInferred)]
+                      then graph { gEmbeddings = Nothing }
+                      else (buildGraphFromExtractions (cfgDirected config)
+                            [extractionFromLists (Map.elems (gNodes graph))
+                                                 (Map.elems (gEdges graph) ++ allInferred)])
+                           { gEmbeddings = Nothing }
                 logSemanticInference lp seCfg mode semanticEdges
                 lpLogInfo lp $ T.pack $ "  Clusters: " ++ show (Map.size commMap)
                 pure (enriched, commMap)
@@ -277,7 +283,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
       fspClearCheckpoint fsp (cfgOutputDir config)
       opShutdownObservability op
 
-      let embWithVectors = length $ filter (not . null . ieVector) (firEmbeddings fir)
+      let embWithVectors = length $ filter (not . VU.null . ieVector) (firEmbeddings fir)
       lpLogInfo lp "[ingest] Single-file pipeline complete!"
 
       pure $ Right SingleFileResult
