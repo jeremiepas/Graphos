@@ -92,8 +92,13 @@ module Graphos.Domain.Config
   , SourceConfig(..)
   , mkSourceConfig
   , validSources
+
+     -- * Content-cache policy
+  , CacheConfig(..)
+  , defaultCacheConfig
   ) where
 
+import Graphos.Domain.Config.Cache
 import Graphos.Domain.Config.Core
 import Graphos.Domain.Config.Extraction
 import Graphos.Domain.Config.Export

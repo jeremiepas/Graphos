@@ -49,7 +49,10 @@ import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
 import qualified Graphos.Infrastructure.Export.CommunityGraph as CommunityGraph
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
-  ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint )
+  ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint
+  , loadCachedFingerprinted, saveCachedFingerprinted
+  , cacheDir, evictToCap, embedCacheDir
+  )
 import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, ignoreMatches)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
   ( docxExtractMediaPaths, pptxExtractMediaPaths, extractMediaFile )
@@ -129,6 +132,8 @@ productionFileSystemPort = FileSystemPort
   , fspClearCheckpoint    = clearPipelineCheckpoint
   , fspLoadIgnorePatterns = loadIgnorePatterns
   , fspShouldIgnore = ignoreMatches
+  , fspLoadCachedExtraction = loadCachedFingerprinted
+  , fspSaveCachedExtraction = saveCachedFingerprinted
   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.

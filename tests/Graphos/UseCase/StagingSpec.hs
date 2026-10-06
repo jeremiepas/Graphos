@@ -89,6 +89,37 @@ spec = do
         graphV2 <- TIO.readFile (out </> "graph.json")
         graphV2 `shouldBe` "v2"
 
+    it "carries the cache pre-body: failed rebuild leaves the old cache in place" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "old.json") "old-cache"
+          pure (Right ())
+        -- A later rebuild fails; the cache must be back in the old output.
+        result <- withStagedOutput out $ \_staging ->
+          pure (Left (T.pack "boom"))
+        case result of
+          Left e -> e `shouldSatisfy` ("boom" `T.isInfixOf`)
+          Right _ -> fail "expected the rebuild to fail"
+        stillThere <- doesFileExist (out </> "cache" </> "old.json")
+        stillThere `shouldBe` True
+
+    it "carries the cache pre-body: successful swap keeps old and new cache entries" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "old.json") "old-cache"
+          pure (Right ())
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "cache" </> "new.json") "new-cache"
+          pure (Right ())
+        oldKept <- doesFileExist (out </> "cache" </> "old.json")
+        newKept <- doesFileExist (out </> "cache" </> "new.json")
+        oldKept `shouldBe` True
+        newKept `shouldBe` True
+
     it "runs on a missing output directory (first build)" $ do
       withSystemTempDirectory "graphos-staging" $ \root -> do
         let out = root </> "nested" </> "graphos-out"

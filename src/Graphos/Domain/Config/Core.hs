@@ -29,6 +29,7 @@ import Graphos.Domain.Config.Extraction ( PdfExtractionMode(..)
                                         )
 import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest (IngestConfig(..), defaultIngestConfig, mergeIngestConfig)
+import Graphos.Domain.Config.Cache (CacheConfig(..), defaultCacheConfig)
 import Graphos.Domain.Config.Memory (MemoryConfig(..), defaultMemoryConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import Graphos.Domain.Config.Vision
@@ -58,6 +59,7 @@ data GraphosConfig = GraphosConfig
    , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
    , gcDetection        :: DetectionConfig               -- ^ Generated/vendored/minified code detection settings
    , gcMemory           :: MemoryConfig                  -- ^ Memory budget settings (memory.budget: auto|off|<size>)
+   , gcCache            :: CacheConfig                   -- ^ Content-cache eviction policy (cache.max_mb; 0 = unlimited)
    , gcSources          :: [SourceConfig]                -- ^ Named multi-source roots ([] = single positional path)
    , gcOutput           :: Maybe FilePath                -- ^ Graph output directory override (Nothing = "graphos-out")
    } deriving (Eq, Show, Generic)
@@ -81,6 +83,7 @@ defaultGraphosConfig = GraphosConfig
    , gcIngest           = defaultIngestConfig
    , gcDetection        = defaultDetectionConfig
    , gcMemory           = defaultMemoryConfig
+   , gcCache            = defaultCacheConfig
    , gcSources          = []
    , gcOutput           = Nothing
    }
@@ -137,6 +140,9 @@ mergeGraphosConfig global project = GraphosConfig
    , gcMemory = if gcMemory project == defaultMemoryConfig
                    then gcMemory global
                    else gcMemory project
+   , gcCache = if gcCache project == defaultCacheConfig
+                  then gcCache global
+                  else gcCache project
    , gcSources = if null (gcSources project)
                    then gcSources global
                    else gcSources project

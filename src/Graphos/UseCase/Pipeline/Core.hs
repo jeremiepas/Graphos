@@ -63,6 +63,7 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(..), EndTime(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.Infrastructure.FileSystem.Ignore (apPriority)
+import Graphos.Infrastructure.FileSystem.Cache (evictToCap)
 import Graphos.Infrastructure.FileSystem.AtomicWrite
   ( writeFileAtomic
   , commitAtomicHandle
@@ -231,7 +232,7 @@ generateGraphEmbeddings llm cfg graph cacheRoot sidecarPath = do
         -- failed batch contributes nothing for its texts. Cache write-back
         -- also happens per batch (hits stay read-only, D5), so no full
         -- fresh table is ever assembled.
-        pooledMapConcurrently'
+        _ <- pooledMapConcurrently'
                           (max 1 (embConcurrency cfg))
                           (\c nodes' -> appendChunk assignRef seenRef h c nodes' llm cfg cacheRoot >> pure [])
                           (zip chunks missNodesByChunk)
@@ -351,32 +352,6 @@ embedChunk llm cfg chunk = case chunk of
 chunkBy :: Int -> [a] -> [[a]]
 chunkBy _ [] = []
 chunkBy n xs = let (c, rest) = splitAt n xs in c : chunkBy n rest
-
--- | Map an IO action over a list with at most @limit@ actions in flight
--- (a bounded worker pool over the input items, each producing a list of
--- results). @limit 1@ runs sequentially in input order. An exception in one
--- worker is caught and degrades that task to an empty contribution, so one
--- failed batch never cancels its siblings.
-pooledMapConcurrently :: Int -> (a -> IO [c]) -> [a] -> IO [[c]]
-pooledMapConcurrently limit action items
-  | limit <= 1 = mapM safeAction items
-  | otherwise = do
-      queue <- newTBQueueIO (fromIntegral (max 1 (length items)) + fromIntegral limit)
-      atomically $ mapM_ (writeTBQueue queue . Just) items
-      -- One sentinel per worker: every worker drains until it sees its own
-      -- Nothing, so none can block forever on an empty queue.
-      atomically $ mapM_ (writeTBQueue queue) (replicate limit Nothing)
-      concat <$> mapConcurrently (\_ -> worker queue) [1 .. limit]
-      where
-        safeAction x = action x `catch` \(_ :: SomeException) -> pure []
-        worker queue = do
-          mItem <- atomically (readTBQueue queue)
-          case mItem of
-            Nothing -> pure []
-            Just x  -> do
-              r <- safeAction x
-              rest <- worker queue
-              pure (r : rest)
 
 -- | Generalized worker pool over paired inputs (streaming variant): items
 -- carry their own payload, the action receives @(item, context)@ and returns
@@ -530,6 +505,18 @@ runPipelineStages appEnv config = do
 
   let isFresh = cfgFresh configWithStreaming
   when isFresh (lpLogInfo lp "Checkpoint recovery disabled (--fresh); starting fresh")
+
+  -- Cache eviction sweep (wire-incremental-update 3.2, D4): bounds the
+  -- persistent extraction + embedding caches before anything consults them.
+  -- A `0` cap disables the sweep; evicted entries are content-addressed state,
+  -- so eviction is sound (a miss re-derives the same result).
+  let cacheCap = ccMaxBytes (gcCache (cfgGraphosConfig configWithStreaming))
+  evicted <- evictToCap cacheCap (cfgOutputDir configWithStreaming)
+  when (evicted > 0) $
+    lpLogInfo lp $ T.pack $
+      "[cache] evicted " ++ show evicted ++ " cache entries (cap "
+        ++ show (cacheCap `div` (1024 * 1024)) ++ " MB)"
+
   when (not isFresh) (do
     mCheckpoint <- fspLoadCheckpoint fsp (cfgOutputDir configWithStreaming)
     case mCheckpoint of
@@ -778,7 +765,7 @@ runPipelineStages appEnv config = do
 -- vector set. The @embeddingsPath@ argument preserves the sidecar pointer
 -- for checkpoints and downstream loads (vectors remain on disk).
 clusterGraph :: AppEnv -> Graph -> PipelineConfig -> Maybe FilePath -> IO ClusterOutput
-clusterGraph appEnv graph config embeddingsPath = do
+clusterGraph appEnv graph config _embeddingsPath = do
   let lp = loggingPort appEnv
       op = observabilityPort appEnv
       mBudget = cfgActiveBudgetBytes config

@@ -1,13 +1,29 @@
--- | Extraction cache - skip unchanged files on re-run
--- Stores per-file extraction results keyed by SHA256 hash of file contents.
 {-# LANGUAGE ScopedTypeVariables #-}
+-- | Extraction cache - skip unchanged files on re-run.
+--
+-- Stores per-file extraction results keyed by SHA256 hash of file contents
+-- concatenated with a caller-supplied fingerprint of the extraction-affecting
+-- configuration (Infrastructure is Domain- and UseCase-free; the UseCase layer
+-- computes the fingerprint and passes it through the port).
+--
+-- INV-CACHE-SOUND (AVI-521 §1.2): the key factors through file content AND
+-- extraction-affecting configuration, so identical content under identical
+-- config hits the same slot, and any change to either the bytes or the
+-- fingerprinted config values invalidates the entry. The fingerprint serializes
+-- the effective per-extension granularity (with CLI override), the extractor
+-- mode per extension, and the pdf extraction level.
 module Graphos.Infrastructure.FileSystem.Cache
   ( loadCached
   , saveCached
+  , loadCachedFingerprinted
+  , saveCachedFingerprinted
+  , cacheKeyForFile
   , checkSemanticCache
   , saveSemanticCache
   , clearCache
   , cacheDir
+  , embedCacheDir
+  , evictToCap
   , loadPipelineCheckpoint
   , savePipelineCheckpoint
   , clearPipelineCheckpoint
@@ -17,13 +33,21 @@ import Control.Exception (SomeException, catch)
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
+import Data.Char (ord)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.Text (Text)
 import Data.Text.Short (toText)
-import System.Directory (doesFileExist, removeFile)
+import System.Directory (doesFileExist, doesDirectoryExist, removeFile, listDirectory)
+import System.Posix.Files (getFileStatus, fileSize, modificationTime)
+import Data.Time.Clock (UTCTime)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import Data.List (sortBy)
+import Data.Ord (comparing)
+import Control.Monad (forM)
 import System.FilePath ((</>))
-import Data.Word (Word8)
+import Data.Word (Word64, Word8)
 import Numeric (showHex)
 import qualified Crypto.Hash.SHA256 as Hash
 
@@ -35,11 +59,24 @@ import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 cacheDir :: FilePath -> FilePath
 cacheDir root = root </> "graphos-out" </> "cache"
 
--- | Load cached extraction for a file (returns Nothing if not cached or file changed)
+-- | Load cached extraction for a file under the content-only (legacy) key.
+-- Retained for the semantic-cache helpers and tests; new wiring calls the
+-- fingerprinted variants below.
 loadCached :: FilePath -> FilePath -> IO (Maybe Extraction)
 loadCached path root = do
   h <- fileHash path root
-  let entry = cacheDir root </> h ++ ".json"
+  readCacheEntry (entryPath h root)
+
+-- | Load cached extraction under the fingerprinted key:
+-- @sha256(content <> fingerprint)@. @outDir@ is the pipeline output directory
+-- (the port-level convention: caches live at @<outDir>/cache/@).
+loadCachedFingerprinted :: Text -> FilePath -> FilePath -> IO (Maybe Extraction)
+loadCachedFingerprinted fingerprint path outDir = do
+  h <- fileHash path outDir
+  readCacheEntry (entryPathIn outDir (cacheKeyForFile h fingerprint))
+
+readCacheEntry :: FilePath -> IO (Maybe Extraction)
+readCacheEntry entry = do
   exists <- doesFileExist entry
   if not exists
     then pure Nothing
@@ -49,12 +86,37 @@ loadCached path root = do
         Left _   -> pure Nothing
         Right cached -> pure (Just (cachedToExtraction cached))
 
--- | Save extraction result for a file
+-- | Save extraction result for a file under the content-only (legacy) key.
 saveCached :: FilePath -> Extraction -> FilePath -> IO ()
 saveCached path result root = do
   h <- fileHash path root
-  let entry = cacheDir root </> h ++ ".json"
-  writeFileAtomic entry (encode (extractionToCached result))
+  writeEntry (entryPath h root) result
+
+-- | Save extraction result under the fingerprinted key. @outDir@ is the
+-- pipeline output directory.
+saveCachedFingerprinted :: Text -> FilePath -> Extraction -> FilePath -> IO ()
+saveCachedFingerprinted fingerprint path result outDir = do
+  h <- fileHash path outDir
+  writeEntry (entryPathIn outDir (cacheKeyForFile h fingerprint)) result
+
+entryPath :: String -> FilePath -> FilePath
+entryPath h root = cacheDir root </> h ++ ".json"
+
+-- | Entry path under the port-level convention: @<outDir>/cache/<key>.json@.
+entryPathIn :: FilePath -> String -> FilePath
+entryPathIn outDir h = outDir </> "cache" </> h ++ ".json"
+
+writeEntry :: FilePath -> Extraction -> IO ()
+writeEntry entry result = writeFileAtomic entry (encode (extractionToCached result))
+
+-- | The composite cache key: sha256 of (content hash hex <> fingerprint).
+-- Kept total and deterministic so the same (content, config) pair always maps
+-- to the same slot.
+cacheKeyForFile :: String -> Text -> String
+cacheKeyForFile contentHash fingerprint =
+  sha256Hex (contentHash <> T.unpack fingerprint)
+  where
+    sha256Hex = concatMap byteToHex . BS.unpack . (Hash.hash :: BS.ByteString -> BS.ByteString) . BS.pack . map (fromIntegral . ord)
 
 -- | Check semantic cache for a list of files
 -- Returns (cachedExtractions, uncachedFiles)
@@ -85,6 +147,74 @@ clearCache root = do
   if exists
     then removeFile dir  -- simplified: just remove the dir marker
     else pure ()
+
+-- ───────────────────────────────────────────────
+-- LRU size-cap eviction (wire-incremental-update 2.2)
+-- ───────────────────────────────────────────────
+
+-- | The embedding cache lives inside the extraction cache root
+-- (project-root convention: @<root>/graphos-out/cache/embeddings/@).
+embedCacheDir :: FilePath -> FilePath
+embedCacheDir root = cacheDir root </> "embeddings"
+
+-- | Evict the oldest-mtime entries across the extraction and embedding caches
+-- until the combined size is at or below the cap (bytes). A cap of 0 disables
+-- eviction entirely (unbounded growth). Missing directories are no-ops; only
+-- regular files are considered. Returns the number of entries evicted.
+--
+-- Sound by construction (AVI-521 INV-CACHE-SOUND): both caches are
+-- content-addressed, so eviction can only turn a would-be hit into a miss
+-- whose recomputation yields the same result — never a wrong result.
+evictToCap :: Word64 -> FilePath -> IO Int
+evictToCap capBytes root
+  | capBytes == 0 = pure 0
+  | otherwise = do
+      exs <- cacheEntries (cacheDir root)
+      ems <- cacheEntries (embedCacheDir root)
+      -- Oldest mtime first; ties broken by path for determinism.
+      let ordered = sortBy (comparing (\(_, mt, p) -> (mt, p))) (exs ++ ems)
+          -- Integer arithmetic: under the cap this difference is negative and
+          -- must not underflow Word64.
+          excess  = toInteger (sum [sz | (sz, _, _) <- ordered])
+                      - toInteger capBytes
+          victims = takeWhileAccum excess ordered
+      mapM_ (removeFileSafe . entryPath3) victims
+      pure (length victims)
+  where
+    -- Take the oldest entries until the running evicted size covers the
+    -- excess. When excess is non-positive (under the cap) the accumulator
+    -- guard is immediately true, so nothing is evicted.
+    takeWhileAccum excess = guard (excess > 0) >> go 0 . map scale
+      where
+        guard c = if c then id else const []
+        scale (sz, mt, p) = (toInteger sz, mt, p)
+        go _ [] = []
+        go acc ((sz, mt, p) : rest)
+          | acc >= excess = []
+          | otherwise     = (sz, mt, p) : go (acc + sz) rest
+    entryPath3 (_, _, p) = p
+
+removeFileSafe :: FilePath -> IO ()
+removeFileSafe p = removeFile p `catch` \(_ :: SomeException) -> pure ()
+
+-- | Every regular cache entry: @(size, mtime, path)@, subdirectories skipped.
+cacheEntries :: FilePath -> IO [(Word64, UTCTime, FilePath)]
+cacheEntries dir = do
+  exists <- doesDirectoryExist dir
+  if not exists
+    then pure []
+    else do
+      names <- listDirectory dir
+      fmap concat $ forM names $ \n -> do
+        let p = dir </> n
+        isFile <- doesFileExist p
+        if not isFile
+          then pure []
+          else do
+            st <- getFileStatus p
+            pure [(fromIntegral (fileSize st),
+                   posixSecondsToUTCTime (realToFrac (modificationTime st)),
+                   p)]
 
 -- ───────────────────────────────────────────────
 -- Internal cached extraction type (with JSON instances)
