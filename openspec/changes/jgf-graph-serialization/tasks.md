@@ -28,4 +28,4 @@
 - [x] 5.1 `cabal build --flag dev` with `-Werror`
 - [x] 5.2 `cabal test`: write→read round-trip equality on a fixture graph
 - [x] 5.3 `cabal test`: legacy `graph.json` still loads; unknown-major-version rejected
-- [ ] 5.4 Validate emitted file against the JGF schema and confirm MCP/query/HTML still load it
+- [x] 5.4 Validate emitted file against the JGF schema and confirm MCP/query/HTML still load it
