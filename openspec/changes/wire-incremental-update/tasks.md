@@ -11,7 +11,7 @@
 ## 3. Cache persistence across staged rebuild (UseCase + Infrastructure)
 
 - [x] 3.1 Move the `cache/` carry-over from post-body (`carryOverState`) to pre-body in `withStagedOutput` (`UseCase.Pipeline.Staging`): rename `out/cache` into staging before the body runs; add rename-back rollback on body failure so a failed rebuild leaves the old cache intact. Unit tests: swap succeeds → final dir contains old cache entries plus new; body fails → old cache back in place. Verify with `cabal test`.
-- [ ] 3.2 Call the eviction sweep at the start of `runPipelineBody` (before detect), logging evicted-entry count at INFO. Unit test: sweep runs before extraction (observe via eviction log or test double). Verify with `cabal test`.
+- [x] 3.2 Call the eviction sweep at the start of `runPipelineBody` (before detect), logging evicted-entry count at INFO. Unit test: sweep runs before extraction (observe via eviction log or test double). Verify with `cabal test`.
 
 ## 4. Wire the extraction cache into the full pipeline (UseCase)
 
