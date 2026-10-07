@@ -37,6 +37,17 @@
   - `.json` files default to `file` granularity (one node per file; lock files
     no longer inflate the graph).
   - **Rollback**: add `granularity: fine` to `graphos.yaml` to restore the previous output.
+- **`--embed` peak memory is now bounded to a single live copy of the vector set**
+  instead of scaling as a multiple of it (drops ~15-20 GB → under ~2 GB at
+  100k nodes × 768 dims): embedding vectors switched from boxed `[Double]` to
+  compact unboxed `Vector Double` (~8 B/dim vs ~40-48 B), the node-to-vector
+  assignment is folded incrementally per batch via the streaming sidecar path
+  (no full fresh-table/union-table copy), and `gEmbeddings` is released after
+  semantic-edge inference so clustering, analysis, and export never hold the
+  table live (vectors remain in the `embeddings.json` sidecar and are re-loaded
+  on demand). Semantic code↔doc inference streams doc vectors one at a time.
+  Wire formats (sidecar, cache files, `graph.json`) are unchanged; the legacy
+  `embedding.streaming` config key is ignored (streaming is now the only mode).
 - Leiden community detection now scales to 100k+ node graphs (16x faster at
   100k nodes: 169s → 10.5s, compiled): in-place assignment updates, batched
   refinement, incremental merge indexing.
