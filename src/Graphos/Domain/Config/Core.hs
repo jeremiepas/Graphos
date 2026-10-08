@@ -13,6 +13,7 @@ module Graphos.Domain.Config.Core
   , effectiveOutputDir
   ) where
 
+import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)

@@ -450,7 +450,7 @@ handleSelectContext g commMap analysis args = do
 -- | Store a conversation exchange in the graph for persistent cross-session memory.
 -- Adds conversation to the chat history community (community 0) and saves to disk.
 handleAddConversation :: FilePath -> Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
-handleAddConversation _g commMap args = do
+handleAddConversation memDir _g commMap args = do
   let question = textArg args "question"
       summary = textArg args "answer_summary"
       sourceNodes = textListArg args "source_nodes"
@@ -484,7 +484,7 @@ handleAddConversation _g commMap args = do
 -- Returns a list of past Q&A summaries relevant to the search terms.
 -- Checks both the in-memory graph (chat community) and disk storage.
 handleConversationHistory :: FilePath -> Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
-handleConversationHistory g commMap args = do
+handleConversationHistory memDir g commMap args = do
   let query = textArg args "query"
       limit = fromMaybe 10 (intArgMaybe args "limit")
   if T.null query
