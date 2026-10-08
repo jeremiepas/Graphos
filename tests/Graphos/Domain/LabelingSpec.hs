@@ -8,7 +8,6 @@ import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON)
 import Data.Text.Short (fromText)
-import Data.Set (Set)
 import qualified Data.Set as Set
 
 import Graphos.Domain.Types
@@ -19,7 +18,6 @@ import Graphos.Domain.Labeling
   , LabelCacheEntry(..)
   , MatchKind(..)
   , fingerprintOf
-  , containmentRatio
   , matchCommunity
   )
 import Graphos.Domain.Community (CommunityComposition(..))
@@ -176,7 +174,7 @@ spec = do
         `shouldNotBe` fingerprintOf (Set.fromList ["a", "b", "c"])
   
   describe "matchCommunity" $ do
-    let entry cid model members label =
+    let entry _cid model members label =
           LabelCacheEntry (fingerprintOf members) (Set.toList members) label model "2026-10-06T00:00:00Z"
   
     it "exact hit reuses the cached label with no LLM call" $ do

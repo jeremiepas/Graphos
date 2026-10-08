@@ -65,7 +65,7 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
+import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
 import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
