@@ -96,7 +96,7 @@ startMCPServerFromFileIn memDir path = do
 startMCPServer :: Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
 startMCPServer g idx cfg commMap analysis = do
   ref <- newIORef (McpState (emptyLoadResult g idx cfg) g Nothing)
-  requestLoop ref idx cfg commMap analysis
+  requestLoop ref defaultMCPMemoryDir idx cfg commMap analysis
 
 -- | An empty LoadResult wrapping the given warm graph state, for callers
 -- that did not load from a file (persistence unavailable).
@@ -110,7 +110,7 @@ emptyLoadResult g idx cfg = LoadResult
 startMCPServerWith :: Maybe FilePath -> LoadResult -> Graph -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
 startMCPServerWith mPath lr g idx cfg commMap analysis = do
   ref <- newIORef (McpState lr g mPath)
-  requestLoop ref idx cfg commMap analysis
+  requestLoop ref defaultMCPMemoryDir idx cfg commMap analysis
 
 -- | Live MCP server state: the original LoadResult (for persistence
 -- carry-over), the live (possibly mutated) graph, and the source path.
@@ -132,13 +132,9 @@ emptyMcpState g = McpState (emptyLoadResult g emptyIdx emptyCfg) g Nothing
 -- Request loop
 -- ───────────────────────────────────────────────
 
-requestLoop :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
-requestLoop stRef idx cfg commMap analysis = do
+requestLoop :: IORef McpState -> FilePath -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
+requestLoop stRef memDir idx cfg commMap analysis = do
   eof <- isEOF
-  -- Conversation persistence root (multi-source-graphs 2.2): the production
-  -- server runs with the resolved effective output's memory/ directory; the
-  -- plain loop keeps the legacy default so tests stay path-neutral.
-  let memDir = defaultMCPMemoryDir
   if eof
     then pure ()
     else do
