@@ -29,6 +29,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Vector (toList)
+import System.FilePath ((</>))
 import System.IO (hFlush, stdout, isEOF)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
