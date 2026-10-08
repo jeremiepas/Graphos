@@ -108,6 +108,18 @@ per API request) with **bounded parallelism** (`embedding.concurrency`, default 
 = sequential). Identical node texts are embedded only once and their vectors
 shared.
 
+**Bounded memory.** The embedding pass keeps peak memory proportional to a
+single copy of the assignment plus one in-flight batch, not a multiple of the
+whole vector set: vectors are held as compact unboxed `Vector Double`
+(~8 bytes/dim vs ~40+ for the old boxed `[Double]`), the node-to-vector
+assignment is folded incrementally as each batch completes (no full fresh-table
+copy), and the table is released after semantic-edge inference so clustering and
+export never hold it live. Vectors persist on disk in the `embeddings.json`
+sidecar (always written via the streaming staged path with atomic rename) and
+are re-loaded on demand by later stages. The legacy `embedding.streaming` config
+key is ignored for compatibility — the sidecar is always streamed. See the
+`bounded-embedding-memory` change for the full design.
+
 ```yaml
 embedding:
   enabled: true
