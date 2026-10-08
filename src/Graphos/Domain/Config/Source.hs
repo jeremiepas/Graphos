@@ -4,6 +4,7 @@ module Graphos.Domain.Config.Source
   ( SourceConfig(..)
   , mkSourceConfig
   , validSources
+  , parseShorthand'
   ) where
 
 import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), object, (.=), withObject, (.:?), (.:))
@@ -53,9 +54,7 @@ instance ToJSON SourceConfig where
 -- string form (a bare path string; the directory base name becomes the
 -- source name).
 instance FromJSON SourceConfig where
-  parseJSON (Data.Aeson.String t) =
-    let p = T.unpack t
-    in pure SourceConfig { scName = T.pack (basePath p), scPath = p, scIgnore = [] }
+  parseJSON (Data.Aeson.String t) = pure (parseShorthand' t)
   parseJSON v = withObject "SourceConfig" objFn v
     where
       objFn obj = do
@@ -69,7 +68,9 @@ instance FromJSON SourceConfig where
 basePath :: FilePath -> FilePath
 basePath p = reverse (takeWhile (/= '/') (dropWhile (== '/') (reverse p)))
 
--- | Parse a string-form source. Exposed for testing.
+-- | Parse a string-form source (shorthand: a bare path; the directory base
+-- name becomes the source name). Used by the 'FromJSON' instance and exposed
+-- for testing.
 parseShorthand' :: Text -> SourceConfig
 parseShorthand' t =
   let p = T.unpack t

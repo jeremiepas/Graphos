@@ -9,7 +9,6 @@
 module Graphos.UseCase.WatchCacheSpec (spec) where
 
 import Data.Maybe (isJust)
-import Data.Text (Text)
 import qualified Data.Text as T
 import System.IO.Temp (withSystemTempDirectory)
 import System.Directory (listDirectory)

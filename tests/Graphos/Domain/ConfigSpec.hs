@@ -2,7 +2,7 @@
 module Graphos.Domain.ConfigSpec where
 
 import Test.Hspec
-import Data.Aeson (decode, encode, eitherDecode, Object(..), Value(..))
+import Data.Aeson (decode, encode, eitherDecode, Value(..))
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
 
