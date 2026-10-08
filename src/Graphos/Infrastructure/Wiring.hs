@@ -51,7 +51,6 @@ import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint
   , loadCachedFingerprinted, saveCachedFingerprinted
-  , cacheDir, evictToCap, embedCacheDir
   )
 import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, ignoreMatches)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
