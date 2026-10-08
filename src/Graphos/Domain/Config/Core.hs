@@ -8,6 +8,9 @@ module Graphos.Domain.Config.Core
 
     -- * Config merging
   , mergeGraphosConfig
+
+    -- * Output directory resolution
+  , effectiveOutputDir
   ) where
 
 import Data.Map.Strict (Map)
@@ -32,6 +35,7 @@ import Graphos.Domain.Config.Ingest (IngestConfig(..), defaultIngestConfig, merg
 import Graphos.Domain.Config.Cache (CacheConfig(..), defaultCacheConfig)
 import Graphos.Domain.Config.Memory (MemoryConfig(..), defaultMemoryConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
+import qualified Graphos.Domain.Config.Output
 import Graphos.Domain.Config.Vision
 import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
 import Graphos.Domain.Config.Source (SourceConfig(..))
@@ -148,3 +152,16 @@ mergeGraphosConfig global project = GraphosConfig
                    else gcSources project
    , gcOutput = maybe (gcOutput global) Just (gcOutput project)
    }
+-- ───────────────────────────────────────────────
+-- Output directory resolution
+-- ───────────────────────────────────────────────
+
+-- | Effective graph output directory for a loaded config (multi-source-graphs
+-- 2.2): the graphos.yaml @output:@ key when set, the canonical default
+-- otherwise. CLI precedence is layered at the call site via
+-- 'Graphos.Domain.Config.Output.resolveOutputDir' (an explicit @-o@ wins over
+-- this value).
+effectiveOutputDir :: GraphosConfig -> FilePath
+effectiveOutputDir cfg = case gcOutput cfg of
+  Just out -> out
+  Nothing  -> Graphos.Domain.Config.Output.defaultOutputDirName

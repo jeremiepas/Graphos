@@ -15,6 +15,12 @@ module Graphos.Infrastructure.Config
   , findLSPServerFromConfig
   , languageIdFromConfig
 
+    -- * Init / writing
+  , generateDefaultConfig
+  , writeConfigYaml
+  , configDocComments
+  , fullInitTemplate
+
     -- * Re-export domain types
   , module Graphos.Domain.Config
   ) where
@@ -25,12 +31,15 @@ import qualified Data.ByteString as BS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Yaml (FromJSON(..), withObject, (.:?))
-import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
+import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
 import System.Exit (exitWith, ExitCode(..))
+import System.FilePath (takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
-import System.FilePath ((</>))
 import qualified Data.Yaml as Yaml
+
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
 
 import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , GraphosConfig(..)
@@ -249,6 +258,58 @@ mergeConfig cfgFile defaults = GraphosConfig
       Just c  -> c
       Nothing -> gcCache defaults
   }
+
+-- ───────────────────────────────────────────────
+-- Init: generate and write a default config file (multi-source-graphs 2.3)
+-- ───────────────────────────────────────────────
+
+-- | Build the default 'GraphosConfig' (the same defaults the loader produces
+-- when no graphos.yaml exists). The @init@ workflow and tests use this as the
+-- round-trip baseline.
+generateDefaultConfig :: IO GraphosConfig
+generateDefaultConfig = pure defaultGraphosConfig
+
+-- | Serialize a config as YAML and write it atomically at the given path.
+-- The template's YAML key names intentionally mirror the documented sections
+-- in the generated @graphos.yaml@ (camelCase per ToJSON field names).
+writeConfigYaml :: FilePath -> GraphosConfig -> IO ()
+writeConfigYaml path cfg = do
+  createDirectoryIfMissing True (takeDirectory path)
+  writeStringFileAtomic path (T.unpack (T.strip (Yaml.encode cfg)) <> "\n")
+
+-- | Commented documentation appended to the machine-rendered defaults by
+-- @graphos init@ (multi-source-graphs 2.3 / workflow 15). Every line is a
+-- comment so the generated file still parses exactly as the rendered config;
+-- the comments document the optional sections — including the multi-source
+-- @sources:@ example and the @output:@ key.
+configDocComments :: String
+configDocComments = unlines
+  [ ""
+  , "# ──── Multi-source (named roots) ─────────────"
+  , "# Graph multiple filesystem roots into ONE graph. Each source gets a name;"
+  , "# every node is tagged with its source and node ids stay distinct across"
+  , "# sources even for identical relative paths. Without `sources:`, Graphos"
+  , "# graphs the single positional PATH argument as before."
+  , "# sources:"
+  , "#   - name: repoA              # unique, non-empty"
+  , "#     path: ~/code/repoA       # must exist (~ and ${VAR} are expanded)"
+  , "#     ignore: [\"vendor\", \"dist\"]  # extra ignores scoped to this source"
+  , "#   - name: repoB"
+  , "#     path: ~/code/repoB"
+  , ""
+  , "# ──── Output directory ────────────────────────"
+  , "# Where graph.json, the HTML view, cache, manifest, and conversations are"
+  , "# written. Default: graphos-out/. The CLI flag -o/--output overrides this."
+  , "# output: my-graph-out"
+  ]
+
+-- | The full documented init template: the rendered default config followed
+-- by 'configDocComments'. Pure so tests can assert on the exact template
+-- content; @graphos init@ writes exactly this via 'writeConfigYaml' +
+-- an append of 'configDocComments'.
+fullInitTemplate :: GraphosConfig -> String
+fullInitTemplate cfg =
+  T.unpack (T.strip (Yaml.encode cfg)) <> "\n" <> configDocComments
 
 -- ───────────────────────────────────────────────
 -- Resolution helpers (replace hardcoded lookups)

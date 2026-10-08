@@ -5,6 +5,9 @@
 module Graphos.Infrastructure.Server.MCP
   ( startMCPServer
   , startMCPServerFromFile
+  , startMCPServerFromFileIn
+  , defaultMCPMemoryDir
+  , defaultMCPServerInfo
   -- * Handlers (exported for testing)
   , handleQueryGraph
   , handleSelectContext
@@ -30,6 +33,7 @@ import System.IO (hFlush, stdout, isEOF)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
  
+import Graphos.Domain.Config (defaultOutputDirName)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors, godNodes, articulationPoints, degree)
 import Graphos.Domain.Analysis (analyze)
@@ -53,9 +57,26 @@ import Graphos.Infrastructure.FileSystem.Conversation (saveConversationToFile, l
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 
 
+-- | The default MCP conversation-memory directory: the legacy project-root
+-- output name. Retained for callers without an effective output directory —
+-- prefer 'startMCPServerFromFileIn' (multi-source-graphs 2.2).
+defaultMCPMemoryDir :: FilePath
+defaultMCPMemoryDir = defaultOutputDirName </> "memory"
+
+-- | Service identity advertised in the MCP @initialize@ response.
+defaultMCPServerInfo :: (Text, Text)
+defaultMCPServerInfo = ("graphos", "0.1.0")
+
 -- | Start MCP server from a graph file
 startMCPServerFromFile :: FilePath -> IO ()
-startMCPServerFromFile path = do
+startMCPServerFromFile = startMCPServerFromFileIn defaultMCPMemoryDir
+
+-- | Start an MCP server from a graph file with an explicit conversation-memory
+-- directory (multi-source-graphs 2.2): callers resolve the effective output
+-- directory and pass @<outDir>/memory@ so a configured @output:@ relocates the
+-- conversations with the rest of the artifacts.
+startMCPServerFromFileIn :: FilePath -> FilePath -> IO ()
+startMCPServerFromFileIn memDir path = do
   result <- loadGraphFromFile path
   case result of
     Left err -> BSLC.putStrLn $ "Error loading graph: " `BSL.append` BSL.fromStrict (TE.encodeUtf8 err)
@@ -65,7 +86,7 @@ startMCPServerFromFile path = do
           idx = lrIndex loaded
           cfg = lrCachedFGL loaded
       -- Load chat history from disk and enrich community map
-      diskConvs <- loadConversationsFromDir "graphos-out/memory"
+      diskConvs <- loadConversationsFromDir memDir
       let enrichedCommMap = enrichWithChatHistory (lrCommunities loaded) diskConvs
           analysis = analyze g enrichedCommMap cohesion
       startMCPServerWith (Just path) loaded g idx cfg enrichedCommMap analysis
@@ -113,6 +134,10 @@ emptyMcpState g = McpState (emptyLoadResult g emptyIdx emptyCfg) g Nothing
 requestLoop :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> IO ()
 requestLoop stRef idx cfg commMap analysis = do
   eof <- isEOF
+  -- Conversation persistence root (multi-source-graphs 2.2): the production
+  -- server runs with the resolved effective output's memory/ directory; the
+  -- plain loop keeps the legacy default so tests stay path-neutral.
+  let memDir = defaultMCPMemoryDir
   if eof
     then pure ()
     else do
@@ -120,29 +145,29 @@ requestLoop stRef idx cfg commMap analysis = do
       case eitherDecode (BSL.fromStrict (TE.encodeUtf8 (T.pack line))) of
         Left err -> do
           sendError (-32700) ("Parse error: " <> T.pack err) Nothing
-          requestLoop stRef idx cfg commMap analysis
+          requestLoop stRef memDir idx cfg commMap analysis
         Right req -> do
-          handleRequest stRef idx cfg commMap analysis req
-          requestLoop stRef idx cfg commMap analysis
+          handleRequest stRef memDir idx cfg commMap analysis req
+          requestLoop stRef memDir idx cfg commMap analysis
 
 -- ───────────────────────────────────────────────
 -- Request handling
 -- ───────────────────────────────────────────────
 
-handleRequest :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> MCPRequest -> IO ()
-handleRequest stRef idx cfg commMap analysis req =
+handleRequest :: IORef McpState -> FilePath -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> MCPRequest -> IO ()
+handleRequest stRef memDir idx cfg commMap analysis req =
   case rqpMethod req of
     "initialize" -> sendBSL (encode (initializeResponse (rqpId req)))
     "tools/list" -> sendBSL (encode (toolsListResponse (rqpId req)))
-    "tools/call" -> handleToolCall stRef idx cfg commMap analysis (rqpId req) (rqpParams req)
+    "tools/call" -> handleToolCall stRef memDir idx cfg commMap analysis (rqpId req) (rqpParams req)
     _ -> sendError (-32601) ("Method not found: " <> rqpMethod req) (Just (rqpId req))
 
 -- ───────────────────────────────────────────────
 -- Tool dispatch
 -- ───────────────────────────────────────────────
 
-handleToolCall :: IORef McpState -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> Value -> KM.KeyMap Value -> IO ()
-handleToolCall stRef idx cfg commMap analysis reqId params = do
+handleToolCall :: IORef McpState -> FilePath -> GraphIndex -> CachedFGL -> CommunityMap -> Analysis -> Value -> KM.KeyMap Value -> IO ()
+handleToolCall stRef memDir idx cfg commMap analysis reqId params = do
   st <- readIORef stRef
   let g = mcpGraph st
       toolName = case KM.lookup (Key.fromText "name") params of
@@ -163,8 +188,8 @@ handleToolCall stRef idx cfg commMap analysis reqId params = do
     "shortest_path"      -> handleShortestPath g idx cfg args
     "bridge_nodes"       -> handleBridgeNodes g cfg
     "select_context"     -> handleSelectContext g commMap analysis args
-    "add_conversation"   -> handleAddConversation g commMap args
-    "conversation_history" -> handleConversationHistory g commMap args
+    "add_conversation"   -> handleAddConversation memDir g commMap args
+    "conversation_history" -> handleConversationHistory memDir g commMap args
     _ -> pure (Left ("Unknown tool: " <> toolName))
   case result of
     Right content -> sendToolResult reqId content
@@ -424,7 +449,7 @@ handleSelectContext g commMap analysis args = do
 
 -- | Store a conversation exchange in the graph for persistent cross-session memory.
 -- Adds conversation to the chat history community (community 0) and saves to disk.
-handleAddConversation :: Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
+handleAddConversation :: FilePath -> Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
 handleAddConversation _g commMap args = do
   let question = textArg args "question"
       summary = textArg args "answer_summary"
@@ -444,7 +469,7 @@ handleAddConversation _g commMap args = do
             , convTokensUsed    = 0
             }
       -- Save to memory directory (disk persistence)
-      saveConversationToFile "graphos-out/memory" conv
+      saveConversationToFile memDir conv
       -- Verify the conversation is in the chat community
       let inCommunity = convId' `elem` Map.findWithDefault [] chatCommunityId commMap
       pure (Right (object
@@ -458,7 +483,7 @@ handleAddConversation _g commMap args = do
 -- | Search conversation history for past exchanges matching a query.
 -- Returns a list of past Q&A summaries relevant to the search terms.
 -- Checks both the in-memory graph (chat community) and disk storage.
-handleConversationHistory :: Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
+handleConversationHistory :: FilePath -> Graph -> CommunityMap -> KM.KeyMap Value -> IO (Either Text Value)
 handleConversationHistory g commMap args = do
   let query = textArg args "query"
       limit = fromMaybe 10 (intArgMaybe args "limit")
@@ -468,7 +493,7 @@ handleConversationHistory g commMap args = do
       -- Search in-memory via chat community
       let inMemoryConvs = queryConversationsFromCommunity g commMap query
       -- Also search from disk
-      diskConvs <- loadConversationsFromDir "graphos-out/memory"
+      diskConvs <- loadConversationsFromDir memDir
       let diskMatches = take limit [c | c <- diskConvs
                                       , not (T.null (convQuestion c))
                                       , any (`T.isInfixOf` T.toLower (convQuestion c))
@@ -528,7 +553,9 @@ initializeResponse reqId = object
   , "result" .= object
     [ "protocolVersion" .= ("2024-11-05" :: Text)
     , "capabilities" .= object ["tools" .= object []]
-    , "serverInfo" .= object ["name" .= ("graphos" :: Text), "version" .= ("0.1.0" :: Text)]
+    , "serverInfo" .= object [ "name" .= fst defaultMCPServerInfo
+                             , "version" .= snd defaultMCPServerInfo
+                             ]
     ]
   ]
 
@@ -552,7 +579,7 @@ allTools =
   , ("shortest_path", "Find shortest path between two nodes", [("from", "Source concept", True), ("to", "Target concept", True)])
   , ("bridge_nodes", "Find articulation points (bridge nodes) whose removal disconnects the graph", [])
   , ("select_context", "Select relevant context from the graph for an LLM query. Returns compact markdown with key nodes, edges, communities, and bridge nodes, capped to the requested budget. Set include_history=true to include past conversation history. Set verbose=true for per-node metadata. Set edges=semantic (default) to drop AMBIGUOUS/trivia edges; edges=all preserves everything. Set max_hint_community_size to hide mega-communities (default 50).", [("question", "The query to select context for", True), ("budget", "Token budget (default: 3000)", False), ("include_history", "Include chat history in context (default: false)", False), ("verbose", "Include per-node metadata (default: false)", False), ("edges", "semantic or all", False), ("max_hint_community_size", "Max community size to suggest (default: 50)", False)])
-  , ("add_conversation", "Store a conversation exchange in the graph for persistent cross-session memory. Saves to graphos-out/memory/", [("question", "The user's question", True), ("answer_summary", "Short summary of the answer", False), ("source_nodes", "List of code node IDs referenced", False)])
+  , ("add_conversation", "Store a conversation exchange in the graph for persistent cross-session memory. Saves to the output directory's memory/ folder (graphos-out/memory/ by default).", [("question", "The user's question", True), ("answer_summary", "Short summary of the answer", False), ("source_nodes", "List of code node IDs referenced", False)])
   , ("conversation_history", "Search past conversation exchanges matching a query", [("query", "Search terms", True), ("limit", "Max results (default: 10)", False)])
   ]
 
