@@ -32,10 +32,11 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Yaml (FromJSON(..), withObject, (.:?))
-import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
+import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
 import System.Exit (exitWith, ExitCode(..))
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import qualified Data.Yaml as Yaml
 
@@ -273,9 +274,13 @@ generateDefaultConfig = pure defaultGraphosConfig
 -- The template's YAML key names intentionally mirror the documented sections
 -- in the generated @graphos.yaml@ (camelCase per ToJSON field names).
 writeConfigYaml :: FilePath -> GraphosConfig -> IO ()
-writeConfigYaml path cfg = do
-  createDirectoryIfMissing True (takeDirectory path)
-  writeStringFileAtomic path (T.unpack (T.strip (Yaml.encode cfg)) <> "\n")
+writeConfigYaml path cfg =
+  writeStringFileAtomic path (renderedYaml cfg <> "\n")
+
+-- | YAML rendering of a config (ByteString → strict UTF-8 Text, with
+-- trailing whitespace stripped so the file ends in exactly one newline).
+renderedYaml :: GraphosConfig -> String
+renderedYaml cfg = T.unpack (T.strip (TE.decodeUtf8 (Yaml.encode cfg)))
 
 -- | Commented documentation appended to the machine-rendered defaults by
 -- @graphos init@ (multi-source-graphs 2.3 / workflow 15). Every line is a
@@ -308,8 +313,7 @@ configDocComments = unlines
 -- content; @graphos init@ writes exactly this via 'writeConfigYaml' +
 -- an append of 'configDocComments'.
 fullInitTemplate :: GraphosConfig -> String
-fullInitTemplate cfg =
-  T.unpack (T.strip (Yaml.encode cfg)) <> "\n" <> configDocComments
+fullInitTemplate cfg = renderedYaml cfg <> "\n" <> configDocComments
 
 -- ───────────────────────────────────────────────
 -- Resolution helpers (replace hardcoded lookups)

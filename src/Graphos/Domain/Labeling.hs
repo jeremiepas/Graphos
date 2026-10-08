@@ -199,12 +199,13 @@ matchCommunity entries model newMembers =
               kept    = filter keep scored
           in case kept of
                 [] -> Nothing
-                _  -> case head (sortBy cmp kept) of
-                          (_, _, e) -> Just (e, FuzzyMatch)
+                _  -> case sortBy cmp kept of
+                        ((_, _, e):_) -> Just (e, FuzzyMatch)
+                        [] -> Nothing
           where
             toScored :: (Int, LabelCacheEntry) -> (Int, Int, LabelCacheEntry)
             toScored (position, e) =
-              let inter = Set.size (Set.intersection newMembers (Set.fromList (lceMembers e)))
+              let inter = intersectionSizeOf newMembers e
               in (inter, position, e)
 
             keep :: (Int, Int, LabelCacheEntry) -> Bool

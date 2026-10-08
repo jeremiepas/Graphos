@@ -165,3 +165,35 @@ effectiveOutputDir :: GraphosConfig -> FilePath
 effectiveOutputDir cfg = case gcOutput cfg of
   Just out -> out
   Nothing  -> Graphos.Domain.Config.Output.defaultOutputDirName
+
+-- ───────────────────────────────────────────────
+-- YAML serialization (graphos init write path)
+-- ───────────────────────────────────────────────
+
+-- | The config-as-YAML key layout for @graphos init@ (multi-source-graphs
+-- 2.3). Every key matches what the FromJSON parsers read back (ConfigFile's
+-- section keys in Infrastructure.Config; each section's own field keys), so a
+-- written file reloads to an Equal config. 'gcDetection' is omitted: it has
+-- no ToJSON instance and its FromJSON default-fills everything the loader
+-- needs.
+instance ToJSON GraphosConfig where
+  toJSON cfg = object
+    [ "lsp"             .= gcLsp cfg
+    , "language_ids"    .= gcLanguageIds cfg
+    , "file_extensions" .= gcFileExtensions cfg
+    , "extractors"      .= gcExtractors cfg
+    , "granularity"     .= gcGranularity cfg
+    , "pdf_extraction"  .= gcPdfExtraction cfg
+    , "neo4j"           .= gcNeo4j cfg
+    , "memgraph"        .= gcMemgraph cfg
+    , "labeling"        .= gcLabeling cfg
+    , "observability"   .= gcObservability cfg
+    , "embedding"       .= gcEmbedding cfg
+    , "semantic_edges"  .= gcSemanticEdges cfg
+    , "vision"          .= gcVision cfg
+    , "ingest"          .= gcIngest cfg
+    , "memory"          .= gcMemory cfg
+    , "cache"           .= gcCache cfg
+    , "sources"         .= gcSources cfg
+    , "output"          .= gcOutput cfg
+    ]
