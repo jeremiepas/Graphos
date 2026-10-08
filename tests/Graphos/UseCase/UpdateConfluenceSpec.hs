@@ -21,7 +21,7 @@ import Data.Text (Text)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
-import System.Process (CreateProcess(..), create_group, readCreateProcessWithExitCode, proc)
+import System.Process (readCreateProcessWithExitCode, proc)
 
 import Test.Hspec
 

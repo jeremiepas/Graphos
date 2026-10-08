@@ -67,6 +67,14 @@ spec = describe "Graphos.Domain.Config.Source" $ do
       (eitherDecode "\"~/code/myrepo/\"" :: Either String SourceConfig)
         `shouldBe` Right (SourceConfig "myrepo" "~/code/myrepo/" [])
 
+    it "parseShorthand' matches the shorthand FromJSON branch" $
+      parseShorthand' "~/code/myrepo/"
+        `shouldBe` SourceConfig "myrepo" "~/code/myrepo/" []
+
+    it "parseShorthand' tolerates a trailing slash" $
+      parseShorthand' "/tmp/repoA/"
+        `shouldBe` SourceConfig "repoA" "/tmp/repoA/" []
+
     it "defaults ignore to empty when absent" $
       (eitherDecode "{ \"name\": \"x\", \"path\": \"/tmp/x\" }"
         :: Either String SourceConfig)
