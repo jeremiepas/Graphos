@@ -16,6 +16,7 @@ module Graphos.UseCase.Extract.Core
   , extractImageSource
   , collectEmbeddedImages
   , collapseDetectedFiles
+  , applyTaggingSources
   ) where
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
@@ -30,6 +31,7 @@ import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
 import Data.Text (Text)
+import Data.Map (Map)
 import Data.Text.Short (fromText, toText)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension, takeFileName)
@@ -37,20 +39,29 @@ import Data.Char (toLower)
 import System.Mem (performGC)
 
 import Graphos.Domain.Config (PdfExtractionMode(..))
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, gcPdfExtraction, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), EdgeId, FileType(..), bitNodeKind, bitNodeExtra)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, gcPdfExtraction, Granularity(..), VisionConfig(..)  , NodeId, Node(..), Edge(..), EdgeId(..), FileType(..)  , bitNodeKind, bitNodeExtra, bitNodeSource, relationToText, setFieldPresent)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
+import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
 import Data.Aeson (object, (.=))
 
 -- | Extract entities from all detected files.
-extractAll :: AppEnv -> PipelineConfig -> Detection -> IO Extraction
-extractAll appEnv config detection = do
+--
+-- When @mProvenance@ is 'Just', this applies a multi-source tagging post-pass
+-- over the merged extraction: each node whose source file was attributed to a
+-- source is recomputed under that source's qualified path, tagged with its
+-- source name on 'nodeSource'/'nodeSourceFile', and edges are remapped so
+-- their endpoints (and ids) follow. When @mProvenance@ is 'Nothing' (the
+-- single-source case) the extraction is returned unchanged, preserving prior
+-- behavior byte-for-byte.
+extractAll :: AppEnv -> PipelineConfig -> Detection -> Maybe (Map Text (Text, Text)) -> IO Extraction
+extractAll appEnv config detection mProvenance = do
   let ep = extractionPort appEnv
       lp = loggingPort appEnv
       fsp = fileSystemPort appEnv
@@ -370,7 +381,43 @@ extractAll appEnv config detection = do
                        ++ show cacheMisses
 
   logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges"
-  pure merged
+  pure (applyTaggingSources mProvenance merged)
+
+-- | Tag an extraction with multi-source provenance.
+--
+-- For every node whose 'nodeSourceFile' is a key in @prov@ (a real path ->
+-- (sourceName, qualifiedPath) map), recompute its nodeId from the qualified
+-- path so files with identical relative paths in different sources get
+-- distinct identifiers, record the source on 'nodeSource'/'nodeSourceFile',
+-- and rebuild edges so their endpoints and ids follow the resulting remap.
+-- Nodes absent from @prov@ are left untouched. When @mProv@ is 'Nothing' the
+-- extraction is returned unchanged, preserving single-source behavior.
+applyTaggingSources
+  :: Maybe (Map Text (Text, Text))
+  -> Extraction
+  -> Extraction
+applyTaggingSources Nothing ext = ext
+applyTaggingSources (Just prov) ext =
+    let pairs  = map tagNode (Map.elems (extractionNodes ext))
+        remap  = Map.fromList [(oldId, nodeId node) | (oldId, node) <- pairs, oldId /= nodeId node]
+        nodes' = map snd pairs
+        edges' = map (remapEdge remap) (Map.elems (extractionEdges ext))
+    in ext { extractionNodes = Map.fromList (map (\n -> (nodeId n, n)) nodes')
+           , extractionEdges = Map.fromList (map (\e -> (edgeId e, e)) edges') }
+  where
+    tagNode n = case Map.lookup (toText (nodeSourceFile n)) prov of
+      Just (srcName, qPath) ->
+        let newNid  = makeNodeId (T.unpack qPath) (toText (nodeLabel n))
+            tagged  = n { nodeId           = newNid
+                      , nodeSource       = Just (fromText srcName)
+                      , nodeSourceFile   = fromText qPath
+                      , nodePresentBits  = setFieldPresent bitNodeSource (nodePresentBits n) }
+        in (nodeId n, tagged)
+      Nothing -> (nodeId n, n)
+    remapEdge remap e =
+      let s = Map.findWithDefault (edgeSource e) (edgeSource e) remap
+          t = Map.findWithDefault (edgeTarget e) (edgeTarget e) remap
+      in e { edgeSource = s, edgeTarget = t, edgeId = EdgeId (s <> "->" <> t <> ":" <> relationToText (edgeRelation e)) }
 
 -- | Push a single extraction to Neo4j if streaming is configured.
 pushExtractionStreaming :: ExtractionPort -> PipelineConfig -> Extraction -> IO ()

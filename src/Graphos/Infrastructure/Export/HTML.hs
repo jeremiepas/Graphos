@@ -131,6 +131,7 @@ computePayload g analysis mLabels aggregates =
                , vnIsBridge   = maybe False id (nodeIsBridge n)
                , vnKindIdx    = maybe 0 (\k -> Map.findWithDefault 0 (toText k) kindToIdx) (nodeKind n)
                , vnFileType   = fileTypeToIdx (nodeFileType n)
+               , vnSource     = fmap toText (nodeSource n)
               }
             | n <- Map.elems nodeMap
             ]
@@ -271,6 +272,7 @@ data VisNode = VisNode
   , vnIsBridge   :: Bool
   , vnKindIdx    :: Int
   , vnFileType   :: Int
+  , vnSource     :: Maybe Text
   } deriving (Show, Generic)
 
 instance ToJSON VisNode where
@@ -283,6 +285,7 @@ instance ToJSON VisNode where
     , "is_bridge"    .= vnIsBridge n
     , "kind_idx"     .= vnKindIdx n
     , "file_type"    .= vnFileType n
+    , "source"       .= vnSource n
     ]
 
 -- | Edge data for JSON export

@@ -414,6 +414,8 @@ test-suite graphos-test
     Graphos.Infrastructure.FileSystem.CacheSpec
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.WatchCacheSpec
+    Graphos.Domain.Config.OutputSpec
+    Graphos.Infrastructure.FileSystem.OutputPlacementSpec
   build-depends:
       base
     , graphos

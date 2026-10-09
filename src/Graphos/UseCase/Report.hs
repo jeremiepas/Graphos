@@ -22,37 +22,46 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 -- whole-graph work.
 generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Text
 generateReport g analysis _config _detection mLabels =
-  T.unlines
-    [ "# Graph Report"
-    , ""
-    , "## Summary"
-    , ""
-    , T.pack $ "Nodes: " ++ show (Map.size (gNodes g))
-    , T.pack $ "Edges: " ++ show (Map.size (gEdges g))
-    , T.pack $ "Communities: " ++ show (Map.size (analysisCommunities analysis))
-    , T.pack $ "Articulation points: " ++ show (length artPoints)
-    , T.pack $ "Biconnected components: " ++ show (analysisBccCount analysis)
-    , ""
-    , "## Communities"
-    , ""
-    , communitiesSection (analysisCommunities analysis) (analysisCohesion analysis) g mLabels
-    , ""
-    , "## God Nodes (Top Hubs)"
-    , ""
-    , godNodesSection (analysisGodNodes analysis)
-    , ""
-    , "## Bridge Nodes (Articulation Points)"
-    , ""
-    , bridgeNodesSection artPoints g
-    , ""
-    , "## Surprising Connections"
-    , ""
-    , surprisesSection (analysisSurprises analysis)
-    , ""
-    , "## Suggested Questions"
-    , ""
-    , questionsSection (analysisQuestions analysis)
-    ]
+  let summaryLines =
+        [ T.pack $ "Nodes: " ++ show (Map.size (gNodes g))
+        , T.pack $ "Edges: " ++ show (Map.size (gEdges g))
+        , T.pack $ "Communities: " ++ show (Map.size (analysisCommunities analysis))
+        , T.pack $ "Articulation points: " ++ show (length artPoints)
+        , T.pack $ "Biconnected components: " ++ show (analysisBccCount analysis)
+        ]
+      sourceTally = Map.fromListWith (+) [ (toText s, 1 :: Int) | n <- Map.elems (gNodes g), Just s <- [nodeSource n] ]
+      sourceLines = case Map.toList sourceTally of
+        [] -> []
+        ts -> [ T.pack $ "Sources: " ++ unwords [(T.unpack k ++ "=" ++ show v) | (k, v) <- ts] ]
+  in T.unlines
+     ( [ "# Graph Report"
+       , ""
+       , "## Summary"
+       , ""
+       ]
+       ++ summaryLines ++ sourceLines
+       ++ [ ""
+          , "## Communities"
+          , ""
+          , communitiesSection (analysisCommunities analysis) (analysisCohesion analysis) g mLabels
+          , ""
+          , "## God Nodes (Top Hubs)"
+          , ""
+          , godNodesSection (analysisGodNodes analysis)
+          , ""
+          , "## Bridge Nodes (Articulation Points)"
+          , ""
+          , bridgeNodesSection artPoints g
+          , ""
+          , "## Surprising Connections"
+          , ""
+          , surprisesSection (analysisSurprises analysis)
+          , ""
+          , "## Suggested Questions"
+          , ""
+          , questionsSection (analysisQuestions analysis)
+          ]
+     )
   where
     artPoints = analysisArticulation analysis
 

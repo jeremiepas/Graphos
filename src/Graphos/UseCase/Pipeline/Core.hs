@@ -78,7 +78,7 @@ import Graphos.UseCase.Pipeline.Staging
   )
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
-import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore')
+import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiSources)
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
@@ -553,8 +553,14 @@ runPipelineStages appEnv config = do
         case applyDetectionOverrides baseDetection effectiveMode (cfgMinifiedThreshold configWithStreaming) of
           Right ok -> ok
           Left err -> error $ "graphos: invalid detection config: " ++ err
-  detection <- withHeapGuard lp mBudget "detect" $
-    detectFilesWithExtensionsAndIgnore' fsp effectiveDetection (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
+  detectionResult <- withHeapGuard lp mBudget "detect" $
+    if null (gcSources (cfgGraphosConfig configWithStreaming))
+      then do
+        det <- detectFilesWithExtensionsAndIgnore' fsp effectiveDetection (cfgInputPath configWithStreaming) extMap allIgnorePatterns (lpLogDebug lp)
+        pure (det, Nothing)
+      else detectMultiSources fsp effectiveDetection extMap (gcSources (cfgGraphosConfig configWithStreaming)) (lpLogDebug lp)
+  let detection   = fst detectionResult
+      mProvenance = snd detectionResult
   detectEnd <- getCurrentTime
   opRecordHistogram op "graphos_pipeline_step_duration_seconds" (realToFrac (diffUTCTime detectEnd detectStart) :: Double)
   opIncCounter op "graphos_pipeline_steps_total" 1
@@ -600,7 +606,7 @@ runPipelineStages appEnv config = do
       lpLogInfo lp "Step 2: Extracting entities and relationships..."
       extractStart <- getCurrentTime
       extraction <- withHeapGuard lp mBudget "extract" $
-        extractAll appEnv configWithStreaming detection
+        extractAll appEnv configWithStreaming detection mProvenance
       extractEnd <- getCurrentTime
       collapsedNodes <- if dcMode effectiveDetection == Collapse
             then collapseDetectedFiles appEnv configWithStreaming (detectionClassification detection)

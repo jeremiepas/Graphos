@@ -202,7 +202,7 @@ ingestFile appEnv config filePath = do
              }
 
       -- Extract entities from the single file
-      extraction <- Extract.extractAll appEnv config detection
+      extraction <- Extract.extractAll appEnv config detection Nothing
 
       let nodes = Map.elems (extractionNodes extraction)
           nodeCount = length nodes
