@@ -288,8 +288,10 @@ library openspec-view
                     OpenSpecView.ChangeList
                     OpenSpecView.ArtifactView
                     OpenSpecView.SpecDiff
-                    OpenSpecView.StateDashboard
+                     OpenSpecView.StateDashboard
   build-depends:   base
+                  , directory
+                  , time
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -400,10 +402,12 @@ test-suite graphos-test
     Graphos.UseCase.InferBetweennessWiringSpec
     Graphos.UseCase.IngestSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
+    OpenSpecView.ChangeListSpec
   build-depends:
-      base
-    , graphos
-    , hspec                >= 2.10
+       base
+     , graphos
+     , openspec-view
+     , hspec                >= 2.10
     , hspec-discover       >= 2.10
     , QuickCheck           >= 2.14
     , aeson
