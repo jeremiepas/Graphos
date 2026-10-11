@@ -402,7 +402,8 @@ test-suite graphos-test
     Graphos.UseCase.InferBetweennessWiringSpec
     Graphos.UseCase.IngestSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
-    OpenSpecView.ChangeListSpec
+     OpenSpecView.ChangeListSpec
+     OpenSpecView.ArtifactViewSpec
   build-depends:
        base
      , graphos
