@@ -10,9 +10,12 @@ module OpenSpecView.ChangeList
   ) where
 
 import Control.Monad (forM, filterM)
-import Data.List (sort)
-import Data.Time (defaultTimeLocale, formatTime, UTCTime)
-import System.Directory (doesDirectoryExist, doesFileExist, getModificationTime, listDirectory)
+import Data.List (sortBy)
+import Data.Maybe (catMaybes)
+import Data.Time (defaultTimeLocale, formatTime, UTCTime(..), diffUTCTime, fromGregorian)
+import Data.Ord (comparing, Down(..))
+import System.Directory (doesDirectoryExist, doesFileExist, getModificationTime,
+                         listDirectory)
 
 type ChangeName = String
 type TaskStatus = String
@@ -45,9 +48,10 @@ parseTaskCounts = foldl' step (0, 0) . lines
         Nothing    -> (done, total)
 
 computeStatus :: TaskCount -> TaskCount -> TaskStatus
-computeStatus 0 _ = "not_started"
-computeStatus done total | done == total = "complete"
-                         | otherwise       = "in_progress"
+computeStatus done total
+  | total == 0    = "no-tasks"
+  | done == total = "complete"
+  | otherwise      = "in-progress"
 
 parseTasksMd :: ChangeName -> String -> ChangeInfo
 parseTasksMd name content =
@@ -69,25 +73,62 @@ combine' a b
 takeBaseName :: FilePath -> FilePath
 takeBaseName fp = reverse (takeWhile (/= '/') (reverse fp))
 
-formatModTime :: UTCTime -> String
-formatModTime t = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" t
+pad3 :: Integer -> String
+pad3 n = take 3 (show n ++ "000")
+
+-- Encode an mtime the way `openspec list --json` reports lastModified: a UTC
+-- timestamp rounded to milliseconds with a trailing Z. Callers must pass the
+-- max mtime across a change's nested files.
+formatModTime :: UTCTime -> IO String
+formatModTime t = do
+  let msTotal = round (diffUTCTime t epoch * 1000) :: Integer
+  pure (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" t
+        ++ "." ++ pad3 (msTotal `mod` 1000) ++ "Z")
+
+-- Unix epoch (1970-01-01T00:00:00Z) used as the mtime reference.
+epoch :: UTCTime
+epoch = UTCTime { utctDay = fromGregorian 1970 1 1, utctDayTime = 0 }
+
+-- Recursively collect every regular file beneath a directory.
+listFilesRecursively :: FilePath -> IO [FilePath]
+listFilesRecursively path = do
+  entries <- listDirectory path
+  chunks <- forM entries (\e ->
+    let p = combine' path e in
+    doesDirectoryExist p >>= \isDir ->
+      if isDir then listFilesRecursively p else return [p])
+  return (concat chunks)
+
+-- Max mtime across all files in a change directory (recursive).
+maxMtime :: FilePath -> IO (Maybe UTCTime)
+maxMtime changeDir = do
+  files <- listFilesRecursively changeDir
+  if null files
+    then return Nothing
+    else do
+      mtimes <- forM files (\f -> fmap Just (getModificationTime f))
+      pure (Just (maximum (catMaybes mtimes)))
 
 readChangeInfo :: FilePath -> IO (Maybe ChangeInfo)
 readChangeInfo changeDir = do
   let tasksPath = combine' changeDir "tasks.md"
-  exists <- doesFileExist tasksPath
-  if not exists
-    then return Nothing
-    else do
-      content <- readFile tasksPath
-      mtime <- getModificationTime tasksPath
-      let info = parseTasksMd (takeBaseName changeDir) content
-          withMtime = info { changeLastModified = Just (formatModTime mtime) }
-      return (Just withMtime)
+  hasTasks <- doesFileExist tasksPath
+  content <- if hasTasks then readFile tasksPath else return ""
+  mtime <- maxMtime changeDir
+  info0 <- pure (parseTasksMd (takeBaseName changeDir) content)
+  mtimeStr <- case mtime of
+    Just t -> fmap Just (formatModTime t)
+    Nothing -> pure Nothing
+  pure (Just (info0 { changeLastModified = mtimeStr }))
 
 readAllChangeInfos :: FilePath -> IO [ChangeInfo]
 readAllChangeInfos changesRoot = do
   entries <- listDirectory changesRoot
-  changeDirs <- filterM (\e -> doesDirectoryExist (combine' changesRoot e)) entries
-  ordered <- forM (sort changeDirs) (\e -> readChangeInfo (combine' changesRoot e))
-  return [ x | Just x <- ordered ]
+  dirs <- filterM (\e -> do
+                    isDir <- doesDirectoryExist (combine' changesRoot e)
+                    pure (isDir && e /= "archive")) entries
+  ordered <- forM dirs (\e -> readChangeInfo (combine' changesRoot e))
+  let allInfos = [ x | Just x <- ordered ]
+  -- Sort by lastModified descending, breaking ties by name ascending so the
+  -- ordering matches `openspec list --json` exactly.
+  pure (sortBy (comparing (fmap Down changeLastModified) <> comparing changeName) allInfos)
