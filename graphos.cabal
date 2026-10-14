@@ -405,6 +405,7 @@ test-suite graphos-test
       OpenSpecView.ChangeListSpec
       OpenSpecView.ArtifactViewSpec
       OpenSpecView.SpecDiffSpec
+      OpenSpecView.StateDashboardSpec
   build-depends:
        base
      , graphos
