@@ -1,6 +1,8 @@
 -- | Report generation - produces GRAPH_REPORT.md
 module Graphos.UseCase.Report
   ( generateReport
+  , bridgeNodesSection
+  , bridgeTableCap
   ) where
 
 import Data.List (intercalate, sortOn)
@@ -100,15 +102,42 @@ godNodesSection nodes =
       rows   = map (\g -> "| " <> gnLabel g <> " | " <> T.pack (show (gnEdges g)) <> " |") nodes
   in T.unlines (header : sep : rows)
 
+-- | Cap on the number of articulation points rendered in the bridge table.
+-- Anything beyond this many (after dropping degree ≤ 1) is omitted and totalled
+-- in the footer, so a large report stays a handful of rows instead of growing
+-- into a tens-of-megabytes file.
+bridgeTableCap :: Int
+bridgeTableCap = 50
+
+-- | Render the bridge-node table: articulation points ranked by descending
+-- degree, capped at 'bridgeTableCap'. Degree ≤ 1 nodes cannot disconnect the
+-- graph, so they are filtered out; anything past the cap is tallied in the
+-- footer rather than rendered.
 bridgeNodesSection :: [NodeId] -> Graph -> Text
 bridgeNodesSection artPoints g =
-  if null artPoints
-    then "_No articulation points found — graph is well-connected._"
-    else let header = "| Bridge Node | Degree |"
-             sep    = "|-------------|--------|"
-             rows   = [ "| " <> nid <> " | " <> T.pack (show (Set.size (neighbors g nid))) <> " |"
-                       | nid <- artPoints]
-         in T.unlines (header : sep : rows)
+  let degOf nid = Set.size (neighbors g nid)
+      relevant  = [ nid | nid <- artPoints, degOf nid > 1 ]
+      ordered   = sortOn (\nid -> (negate (degOf nid), nid)) relevant
+      shown     = take bridgeTableCap ordered
+      omitted   = length relevant - length shown
+      renderRow nid =
+          case Map.lookup nid (gNodes g) of
+            Just n ->
+              "| " <> toText (nodeLabel n) <> " | "
+              <> maybe (T.pack "-") toText (nodeKind n) <> " | "
+              <> toText (nodeSourceFile n) <> " | "
+              <> T.pack (show (degOf nid)) <> " |"
+            Nothing ->
+              "| " <> nid <> " | - | ? | " <> T.pack (show (degOf nid)) <> " |"
+      footer = show (length relevant) <> " articulation points, "
+             ++ show omitted <> " omitted"
+  in if null shown
+       then "_No articulation points found — graph is well-connected._"
+       else T.unlines
+              ( "| Bridge Node | Kind | Source | Degree |"
+              : "|-----------|------|--------|--------|"
+              : map renderRow shown )
+          <> "\n" <> T.pack footer
 
 surprisesSection :: [SurprisingConnection] -> Text
 surprisesSection surprises =
