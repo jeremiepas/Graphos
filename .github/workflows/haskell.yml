@@ -35,7 +35,11 @@ jobs:
             ~/.local/state/cabal/store
             ~/.cabal/store
             dist-newstyle
-          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-${{ github.sha }}
+          # Stable key shared across every branch/PR (no github.sha): all feature
+          # PRs restore the same warm store cache, so configure+build need no
+          # network and stay deterministic. This is what stops the flaky package
+          # fetch that used to break the Haskell step on every PR.
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}
           restore-keys: |
             cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
             cabal-${{ runner.os }}-ghc910-
@@ -92,7 +96,9 @@ jobs:
             ~/.local/state/cabal/store
             ~/.cabal/store
             dist-newstyle
-          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-${{ github.sha }}
+          # Stable key shared across branches (no github.sha) so this job also
+          # restores a warm store cache and needs no network during the build.
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}
           restore-keys: |
             cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
             cabal-${{ runner.os }}-ghc910-
