@@ -171,6 +171,28 @@ jobs:
         # binary in dist-newstyle is executed directly below.
         run: chmod -R u+x dist-newstyle
 
+      - name: Locate graphos binary (devenv tasks run ci:bin)
+        # ci:bin is the single source of truth for the binary path. Its output
+        # reaches the caller differently across devenv versions (2.1 prints
+        # the path flush on stdout; 2.4+ prints it indented on stderr), so
+        # capture both streams, strip indentation, and fall back to the same
+        # cabal query in a devenv shell when no path was printed.
+        run: |
+          set -euo pipefail
+          OUT=$(devenv tasks run ci:bin --show-output 2>&1 || true)
+          printf '%s\n' "$OUT"
+          BIN=$(printf '%s\n' "$OUT" | sed -E 's/^[[:space:]]+//' | grep -E '^/' | tail -n 1 || true)
+          if [ -z "$BIN" ]; then
+            echo "ci:bin printed no path — falling back to devenv shell -- cabal list-bin" >&2
+            BIN=$(devenv shell -- cabal list-bin graphos 2>/dev/null | grep -E '^/' | tail -n 1 || true)
+          fi
+          if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+            echo "graphos binary not found" >&2
+            exit 1
+          fi
+          echo "graphos binary: $BIN"
+          echo "BIN_PATH=$BIN" >> "$GITHUB_ENV"
+
       - name: Generate graph.json fixtures from the test corpus
         # One staged input dir + one output dir per corpus input, so each
         # graph.json is generated from exactly one file. graphos analyzes a
@@ -179,8 +201,7 @@ jobs:
         # default exclude mode would filter out ("No supported files found").
         run: |
           set -euo pipefail
-          BIN=$(devenv tasks run ci:bin --show-output 2>/dev/null | grep -E '^/' | tail -n 1)
-          echo "graphos binary: $BIN"
+          BIN="$BIN_PATH"
           mkdir -p graphos-fixture
           for input in generated.rs minified.js source.js; do
             mkdir -p "fixture-corpus/$input" "fixture-out/$input"
