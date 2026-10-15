@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build:
     if: github.actor == 'jeremiepas'
     runs-on: ubuntu-latest
     steps:
@@ -34,17 +34,19 @@ jobs:
           path: |
             ~/.local/state/cabal/store
             ~/.cabal/store
-            dist-newstyle
-          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-${{ github.sha }}
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
           restore-keys: |
-            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
             cabal-${{ runner.os }}-ghc910-
 
       - name: Build
         run: devenv tasks run ci:build
 
-      - name: Run tests
-        run: devenv tasks run ci:test
+      - name: Upload build products
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-products
+          path: dist-newstyle
 
       - name: Save binary artifact
         if: success() && github.event_name == 'push'
@@ -69,10 +71,46 @@ jobs:
         continue-on-error: true
         run: openspec validate --changes --json
 
+  test:
+    if: github.actor == 'jeremiepas'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
+
+      - name: Restore cabal store cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.local/state/cabal/store
+            ~/.cabal/store
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
+          restore-keys: |
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
+            cabal-${{ runner.os }}-ghc910-
+
+      - name: Download build products
+        uses: actions/download-artifact@v4
+        with:
+          name: build-products
+          path: dist-newstyle
+
+      - name: Run tests
+        run: devenv tasks run ci:test-only
+
   haddock:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.actor == 'jeremiepas'
-    needs: build-and-test
+    needs: [build, test]
     steps:
       - uses: actions/checkout@v4
 
