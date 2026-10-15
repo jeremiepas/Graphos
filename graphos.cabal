@@ -229,6 +229,7 @@ library
                      -- OpenSpec workspace inspector
                      Graphos.OpenSpecView.Types
                      Graphos.OpenSpecView.List
+                     Graphos.OpenSpecView.ArtifactView
 
   other-modules:
                     Graphos.Domain.HexColor
@@ -398,6 +399,7 @@ test-suite graphos-test
     Graphos.UseCase.ScaffoldSpec
     Graphos.CLI.ParserSpec
     Graphos.OpenSpecView.ListSpec
+    Graphos.OpenSpecView.ArtifactViewSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
     Graphos.Infrastructure.Export.JGFSpec
