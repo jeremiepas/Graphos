@@ -36,6 +36,7 @@ jobs:
             ~/.cabal/store
             ~/.local/state/cabal/packages
             ~/.cabal/packages
+            ~/.cache/cabal/packages
           key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
           restore-keys: |
             cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
@@ -97,6 +98,7 @@ jobs:
             ~/.cabal/store
             ~/.local/state/cabal/packages
             ~/.cabal/packages
+            ~/.cache/cabal/packages
           key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
           restore-keys: |
             cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
