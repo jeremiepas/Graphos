@@ -1,434 +1,408 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE NamedTypeFields #-}
-
--- | Group 3 rewrite of the TreeSitter → Extraction converter.
+-- | Convert tree-sitter AST nodes into Graphos domain types.
+-- Pure conversion — no IO.
 --
--- Changes from the legacy module:
---   * New identifier extraction (3.1): imports → resolved specifier, modules
---     → file name, otherwise first identifier-class descendant, else text
---     fallback, else node type.
---   * Wrapper suppression (3.2): export / re-export / require wrappers are
---     suppressed and their inner declarations emitted with an `exported` flag.
---   * New identity layout + collision rank (3.3): `<dirHash>_<stem>_<kind>:<id>`
---     with file-wide `#L<line>` suffixes.
---   * Contains edges point to the enclosing module; import / external edges
---     carry the resolved target node ids.
+-- Node volume is controlled by 'Granularity':
+--
+--   * 'GranularityFine'     — all whitelisted definition types, full recursion.
+--   * 'GranularityFunction' — structure + API surface only; recursion STOPS at
+--     function/method/constructor boundaries, so nothing inside a function
+--     body produces a node regardless of its AST type.
+--   * 'GranularityFile'     — only the root module/structure node(s).
+{-# LANGUAGE OverloadedStrings #-}
 module Graphos.Infrastructure.Extract.TreeSitter.Convert
   ( tsNodesToExtraction
+  , tsNodeToGraphNodes
+  , tsNodeToGraphEdges
   , definitionTypes
   , structureTypes
   , apiSurfaceTypes
   , importExportTypes
   , implementationDetailTypes
   , functionBoundaryTypes
-  , descendInto
-  , nodeKeyId
-  , mkSourceFile
-  , SourceFile(..)
-  ) where
+   , makeNodeId
+    , tsNodeLabel
+    , tsNodeUntruncatedLabel
+   ) where
 
-import           Data.Aeson        (Value, toJSON)
-import qualified Data.Bits         as Bits ((.|.))
-import qualified Data.Char         as Char (isAlphaNum)
-import qualified Data.List         as List (isPrefixOf)
-import qualified Data.Map.Strict   as Map
-import qualified Data.Text         as T
-import           Data.Text         (Text)
-import qualified Data.Text.Short   as Short (fromText)
-import           Data.Text.Short   (ShortText)
-import qualified Data.Maybe        as Maybe (fromMaybe)
 
-import           Graphos.Domain.Config (Granularity, GranularityFunction, GranularityModule)
-import           Graphos.Domain.Types  (Confidence, Edge, EdgeId, Extraction, Node, NodeId, nodeEdgeId, nodeExtra)
-import           Graphos.Domain.Types.Graph (Graph, emptyGraph, graphEdges, graphNodes)
-import           Graphos.Infrastructure.Extract.TreeSitter.Core
-import           Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
+import Data.List (isPrefixOf)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Text.Short (fromText)
+import Data.Maybe (fromMaybe)
+import Data.Aeson (toJSON)
 
--- ---------------------------------------------------------------------------
--- Source file model
--- ---------------------------------------------------------------------------
+import Graphos.Domain.Config (Granularity(..))
+import Graphos.Domain.Types
+  ( Node(..), Edge(..), Extraction(..), extractionFromLists
+  , NodeId, FileType(..), Relation(..), Confidence(..), EdgeId(..)
+  , bitNodeKind, bitNodeLineStart, bitNodeLineEnd
+  )
+import Data.Bits ((.|.))
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision)
+import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
--- | Identifies a source file for the identity scheme. `sourceDirHash` is a
--- small, stable fingerprint of the directory so that two files with the same
--- stem never collide even when they share a working tree.
-data SourceFile = SourceFile
-  { sourcePath     :: !Text
-  , sourceDirHash  :: !Int
-  , sourceStem     :: !Text
-  , sourceFileName :: !Text
-  }
+-- | Tier 1 — file/module structure. Emitted at every granularity level.
+structureTypes :: [String]
+structureTypes =
+  [ "module", "program", "source_file"
+  , "package_clause"        -- Go
+  , "mod_item"              -- Rust
+  , "document"              -- JSON
+  ]
 
-mkSourceFile :: FilePath -> SourceFile
-mkSourceFile filePath =
-  let dirPart = T.pack (takeDirectory' filePath)
-      stem    = T.pack (takeBaseName' filePath)
-      name    = T.pack (takeFileName' filePath)
-      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPart) `mod` 65536
-  in SourceFile
-       { sourcePath     = fromText (T.pack filePath)
-       , sourceDirHash  = dirHash
-       , sourceStem     = stem
-       , sourceFileName = name
-       }
+-- | Tier 2 — API surface: definitions visible from outside a function body.
+-- Emitted at 'GranularityFunction' and 'GranularityFine'.
+apiSurfaceTypes :: [String]
+apiSurfaceTypes =
+  [ "function_declaration", "function_definition", "function"
+  , "method_declaration", "method_definition"
+  , "class_declaration", "class_definition", "class"
+  , "interface_declaration", "interface_definition", "interface"
+  , "type_declaration", "type_alias_declaration", "type_definition"
+  , "type_alias", "type_item", "type_identifier"
+  , "enum_declaration", "enum_definition", "enum"
+  , "enum_item"
+  , "variable_declaration", "lexical_declaration", "variable_declarator"
+  , "var_declaration"
+  , "const_declaration", "const_item"
+  , "let_declaration"
+  , "import_declaration", "import_statement", "import_from_statement"
+  , "export_statement", "export_default_declaration"
+  , "property_signature", "property_definition", "property_declaration"
+  , "arrow_function", "generator_function_declaration"
+  , "abstract_class_declaration", "abstract_interface_declaration"
+  , "constructor", "field_declaration"
+  , "trait", "trait_item", "impl_block", "impl_item"
+  , "data_type", "new_type", "type_synonym"
+  , "decorated_definition"
+    -- Rust
+  , "function_item", "struct_item", "use_declaration"
+  , "static_item", "extern_item", "attribute_item"
+    -- Haskell
+  , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
+  ]
 
--- | The directory portion of a path without a trailing separator.
-takeDirectory' :: FilePath -> FilePath
-takeDirectory' p = case lastDirectorySeparator p of
-  Just i  -> takeWhile (/= lastDirectorySeparatorChar) (take i p)
-  Nothing -> ""
-  where
-    lastDirectorySeparatorChar = lastDirectorySeparatorChar
-    lastDirectorySeparator p   = go (length p - 1) p
-    go n s
-      | n < 0     = Nothing
-      | s !! n == lastDirectorySeparatorChar = Just n
-      | otherwise = go (n - 1) s
-
-takeBaseName' :: FilePath -> FilePath
-takeBaseName' f = case reverse (takeFileName' f) of
-  (a : rest) | a == '/' -> reverse rest
-  _                     -> f
-
-takeFileName' :: FilePath -> FilePath
-takeFileName' f = if last f == lastDirectorySeparatorChar then f else dropWhile (/= lastDirectorySeparatorChar) (reverse f)
-
-lastDirectorySeparatorChar :: Char
-lastDirectorySeparatorChar = '/'
-
--- ---------------------------------------------------------------------------
--- Identity helpers
--- ---------------------------------------------------------------------------
-
--- | Stable identifier for a node given the identity scheme. When `rank > 0`
--- the declaration gets a file-wide `#L<line>` suffix so that collisions are
--- disambiguated deterministically.
-nodeKeyId :: SourceFile -> Text -> Text -> Int -> Int -> NodeId
-nodeKeyId sourceFile kind ident line rank =
-  let dirHash' = T.pack (show (sourceDirHash sourceFile))
-      base     = dirHash' <> "_" <> sourceStem sourceFile <> "_" <> kind <> ":" <> ident
-  in if rank > 0 then base <> "#L" <> T.pack (show line) else base
-
-nodeIdentifier :: SourceFile -> TSNodeInfo -> Text
-nodeIdentifier sourceFile node = case tsnType node of
-  t | t `elem` importExportTypes -> resolveImportSpecifier sourceFile (tsnText node)
-    | t `elem` moduleContainerTypes -> sourceFileName sourceFile
-    | otherwise -> firstIdentifierDescendant (tsnChildren node) <|> fallbackIdentifier node <|> fromText (tsnType node)
-
--- | For import/export nodes, extract the resolved specifier from the string
--- literal child and resolve it against the enclosing file.
-resolveImportSpecifier :: SourceFile -> Text -> Text
-resolveImportSpecifier sourceFile text =
-  let spec = stripQuotes (dropWhile (not (T.isInfixOf "from ")) (T.drop 5 text))
-      resolved = resolveImport (T.unpack (sourcePath sourceFile)) (T.unpack spec)
-  in maybe spec (\(p, n) -> ShortText.toText n) resolved
-
-stripQuotes :: Text -> Text
-stripQuotes t = case T.stripOnBoth t of
-  Just (q:_) | q == '\'' || q == '"' ->
-    let inner = dropEnds t
-    in if length inner > 1 && firstChar inner /= lastChar inner then inner else t
-  _ -> t
-  where
-    firstChar = T.head
-    lastChar  = last
-    dropEnds s = take (length s - 2) (drop 1 s)
-
--- | First identifier-class descendant in pre-order (node, then children, then
--- siblings). Returns `Nothing` when none exists.
-firstIdentifierDescendant :: [TSNodeInfo] -> Maybe Text
-firstIdentifierDescendant [] = Nothing
-firstIdentifierDescendant (n : ns) =
-  (case tsnType n `elem` identifierChildTypes && tsnIsNamed n of
-     True  -> Just (T.strip (tsnText n))
-     False -> Nothing)
-  <|> firstIdentifierDescendant (tsnChildren n)
-  <|> firstIdentifierDescendant ns
-
--- | Text-based fallback: skip keywords, otherwise scan for the first valid
--- identifier token. Used when the tree has no identifier-class children
--- (e.g. fixtures that embed names directly in the text).
-fallbackIdentifier :: TSNodeInfo -> Maybe Text
-fallbackIdentifier node =
-  let raw = T.strip (tsnText node)
-      tokens = T.words raw
-      filtered = filter (not . isKeyword) tokens
-  in case filtered of
-       (t : _) -> Just t
-       []      -> Nothing
-
-isKeyword :: Text -> Bool
-isKeyword t = t `elem` jsKeywords || not (isIdentifierToken t)
-
-isIdentifierToken :: Text -> Bool
-isIdentifierToken t = case T.uncons t of
-  Just c -> Char.isAlpha c || Char.isDigit c
-  Nothing -> False
-
-jsKeywords :: [Text]
-jsKeywords =
-  ["let", "const", "var", "function", "class", "return", "if", "else", "for",
-   "while", "do", "switch", "case", "break", "continue", "import", "export",
-   "new", "this", "typeof", "in", "of", "async", "await", "try", "catch",
-   "finally", "throw", "void", "delete", "yield", "super", "extends", "static",
-   "public", "private", "protected", "interface", "type", "enum", "from"]
-
-moduleContainerTypes :: [Text]
-moduleContainerTypes =
-  ["program", "module", "namespace_declaration", "source_file", "package_clause", "mod_item"]
-
-importExportTypes :: [Text]
+importExportTypes :: [String]
 importExportTypes =
-  ["import_declaration", "import_statement", "import_from_statement",
-   "use_declaration", "export_statement", "export_default_declaration"]
+  [ "import_declaration", "import_statement", "import_from_statement"
+  , "export_statement", "export_default_declaration"
+  ]
 
-exportWrapperTypes :: [Text]
-exportWrapperTypes = ["export_statement", "re_export", "require_import"]
+-- | Tier 3 — implementation detail: statements, parameters, locals, JSON
+-- values. Emitted only at 'GranularityFine'.
+implementationDetailTypes :: [String]
+implementationDetailTypes =
+  [ "decorator"
+  , "expression_statement", "assignment", "augmented_assignment"
+  , "return_statement", "parameter", "default_parameter", "typed_parameter"
+  , "for_statement", "while_statement", "if_statement"
+  , "with_statement", "try_statement", "except_clause"
+    -- JSON values: every pair/object/array of every JSON file
+  , "object", "array", "pair"
+  ]
 
-identifierChildTypes :: [Text]
-identifierChildTypes = ["identifier", "type_identifier", "property_identifier", "field_identifier", "name"]
+-- | AST types that delimit a function body. At 'GranularityFunction' the
+-- walker does not descend past these, making function bodies opaque.
+functionBoundaryTypes :: [String]
+functionBoundaryTypes =
+  [ "function_declaration", "function_definition", "function"
+  , "method_declaration", "method_definition"
+  , "arrow_function", "generator_function_declaration"
+  , "constructor"
+  , "function_item"       -- Rust
+  ]
 
--- ---------------------------------------------------------------------------
--- Signature normalization
--- ---------------------------------------------------------------------------
+-- | All node types that can represent definitions (fine level).
+-- Kept for backward compatibility and as the fine-level whitelist.
+definitionTypes :: [String]
+definitionTypes = structureTypes ++ apiSurfaceTypes ++ implementationDetailTypes
 
-nodeSignatureOf :: SourceFile -> TSNodeInfo -> Maybe ShortText
-nodeSignatureOf sourceFile node = case tsnType node of
-  t | t `elem` moduleContainerTypes -> Nothing
-  _ -> Just (fromText (boundedSignature node))
+-- | Whitelist for a granularity level.
+typesFor :: Granularity -> [String]
+typesFor GranularityFine     = definitionTypes
+typesFor GranularityFunction = structureTypes ++ apiSurfaceTypes
+typesFor GranularityFile     = structureTypes
 
-boundedSignature :: TSNodeInfo -> Text
-boundedSignature node =
-  let norm = normalizeText (tsnText node)
-  in if tsnType node `elem` importExportTypes
-       then maybe norm (truncateWithElision defaultTruncationBudget norm) (signatureClause norm)
-       else truncateWithElision defaultTruncationBudget norm
+-- | Whether to recurse into a node's children at the given level.
+-- @isDef@ tells whether the current node was emitted as a definition.
+descendInto :: Granularity -> Bool -> TSNodeInfo -> Bool
+descendInto GranularityFine     _     _    = True
+descendInto GranularityFile     _     _    = False
+descendInto GranularityFunction isDef node =
+  not (isDef && tsnType node `elem` functionBoundaryTypes)
 
--- | For import/export nodes, keep the trailing `from '<specifier>'` clause
--- verbatim so that two imports from different specifiers get distinct
--- signatures.
-signatureClause :: Text -> Maybe Text
-signatureClause t =
-  case T.findIndex ("from " :: Text) t of
-    Just i -> Just (T.drop i t)
-    Nothing -> Nothing
-
--- ---------------------------------------------------------------------------
--- Decl model
--- ---------------------------------------------------------------------------
-
-data Decl = Decl
-  { declNode     :: TSNodeInfo
-  , declKind     :: Text
-  , declIdent    :: Text
-  , declLine     :: Int
-  , declContains :: Maybe TSNodeInfo
-  , declExported :: Bool
-  }
-
-data Assigned = Assigned
-  { assignedDecl :: Decl
-  , assignedId   :: NodeId
-  }
-
--- ---------------------------------------------------------------------------
--- Core conversion
--- ---------------------------------------------------------------------------
-
+-- | Convert a tree of TSNodeInfo into an Extraction at a given granularity.
 tsNodesToExtraction :: Granularity -> FilePath -> [TSNodeInfo] -> Extraction
 tsNodesToExtraction gran filePath nodes =
-  let sourceFile = mkSourceFile filePath
-      declared   = concatMap (collectDeclarations gran) nodes
-      ordered    = reverse declared
-      idByNode   = assignIds sourceFile ordered
-      moduleAnc  = collectModules sourceFile ordered
-      edges      = concatMap (moduleEdges sourceFile idByNode moduleAnc) ordered
-                 ++ concatMap (importEdges sourceFile idByNode moduleAnc) ordered
-                 ++ concatMap externalEdges sourceFile ordered
-      nodes'     = concatMap (nodeFor sourceFile idByNode) ordered
-      graph = emptyGraph
-  in Extraction
-       { extractionGraph = graph
-       , extractionGranularity = gran
-       , extractionConfig = ()
-       }
+  let results = map (\node -> (tsNodeToGraphNodes gran filePath node, tsNodeToGraphEdges gran filePath Nothing node)) nodes
+      graphNodes = concatMap fst results
+      extraNodes = concatMap (snd . snd) results
+      graphEdges = concatMap (fst . snd) results
+  in extractionFromLists (graphNodes ++ extraNodes) graphEdges
 
-collectDeclarations :: Granularity -> [TSNodeInfo] -> [Decl]
-collectDeclarations gran tsNodes =
-  let go _ [] = []
-      go allParents moduleAnc (node : rest) =
-        let tType = tsnType node
-            isModule = tType `elem` moduleContainerTypes
-            isWrapper = tType `elem` exportWrapperTypes
-            isDef = tType `elem` typesFor gran && tsnIsNamed node
-            -- wrapper suppression: emit the inner declaration with an exported marker
-            wrapped = isWrapper && tsnIsNamed node
-        in if isModule
-             then let d = Decl { declNode = node
-                              , declKind = "Module"
-                              , declIdent = sourceFileNameFor node
-                              , declLine = tsnLineStart node
-                              , declContains = Just (head moduleAnc)
-                              , declExported = False }
-                  in d : go (moduleAnc ++ [node]) moduleAnc rest
-             else if isWrapper
-                  then []
-                  else if isDef
-                       then let contained = case moduleAnc of
-                              m : _ -> Just m
-                              []    -> Nothing
-                            d = Decl { declNode = node
-                                    , declKind = fromText (tsTypeToKind node)
-                                    , declIdent = nodeIdentifierFor sourceFile node
-                                    , declLine = tsnLineStart node
-                                    , declContains = contained
-                                    , declExported = False }
-                        in d : go (moduleAnc ++ [node]) moduleAnc rest
-                       else go (moduleAnc ++ [node]) moduleAnc rest
-        go allParents moduleAnc (node : rest) = go allParents moduleAnc rest
-  in go [] [] tsNodes
+-- | Convert a TSNodeInfo and its children into Graphos Nodes and Edges.
+tsNodeToGraphNodes :: Granularity -> FilePath -> TSNodeInfo -> [Node]
+tsNodeToGraphNodes gran filePath node =
+  let isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
+      self = [makeNode filePath node | isDef]
+      children = if descendInto gran isDef node
+        then concatMap (tsNodeToGraphNodes gran filePath) (tsnChildren node)
+        else []
+  in self ++ children
 
-collectModules :: SourceFile -> [Decl] -> [(TSNodeInfo, TSNodeInfo)]
-collectModules _sourceFile ordered =
-  map (\d -> (declContains d, declNode d)) (filter (isJust . declContains) ordered)
+-- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
+tsNodeToGraphEdges :: Granularity -> FilePath -> Maybe Text -> TSNodeInfo -> ([Edge], [Node])
+tsNodeToGraphEdges gran filePath parentLabel node =
+  let myLabel = tsNodeLabel node
+      isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
+      tType = tsnType node
+      
+      -- Parent → child edge (Contains)
+      myEdges = case (parentLabel, isDef) of
+        (Just p, True) ->
+          [ Edge
+            { edgeId        = EdgeId (makeNodeId filePath p <> "->" <> makeNodeId filePath myLabel <> ":contains")
+            , edgeSource    = makeNodeId filePath p
+            , edgeTarget    = makeNodeId filePath myLabel
+            , edgeRelation  = Contains
+            , edgeConfidence = Confidence 1.0
+            , edgeWeight    = 1.0
+            , edgeExtra     = Nothing
+            }
+          ]
+        _ -> []
 
-moduleEdges :: SourceFile -> Map.Map (TSNodeInfo, Text) NodeId -> [(TSNodeInfo, TSNodeInfo)] -> [Edge]
-moduleEdges sourceFile idByNode moduleAnc =
-  map (\(enclosing, node) ->
-       let eid = edgeIdFor node
-           sourceId = maybe (mkNodeId sourceFile node) id (Map.lookup (enclosing, "module") idByNode)
-           targetId = maybe (mkNodeId sourceFile node) id (Map.lookup (node, declKey node) idByNode)
-       in Edge { edgeId = eid, edgeSource = sourceId, edgeTarget = targetId,
-                 edgeRelation = "contains", edgeConfidence = Confidence 1.0,
-                 edgeWeight = 1.0, edgeExtra = Nothing }) moduleAnc
+      -- Imports/Exports edges
+      (importEdges, importNodes) = if tType `elem` importExportTypes
+        then case extractSpecifier node of
+                Just (targetPath, targetName) ->
+                  let targetId = if "external:" `isPrefixOf` targetPath
+                                 then makeNodeId "external" targetName
+                                 else makeNodeId targetPath targetName
+                      edge = Edge
+                        { edgeId        = EdgeId (makeNodeId filePath (fromMaybe "" parentLabel) <> "->" <> targetId <> ":imports")
+                        , edgeSource    = makeNodeId filePath (fromMaybe "" parentLabel)
+                        , edgeTarget    = targetId
+                        , edgeRelation  = Imports
+                        , edgeConfidence = Confidence 1.0
+                        , edgeWeight    = 1.0
+                        , edgeExtra     = if tType /= "import_declaration" && tType /= "import_statement" && tType /= "import_from_statement"
+                                           then Just (toJSON (T.pack "re-export"))
+                                           else Nothing
+                        }
+                      targetNode = Node
+                        { nodeId           = targetId
+                        , nodeLabel        = fromText targetName
+                        , nodeFileType     = CodeFile
+                        , nodeSourceFile   = fromText (T.pack targetPath)
+                        , nodeSource       = Nothing
+                        , nodeLineStart    = Nothing
+                        , nodeLineEnd      = Nothing
+                        , nodeSignature    = Nothing
+                        , nodeCommunityId  = Nothing
+                        , nodeKind         = Just (fromText "External")
+                        , nodeDegree       = Nothing
+                        , nodeIsBridge     = Nothing
+                        , nodeExtra        = Nothing
+                        , nodePresentBits  = bitNodeKind
+                        }
+                  in ([edge], [targetNode])
+                Nothing -> ([], [])
+        else ([], [])
 
-importEdges :: SourceFile -> Map.Map (TSNodeInfo, Text) NodeId -> [(TSNodeInfo, TSNodeInfo)] -> [Edge]
-importEdges sourceFile idByNode moduleAnc =
-  map (\(enclosing, node) ->
-       case resolveImportSpecifier sourceFile (tsnText node) of
-         spec -> let eid = edgeIdFor node
-                     targetId = maybe (mkNodeId sourceFile node) id (Map.lookup (node, declKey node) idByNode)
-                 in Edge { edgeId = eid, edgeSource = maybe (mkNodeId sourceFile node) id (Map.lookup (enclosing, "module") idByNode),
-                           edgeTarget = targetId, edgeRelation = "imports", edgeConfidence = Confidence 1.0,
-                           edgeWeight = 1.0, edgeExtra = Nothing }) moduleAnc
+      -- Recurse into children
+      (childEdges, childNodes) = 
+        if not (descendInto gran isDef node)
+        then ([], [])
+        else if isDef
+             then foldr (\child (es, ns) -> 
+                    let (e, n) = tsNodeToGraphEdges gran filePath (Just myLabel) child
+                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+             else foldr (\child (es, ns) -> 
+                    let (e, n) = tsNodeToGraphEdges gran filePath parentLabel child
+                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
 
-externalEdges :: SourceFile -> [Decl] -> [Edge]
-externalEdges sourceFile ordered =
-  map (\d -> case tsnType (declNode d) of
-               t | t `elem` importExportTypes && T.isInfixOf "from" (tsnText (declNode d)) ->
-                   let spec = resolveImportSpecifier sourceFile (tsnText (declNode d))
-                       target = mkNodeId sourceFile (declNode d)
-                   in Edge { edgeId = edgeIdFor (declNode d), edgeSource = maybe (mkNodeId sourceFile (declNode d)) id (Map.lookup (declNode d, declKey d) allIds),
-                             edgeTarget = target, edgeRelation = "imports", edgeConfidence = Confidence 1.0,
-                             edgeWeight = 1.0, edgeExtra = Nothing }
-               _ -> Edge { edgeId = edgeIdFor (declNode d), edgeSource = mkNodeId sourceFile (declNode d),
-                           edgeTarget = mkNodeId sourceFile (declNode d), edgeRelation = "contains",
-                           edgeConfidence = Confidence 1.0, edgeWeight = 1.0, edgeExtra = Nothing }) ordered
+  in (myEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
 
-nodeFor :: SourceFile -> Map.Map (TSNodeInfo, Text) NodeId -> Decl -> [Node]
-nodeFor sourceFile idByNode d =
-  let nid = maybe (mkNodeId sourceFile (declNode d)) id (Map.lookup (declNode d, declKey d) idByNode)
-  in [Node { nodeId = nid
-           , nodeLabel = fromText (nodeIdentifier sourceFile (declNode d))
-           , nodeFileType = CodeFile
-           , nodeSourceFile = fromText (T.pack (sourcePath sourceFile))
-           , nodeSource = Nothing
-           , nodeLineStart = Just (declLine d)
-           , nodeLineEnd = Just (declLine d)
-           , nodeSignature = nodeSignatureOf sourceFile (declNode d)
-           , nodeCommunityId = Nothing
-           , nodeKind = Just (fromText (declKind d))
-           , nodeDegree = Nothing
-           , nodeIsBridge = Nothing
-           , nodeExtra = if declExported d then Just (toJSON (Map.singleton "exported" True :: Map Text Bool)) else Nothing
-           , nodePresentBits = presentBits d }]
+      where
+        extractSpecifier :: TSNodeInfo -> Maybe (FilePath, Text)
+        extractSpecifier n =
+          let tailText = extractTail (tsnText n)
+          in if T.null tailText
+             then Nothing
+             else let raw = T.strip (T.drop (T.length "from ") tailText)
+                      rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
+                      specifier = stripQuotes (T.stripEnd rawNoSemi)
+                  in if T.null specifier
+                     then Nothing
+                     else resolveImport filePath (T.unpack specifier)
 
--- ---------------------------------------------------------------------------
+-- | Strip surrounding single/double quotes/backticks from a specifier.
+stripQuotes :: Text -> Text
+stripQuotes t0
+  | T.null t0 = t0
+  | h `elem` quotes && T.last t0 `elem` quotes && T.length t0 >= 2 = T.init (T.tail t0)
+  | h `elem` quotes = T.tail t0
+  | otherwise = t0
+  where
+    h = T.head t0
+    quotes :: [Char]
+    quotes = "'\"`"
+
+
+-- ───────────────────────────────────────────────
 -- Helpers
--- ---------------------------------------------------------------------------
+-- ───────────────────────────────────────────────
 
-mkNodeId :: SourceFile -> TSNodeInfo -> NodeId
-mkNodeId sourceFile node =
-  let kind = fromText (tsTypeToKind node)
-      ident = fromText (nodeIdentifier sourceFile node)
-  in nodeKeyId sourceFile kind ident 0 0
+-- | Make a Graphos Node from a TSNodeInfo.
+makeNode :: FilePath -> TSNodeInfo -> Node
+makeNode filePath node = Node
+  { nodeId           = makeNodeId filePath (tsNodeUntruncatedLabel node)
+  , nodeLabel        = fromText (tsNodeLabel node)
+  , nodeFileType     = CodeFile
+  , nodeSourceFile   = fromText (T.pack filePath)
+  , nodeSource       = Nothing
+  , nodeLineStart    = Just (tsnStartRow node + 1)
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
+  , nodeLineEnd      = Just (tsnEndRow node + 1)
+           , nodeKind         = Just (fromText (T.pack $ tsTypeToKind (tsnType node)))
+  , nodeSignature    = Nothing
+  , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
+  }
 
-declKey :: Decl -> Text
-declKey d = declKind d <> ":" <> declIdent d
+-- | Get the untruncated, normalized label for a node.
+tsNodeUntruncatedLabel :: TSNodeInfo -> Text
+tsNodeUntruncatedLabel node =
+  let raw = let t = tsnText node in if T.null t then T.pack (tsnType node) else t
+  in normalizeText raw
 
-edgeIdFor :: TSNodeInfo -> EdgeId
-edgeIdFor node = nodeEdgeId (tsnType node)
+-- | Get a display label for a node — use text if available, otherwise type.
+-- For imports/exports, preserves the specifier via middle-elision.
+tsNodeLabel :: TSNodeInfo -> Text
+tsNodeLabel node =
+  let untruncated = tsNodeUntruncatedLabel node
+      tType = tsnType node
+  in if tType `elem` importExportTypes && T.length untruncated > defaultTruncationBudget
+     then truncateWithElision defaultTruncationBudget untruncated (extractTail untruncated)
+     else untruncated
 
-presentBits :: Decl -> Word64
-presentBits d = bitNodeKind .|. bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeSignature .|. bitNodeExtra
+-- | Extract the 'from <specifier>' part of a declaration.
+extractTail :: Text -> Text
+extractTail t =
+  case T.breakOnEnd "from " t of
+    (prefix, suffix) | not (T.null prefix) -> "from " <> suffix
+    _ -> ""
 
-tsTypeToKind :: TSNodeInfo -> Text
-tsTypeToKind node = case tsnType node of
-  "program" -> "Module"
-  "module" -> "Module"
-  "source_file" -> "Module"
+-- | Convert tree-sitter type to human-readable kind.
+tsTypeToKind :: String -> String
+tsTypeToKind t = case t of
+  -- Functions / Methods
+  "function_declaration" -> "Function"
+  "function" -> "Function"
+  "function_definition" -> "Function"
+  "function_item" -> "Function"
+  "method_declaration" -> "Method"
+  "method_definition" -> "Method"
+  "arrow_function" -> "Function"
+  "generator_function_declaration" -> "Function"
+  "constructor" -> "Constructor"
+  -- Classes / Interfaces / Traits
+  "class_declaration" -> "Class"
+  "class_definition" -> "Class"
+  "class" -> "Class"
+  "abstract_class_declaration" -> "Class"
+  "interface_declaration" -> "Interface"
+  "interface_definition" -> "Interface"
+  "interface" -> "Interface"
+  "trait" -> "Trait"
+  "trait_item" -> "Trait"
+  "impl_block" -> "Impl"
+  "impl_item" -> "Impl"
+  "struct_item" -> "Struct"
+  -- Types / Enums
+  "type_declaration" -> "Type"
+  "type_alias_declaration" -> "Type"
+  "type_definition" -> "Type"
+  "type_alias" -> "Type"
+  "type_item" -> "Type"
+  "type_synonym" -> "Type"
+  "data_type" -> "Type"
+  "new_type" -> "Type"
+  "enum_declaration" -> "Enum"
+  "enum_definition" -> "Enum"
+  "enum" -> "Enum"
+  "enum_item" -> "Enum"
+  -- Variables / Constants
+  "variable_declaration" -> "Variable"
+  "lexical_declaration" -> "Variable"
+  "variable_declarator" -> "Variable"
+  "var_declaration" -> "Variable"
+  "const_declaration" -> "Constant"
+  "const_item" -> "Constant"
+  "let_declaration" -> "Variable"
+  "static_item" -> "Constant"
+  -- Imports / Exports
+  "import_declaration" -> "Import"
+  "import_statement" -> "Import"
+  "import_from_statement" -> "Import"
+  "use_declaration" -> "Import"
+  "export_statement" -> "Export"
+  "export_default_declaration" -> "Export"
+  -- Properties / Fields
+  "property_signature" -> "Property"
+  "property_definition" -> "Property"
+  "property_declaration" -> "Property"
+  "field_declaration" -> "Field"
+  "parameter" -> "Parameter"
+  "default_parameter" -> "Parameter"
+  "typed_parameter" -> "Parameter"
+  "decorator" -> "Decorator"
+  -- Python-specific
+  "decorated_definition" -> "Definition"
+  "expression_statement" -> "Statement"
+  "assignment" -> "Assignment"
+  "augmented_assignment" -> "Assignment"
+  "return_statement" -> "Return"
+  "for_statement" -> "Loop"
+  "while_statement" -> "Loop"
+  "if_statement" -> "Conditional"
+  "with_statement" -> "Context"
+  "try_statement" -> "Try"
+  "except_clause" -> "Except"
+  -- Go-specific
   "package_clause" -> "Module"
-  _ -> tsnType node
-
-nodeIdentifierFor :: SourceFile -> TSNodeInfo -> Text
-nodeIdentifierFor sourceFile node = nodeIdentifier sourceFile node
-
-collectModulesFor :: SourceFile -> [Decl] -> [(TSNodeInfo, TSNodeInfo)]
-collectModulesFor sourceFile ordered = collectModules sourceFile ordered
-
-allIds :: SourceFile -> [Decl] -> Map.Map (TSNodeInfo, Text) NodeId
-allIds sourceFile ordered = assignIds sourceFile ordered
-
-assignIds :: SourceFile -> [Decl] -> Map.Map (TSNodeInfo, Text) NodeId
-assignIds sourceFile ordered =
-  let go _ _ [] = Map.empty
-      go seen rank (d : rest) =
-        let key = (declNode d, declKey d)
-            (rank', seen') = case Map.lookup key seen of
-              Just r -> (r, seen)
-              Nothing -> (Map.size seen, Map.insert key (Map.size seen) seen)
-            id = nodeKeyId sourceFile (declKind d) (declIdent d) (declLine d) rank'
-        in Map.insert key id (go seen' rank' rest)
-  in go Map.empty 0 ordered
-
-tsTypeToKindLegacy :: TSNodeInfo -> Text
-tsTypeToKindLegacy node = case tsnType node of
-  "program" -> "Module"
+  "type_identifier" -> "Type"
+  -- Rust-specific
+  "extern_item" -> "Extern"
+  "attribute_item" -> "Attribute"
+  "mod_item" -> "Module"
+  -- Haskell-specific
+  "declarations" -> "Declarations"
+  "instance_declaration" -> "Instance"
+  "pattern_declaration" -> "Pattern"
+  "type_signature" -> "Signature"
+  -- General
   "module" -> "Module"
+  "program" -> "Module"
   "source_file" -> "Module"
-  "package_clause" -> "Module"
-  _ -> tsnType node
+  -- JSON
+  "document" -> "Document"
+  "object" -> "Object"
+  "array" -> "Array"
+  "pair" -> "Property"
+  _ -> t
 
--- ---------------------------------------------------------------------------
--- Type lists (kept for compatibility with the spec tests)
--- ---------------------------------------------------------------------------
-
-definitionTypes :: [Text]
-definitionTypes = ["variable_declarator", "function_declaration", "class_declaration"]
-
-structureTypes :: [Text]
-structureTypes = ["object", "array", "parenthesized_expression"]
-
-apiSurfaceTypes :: [Text]
-apiSurfaceTypes = ["identifier", "property_identifier", "type_identifier"]
-
-importExportTypes_ :: [Text]
-importExportTypes_ = importExportTypes
-
-implementationDetailTypes :: [Text]
-implementationDetailTypes = ["arrow_function", "function"]
-
-functionBoundaryTypes :: [Text]
-functionBoundaryTypes = ["function_declaration", "arrow_function", "method_definition"]
-
-descendInto :: Granularity -> Bool -> TSNodeInfo -> Bool
-descendInto gran isDef node =
-  case gran of
-    GranularityModule -> True
-    GranularityFunction -> not (isDef && tsnType node `elem` functionBoundaryTypes)
-    GranularityFine -> True
-
--- ---------------------------------------------------------------------------
--- Imports
--- ---------------------------------------------------------------------------
-
-import qualified Data.Text as DT
+-- | Create a node ID from file path and name.
+makeNodeId :: FilePath -> Text -> NodeId
+makeNodeId filePath name =
+  let normalizedName = normalizeText name
+      stem = T.pack $ takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath
+      dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
+      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
+      hashPrefix = T.pack $ show dirHash
+      safeName = T.filter (\c -> c /= '"' && c /= '\'' && c /= '`') normalizedName
+  in hashPrefix <> "_" <> stem <> "_" <> safeName
