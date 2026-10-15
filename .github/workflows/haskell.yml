@@ -127,7 +127,7 @@ jobs:
   haddock:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.actor == 'jeremiepas'
-    needs: [build, test]
+    needs: build
     steps:
       - uses: actions/checkout@v4
 
@@ -141,16 +141,30 @@ jobs:
         run: nix profile add nixpkgs#devenv
 
       - name: Restore cabal store cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.local/state/cabal/store
             ~/.cabal/store
-            dist-newstyle
-          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-${{ github.sha }}
+            ~/.local/state/cabal/packages
+            ~/.cabal/packages
+            ~/.cache/cabal/packages
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
           restore-keys: |
-            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
             cabal-${{ runner.os }}-ghc910-
 
+      - name: Download build products
+        uses: actions/download-artifact@v4
+        with:
+          name: build-products
+          # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
+          path: .
+
+      - name: Restore executable bits
+        # upload-artifact does not preserve the executable bit; binaries in
+        # dist-newstyle are spawned directly by `cabal haddock all`.
+        run: chmod -R u+x dist-newstyle
+
       - name: Haddock
-        run: devenv tasks run ci:haddock
+        run: devenv tasks run ci:haddock-only
