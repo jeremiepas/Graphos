@@ -116,6 +116,11 @@ jobs:
           # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
           path: .
 
+      - name: Restore executable bits
+        # upload-artifact does not preserve the executable bit; test binaries
+        # in dist-newstyle are spawned directly by `cabal test all`.
+        run: chmod -R u+x dist-newstyle
+
       - name: Run tests
         run: devenv tasks run ci:test-only
 
