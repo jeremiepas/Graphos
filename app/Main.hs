@@ -14,25 +14,30 @@ import qualified Data.ByteString.Lazy as BL
 import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
-import System.Process (createProcess, proc)
-import System.Environment (getArgs, getExecutablePath, withArgs)
+import System.Process (createProcess, proc, waitForProcess)
+import qualified System.Process as Process
+import System.Environment (getArgs, getExecutablePath, withArgs, lookupEnv, getEnvironment)
+import Text.Read (readMaybe)
 import System.FilePath ((</>))
 import qualified Data.Time.Clock as TCC (getCurrentTime)
 import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
-import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
+import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
-import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON)
+import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
-import Graphos.UseCase.SpecCheck (runSpecCheck, renderSpecReport, reportGates)
-import Graphos.Infrastructure.SpecParse (parseSpecDir)
+import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
+import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
+import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
+import Graphos.Infrastructure.Wiring (productionLLMPort)
+import Graphos.Domain.Config (defaultLabelingConfig)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
@@ -60,8 +65,9 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges)
-import Graphos.Infrastructure.Config (loadConfig)
+import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes)
+import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent)
+import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
@@ -89,6 +95,22 @@ loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
 loadGraphOpt strict path =
   if strict then loadGraphFromFileStrict path else loadGraphFromFile path
 
+-- | Empty analysis payload for 'exportGraphWithLabels' (migrate-graph):
+-- the loaded analysis sections are carried by 'LoadResult' fields that the
+-- JGF writer takes from the graph itself; only the community labels are
+-- preserved explicitly.
+emptyAnalysisForMigrate :: LoadResult -> Analysis
+emptyAnalysisForMigrate lr = Analysis
+  { analysisCommunities   = lrCommunities lr
+  , analysisNullModel     = DefaultNullModel
+  , analysisCohesion      = lrCohesion lr
+  , analysisGodNodes      = lrGodNodes lr
+  , analysisSurprises     = []
+  , analysisQuestions     = []
+  , analysisArticulation  = []
+  , analysisBccCount      = 0
+  }
+
 parseHeapSize :: String -> Maybe Int
 parseHeapSize s = case reads s of
   [(n, "")] -> case () of
@@ -111,25 +133,75 @@ stripRTSFlags args = go args False Nothing
       other -> let (rest, p, h) = go as profile heap
                in (other : rest, p, h)
 
-reexecWithRTS :: Bool -> Maybe String -> IO ()
-reexecWithRTS profile heapStr = do
+-- | Environment marker set on the re-exec'd child process: its presence means
+-- budget establishment already happened in the parent (never derive or
+-- re-exec again); its value carries the active heap budget in bytes (empty
+-- when the parent re-exec'd for profiling only, with no budget).
+reexecEnvVar :: String
+reexecEnvVar = "GRAPHOS_MEMORY_BUDGET"
+
+-- | Establish the active heap budget before the pipeline starts (Workflow 01,
+-- memory-budget-guard): an explicit @--max-heap@ (or fixed graphos.yaml
+-- @memory.budget@) wins; otherwise a default is derived from MemAvailable
+-- minus the safety reserve; otherwise the run is uncapped with a WARN.
+-- Re-executes the binary under the corresponding RTS @-M@ cap — in that case
+-- this never returns (the parent waits for the child and exits with its
+-- code). Returns the active budget when execution continues in-process.
+establishMemoryBudget :: PipelineConfig -> IO (Maybe Integer)
+establishMemoryBudget config = do
+  let profile = cfgRtsProfile config
+      cliBytes = fmap (\mb -> fromIntegral mb * 1024 * 1024) (cfgMaxHeap config) :: Maybe Integer
+  yamlSetting <- if isJust cliBytes
+    then pure BudgetAuto  -- the CLI flag decides; skip the config read
+    else memBudget . gcMemory <$> loadConfigSilent
+  let explicitBytes = case (cliBytes, yamlSetting) of
+        (Just b, _)             -> Just b
+        (Nothing, BudgetFixed b) -> Just b
+        _                        -> Nothing
+      optOut = cfgNoMemoryBudget config || yamlSetting == BudgetOff
+      uncapped reason = do
+        hPutStrLn stderr $ "[memory] WARNING: no budget applied (" ++ reason ++ ") — the run is uncapped"
+        if profile then reexecWithRTS profile Nothing else pure Nothing
+  case explicitBytes of
+    Just b -> do
+      hPutStrLn stderr $ "[memory] budget: " ++ formatBytes b ++ " (explicit)"
+      reexecWithRTS profile (Just b)
+    Nothing
+      | optOut -> uncapped (if cfgNoMemoryBudget config
+                              then "--no-memory-budget"
+                              else "memory.budget: off")
+      | otherwise -> do
+          mInfo <- readMemInfo
+          case (deriveBudget mInfo Nothing memorySafetyReserve, mInfo) of
+            (Just derived, Just mi) -> do
+              hPutStrLn stderr $ "[memory] budget: " ++ formatBytes derived
+                ++ " (derived from available " ++ formatBytes (miMemAvailable mi) ++ ")"
+              reexecWithRTS profile (Just derived)
+            _ -> uncapped "memory info unavailable"
+
+-- | Re-execute the binary with RTS flags (@-M@ heap cap and/or profiling),
+-- marking the child via 'reexecEnvVar', then wait and exit with the child's
+-- exit code — so heap-exhaustion (2) and pre-flight (1) exits survive the
+-- re-exec unchanged.
+reexecWithRTS :: Bool -> Maybe Integer -> IO a
+reexecWithRTS profile mBudgetBytes = do
   originalArgs <- getArgs
   exePath <- getExecutablePath
+  envs <- getEnvironment
   let rtsFlags = concat
-        [ if profile then "-s -hT" else ""
-        , if profile && isJust heapStr then " " else ""
-        , maybe "" (\sz -> "-M" ++ sz) heapStr
+        [ if profile then ["-s", "-hT"] else []
+        , maybe [] (\b -> ["-M" ++ show b]) mBudgetBytes
         ]
-  case rtsFlags of
-    "" -> pure ()
-    _ -> do
-      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ rtsFlags
-      hFlush stderr
-      let (cleanArgs, _, _) = stripRTSFlags originalArgs
-          finalArgs = words ("+RTS " ++ rtsFlags ++ " --") ++ cleanArgs
-      let spec = proc exePath finalArgs
-      _ <- createProcess spec
-      exitSuccess
+  hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ unwords rtsFlags
+  hFlush stderr
+  let (cleanArgs, _, _) = stripRTSFlags originalArgs
+      finalArgs = ["+RTS"] ++ rtsFlags ++ ["--"] ++ cleanArgs
+      childEnv = (reexecEnvVar, maybe "" show mBudgetBytes)
+                   : filter ((/= reexecEnvVar) . fst) envs
+      spec = (proc exePath finalArgs) { Process.env = Just childEnv }
+  (_, _, _, ph) <- createProcess spec
+  code <- waitForProcess ph
+  exitWith code
 
 runClusterOnlyMode :: AppEnv -> LogEnv -> ObservabilityEnv -> PipelineConfig -> IO ()
 runClusterOnlyMode appEnv env obsEnv config' = do
@@ -166,9 +238,13 @@ main = do
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
-      let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
-      when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
-        reexecWithRTS (cfgRtsProfile config) heapStr
+      -- Budget establishment (memory-budget-guard): the parent derives (or
+      -- takes the explicit) heap budget and re-execs under RTS -M; the child
+      -- recognizes the env marker and reads the active budget from it.
+      reexecMarker <- lookupEnv reexecEnvVar
+      activeBudget <- case reexecMarker of
+        Just v  -> pure (readMaybe v :: Maybe Integer)
+        Nothing -> establishMemoryBudget config
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
       let obsCfg = gcObservability graphosCfg
@@ -195,6 +271,7 @@ main = do
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
+                            , cfgActiveBudgetBytes = activeBudget
                             }
       -- Fail-fast on a corrupt existing graph.json before doing any work.
       -- Strict by default; pass --no-strict-graph for tolerant loading.
@@ -660,17 +737,44 @@ main = do
           when (sfrEmbeddingCount res > 0) $
             logInfo env $ T.pack $ "  Embeddings: " ++ show (sfrEmbeddingCount res) ++ " vectors"
 
-    SpeccheckCmd specsDir asJson strictCov -> do
-      parsed <- parseSpecDir specsDir
+    SpeccheckCmd specsDir asJson strictCov checkNames strictDups mGraph adjudicate -> do
+      parsed <- case mGraph of
+        Just graphPath -> do
+          loadResult <- loadGraphFromFile graphPath
+          pure $ case loadResult of
+            Left err -> Left err
+            Right loaded -> Right
+              ( Map.elems (gNodes (lrGraph loaded))
+              , Map.elems (gEdges (lrGraph loaded))
+              )
+        Nothing -> parseSpecCorpus specsDir
       case parsed of
         Left err -> do
           hPutStrLn stderr $ "[graphos] speccheck: " ++ T.unpack err
           exitWith (ExitFailure 1)
         Right (specNodes, specEdges) -> do
-          let report = runSpecCheck specNodes specEdges strictCov
+          let checks = [ c | Just c <- map parseCheckName checkNames ]
+              -- Duplication candidates need node embeddings; the structural
+              -- corpus parse carries none, so they only appear when a graph
+              -- with an embeddings sidecar is loaded (future: --embeddings).
+              dups = []
+              spofs = spofDecisions specNodes specEdges
+          madj <- if adjudicate
+            then do
+              let report0 = runSpecCheck'
+                              specNodes specEdges strictCov strictDups dups spofs Nothing
+              adjns <- SpecAdjudicate.adjudicateCandidates
+                         productionLLMPort defaultLabelingConfig specNodes
+                         (srCandidates report0) 2
+              pure (Just
+                [ (SpecAdjudicate.adjPair a, SpecAdjudicate.adjVerdict a, SpecAdjudicate.adjRationale a)
+                | a <- adjns ])
+            else pure Nothing
+          let report = runSpecCheck'
+                         specNodes specEdges strictCov strictDups dups spofs madj
           if asJson
-            then BL.putStr (encode report) >> putStrLn ""
-            else TIO.putStrLn (renderSpecReport report)
+            then BL.putStr (encode (filterReport checks report)) >> putStrLn ""
+            else TIO.putStrLn (renderSpecReport (filterReport checks report))
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
@@ -707,6 +811,22 @@ main = do
         else do
           putStrLn $ "  Found " ++ show (length servers) ++ " LSP server(s):"
           mapM_ (\s -> putStrLn $ "    " ++ T.unpack (lsiName s) ++ " (" ++ lsiCommand s ++ ") - " ++ show (lsiExtensions s)) servers
+
+    MigrateGraphCmd graphPath mOutputPath -> do
+      let outPath = maybe graphPath id mOutputPath
+      putStrLn $ "[graphos] Migrate-graph: loading " ++ graphPath
+      loadResult <- loadGraphFromFile graphPath
+      case loadResult of
+        Left err -> do
+          putStrLn $ "Error: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right loaded -> do
+          let g = lrGraph loaded
+          exportGraphWithLabels g (emptyAnalysisForMigrate loaded) (Just (lrCommunityLabels loaded)) outPath
+          putStrLn $ "[graphos] Migrated " ++ graphPath ++ " -> " ++ outPath
+                     ++ " (JGF envelope, application/vnd.jgf+json)"
+          putStrLn $ "[graphos] Nodes: " ++ show (Map.size (gNodes g))
+                     ++ ", edges: " ++ show (Map.size (gEdges g))
 
     Serve dir graphPath port apiOnly noApi -> do
       putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
@@ -1026,17 +1146,24 @@ defaultConfigYaml = unlines
   , "  # base_url: \"https://api.openai.com/v1\""
   , ""
   , "# ──── Embedding ───────────────────────────────────"
-  , "# Local embedding generation via Ollama. Disabled by default."
+  , "# Local embedding generation. Disabled by default."
   , "# Enable with --embed flag or embedding.enabled: true."
-  , "# Targets small local models (nomic-embed-text, all-minilm)."
+  , "# Default model: LFM2.5-Embedding-350M GGUF (512-token fit, optional"
+  , "# asymmetric document:/query: prefixes; benchmark-cited — see the"
+  , "# lfm-embedding-optimization change's bench/BENCHMARK.md)."
   , "embedding:"
   , "  enabled: false               # default: false (enable with --embed)"
   , "  provider: ollama              # ollama (default, only local for now)"
-  , "  model: nomic-embed-text       # default: nomic-embed-text"
-  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
+  , "  # model: \"hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M\"  # default"
+  , "  #   (e.g. nomic-embed-text keeps previous behavior + cache keys)"
+  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local (or a standalone llama-server)"
   , "  dimension: 0                  # 0 = auto-detect from model"
   , "  # batchSize: 64               # max texts per API request (default: 64, must be >= 1)"
-  , "  # concurrency: 1              # batches processed in parallel (default: 1 = sequential)"
+  , "  # concurrency: 1              # batches processed in parallel (benchmark-pinned: 1)"
+  , "  # maxTokens: 512              # token-fit truncation (0 = model-table default)"
+  , "  # docPrefix: \"\"               # prepended to every embedded text (e.g. \"document: \")"
+  , "  # queryPrefix: \"\"             # prepended to query-time text (e.g. \"query: \")"
+  , "  # streaming: true             # legacy key, ignored: sidecar is always streaming (staged per-batch write + atomic rename)"
   , "  # headers:                    # custom HTTP headers for auth (default: none)"
   , "  #   X-API-Key: \"${MY_TOKEN}\""
   , ""
@@ -1053,6 +1180,22 @@ defaultConfigYaml = unlines
   , "  batch_size: 5                 # images per batch with GC between"
   , "  # headers:                    # custom HTTP headers for auth (default: none)"
   , "  #   X-API-Key: \"${MY_TOKEN}\""
+  , ""
+  , "# ──── Memory budget ─────────────────────────────────"
+  , "# RTS heap budget for pipeline runs (fix-oom-memory-budget-guard)."
+  , "# auto   — derive from available memory minus a 4 GB reserve (default)"
+  , "# off    — run uncapped (same as --no-memory-budget)"
+  , "# <size> — fixed budget, e.g. 8G or 512M (same as --max-heap)"
+  , "# CLI flags (--max-heap, --no-memory-budget) override this value."
+  , "memory:"
+  , "  budget: auto"
+  , ""
+  , "# ──── Cache ─────────────────────────────────────────"
+  , "# Content-addressed extraction + embedding cache eviction policy."
+  , "# Entries are re-derivable state, so eviction is always sound (a miss"
+  , "# re-computes the same result); only the disk footprint is bounded."
+  , "cache:"
+  , "  max_mb: 512                  # combined cache size cap in MB; 0 = unlimited"
   , ""
   , "# ──── Observability ─────────────────────────────────"
   , "# Tracing, metrics, and debug instrumentation."

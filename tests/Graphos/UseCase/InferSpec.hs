@@ -13,17 +13,18 @@ import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
 import Graphos.Domain.Config (SemanticEdgesConfig(..), defaultSemanticEdgesConfig)
 import Graphos.Domain.Graph (buildGraph, gEmbeddings)
+import qualified Data.Vector.Unboxed as VU
 import Graphos.UseCase.Infer (inferCommunityBridges, inferCodeDocEdges, inferSemanticCodeDocEdges, SemanticMode(..), semanticMode, isSingleCorpus)
 
 -- Helpers
 testNode :: Text -> Node
-testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") Nothing (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 docNode :: Text -> Text -> Node
-docNode nid lbl = Node nid (fromText lbl) DocFile (fromText "doc.md") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+docNode nid lbl = Node nid (fromText lbl) DocFile (fromText "doc.md") Nothing (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 codeNode :: Text -> Text -> Node
-codeNode nid lbl = Node nid (fromText lbl) CodeFile (fromText "code.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+codeNode nid lbl = Node nid (fromText lbl) CodeFile (fromText "code.hs") Nothing (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Calls 1.0 (Confidence 1.0) Nothing
@@ -109,7 +110,7 @@ spec = do
 
     it "returns identical semantic doc-code edges across repeated runs" $ do
       let g = buildGraph False (extractionFromLists ([codeNode "c1" "a", docNode "d1" "b"] :: [Node]) [])
-          embs = Map.fromList [("c1", [1.0, 0.0]), ("d1", [1.0, 0.0])]
+          embs = Map.fromList [("c1", VU.fromList [1.0, 0.0]), ("d1", VU.fromList [1.0, 0.0])]
           g' = g { gEmbeddings = Just embs }
           se = defaultSemanticEdgesConfig
           runs = replicate 5 (inferSemanticCodeDocEdges se g' embs)
@@ -170,9 +171,9 @@ spec = do
 
     it "creates References edges for similar doc-code pairs" $ do
       let g = (buildGraph False (extractionFromLists [codeNode "c1" "a", docNode "d1" "b"] []))
-                { gEmbeddings = Just (Map.fromList [("c1", [1.0, 0.0]), ("d1", [1.0, 0.0])]) }
+                { gEmbeddings = Just (Map.fromList [("c1", VU.fromList [1.0, 0.0]), ("d1", VU.fromList [1.0, 0.0])]) }
           se = defaultSemanticEdgesConfig
-          edges = inferSemanticCodeDocEdges se g (Map.fromList [("c1", [1.0, 0.0]), ("d1", [1.0, 0.0])])
+          edges = inferSemanticCodeDocEdges se g (Map.fromList [("c1", VU.fromList [1.0, 0.0]), ("d1", VU.fromList [1.0, 0.0])])
       length edges `shouldBe` 1
       case edges of
         [e] -> do
@@ -182,7 +183,7 @@ spec = do
         _ -> fail "expected exactly one edge"
 
     it "filters out pairs below threshold" $ do
-      let embs = Map.fromList [("c1", [1.0, 0.0]), ("d1", [0.0, 1.0])]
+      let embs = Map.fromList [("c1", VU.fromList [1.0, 0.0]), ("d1", VU.fromList [0.0, 1.0])]
           g = (buildGraph False (extractionFromLists [codeNode "c1" "a", docNode "d1" "b"] []))
                 { gEmbeddings = Just embs }
           se = defaultSemanticEdgesConfig
@@ -192,14 +193,14 @@ spec = do
       let codes = [codeNode (T.pack ("c" ++ show i)) (T.pack ("a" ++ show i)) | i <- [1..10 :: Int]]
           doc = docNode "d1" "doc"
           g = (buildGraph False (extractionFromLists (doc : codes) []))
-                { gEmbeddings = Just (Map.fromList [("d1", [1.0, 0.0])]) }
+                { gEmbeddings = Just (Map.fromList [("d1", VU.fromList [1.0, 0.0])]) }
           se = defaultSemanticEdgesConfig { seMaxFanOut = 3 }
-          embs = Map.fromList ([("d1", [1.0, 0.0])] ++ [(T.pack ("c" ++ show i), [1.0, 0.0]) | i <- [1..10 :: Int]])
+          embs = Map.fromList ([("d1", VU.fromList [1.0, 0.0])] ++ [(T.pack ("c" ++ show i), VU.fromList [1.0, 0.0]) | i <- [1..10 :: Int]])
       length (inferSemanticCodeDocEdges se g embs) `shouldBe` 3
 
     it "emits References edge with confidence equal to cosine similarity" $ do
       let b = sqrt (1 - 0.82 * 0.82)
-          embs = Map.fromList [("c1", [0.82, b]), ("d1", [1.0, 0.0])]
+          embs = Map.fromList [("c1", VU.fromList [0.82, b]), ("d1", VU.fromList [1.0, 0.0])]
           g = (buildGraph False (extractionFromLists [codeNode "c1" "a", docNode "d1" "b"] []))
                 { gEmbeddings = Just embs }
           edges = inferSemanticCodeDocEdges defaultSemanticEdgesConfig g embs
@@ -209,7 +210,7 @@ spec = do
         _ -> fail "expected exactly one edge"
 
     it "emits no edge for doc node with empty-vector embedding" $ do
-      let embs = Map.fromList [("c1", [1.0, 0.0]), ("d1", [])]
+      let embs = Map.fromList [("c1", VU.fromList [1.0, 0.0]), ("d1", VU.empty)]
           g = (buildGraph False (extractionFromLists [codeNode "c1" "a", docNode "d1" "b"] []))
                 { gEmbeddings = Just embs }
       inferSemanticCodeDocEdges defaultSemanticEdgesConfig g embs `shouldBe` []

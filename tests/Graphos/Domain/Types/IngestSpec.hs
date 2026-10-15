@@ -4,6 +4,7 @@ module Graphos.Domain.Types.IngestSpec where
 import Test.Hspec
 import Data.Aeson (decode, encode)
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector.Unboxed as VU
 
 import Graphos.Domain.Config.Ingest (FileEntry(..))
 import Graphos.Domain.Types.Ingest
@@ -20,7 +21,7 @@ spec = do
                 [ ("src/Foo.hs", FileEntry "abc123" "2026-01-01T00:00:00Z")
                 ]
             , iiNodes = Map.fromList
-                [ ("node-1", [1.0, 2.0, 3.0])
+                [ ("node-1", VU.fromList [1.0, 2.0, 3.0])
                 ]
             }
       decode (encode idx) `shouldBe` Just idx
@@ -33,23 +34,23 @@ spec = do
         Just idx -> do
           iiVersion idx `shouldBe` 1
           iiFiles idx `shouldBe` Map.empty
-          iiNodes idx `shouldBe` Map.fromList [("node-1", [1.0, 2.0])]
+          iiNodes idx `shouldBe` Map.fromList [("node-1", VU.fromList [1.0, 2.0])]
 
   describe "IngestIndex helpers" $ do
     it "lookupEmbedding returns stored vector" $ do
-      let idx = emptyIngestIndex { iiNodes = Map.fromList [("node-1", [1.0, 2.0])] }
-      lookupEmbedding "node-1" idx `shouldBe` Just [1.0, 2.0]
+      let idx = emptyIngestIndex { iiNodes = Map.fromList [("node-1", VU.fromList [1.0, 2.0])] }
+      lookupEmbedding "node-1" idx `shouldBe` Just (VU.fromList [1.0, 2.0])
       lookupEmbedding "missing" idx `shouldBe` Nothing
 
     it "mergeIndex is right-biased for nodes and files" $ do
       let left = emptyIngestIndex
             { iiFiles = Map.fromList [("a.hs", FileEntry "old" "t1")]
-            , iiNodes = Map.fromList [("n1", [1.0])]
+            , iiNodes = Map.fromList [("n1", VU.fromList [1.0])]
             }
           right = emptyIngestIndex
             { iiFiles = Map.fromList [("a.hs", FileEntry "new" "t2")]
-            , iiNodes = Map.fromList [("n1", [2.0])]
+            , iiNodes = Map.fromList [("n1", VU.fromList [2.0])]
             }
           merged = mergeIndex left right
       iiFiles merged `shouldBe` Map.fromList [("a.hs", FileEntry "new" "t2")]
-      iiNodes merged `shouldBe` Map.fromList [("n1", [2.0])]
+      iiNodes merged `shouldBe` Map.fromList [("n1", VU.fromList [2.0])]

@@ -29,9 +29,12 @@ import Graphos.Domain.Config.Extraction ( PdfExtractionMode(..)
                                         )
 import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest (IngestConfig(..), defaultIngestConfig, mergeIngestConfig)
+import Graphos.Domain.Config.Cache (CacheConfig(..), defaultCacheConfig)
+import Graphos.Domain.Config.Memory (MemoryConfig(..), defaultMemoryConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import Graphos.Domain.Config.Vision
 import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
+import Graphos.Domain.Config.Source (SourceConfig(..))
 
 -- ───────────────────────────────────────────────
 -- Top-level Configuration
@@ -55,6 +58,10 @@ data GraphosConfig = GraphosConfig
   , gcVision           :: VisionConfig                  -- ^ Vision analysis settings
    , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
    , gcDetection        :: DetectionConfig               -- ^ Generated/vendored/minified code detection settings
+   , gcMemory           :: MemoryConfig                  -- ^ Memory budget settings (memory.budget: auto|off|<size>)
+   , gcCache            :: CacheConfig                   -- ^ Content-cache eviction policy (cache.max_mb; 0 = unlimited)
+   , gcSources          :: [SourceConfig]                -- ^ Named multi-source roots ([] = single positional path)
+   , gcOutput           :: Maybe FilePath                -- ^ Graph output directory override (Nothing = "graphos-out")
    } deriving (Eq, Show, Generic)
 
 -- | Default Graphos configuration (used when no config file is found).
@@ -75,6 +82,10 @@ defaultGraphosConfig = GraphosConfig
    , gcVision           = defaultVisionConfig
    , gcIngest           = defaultIngestConfig
    , gcDetection        = defaultDetectionConfig
+   , gcMemory           = defaultMemoryConfig
+   , gcCache            = defaultCacheConfig
+   , gcSources          = []
+   , gcOutput           = Nothing
    }
 
 -- ───────────────────────────────────────────────
@@ -126,4 +137,14 @@ mergeGraphosConfig global project = GraphosConfig
    , gcDetection = if gcDetection project == defaultDetectionConfig
                      then gcDetection global
                      else gcDetection project
+   , gcMemory = if gcMemory project == defaultMemoryConfig
+                   then gcMemory global
+                   else gcMemory project
+   , gcCache = if gcCache project == defaultCacheConfig
+                  then gcCache global
+                  else gcCache project
+   , gcSources = if null (gcSources project)
+                   then gcSources global
+                   else gcSources project
+   , gcOutput = maybe (gcOutput global) Just (gcOutput project)
    }

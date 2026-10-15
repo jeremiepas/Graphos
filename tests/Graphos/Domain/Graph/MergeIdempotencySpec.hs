@@ -30,6 +30,7 @@ mkNodeKV (k, ft, src) = Node
   , nodeLabel        = fromText k
   , nodeFileType     = ft
   , nodeSourceFile   = fromText src
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing

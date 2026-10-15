@@ -50,6 +50,7 @@ module Graphos.Domain.Config
       -- * Semantic edge inference configuration
   , SemanticEdgesConfig(..)
   , defaultSemanticEdgesConfig
+  , defaultPathExtensions
 
      -- * Vision configuration
   , VisionConfig(..)
@@ -67,14 +68,42 @@ module Graphos.Domain.Config
   , FileEntry(..)
   , defaultIngestConfig
 
+     -- * Memory budget policy
+  , Bytes
+  , MemInfo(..)
+  , Verdict(..)
+  , MemoryBudgetSetting(..)
+  , MemoryConfig(..)
+  , defaultMemoryConfig
+  , memorySafetyReserve
+  , memoryBudgetFloor
+  , memoryBudgetCeiling
+  , deriveBudget
+  , preFlightVerdict
+  , projectedEmbeddingBytes
+  , parseByteSize
+  , formatBytes
+
      -- * Config merging
   , mergeGraphosConfig
   , mergeObservabilityConfig
+
+     -- * Multi-source configuration
+  , SourceConfig(..)
+  , mkSourceConfig
+  , validSources
+
+     -- * Content-cache policy
+  , CacheConfig(..)
+  , defaultCacheConfig
   ) where
 
+import Graphos.Domain.Config.Cache
 import Graphos.Domain.Config.Core
 import Graphos.Domain.Config.Extraction
 import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest
+import Graphos.Domain.Config.Memory
 import Graphos.Domain.Config.Observability
+import Graphos.Domain.Config.Source
 import Graphos.Domain.Config.Vision

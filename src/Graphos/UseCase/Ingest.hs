@@ -30,6 +30,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
 import Data.Time (getCurrentTime, UTCTime, formatTime, defaultTimeLocale)
+import qualified Data.Vector.Unboxed as VU
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeExtension, (</>))
 import Network.HTTP.Client
@@ -48,6 +49,7 @@ import Graphos.Domain.Types
 import Graphos.Domain.Config (GraphosConfig(..), gcFileExtensions, FileExtensionConfig(..))
 import Graphos.Domain.Config.Extraction (Granularity(..))
 import Graphos.Domain.Config.Ingest (IngestCategories(..), IngestCategoryConfig(..))
+import Graphos.Domain.Embedding (prepare)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -225,12 +227,12 @@ ingestFile appEnv config filePath = do
           let model = T.pack (embModel embCfg)
               metaEmbs = [ IngestEmbedding
                              { ieNodeId     = nodeId n
-                             , ieVector     = []
-                             , ieSourceHash = embeddingSourceHash model (nodeEmbedText n)
+                             , ieVector     = VU.empty
+                             , ieSourceHash = embeddingSourceHash model (embDocPrefix embCfg) (nodeEmbedText n)
                              , ieTimestamp  = now
                              , ieModel      = model
                              }
-                         | n <- nodes ]
+                          | n <- nodes ]
               idx' = foldr addToIndex emptyIngestIndex metaEmbs
           pure (metaEmbs, idx')
 
@@ -268,35 +270,53 @@ generateEmbeddingsForNodes :: AppEnv -> EmbeddingConfig -> [Node] -> IO [IngestE
 generateEmbeddingsForNodes appEnv cfg nodes = do
   now <- getCurrentTime
   let model = T.pack (embModel cfg)
+      docPrefix = embDocPrefix cfg
       nodeTexts = [ (n, nodeEmbedText n) | n <- nodes ]
       uniqueTexts = Set.toList (Set.fromList (map snd nodeTexts))
       chunks = chunkBy (max 1 (embBatchSize cfg)) uniqueTexts
   chunkResults <- mapM (embedChunk appEnv cfg model now) chunks
-  let vecTable = Map.fromList (concat chunkResults) :: Map.Map Text [Double]
+  let vecTable = Map.fromList (concat chunkResults) :: Map.Map Text (VU.Vector Double)
   pure
     [ IngestEmbedding
         { ieNodeId     = nodeId n
         , ieVector     = vec
-        , ieSourceHash = embeddingSourceHash model (nodeEmbedText n)
+        , ieSourceHash = embeddingSourceHash model docPrefix (prepare cfg t)
         , ieTimestamp  = now
         , ieModel      = model
         }
     | (n, t) <- nodeTexts
-    , let vec = Map.findWithDefault [] t vecTable
+    , let vec = Map.findWithDefault VU.empty t vecTable
     ]
 
 -- | The text embedded for a node (unchanged from the sequential loop).
 nodeEmbedText :: Node -> Text
 nodeEmbedText n = toText (nodeLabel n) <> " " <> toText (nodeSourceFile n)
 
--- | Embed one chunk of unique texts; a transport or API failure yields an
--- empty contribution for this chunk only (per-batch failure isolation).
-embedChunk :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> [Text] -> IO [(Text, [Double])]
-embedChunk appEnv cfg _model _ts chunk = do
-  r <- lpGenerateEmbeddings (llmPort appEnv) cfg chunk
-  pure $ case r of
-    Left _err  -> []
-    Right vecs -> zip chunk vecs
+-- | Embed one chunk of unique texts with per-input failure isolation
+-- (design D2, mirroring 'Graphos.UseCase.Pipeline.Core.embedChunk'): on a
+-- whole-request failure with more than one text, bisect and retry the halves
+-- independently; at batch size 1 the failing text is logged (first 200
+-- chars) with its error and contributes no vector.
+embedChunk :: AppEnv -> EmbeddingConfig -> Text -> UTCTime -> [Text] -> IO [(Text, VU.Vector Double)]
+embedChunk appEnv cfg _model _ts chunk = case chunk of
+  []  -> pure []
+  [t] -> do
+    r <- lpGenerateEmbeddings (llmPort appEnv) cfg [t]
+    case r of
+      Left err -> do
+        lpLogWarn (loggingPort appEnv) $ T.pack $
+          "embedding failed for input (batch-size 1, no vector): "
+            ++ take 200 (T.unpack t) ++ " — " ++ T.unpack err
+        pure []
+      Right vecs -> pure (zip chunk vecs)
+  _ -> do
+    r <- lpGenerateEmbeddings (llmPort appEnv) cfg chunk
+    case r of
+      Right vecs -> pure (zip chunk vecs)
+      Left _ -> do
+        let (half1, half2) = splitAt (length chunk `div` 2) chunk
+        (<>) <$> embedChunk appEnv cfg _model _ts half1
+             <*> embedChunk appEnv cfg _model _ts half2
 
 -- | Split a list into consecutive chunks of at most @n@ elements
 -- (list-level analogue of @T.chunksOf@; @n >= 1@).

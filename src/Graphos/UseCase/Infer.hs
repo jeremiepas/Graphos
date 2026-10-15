@@ -5,16 +5,20 @@ module Graphos.UseCase.Infer
   , inferCodeDocEdges
    , inferSemanticCodeDocEdges
    , inferNonSemanticEdges
+   , inferNonSemanticEdgesWith
+   , inferDeterministicDocEdges
+   , inferDeterministicDocEdgesWith
    , inferSemanticEdgesForMode
    , inferEdges
    , semanticModeName
    , classifyBridgeNodes
    , classifyBridgeNodesWith
    , BridgeClassification(..)
-  , SemanticMode(..)
-  , semanticMode
-  , isSingleCorpus
-  ) where
+   , SemanticMode(..)
+   , semanticMode
+    , isSingleCorpus
+    , module Graphos.UseCase.Infer.Document
+    ) where
 
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
@@ -24,15 +28,17 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
+import qualified Data.Vector.Unboxed as VU
 
 import Graphos.Domain.Types
 import Graphos.Domain.Analysis (dedupOn)
-import Graphos.Domain.Config (SemanticEdgesConfig(..))
+import Graphos.Domain.Config (SemanticEdgesConfig(..), defaultSemanticEdgesConfig)
 import Graphos.Domain.Graph
   ( Graph, gNodes, gEdges, gEmbeddings, neighbors, degree
   , articulationPoints, biconnectedComponents
   , edgeBetweennessWith
   )
+import Graphos.UseCase.Infer.Document
 import Graphos.UseCase.Port.LLMPort (cosineSimilarity)
 
 -- | Maximum number of inferred community-bridge edges per run.
@@ -251,29 +257,44 @@ isSingleCorpus g =
 -- | Infer code↔doc edges via cosine similarity on node embeddings.
 -- For each doc node with an embedding, find the top-k code nodes (by similarity)
 -- that exceed the threshold, and create a References edge.
-inferSemanticCodeDocEdges :: SemanticEdgesConfig -> Graph -> Map NodeId [Double] -> [Edge]
+--
+-- Bounded-memory formulation (bounded-embedding-memory): doc vectors are
+-- consumed one doc at a time through a strict fold, so peak live vectors are
+-- bounded by one doc row plus the code table — never the whole embedding map
+-- forced as a list. Output equals the all-pairs formulation for the same
+-- inputs (verified by property test).
+inferSemanticCodeDocEdges :: SemanticEdgesConfig -> Graph -> Map NodeId (VU.Vector Double) -> [Edge]
 inferSemanticCodeDocEdges se g embs
   | Map.null embs = []
   | otherwise =
-  let docNodes = [(nid, n) | (nid, n) <- Map.toList (gNodes g), nodeFileType n == DocFile]
-      codeNodes = [(nid, n) | (nid, n) <- Map.toList (gNodes g), nodeFileType n == CodeFile]
-
-      docWithEmb = [(nid, e) | (nid, _) <- docNodes, Just e <- [Map.lookup nid embs], not (null e)]
-      codeWithEmb = [(nid, e) | (nid, _) <- codeNodes, Just e <- [Map.lookup nid embs], not (null e)]
-
-      semanticEdges = concat
-        [ let docVec = docEmb
-              candidates = [ (cosineSimilarity docVec codeVec, codeNid)
-                            | (codeNid, codeVec) <- codeWithEmb
-                            , notEdgeAlready g docNid codeNid
-                            ]
-              filtered = [(sim, codeNid) | (sim, codeNid) <- candidates, sim >= seThreshold se]
-              top = take (seMaxFanOut se) $ sortOn (\(sim, _) -> negate sim) filtered
-          in [ makeInferredEdge codeNid docNid References sim
-             | (sim, codeNid) <- top
-             ]
-        | (docNid, docEmb) <- docWithEmb
-        ]
+  let codeWithEmb = [ (nid, e)
+                    | (nid, n) <- Map.toList (gNodes g), nodeFileType n == CodeFile
+                    , Just e <- [Map.lookup nid embs], not (VU.null e)
+                    ]
+      docNidsWithEmb = [ nid
+                       | (nid, n) <- Map.toList (gNodes g), nodeFileType n == DocFile
+                       , Just e <- [Map.lookup nid embs], not (VU.null e)
+                       ]
+      -- Match one doc against the code table (unchanged matching logic).
+      matchedFor :: NodeId -> VU.Vector Double -> [Edge]
+      matchedFor docNid docVec =
+        let candidates = [ (cosineSimilarity docVec codeVec, codeNid)
+                         | (codeNid, codeVec) <- codeWithEmb
+                         , notEdgeAlready g docNid codeNid
+                         ]
+            filtered = [(sim, codeNid) | (sim, codeNid) <- candidates, sim >= seThreshold se]
+            top = take (seMaxFanOut se) $ sortOn (\(sim, _) -> negate sim) filtered
+        in [ makeInferredEdge codeNid docNid References sim | (sim, codeNid) <- top ]
+      -- Strict fold: one doc row at a time; the accumulator is forced each step
+      -- so completed edges do not pile up as thunks.
+      step acc docNid =
+        let newEdges = case Map.lookup docNid embs of
+              Just docVec | not (VU.null docVec) -> matchedFor docNid docVec
+              _ -> []
+        in case newEdges of
+             [] -> acc
+             _  -> newEdges `seq` (acc ++ newEdges)
+      semanticEdges = foldl' step [] docNidsWithEmb
   in sortOn edgeSortKey
        (dedupOn (\e -> (edgeSource e, edgeTarget e)) semanticEdges)
 
@@ -290,13 +311,40 @@ fileBaseName path =
         _ -> filename
   in base
 
--- | Infer all non-semantic edges (community bridges, transitive deps, shared context, code-doc).
+-- | Deterministic @documents@ edges (co-location, symbol-mention, path-reference).
+-- Co-location needs only the graph; symbol-mention and path-reference read doc-body
+-- text, which is not carried on the graph, so they require a @Map NodeId Text@ index.
+inferDeterministicDocEdgesWith :: Map NodeId Text -> Graph -> [Edge]
+inferDeterministicDocEdgesWith = inferDeterministicDocEdgesConfigured defaultSemanticEdgesConfig
+
+-- | Deterministic @documents@ edges with an empty doc-text index (co-location only).
+inferDeterministicDocEdges :: Graph -> [Edge]
+inferDeterministicDocEdges = inferDeterministicDocEdgesWith Map.empty
+
+-- | Deterministic @documents@ edges with doc-text index and configurable
+-- thresholds (@seMinIdentLength@, @sePathExtensions@ from graphos.yaml).
+inferDeterministicDocEdgesConfigured :: SemanticEdgesConfig -> Map NodeId Text -> Graph -> [Edge]
+inferDeterministicDocEdgesConfigured se docText g =
+  inferCoLocationEdges g
+  ++ inferSymbolMentionEdgesWith (seMinIdentLength se) docText g
+  ++ inferPathReferenceEdgesWith (sePathExtensions se) docText g
+
+-- | Infer all non-semantic edges (community bridges, transitive deps, shared context, code-doc, documents).
 inferNonSemanticEdges :: EdgeDensity -> Graph -> CommunityMap -> [Edge]
 inferNonSemanticEdges density g cm = case density of
-  Sparse  -> inferCodeDocEdges g
-  Normal  -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g
-  Dense   -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g
-  Maximum -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g
+  Sparse  -> inferCodeDocEdges g ++ inferDeterministicDocEdges g
+  Normal  -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g ++ inferDeterministicDocEdges g
+  Dense   -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g ++ inferDeterministicDocEdges g
+  Maximum -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g ++ inferDeterministicDocEdges g
+
+-- | Infer all non-semantic edges with doc-body text and configured doc-link
+-- thresholds (doc-code-linking): the pipeline entry point.
+inferNonSemanticEdgesWith :: EdgeDensity -> SemanticEdgesConfig -> Map NodeId Text -> Graph -> CommunityMap -> [Edge]
+inferNonSemanticEdgesWith density se docText g cm = case density of
+  Sparse  -> inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
+  Normal  -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
+  Dense   -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
+  Maximum -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
 
 -- | Infer semantic code↔doc edges for the given mode (empty for disabled/skip/fallback modes).
 inferSemanticEdgesForMode :: SemanticMode -> SemanticEdgesConfig -> Graph -> [Edge]

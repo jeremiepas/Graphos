@@ -26,6 +26,9 @@ module Graphos.Domain.Types
   , graphFileTopLevelKeys
   , graphFileRequiredKeys
 
+    -- * JGF document contract
+  , module Graphos.Domain.Types.JGF
+
     -- * Extraction types
   , Extraction(..)
   , emptyExtraction
@@ -83,6 +86,7 @@ module Graphos.Domain.Types
   , EdgeDensity(..)
   , defaultConfig
   , GraphosConfig(..)
+  , CacheConfig(..)
   , defaultGraphosConfig
   , Neo4jConfig(..)
   , defaultNeo4jConfig
@@ -103,6 +107,12 @@ module Graphos.Domain.Types
   , defaultEmbeddingConfig
   , VisionConfig(..)
   , defaultVisionConfig
+  , Bytes
+  , MemInfo(..)
+  , MemoryBudgetSetting(..)
+  , MemoryConfig(..)
+  , defaultMemoryConfig
+  , deriveBudget
 
     -- * Incremental writer handle
   , IncrementalWriter(..)
@@ -119,8 +129,9 @@ import Graphos.Domain.Types.Node
 import Graphos.Domain.Types.Writer (IncrementalWriter(..))
 import Graphos.Domain.Types.Edge (EdgeId(..), Edge(..), Relation(..), relationToText, textToRelation, Confidence(..))
 import Graphos.Domain.Types.GraphFile (graphFileSchemaVersion, graphFileTopLevelKeys, graphFileRequiredKeys)
+import Graphos.Domain.Types.JGF
 import Graphos.Domain.Types.Graph (Extraction(..), emptyExtraction, extractionFromLists, extNodes, extEdges, LabeledGraph, CommunityId, CommunityMap, CohesionMap, NullModel(..), PushMode(..), GraphDiff(..), Hyperedge(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), FileClass(..), isSourceClass, ExclusionCounts(..), emptyExclusionCounts, FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..), CommunityAggregate(..))
 import Graphos.Domain.Types.Ingest (IngestResult(..), IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex, lookupEmbedding, mergeIndex, lookupIndex, indexSize, isFileUpToDate)
-import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, Neo4jConfig(..), defaultNeo4jConfig, MemgraphConfig(..), defaultMemgraphConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors, Granularity(..), defaultGranularity, EmbeddingConfig(..), defaultEmbeddingConfig, VisionConfig(..), defaultVisionConfig)
+import Graphos.Domain.Config (GraphosConfig(..), defaultGraphosConfig, CacheConfig(..), Neo4jConfig(..), defaultNeo4jConfig, MemgraphConfig(..), defaultMemgraphConfig, LabelingConfig(..), defaultLabelingConfig, ObservabilityConfig(..), defaultObservabilityConfig, mergeGraphosConfig, mergeObservabilityConfig, ExtractorMode(..), ExtractorConfig(..), defaultExtractors, Granularity(..), defaultGranularity, EmbeddingConfig(..), defaultEmbeddingConfig, VisionConfig(..), defaultVisionConfig, Bytes, MemInfo(..), MemoryBudgetSetting(..), MemoryConfig(..), defaultMemoryConfig, deriveBudget)

@@ -18,6 +18,7 @@ module Graphos.CLI.Parser
   , mergeOpts
   , ingestOpts
   , subgraphOpts
+  , migrateGraphOpts
   , commandOpts
   , granularityReader
     -- * Install-skill target
@@ -54,9 +55,11 @@ data Command
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
-  | SpeccheckCmd FilePath Bool Bool
+  | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
   | LServers
-   | Serve FilePath FilePath Int Bool Bool
+ | Serve FilePath FilePath Int Bool Bool
+
+  | MigrateGraphCmd FilePath (Maybe FilePath)
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
@@ -124,6 +127,9 @@ pipelineOpts = PipelineConfig
       <*> optional (option detectModeReader (long "detect-mode" <> metavar "MODE" <> help "Generated/vendored/minified detection mode: exclude|collapse|off (default: exclude)"))
       <*> switch (long "no-detect" <> help "Disable generated/vendored/minified detection (equivalent to --detect-mode off)")
       <*> optional (option auto (long "minified-threshold" <> help "Longest allowed line length before a file is classified as Minified (default: 5000)"))
+      <*> switch (long "fail-on-low-memory" <> help "Abort before any stage (exit 1) when available memory is below the heap budget (default: warn only)")
+      <*> switch (long "no-memory-budget" <> help "Disable the machine-derived default heap budget (run uncapped; --max-heap still applies when given)")
+      <*> pure Nothing
 
 
 granularityReader :: ReadM Granularity
@@ -294,9 +300,18 @@ subgraphOpts = SubgraphCmd
 
 speccheckOpts :: Parser Command
 speccheckOpts = SpeccheckCmd
-  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec)")
+  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec; ADRs under ../docs/proposals are included automatically)")
   <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
   <*> switch (long "strict-coverage" <> help "Gate on unimplemented requirements too (default: warn only)")
+  <*> many (strOption (long "check" <> metavar "NAME" <> help "Restrict to one check: cycles|coverage|candidates|stale|duplicates|spof (repeatable)"))
+  <*> switch (long "strict-duplicates" <> help "Gate on duplication candidates too (default: advisory)")
+  <*> optional (strOption (long "graph" <> metavar "G" <> help "Load spec artifacts from a graph.json instead of parsing the openspec/ tree"))
+  <*> switch (long "adjudicate" <> help "Adjudicate contradiction candidates pairwise via the configured LLM")
+
+migrateGraphOpts :: Parser Command
+migrateGraphOpts = MigrateGraphCmd
+  <$> strArgument (metavar "GRAPH" <> help "Path to a graph.json in the legacy top-level format")
+  <*> optional (strOption (long "output" <> short 'o' <> metavar "PATH" <> help "Output path (default: overwrite GRAPH in place)"))
 
 commandOpts :: Parser Command
 commandOpts = subparser
@@ -311,6 +326,7 @@ commandOpts = subparser
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
+  <> command "migrate-graph" (info migrateGraphOpts (progDesc "Upgrade a legacy graph.json to the JGF envelope format (in place unless --output)" <> footer "Example: graphos migrate-graph graphos-out/graph.json"))
   <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
@@ -391,6 +407,9 @@ renderCommandReference = unlines $
   , "graphos subgraph                Extract a path-driven subgraph"
   , "  --graph FILE / --config CONFIG / --out, -o FILE"
   , "  --boundary-hops N / --no-derive"
+  , ""
+  , "graphos migrate-graph GRAPH      Upgrade a legacy graph.json to the JGF format"
+  , "  --output, -o PATH              (default: overwrite in place)"
   , ""
   , "graphos init                    Generate graphos.yaml"
   , ""

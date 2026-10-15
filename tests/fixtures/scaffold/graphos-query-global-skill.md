@@ -70,6 +70,9 @@ graphos subgraph                Extract a path-driven subgraph
   --graph FILE / --config CONFIG / --out, -o FILE
   --boundary-hops N / --no-derive
 
+graphos migrate-graph GRAPH      Upgrade a legacy graph.json to the JGF format
+  --output, -o PATH              (default: overwrite in place)
+
 graphos init                    Generate graphos.yaml
 
 graphos push [opts]             Push to Neo4j

@@ -57,6 +57,7 @@ library
                     Graphos.Domain.Types.Writer
                     Graphos.Domain.Types.GraphFile
                     -- Domain - Graph
+                    Graphos.Domain.CypherHash
                     Graphos.Domain.Graph
                     Graphos.Domain.Graph.Core
                     Graphos.Domain.Graph.Query
@@ -64,6 +65,8 @@ library
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.SpecCheck
                     Graphos.UseCase.SpecCheck
+                    Graphos.UseCase.SpecExtract
+                    Graphos.UseCase.SpecAdjudicate
                     Graphos.Infrastructure.SpecParse
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
@@ -97,8 +100,9 @@ library
                      Graphos.UseCase.Analyze
                      Graphos.UseCase.Report
                      Graphos.UseCase.Export
-                     Graphos.UseCase.Infer
-                     Graphos.UseCase.Label
+                      Graphos.UseCase.Infer
+                      Graphos.UseCase.Infer.Document
+                      Graphos.UseCase.Label
                        Graphos.UseCase.Query
                      Graphos.UseCase.Load
                      Graphos.UseCase.Merge
@@ -138,6 +142,8 @@ library
                        Graphos.Infrastructure.LSP.Extraction
                          -- Infrastructure - Config
                          Graphos.Infrastructure.Config
+                         -- Infrastructure - System
+                         Graphos.Infrastructure.System.Memory
                       -- Infrastructure - Wiring
                       Graphos.Infrastructure.Wiring
                           -- Infrastructure - TreeSitter
@@ -200,15 +206,22 @@ library
                      Graphos.Domain.Context
                        -- Domain - PDF structure
                        Graphos.Domain.PdfStructure
-                       -- Domain - Config
-                       Graphos.Domain.Config
+                      -- Domain - JGF serialization
+                      Graphos.Domain.Types.JGF
+                      -- Domain - Config
+                      Graphos.Domain.Config
                        Graphos.Domain.Config.Core
                        Graphos.Domain.Config.Detection
                        Graphos.Domain.Config.Extraction
                        Graphos.Domain.Config.Export
+                       Graphos.Domain.Config.Cache
                        Graphos.Domain.Config.Ingest
+                       Graphos.Domain.Config.Memory
                        Graphos.Domain.Config.Observability
+                       Graphos.Domain.Config.Source
                        Graphos.Domain.Config.Vision
+                       -- Domain - Embedding preparation
+                       Graphos.Domain.Embedding
                      -- Domain - Scaffold
                      Graphos.Domain.Scaffold
                      -- CLI
@@ -272,7 +285,8 @@ library
      , xml-types             >= 0.3
      , base16-bytestring     >= 1.0
     , base64-bytestring     >= 1.0
-      , cryptohash-sha256     >= 0.11
+      , cryptohash-sha256    >= 0.11
+      , cryptohash-sha1      >= 0.11
      , file-embed            >= 0.0.15
      , text-short            >= 0.1
      , unix                  >= 2.8
@@ -330,7 +344,12 @@ test-suite graphos-test
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
     Graphos.Domain.ConfigSpec
+    Graphos.Domain.EmbeddingSpec
     Graphos.Domain.Config.IngestSpec
+    Graphos.Domain.Config.SourceSpec
+    Graphos.Domain.Config.CacheSpec
+    Graphos.Domain.Config.MemorySpec
+    Graphos.Infrastructure.System.MemorySpec
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
     Graphos.Domain.CommunitySpec
@@ -344,8 +363,10 @@ test-suite graphos-test
      Graphos.UseCase.PipelineSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
-    Graphos.UseCase.InferSpec
-    Graphos.UseCase.Extract.HaskellSpec
+     Graphos.UseCase.InferSpec
+     Graphos.UseCase.InferDocumentSpec
+     Graphos.UseCase.DocLinkParitySpec
+     Graphos.UseCase.Extract.HaskellSpec
     Graphos.UseCase.Extract.ImageSpec
     Graphos.UseCase.QuerySpec
     Graphos.UseCase.Query.RefineSpec
@@ -357,6 +378,7 @@ test-suite graphos-test
     Graphos.UseCase.FormatContextHintsSpec
     Graphos.UseCase.ConversationSpec
     Graphos.UseCase.LoadSpec
+    Graphos.UseCase.ReportSpec
     Graphos.UseCase.StartupValidationSpec
     Graphos.Domain.Graph.ScoreSpec
     Graphos.Domain.Graph.IndexSpec
@@ -376,6 +398,7 @@ test-suite graphos-test
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
     Graphos.Infrastructure.LLM.EmbeddingSpec
+    Graphos.Domain.EmbeddingSpec
     Graphos.Infrastructure.LLM.EmbeddingCacheSpec
     Graphos.Infrastructure.Observability.SDKSpec
     Graphos.Infrastructure.Server.MCPQuerySpec
@@ -389,6 +412,8 @@ test-suite graphos-test
     Graphos.CLI.ParserSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
+    Graphos.Infrastructure.Export.JGFSpec
+    Graphos.Infrastructure.Export.Neo4jSpec
     Graphos.Infrastructure.Export.PersistMutationSpec
     Graphos.Infrastructure.Export.ResearchHTMLSpec
     Graphos.UseCase.SubgraphSpec
@@ -406,6 +431,8 @@ test-suite graphos-test
       OpenSpecView.ArtifactViewSpec
       OpenSpecView.SpecDiffSpec
       OpenSpecView.StateDashboardSpec
+    Graphos.UseCase.UpdateConfluenceSpec
+    Graphos.UseCase.WatchCacheSpec
   build-depends:
        base
      , graphos
@@ -418,6 +445,7 @@ test-suite graphos-test
     , containers
     , text-short           >= 0.1
     , deepseq              >= 1.4
+    , unix                  >= 2.8
     , directory            >= 1.3
     , filepath             >= 1.4
      , fgl                  >= 5.8
@@ -430,5 +458,41 @@ test-suite graphos-test
     , vector               >= 0.12
      , time                 >= 1.12
      , wai                  >= 3.2
+     , http-types           >= 0.12
+     , yaml                 >= 0.11
+
+test-suite graphos-test-focus
+  import:         shared
+  type:           exitcode-stdio-1.0
+  main-is:        FocusMain.hs
+  hs-source-dirs: tests
+  other-modules:
+    Graphos.Domain.TypesSpec
+    Graphos.UseCase.DocLinkParitySpec
+    Graphos.UseCase.FormatContextSpec
+    Graphos.UseCase.InferDocumentSpec
+  build-depends:
+      base
+    , graphos
+    , hspec                >= 2.10
+    , hspec-discover       >= 2.10
+    , QuickCheck           >= 2.14
+    , aeson
+    , bytestring           >= 0.11
+    , containers
+    , text-short           >= 0.1
+    , deepseq              >= 1.4
+
+    , unix                  >= 2.8
+    , directory            >= 1.3
+    , filepath             >= 1.4
+    , fgl                  >= 5.8
+    , optparse-applicative >= 0.17
+    , process              >= 1.6
+    , text
+    , temporary            >= 1.3
+    , vector               >= 0.12
+    , time                 >= 1.12
+    , wai                  >= 3.2
     , http-types           >= 0.12
     , yaml                 >= 0.11

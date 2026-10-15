@@ -18,14 +18,31 @@ corpora, `bge-m3` or `voyage-code-2` are recommended.
 | `voyage-code-2`         | hosted       | 1536 | Best (code-specialized) | Medium | Paid       |
 | `text-embedding-3-small`| hosted (OpenAI) | 1536 | Good           | Medium  | Paid         |
 
+### LFM2.5-Embedding-350M (default local model)
+
+`hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M` is the default local
+model since `lfm-embedding-optimization` (GGUF via a standalone llama-server
+or any OpenAI-compatible server):
+
+| Property        | Value                                             |
+|-----------------|---------------------------------------------------|
+| Local/Hosted    | local (llama-server)                              |
+| Dim             | 1024                                              |
+| Doc token limit | 512                                               |
+| Prefixes        | asymmetric — `document: ` (docs) / `query: ` (queries) |
+| Throughput      | ~77 texts/s measured on the target hardware (see the recorded benchmark below); llama-server burst on short inputs ~343 req/s |
+
 Set the model via `embedding.model` in `graphos.yaml`:
 
 ```yaml
 embedding:
   enabled: true
-  model: bge-m3
-  dimension: 1024
+  model: "hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M"
+  dimension: 1024        # or 0 = auto-detect
 ```
+
+Existing configs naming `nomic-embed-text` explicitly continue to work
+unchanged (same cache keys as previous runs).
 
 ## Configuration
 
@@ -44,8 +61,31 @@ Embeddings are configured under the `embedding` key in the Graphos config file:
 | Field       | Type    | Default              | Description                          |
 |-------------|---------|----------------------|--------------------------------------|
 | `enabled`   | `bool`  | `false`              | Enable embedding generation          |
-| `model`     | `string`| `"nomic-embed-text"` | Embedding model name                 |
-| `dimension` | `int`   | `768`                | Vector dimension                     |
+| `model`     | `string`| `"hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M"` | Embedding model name |
+| `dimension` | `int`   | `0` (auto-detect)    | Vector dimension                     |
+
+## Token limits and preparation
+
+Before any request is submitted, each embed text is **prepared** to fit the
+model's token limit: the default limit comes from the model's documented
+context (`nomic-embed-text` 8192, LFM2.5 512, `all-minilm` 256), overridden by
+`embedding.maxTokens` (`0` or absent = model default). Preparation applies
+truncation under a conservative characters÷4 token estimate — a prepared text
+never exceeds the effective limit, and the original unprepared text is never
+sent to the API. Two raw texts that prepare identically (e.g. differing only
+past the truncation point) share one cache entry.
+
+Optional asymmetric prefixes for bi-encoders like LFM2.5:
+`embedding.docPrefix` (e.g. `"document: "`) is prepended to every embedded
+text; `embedding.queryPrefix` (e.g. `"query: "`) applies to query-time text.
+Empty defaults preserve unprefixed behavior, and both prefixes participate in
+the cache key and persisted source-hash.
+
+Throughput measurements per model/server/concurrency (and the oversized-input
+regression probe) are recorded in the
+`lfm-embedding-optimization` change's
+[`bench/BENCHMARK.md`](../openspec/changes/lfm-embedding-optimization/bench/BENCHMARK.md);
+the pinned default concurrency (1) cites its recorded sweep.
 
 ## Semantic Edge Inference
 

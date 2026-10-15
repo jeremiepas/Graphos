@@ -272,6 +272,7 @@ explainNodeWithIndex g idx term =
     , nodeLabel        = fromText "unknown"
     , nodeFileType     = CodeFile
     , nodeSourceFile   = fromText ""
+    , nodeSource       = Nothing
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing

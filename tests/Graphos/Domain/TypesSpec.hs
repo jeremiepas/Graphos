@@ -35,6 +35,15 @@ spec = do
       map relationToText [Refines, ConflictsWith, Satisfies, Supersedes, Constrains]
         `shouldBe` ["refines", "conflicts_with", "satisfies", "supersedes", "constrains"]
 
+    it "serializes the documents relation (deterministic doc-code edges)" $ do
+      relationToText Documents `shouldBe` "documents"
+      textToRelation "documents" `shouldBe` Just Documents
+
+    it "round-trips the documents relation through JSON" $ do
+      let edge = Edge (EdgeId "d->c:documents") "d" "c" Documents 0.9 (Confidence 0.9) Nothing
+          enc = encode edge
+      (decode enc :: Maybe Edge) `shouldBe` Just edge
+
   describe "EdgeId" $ do
     it "wraps Text" $ do
       let EdgeId t = EdgeId "test-edge"

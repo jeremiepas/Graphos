@@ -33,6 +33,7 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 import Data.Map.Strict (Map, empty)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -118,7 +119,7 @@ loadEmbeddingsSidecar graphPath lr =
           pure lr
         else do
           bs <- BSL.readFile sidecar
-          case (eitherDecode bs :: Either String (Map NodeId [Double])) of
+          case (eitherDecode bs :: Either String (Map NodeId (VU.Vector Double))) of
             Left err -> do
               putStrLn $ "WARNING: failed to parse embeddings sidecar " ++ sidecar ++ ": " ++ err
               pure lr
@@ -144,16 +145,34 @@ validateGraphFile path = do
         Left err -> pure $ Left $ "failed to parse graph JSON: " <> T.pack err
         Right root -> pure (validateMinimalShape root)
 
--- | Minimal shape check: a top-level JSON object containing a "nodes" array
--- and an "edges" array. Catches the common corruption cases (non-JSON,
--- non-object, missing or malformed core sections).
+-- | Minimal shape check. Accepts both formats:
+-- the JGF envelope (top-level "graph" object with "nodes" and "edges"
+-- inside) and the legacy top-level "nodes"/"edges" arrays. Catches the
+-- common corruption cases (non-JSON, non-object, missing or malformed
+-- core sections).
 validateMinimalShape :: Value -> Either Text ()
-validateMinimalShape (Object km) =
-  case KM.lookup (Key.fromText "nodes") km of
-    Just (Array _) -> case KM.lookup (Key.fromText "edges") km of
-      Just (Array _) -> Right ()
-      _              -> Left $ "graph.json: missing required \"edges\" array"
-    _ -> Left $ "graph.json: missing required \"nodes\" array"
+validateMinimalShape (Object km)
+  | KM.member (Key.fromText "graph") km =
+      case KM.lookup (Key.fromText "graph") km of
+        Just (Object gkm)
+          | hasNodes gkm && hasEdges gkm -> Right ()
+        Just (Object _) -> Left $ "graph.json: JGF \"graph\" object must contain \"nodes\" and \"edges\""
+        Just _ -> Left $ "graph.json: top-level \"graph\" must be a JSON object"
+        Nothing -> Left $ "graph.json: missing required \"graph\" object"
+  | otherwise =
+      case KM.lookup (Key.fromText "nodes") km of
+        Just (Array _) -> case KM.lookup (Key.fromText "edges") km of
+          Just (Array _) -> Right ()
+          _              -> Left $ "graph.json: missing required \"edges\" array"
+        _ -> Left $ "graph.json: missing required \"nodes\" array"
+  where
+    hasNodes g = case KM.lookup (Key.fromText "nodes") g of
+      Just (Object _) -> True
+      Just (Array _)  -> True
+      _               -> False
+    hasEdges g = case KM.lookup (Key.fromText "edges") g of
+      Just (Array _) -> True
+      _              -> False
 validateMinimalShape _ =
   Left $ "graph.json: top-level value must be a JSON object"
 
@@ -169,8 +188,21 @@ corruptGraphMessage path msg =
 -- Top-level parsing
 -- ───────────────────────────────────────────────
 
+-- | Parse a graph file. Format selection (jgf-serialization): a top-level
+-- @graph@ object means JGF; anything else is the legacy top-level
+-- @nodes@/@edges@ schema (kept for the deprecation window).
 parseGraphFile :: Bool -> FilePath -> Value -> Either Text LoadResult
-parseGraphFile strict path (Object km) = do
+parseGraphFile strict path root@(Object km) =
+  case KM.lookup (Key.fromText "graph") km of
+    Just (Object _) -> parseGraphFileLegacy strict path =<< unwrapJGF path root
+    _               -> parseGraphFileLegacy strict path km
+parseGraphFile _ _ _ =
+  Left $ "graph.json: top-level value must be a JSON object"
+
+-- | Parse the (possibly normalized) legacy key map. All sections are
+-- optional except nodes/edges.
+parseGraphFileLegacy :: Bool -> FilePath -> KM.KeyMap Value -> Either Text LoadResult
+parseGraphFileLegacy strict path km = do
   _ <- case KM.lookup (Key.fromText "schema_version") km of
     Nothing         -> pure ()
     Just (String v) -> validateSchemaVersion path (Just v)
@@ -205,8 +237,6 @@ parseGraphFile strict path (Object km) = do
     , lrSkippedNodes        = skippedNodes
     , lrSkippedEdges        = skippedEdges
     }
-parseGraphFile _ _ _ =
-  Left $ "graph.json: top-level value must be a JSON object"
 
 -- | Parse an optional top-level section; absent keys default to the given value.
 parseSection :: FromJSON a => Text -> KM.KeyMap Value -> a -> Either Text a
@@ -234,6 +264,80 @@ validateSchemaVersion path (Just v) =
           [(n, _)] -> n
           _        -> 0
         [] -> 0
+
+-- ───────────────────────────────────────────────
+-- JGF envelope (jgf-serialization)
+-- ───────────────────────────────────────────────
+
+-- | Normalize a JGF document into the legacy key map so the existing
+-- per-item parsers can run unchanged: @graph.nodes@ (object keyed by id)
+-- becomes an array of node objects; @graph.edges@ stays an array;
+-- @graph.metadata.graphos.*@ sections are hoisted to top-level keys.
+-- The document's @schemaVersion@ is validated first (major-version gate).
+--
+-- The JGF @directed@ directive and the edge-level @directed@ override are
+-- accepted but not used to set @gDirected@ (graphos loads undirected and
+-- rebuilds adjacency — same as the legacy loader).
+unwrapJGF :: FilePath -> Value -> Either Text (KM.KeyMap Value)
+unwrapJGF path (Object rootKm) =
+  case KM.lookup (Key.fromText "graph") rootKm of
+    Just (Object gkm) -> do
+      let graphos = graphosMetaOf gkm
+      -- Schema version gate (task 3.4): reject unknown majors with a clear error.
+      case KM.lookup (Key.fromText "schemaVersion") graphos of
+        Nothing         -> pure ()
+        Just (String v) -> validateSchemaVersion path (Just v)
+        Just _          -> Left $ jgfErr path "\"schemaVersion\" must be a string"
+      nodesVal <- case KM.lookup (Key.fromText "nodes") gkm of
+        Just (Object nodesObj) ->
+          Right (Array (V.fromList [v | (_, v) <- KM.toList nodesObj]))
+        Just (Array items)     -> Right (Array items)
+        Just _                 -> Left $ jgfErr path "\"nodes\" must be an object or array"
+        Nothing                -> Left $ jgfErr path "missing required key \"nodes\""
+      edgesVal <- case KM.lookup (Key.fromText "edges") gkm of
+        Just (Array items) -> Right (Array items)
+        Just _             -> Left $ jgfErr path "\"edges\" must be an array"
+        Nothing            -> Left $ jgfErr path "missing required key \"edges\""
+      let inserts =
+            [ (Key.fromText "nodes", nodesVal)
+            , (Key.fromText "edges", edgesVal)
+            ] ++ [ (Key.fromText name, v)
+                 | (name, v) <- hoistedSections graphos, not (KM.member (Key.fromText name) rootKm) ]
+      pure (foldr (uncurry KM.insert) rootKm inserts)
+    _ -> Left $ jgfErr path "the top-level \"graph\" key must hold a JGF graph object"
+unwrapJGF path _ = Left $ jgfErr path "top-level value must be a JSON object"
+
+-- | @graph.metadata.graphos@ sub-object (empty when absent).
+graphosMetaOf :: KM.KeyMap Value -> KM.KeyMap Value
+graphosMetaOf gkm =
+  case KM.lookup (Key.fromText "metadata") gkm of
+    Just (Object mm) -> case KM.lookup (Key.fromText "graphos") mm of
+      Just (Object gm) -> gm
+      _                -> KM.empty
+    _                -> KM.empty
+
+-- | graphos metadata sections hoisted from @graph.metadata.graphos@ into
+-- the legacy key-map namespace (name = legacy top-level key).
+hoistedSections :: KM.KeyMap Value -> [(Text, Value)]
+hoistedSections graphos =
+  [ (name, v)
+  | (jgfName, name) <-
+      [ ("communities", "communities" :: Text)
+      , ("cohesion", "cohesion")
+      , ("god_nodes", "god_nodes")
+      , ("community_labels", "community_labels")
+      , ("community_aggregates", "community_aggregates")
+      , ("compositions", "compositions")
+      , ("embeddings_path", "embeddings_path")
+      , ("null_model", "null_model")
+      , ("schema_version", "schema_version")
+      ]
+  , Just v <- [KM.lookup (Key.fromText jgfName) graphos]
+  ]
+
+jgfErr :: FilePath -> Text -> Text
+jgfErr path msg =
+  "graph.json (JGF): " <> msg <> " in " <> T.pack path
 
 -- ───────────────────────────────────────────────
 -- Per-item node/edge parsing (tolerant)
@@ -269,44 +373,87 @@ parseItems strict parse (item:rest) = do
 
 -- | Parse one node entry. Returns the node plus whether its file_type was
 -- degraded. Left = malformed entry (skip in tolerant mode, fail in strict).
+--
+-- Accepts the legacy flat layout and the JGF layout (jgf-serialization):
+-- @id@/@label@ top-level with the remaining fields under @metadata@.
 parseNodeItem :: Bool -> Value -> Either Text (Node, Bool)
 parseNodeItem strict v =
   case v of
     Object km -> do
-      nid <- fieldText "id" km
-      label <- fieldText "label" km
-      (ft, degraded) <- parseFileTypeItem strict nid km
-      src <- case KM.lookup (Key.fromText "source_file") km of
+      let km' = case KM.lookup (Key.fromText "metadata") km of
+            Just (Object mm) -> foldr (uncurry KM.insert) km
+              [ (Key.fromText legacy, mv)
+              | (jgfName, legacy) <- hoistedNodeFields
+              , Just mv <- [KM.lookup (Key.fromText jgfName) mm]
+              ]
+            _                -> km
+      nid <- fieldText "id" km'
+      label <- fieldText "label" km'
+      (ft, degraded) <- parseFileTypeItem strict nid km'
+      src <- case KM.lookup (Key.fromText "source_file") km' of
         Nothing       -> pure ""
         Just Null     -> pure ""
         Just (String s) -> pure s
         Just _        -> Left $ nodeErr nid "\"source_file\" must be a string"
-      lineStart <- optionalInt "line_start" km
-      lineEnd   <- optionalInt "line_end" km
-      signature <- optionalText "signature" km
-      communityId <- optionalInt "community_id" km
-      kind <- optionalText "kind" km
-      degree <- optionalInt "degree" km
-      isBridge <- optionalBool "is_bridge" km
-      extra <- optionalValue "extra" km
-      pure (Node nid (fromText label) ft (fromText src) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra 0, degraded)
+      lineStart <- optionalInt "line_start" km'
+      lineEnd   <- optionalInt "line_end" km'
+      signature <- optionalText "signature" km'
+      communityId <- optionalInt "community_id" km'
+      kind <- optionalText "kind" km'
+      degree <- optionalInt "degree" km'
+      isBridge <- optionalBool "is_bridge" km'
+      extra <- optionalValue "extra" km'
+      mSrc <- optionalText "source" km'
+      pure (Node nid (fromText label) ft (fromText src) (fromText <$> mSrc) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra 0, degraded)
     _ -> Left $ "graph.json: node entry must be an object"
+
+-- | Legacy field names hoisted from a JGF node's @metadata@ object.
+hoistedNodeFields :: [(Text, Text)]
+hoistedNodeFields =
+  [ ("file_type", "file_type" :: Text)
+  , ("source_file", "source_file")
+  , ("line_start", "line_start")
+  , ("line_end", "line_end")
+  , ("signature", "signature")
+  , ("community_id", "community_id")
+  , ("kind", "kind")
+  , ("degree", "degree")
+  , ("is_bridge", "is_bridge")
+  , ("extra", "extra")
+  ]
 
 -- | Parse one edge entry. Returns the edge plus whether its relation was
 -- degraded. Left = malformed entry (skip in tolerant mode, fail in strict).
+--
+-- Accepts the legacy flat layout and the JGF layout: @source@/@target@/
+-- @relation@ top-level with @id@/@weight@/@confidence@/@extra@ under
+-- @metadata@.
 parseEdgeItem :: Bool -> Value -> Either Text (Edge, Bool)
 parseEdgeItem strict v =
   case v of
     Object km -> do
-      eid <- fieldText "id" km
-      src <- fieldText "source" km
-      tgt <- fieldText "target" km
-      (rel, degraded) <- parseRelationItem strict eid km
-      weight <- fieldNumber "weight" km
-      confidence <- fieldNumber "confidence" km
-      extra <- optionalValue "extra" km
+      let km' = case KM.lookup (Key.fromText "metadata") km of
+            Just (Object mm) -> foldr (uncurry KM.insert) km (hoistedEdgeFields mm)
+            _                -> km
+      eid <- fieldText "id" km'
+      src <- fieldText "source" km'
+      tgt <- fieldText "target" km'
+      (rel, degraded) <- parseRelationItem strict eid km'
+      weight <- fieldNumber "weight" km'
+      confidence <- fieldNumber "confidence" km'
+      extra <- optionalValue "extra" km'
       pure (Edge (EdgeId eid) src tgt rel weight (Confidence confidence) extra, degraded)
     _ -> Left $ "graph.json: edge entry must be an object"
+
+-- | Edge metadata values hoisted into the flat field namespace.
+-- Every field keeps its legacy name, so the list is the JGF metadata
+-- key set itself.
+hoistedEdgeFields :: KM.KeyMap Value -> [(KM.Key, Value)]
+hoistedEdgeFields mm =
+  [ (k, v)
+  | k <- [ Key.fromText "id", Key.fromText "weight", Key.fromText "confidence", Key.fromText "extra" ]
+  , Just v <- [KM.lookup k mm]
+  ]
 
 parseFileTypeItem :: Bool -> NodeId -> KM.KeyMap Value -> Either Text (FileType, Bool)
 parseFileTypeItem strict nid km =

@@ -20,6 +20,7 @@ testNode nid = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -39,6 +40,7 @@ testNodeWithLabel nid label = Node
   , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -97,6 +99,7 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = ft
   , nodeSourceFile   = fromText srcFile
+,   nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -166,6 +169,7 @@ spec = do
             , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = fromText "test.hs"
+,             nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -401,6 +405,7 @@ spec = do
             , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = fromText "test.hs"
+,             nodeSource = Nothing
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -421,6 +426,7 @@ spec = do
             , nodeLabel = fromText ".foo()"
             , nodeFileType = CodeFile
             , nodeSourceFile = fromText "test.hs"
+,             nodeSource = Nothing
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing

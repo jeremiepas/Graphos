@@ -16,6 +16,7 @@ mkNode i label = Node
   , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "src/Test.hs"
+,   nodeSource = Nothing
   , nodeLineStart    = Just i
   , nodeLineEnd      = Nothing
   , nodeCommunityId  = Nothing

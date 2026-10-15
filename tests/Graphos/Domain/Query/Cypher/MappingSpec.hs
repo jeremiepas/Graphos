@@ -14,6 +14,7 @@ mkNode = Node
   , nodeLabel       = fromText "foo"
   , nodeFileType    = CodeFile
   , nodeSourceFile  = fromText "src/foo.hs"
+,   nodeSource = Nothing
   , nodeLineStart   = Just 10
   , nodeLineEnd     = Just 20
   , nodeSignature   = Just "foo :: Int -> Int"
