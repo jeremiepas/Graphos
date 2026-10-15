@@ -15,14 +15,29 @@ import Graphos.UseCase.Detect
   , isIgnoredEntryRoot
   , findAllFilesWithExclusions
   , allSupportedExtensions
+  , detectMultiSources
   )
+import Graphos.UseCase.Extract.Core (applyTaggingSources)
 import Graphos.Infrastructure.FileSystem.Ignore
   ( loadIgnorePatterns
   , shouldIgnore
   , ignoreMatches
   , parseGitignoreLine
   )
-import Graphos.Domain.Types (emptyExclusionCounts, ExclusionCounts(..))
+import Graphos.Domain.Types
+  ( emptyExclusionCounts, ExclusionCounts(..)
+  , Edge(..), EdgeId(..), Relation(..), Confidence(..)
+  , NodeId, Node(..), extractionFromLists, extNodes, extEdges, nodeToJGF )
+import Graphos.Domain.Graph (makeStubNode)
+import Graphos.Domain.Config.Source (SourceConfig(..))
+import Graphos.Domain.Config.Detection (defaultDetectionConfig)
+import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
+import qualified Data.Map.Strict as Map
+import Data.List (sort)
+import Data.Text.Short (toText)
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Key as AesKey
 
 -- | Create a temporary test directory tree, run the action, then clean up.
 withTestTree :: FilePath -> IO a -> IO a
@@ -192,3 +207,146 @@ spec = do
         (files, excs) <- findAllFilesWithExclusions tmpDir tmpDir ignoreMatches allSupportedExtensions patterns (\_ -> pure ())
         excIgnoredFiles excs `shouldBe` 0
         length files `shouldBe` 2
+
+
+  describe "multi-source detection (3.1) — union walk + provenance" $ do
+    it "two sources sharing a relative path yield distinct qualified paths" $ do
+      let tmpDir = "/tmp/graphos-multi-distinct"
+      withTestTree tmpDir $ do
+        let repoA = tmpDir </> "repoA"
+            repoB = tmpDir </> "repoB"
+        mkSubdirs tmpDir ["repoA", "repoB"]
+        touch repoA "app.py"
+        touch repoB "app.py"
+        let sources = [ SourceConfig "repoA" repoA []
+                      , SourceConfig "repoB" repoB [] ]
+        (_, provIO) <- detectMultiSources testFSP defaultDetectionConfig allSupportedExtensions sources (\_ -> pure ())
+        case provIO of
+          Just provMap -> do
+            Map.size provMap `shouldBe` 2
+            sort (Map.elems provMap) `shouldBe` [("repoA", "repoA/app.py"), ("repoB", "repoB/app.py")]
+          Nothing -> error "expected multi-source provenance"
+
+    it "a file inside a nested-worktree is attributed to the inner source exactly once" $ do
+      let tmpDir = "/tmp/graphos-multi-nested"
+      withTestTree tmpDir $ do
+        let repoA = tmpDir </> "repoA"
+            repoB = tmpDir </> "repoA" </> "sub"
+        mkSubdirs tmpDir ["repoA", "repoA" </> "sub"]
+        touch repoB "deep.py"
+        touch repoA "top.py"
+        let sources = [ SourceConfig "repoA" repoA []
+                      , SourceConfig "repoB" repoB [] ]
+        (_, provIO) <- detectMultiSources testFSP defaultDetectionConfig allSupportedExtensions sources (\_ -> pure ())
+        case provIO of
+          Just provMap -> do
+            Map.size provMap `shouldBe` 2
+            sort (Map.elems provMap) `shouldBe` [("repoA", "repoA/top.py"), ("repoB", "repoB/deep.py")]
+          Nothing -> error "expected multi-source provenance"
+
+    it "a per-source ignore list scopes to that source only" $ do
+      let tmpDir = "/tmp/graphos-multi-ignore"
+      withTestTree tmpDir $ do
+        let repoA = tmpDir </> "repoA"
+            repoB = tmpDir </> "repoB"
+        mkSubdirs tmpDir ["repoA", "repoB"]
+        touch repoA "gen.py"
+        touch repoB "gen.py"
+        let sources = [ SourceConfig "repoA" repoA ["gen.py"]
+                      , SourceConfig "repoB" repoB [] ]
+        (_, provIO) <- detectMultiSources testFSP defaultDetectionConfig allSupportedExtensions sources (\_ -> pure ())
+        case provIO of
+          Just provMap -> do
+            Map.size provMap `shouldBe` 1
+            sort (Map.elems provMap) `shouldBe` [("repoB", "repoB/gen.py")]
+          Nothing -> error "expected multi-source provenance"
+
+    it "with no sources configured, provenance is Nothing (single-source regression)" $ do
+      let tmpDir = "/tmp/graphos-multi-empty"
+      withTestTree tmpDir $ do
+        mkSubdirs tmpDir ["repoA"]
+        touch (tmpDir </> "repoA") "app.py"
+        (_, provIO) <- detectMultiSources testFSP defaultDetectionConfig allSupportedExtensions [] (\_ -> pure ())
+        provIO `shouldBe` Nothing
+
+  describe "multi-source tagging (3.2) — applyTaggingSources" $ do
+    it "tags nodes with nodeSource, qualified nodeSourceFile and a distinct id per source" $ do
+      let prov = Map.fromList
+            [ ("/abs/repoA/app.py", ("repoA", "repoA/app.py"))
+            , ("/abs/repoB/app.py", ("repoB", "repoB/app.py"))
+            ]
+          ext = extractionFromLists [ makeStubNode "/abs/repoA/app.py"
+                                    , makeStubNode "/abs/repoB/app.py" ] []
+          tagged = applyTaggingSources (Just prov) ext
+          byPath = Map.fromList [ (nodeSourceFile n, n) | n <- Map.elems (extNodes tagged) ]
+          nA = case Map.lookup "repoA/app.py" byPath of Just n -> n; _ -> error "missing repoA node"
+          nB = case Map.lookup "repoB/app.py" byPath of Just n -> n; _ -> error "missing repoB node"
+      length (Map.elems (extNodes tagged)) `shouldBe` 2
+      fmap toText (nodeSource nA) `shouldBe` Just "repoA"
+      toText (nodeSourceFile nA) `shouldBe` "repoA/app.py"
+      fmap toText (nodeSource nB) `shouldBe` Just "repoB"
+      toText (nodeSourceFile nB) `shouldBe` "repoB/app.py"
+      nodeId nA `shouldNotBe` nodeId nB
+
+    it "applyTaggingSources Nothing returns the extraction unchanged (single-source regression)" $ do
+      let ext = extractionFromLists [ makeStubNode "/abs/repoA/app.py" ] []
+          same = applyTaggingSources Nothing ext
+      map nodeId (Map.elems (extNodes same)) `shouldBe` map nodeId (Map.elems (extNodes ext))
+      all (== Nothing) (map (fmap toText . nodeSource) (Map.elems (extNodes same))) `shouldBe` True
+
+    it "applyTaggingSources remaps edge endpoints to the tagged node ids" $ do
+      let prov = Map.fromList
+            [ ("/abs/repoA/app.py", ("repoA", "repoA/app.py"))
+            , ("/abs/repoB/app.py", ("repoB", "repoB/app.py"))
+            ]
+          nA = makeStubNode "/abs/repoA/app.py"
+          nB = makeStubNode "/abs/repoB/app.py"
+          ext = extractionFromLists [nA, nB] [mkEdge (nodeId nA) (nodeId nB)]
+          tagged = applyTaggingSources (Just prov) ext
+          edges = Map.elems (extEdges tagged)
+          nodeIds = Map.keysSet (extNodes tagged)
+      length edges `shouldBe` 1
+      let es = case edges of (x : _) -> x; [] -> error "no edges"
+      edgeSource es `elem` nodeIds `shouldBe` True
+      edgeTarget es `elem` nodeIds `shouldBe` True
+
+  describe "multi-source export (3.3) — nodeToJGF source field" $ do
+    it "emits a non-null source field in metadata for a tagged (multi-source) node" $ do
+      let prov = Map.fromList [ ("/abs/repoA/app.py", ("repoA", "repoA/app.py")) ]
+          tagged = applyTaggingSources (Just prov) (extractionFromLists [makeStubNode "/abs/repoA/app.py"] [])
+          n = case Map.elems (extNodes tagged) of (x : _) -> x; [] -> error "no node"
+      jgfHasSource n `shouldBe` True
+
+    it "omits the source field in metadata for a single-source node (legacy source: null)" $ do
+      let n = makeStubNode "/abs/repoA/app.py"
+      jgfHasSource n `shouldBe` False
+
+testFSP :: FileSystemPort
+testFSP = FileSystemPort
+  { fspLoadCheckpoint       = \_ -> pure Nothing
+  , fspSaveCheckpoint       = \_ _ -> pure ()
+  , fspClearCheckpoint      = \_ -> pure ()
+  , fspLoadIgnorePatterns   = loadIgnorePatterns
+  , fspShouldIgnore         = \_ ps path -> shouldIgnore ps path
+  , fspLoadCachedExtraction = \_ _ _ -> pure Nothing
+  , fspSaveCachedExtraction = \_ _ _ _ -> pure ()
+  }
+
+mkEdge :: NodeId -> NodeId -> Edge
+mkEdge s t = Edge
+  { edgeId           = EdgeId (s <> "->" <> t <> ":Calls")
+  , edgeSource       = s
+  , edgeTarget       = t
+  , edgeRelation     = Calls
+  , edgeWeight       = 1.0
+  , edgeConfidence   = Confidence 1.0
+  , edgeExtra        = Nothing
+  }
+
+-- | True iff the multi-source "source" key is present in a node's JGF metadata.
+jgfHasSource :: Node -> Bool
+jgfHasSource n = case nodeToJGF n of
+  Aeson.Object m -> case KeyMap.lookup (AesKey.fromText "metadata") m of
+    Just (Aeson.Object md) -> KeyMap.member (AesKey.fromText "source") md
+    _                      -> False
+  _ -> False

@@ -24,6 +24,7 @@ var allNodes = rawNodes.map(function(n, i) {
     id:           nodeIdStrings[i],
     label:        n.label,
     source_file:  fileStrings[n.file_idx],
+    source:       n.source,
     line:         n.line,
     community_id: n.community_id,
     degree:       n.degree,
