@@ -8,7 +8,6 @@ import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON)
 import Data.Text.Short (fromText)
-import Data.Set (Set)
 import qualified Data.Set as Set
 
 import Graphos.Domain.Types
