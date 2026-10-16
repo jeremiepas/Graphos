@@ -8,9 +8,10 @@ module Graphos.Domain.Types
   , FileType(..)
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-  , bitNodeIsBridge, bitNodeExtra
-  , computePresentBits
+   , bitNodeIsBridge, bitNodeExtra, bitNodeBodyHash
+   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
+  , computeBodyHash
 
     -- * Edge types
   , EdgeId(..)
@@ -112,9 +113,10 @@ import Graphos.Domain.Types.Node
   ( NodeId, Node(..), FileType(..)
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-  , bitNodeIsBridge, bitNodeExtra
-  , computePresentBits
+   , bitNodeIsBridge, bitNodeExtra, bitNodeBodyHash
+   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
+  , computeBodyHash
   )
 import Graphos.Domain.Types.Writer (IncrementalWriter(..))
 import Graphos.Domain.Types.Edge (EdgeId(..), Edge(..), Relation(..), relationToText, textToRelation, Confidence(..))

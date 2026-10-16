@@ -24,9 +24,10 @@ module Graphos.Domain.Types.Node
     -- * Compact representation helpers
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-  , bitNodeIsBridge, bitNodeExtra
-  , computePresentBits
+   , bitNodeIsBridge, bitNodeExtra, bitNodeBodyHash
+   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
+  , computeBodyHash
   ) where
 
 import Control.DeepSeq (NFData(..))
@@ -40,6 +41,10 @@ import qualified Data.Text as T
 import Data.Text.Short (ShortText, fromText, toText)
 import GHC.Generics (Generic)
 import GHC.Word (Word64)
+import qualified Data.ByteString as BS
+import Data.Word (Word8)
+import Numeric (showHex)
+import qualified Crypto.Hash.SHA256 as Hash
 
 -- | Unique identifier for a node (derived from file + entity name)
 -- TODO: Migrate to newtype NodeId = NodeId Text (dedicated migration task after Domain types stablized)
@@ -110,6 +115,10 @@ bitNodeIsBridge = 1 `shiftL` 6
 bitNodeExtra :: Word64
 bitNodeExtra = 1 `shiftL` 7
 
+{-# NOINLINE bitNodeBodyHash #-}
+bitNodeBodyHash :: Word64
+bitNodeBodyHash = 1 `shiftL` 8
+
 -- | A node in the knowledge graph
 --
 -- Compact representation:
@@ -132,6 +141,9 @@ data Node = Node
   , nodeDegree       :: !(Maybe Int)
   , nodeIsBridge     :: !(Maybe Bool)
   , nodeExtra        :: !(Maybe Value)
+    -- Optional SHA-256 of the symbol's source span (intent-graph-verification).
+    -- Absent on graphs produced before this field existed.
+  , nodeBodyHash     :: !(Maybe Text)
     -- Compact representation: bit-field for optional field presence
   , nodePresentBits  :: !Word64
   } deriving (Eq, Show, Generic)
@@ -159,6 +171,7 @@ computePresentBits n = foldr (.|.) 0
     , if isJust (nodeDegree n)    then bitNodeDegree            else 0
     , if isJust (nodeIsBridge n)  then bitNodeIsBridge          else 0
     , if isJust (nodeExtra n)     then bitNodeExtra             else 0
+    , if isJust (nodeBodyHash n)  then bitNodeBodyHash          else 0
     ]
 
 instance NFData FileType
@@ -175,16 +188,17 @@ instance NFData Node where
        rnf (nodeCommunityId n) `seq`
        rnf (nodeKind n) `seq`
        rnf (nodeDegree n) `seq`
-       rnf (nodeIsBridge n) `seq`
-       rnf (nodeExtra n) `seq`
-       rnf pb
+        rnf (nodeIsBridge n) `seq`
+        rnf (nodeExtra n) `seq`
+        rnf (nodeBodyHash n) `seq`
+        rnf pb
 
 instance ToJSON Node where
   toJSON n = object
-    [ "id"            .= nodeId n
-    , "label"         .= toText (nodeLabel n)
-    , "file_type"     .= nodeFileType n
-    , "source_file"   .= toText (nodeSourceFile n)
+    ( [ "id"           .= nodeId n
+    , "label"        .= toText (nodeLabel n)
+    , "file_type"    .= nodeFileType n
+    , "source_file"  .= toText (nodeSourceFile n)
     , "line_start"   .= nodeLineStart n
     , "line_end"     .= nodeLineEnd n
     , "signature"    .= fmap toText (nodeSignature n)
@@ -194,6 +208,9 @@ instance ToJSON Node where
     , "is_bridge"    .= nodeIsBridge n
     , "extra"        .= nodeExtra n
     ]
+      ++ case nodeBodyHash n of
+           Just h  -> [ "body_hash" .= h ]
+           Nothing -> [] )
 
 instance FromJSON Node where
   parseJSON = withObject "Node" $ \v -> do
@@ -209,6 +226,7 @@ instance FromJSON Node where
     degreeVal      <- v .:? "degree"
     isBridgeVal    <- v .:? "is_bridge"
     extraVal       <- v .:? "extra"
+    bodyHashVal    <- v .:? "body_hash"
 
     let presentBits = foldr (.|.) 0
           [ if isJust lineStartVal   then bitNodeLineStart      else 0
@@ -219,6 +237,7 @@ instance FromJSON Node where
           , if isJust degreeVal      then bitNodeDegree            else 0
           , if isJust isBridgeVal    then bitNodeIsBridge          else 0
           , if isJust extraVal       then bitNodeExtra             else 0
+          , if isJust bodyHashVal    then bitNodeBodyHash          else 0
           ]
 
     pure Node
@@ -234,6 +253,7 @@ instance FromJSON Node where
       , nodeDegree       = degreeVal
       , nodeIsBridge     = isBridgeVal
       , nodeExtra        = extraVal
+      , nodeBodyHash     = bodyHashVal
       , nodePresentBits  = presentBits
       }
 
@@ -257,3 +277,18 @@ setNodeExtraCapturedAt ts n =
              Just (Object km) -> km
              _                -> KM.empty
   in n { nodeExtra = Just (Object (KM.insert key (String ts) base)) }
+
+-- | SHA-256 digest (hex) of a byte span, used for the optional 'nodeBodyHash'.
+--
+-- Mirrors the content-addressing scheme in
+-- 'Graphos.Infrastructure.FileSystem.Cache' (cryptohash-sha256 + hex): identical
+-- span bytes always yield the same digest, so the field is stable across runs
+-- and machines. Pure, so it can be computed at extraction time with no IO.
+computeBodyHash :: BS.ByteString -> Text
+computeBodyHash bs =
+  T.pack (concatMap byteToHex (BS.unpack (Hash.hash bs :: BS.ByteString)))
+  where
+    byteToHex :: Word8 -> String
+    byteToHex w = case showHex (fromIntegral w :: Int) "" of
+      s | length s == 1 -> '0' : s
+        | otherwise     -> s
