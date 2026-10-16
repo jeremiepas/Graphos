@@ -110,9 +110,19 @@ in
       exec = "cabal test all";
       after = [ "ci:build@succeeded" ];
     };
+    # Test without building: the CI `test` job restores dist-newstyle from the
+    # build job's `build-products` artifact, so no build dependency is needed.
+    "ci:test-only" = {
+      exec = "cabal test all";
+    };
     "ci:haddock" = {
       exec = "cabal haddock all";
       after = [ "ci:build@succeeded" ];
+    };
+    # Haddock without building: the CI `haddock` job restores dist-newstyle from
+    # the build job's `build-products` artifact, so no build dependency is needed.
+    "ci:haddock-only" = {
+      exec = "cabal haddock all";
     };
     # Best-effort cabal update with retries; always proceed to build.
     "ci:release-build" = {
