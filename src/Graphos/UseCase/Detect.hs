@@ -14,17 +14,21 @@ module Graphos.UseCase.Detect
   , rootAnchoredIgnoreDirs
   , depthIndependentIgnoreDirs
   , isIgnoredEntry
-  , isIgnoredEntryRoot
-  , findAllFilesWithExclusions
-  ) where
+   , isIgnoredEntryRoot
+   , findAllFilesWithExclusions
+   , detectMultiSources
+   ) where
 
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
+import Control.Monad (foldM)
+import Data.Ord (comparing)
+import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Exception (try, IOException)
-import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
+import System.Directory (doesDirectoryExist, doesFileExist, listDirectory, canonicalizePath)
 import System.IO (withFile, IOMode(..), hGetLine)
 import System.FilePath (takeExtension, (</>))
 
@@ -33,8 +37,9 @@ import Graphos.Domain.Types.Pipeline
   ( FileMeta(..) )
 import Graphos.Domain.Config.Detection
   ( DetectionConfig(..), DetectionMode(..), defaultDetectionConfig )
+import Graphos.Domain.Config.Source (SourceConfig(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern(..), IgnorePattern(..))
-import Graphos.Infrastructure.FileSystem.Ignore (matches, matchingPattern)
+import Graphos.Infrastructure.FileSystem.Ignore (matches, matchingPattern, parseGitignoreLine)
 
 -- | All supported file extensions organized by category
 -- Prefer using config-driven extensions from GraphosConfig when available.
@@ -132,6 +137,60 @@ detectFilesWithExtensionsAndIgnore' fsp cfg root extMap ignorePatterns logDebug 
         , detectionClassification   = classification
         , detectionExclusions       = excs
         }
+
+-- | Multi-source union-walk. Walks each configured source root, unions the
+-- detected files, and attributes every file to exactly one source using
+-- longest-root-prefix deduplication (the deepest source root that contains a
+-- file wins). Returns the Detection plus, when sources are configured, a
+-- provenance map keyed by real path -> (sourceName, qualifiedPath) so that
+-- downstream extraction can tag nodes with their source. Provenance is
+-- 'Nothing' when no sources are configured, preserving single-source behavior.
+detectMultiSources
+  :: FileSystemPort
+  -> DetectionConfig
+  -> Map FileCategory [String]
+  -> [SourceConfig]
+  -> (T.Text -> IO ())
+  -> IO (Detection, Maybe (Map Text (Text, Text)))
+detectMultiSources fsp cfg extMap sources logDebug = do
+  canon <- mapM canonSource sources
+  let sorted = sortBy (comparing (negate . length . sourceRoot)) canon
+  (claimed, excs, provenance) <- foldM walk (Map.empty, emptyExclusionCounts, Map.empty) sorted
+  let files = Map.keys claimed
+  (categorized, classification) <- categorizeFilesWithConfig files extMap cfg
+  let totalFiles = sum (length <$> Map.elems categorized)
+      detection = Detection
+        { detectionTotalFiles       = totalFiles
+        , detectionTotalWords       = 0
+        , detectionNeedsGraph       = totalFiles > 0
+        , detectionWarning          = if totalFiles > 200
+                                        then Just $ T.pack $ "Large corpus: " ++ show totalFiles ++ " files"
+                                        else Nothing
+        , detectionFiles            = categorized
+        , detectionClassification   = classification
+        , detectionExclusions       = excs
+        }
+  pure (detection, if null sources then Nothing else Just provenance)
+  where
+    canonSource s = do
+      mRoot <- try (canonicalizePath (scPath s)) :: IO (Either IOException FilePath)
+      pure (scName s, case mRoot of Right p -> p; Left _ -> scPath s, scIgnore s)
+    sourceRoot (_, r, _) = r
+    walk (claimed', excs', prov') (name, root, srcIgnore) = do
+      exists <- doesDirectoryExist root
+      if not exists
+        then pure (claimed', excs', prov')
+        else do
+          diskIgnore <- fspLoadIgnorePatterns fsp root
+          let allIgnore = diskIgnore ++ map (\t -> parseGitignoreLine 1 (T.unpack t)) srcIgnore
+          (fs, fileExcs) <- findAllFilesWithExclusions root root (fspShouldIgnore fsp) extMap allIgnore logDebug
+          let kept = filter (`notElem` Map.keysSet claimed') fs
+              newClaimed = foldr (\f m -> Map.insert f () m) claimed' kept
+              newProv = foldr (\f m -> case relativize root f of
+                                          r | null r || r == "." -> m
+                                            | otherwise -> Map.insert (T.pack f) (name, name <> "/" <> T.pack r) m)
+                                  prov' kept
+          pure (newClaimed, addExclusionCounts excs' fileExcs, newProv)
 
 -- | Find all files recursively (using default extensions)
 findAllFiles :: FilePath -> IO [FilePath]

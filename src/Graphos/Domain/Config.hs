@@ -96,6 +96,11 @@ module Graphos.Domain.Config
      -- * Content-cache policy
   , CacheConfig(..)
   , defaultCacheConfig
+
+     -- * Output directory resolution
+  , defaultOutputDirName
+  , resolveOutputDir
+  , effectiveOutputDir
   ) where
 
 import Graphos.Domain.Config.Cache
@@ -105,5 +110,6 @@ import Graphos.Domain.Config.Export
 import Graphos.Domain.Config.Ingest
 import Graphos.Domain.Config.Memory
 import Graphos.Domain.Config.Observability
+import Graphos.Domain.Config.Output
 import Graphos.Domain.Config.Source
 import Graphos.Domain.Config.Vision

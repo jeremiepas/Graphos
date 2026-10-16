@@ -104,7 +104,7 @@ type alias Model =
     , identity : Maybe String
     , caps : Api.Capabilities
     , probed : Int
-    , overview : Maybe Source.Overview
+     , overview : Maybe Api.Overview
     , nav : Navi.ViewState
     , pendingHash : Maybe String
     , suppressUrlMsg : Bool
@@ -472,7 +472,7 @@ update msg model =
             addToast "error" err { model | connecting = False }
 
         GotOverview ( origin, Ok body ) ->
-            case D.decodeString Source.overviewDecoder body of
+            case D.decodeString Api.overviewDecoder body of
                 Ok ov ->
                     overviewLoaded origin ov { model | connecting = False }
 
@@ -1013,7 +1013,7 @@ resolveFetch model =
 {-| Shared slices-mode load path: boot from the overview (aggregates + totals +
 graph hash) with zero nodes/edges until communities pull their slices on
 drill-down. The overview's totals are authoritative for the stats line. -}
-overviewLoaded : String -> Source.Overview -> Model -> ( Model, Cmd Msg )
+overviewLoaded : String -> Api.Overview -> Model -> ( Model, Cmd Msg )
 overviewLoaded origin ov model =
     let
         graph =
@@ -1935,31 +1935,22 @@ viewSourcePanel model =
                 ]
 
             Connected c ->
+                let
+                    mode =
+                        Source.resolveMode c.caps
+                in
                 [ div [ A.class "spread" ]
                     [ span [] [ text c.origin ]
                     , UI.badge "accent" "connected"
                     ]
                 , div [ A.class "row" ]
-                    [ UI.badge ""
-                        (if c.caps.slices then
-                            "slices mode"
-
-                         else
-                            "legacy (full fetch)"
-                        )
+                    [ UI.badge "" (Source.slicesReason mode)
                     , UI.badge ""
                         (if c.caps.query then
                             "query ✓"
 
                          else
                             "query ✗"
-                        )
-                    , UI.badge ""
-                        (if c.caps.slices then
-                            "slices ✓"
-
-                         else
-                            "slices ✗ (full fetch)"
                         )
                     ]
                 , viewGraphStats model
