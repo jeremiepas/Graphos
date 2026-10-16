@@ -19,9 +19,14 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , importExportTypes
   , implementationDetailTypes
   , functionBoundaryTypes
-   , makeNodeId
+    , makeNodeId
     , tsNodeLabel
     , tsNodeUntruncatedLabel
+    -- | Group 3 node-identity helpers (AVI-984): stable identity scheme
+    --   <dirHash>_<stem>_<kind>:<ident> with file-wide collision ranks.
+    , SourceFile(..)
+    , mkSourceFile
+    , nodeKeyId
    ) where
 
 
@@ -405,4 +410,63 @@ makeNodeId filePath name =
       dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
       hashPrefix = T.pack $ show dirHash
       safeName = T.filter (\c -> c /= '"' && c /= '\'' && c /= '`') normalizedName
-  in hashPrefix <> "_" <> stem <> "_" <> safeName
+   in hashPrefix <> "_" <> stem <> "_" <> safeName
+
+-- ---------------------------------------------------------------------------
+-- Group 3 node identity (AVI-984 / AVI-973)
+--
+-- Stable identity scheme: "<dirHash>_<stem>_<kind>:<ident>" with an optional
+-- file-wide "#L<line>" suffix for collision rank. These helpers are layered on
+-- top of the proven conversion functions above; they do not alter the tested
+-- 'makeNodeId' behaviour.
+-- ---------------------------------------------------------------------------
+
+-- | Identifies a source file for the identity scheme. `sourceDirHash` is a
+-- small, stable fingerprint of the directory so that two files with the same
+-- stem never collide even when they share a working tree.
+data SourceFile = SourceFile
+  { sourcePath     :: !Text
+  , sourceDirHash  :: !Int
+  , sourceStem     :: !Text
+  , sourceFileName :: !Text
+  }
+
+mkSourceFile :: FilePath -> SourceFile
+mkSourceFile filePath =
+  let dirPart = T.pack (takeDirectory' filePath)
+      stem    = T.pack (takeBaseName' filePath)
+      name    = T.pack (takeFileName' filePath)
+      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPart) `mod` 65536
+  in SourceFile
+       { sourcePath     = T.pack filePath
+       , sourceDirHash  = dirHash
+       , sourceStem     = stem
+       , sourceFileName = name
+       }
+
+-- | Directory portion of a path (everything before its final '/').
+takeDirectory' :: FilePath -> FilePath
+takeDirectory' p =
+  case break (== '/') (reverse p) of
+    (_, '/' : dirRest) -> reverse dirRest
+    _                  -> ""
+
+-- | File name portion of a path (its final component).
+takeFileName' :: FilePath -> FilePath
+takeFileName' p = reverse (fst (break (== '/') (reverse p)))
+
+-- | File stem (file name without its final extension).
+takeBaseName' :: FilePath -> FilePath
+takeBaseName' f =
+  let fn = reverse (takeFileName' f)
+      (stem, _) = break (== '.') fn
+  in if null stem then fn else reverse stem
+
+-- | Stable identifier for a node under the Group 3 identity scheme. When
+-- `rank > 0` the declaration gets a file-wide `#L<line>` suffix so that
+-- collisions are disambiguated deterministically.
+nodeKeyId :: SourceFile -> Text -> Text -> Int -> Int -> NodeId
+nodeKeyId sourceFile kind ident line rank =
+  let dirHash' = T.pack (show (sourceDirHash sourceFile))
+      base     = dirHash' <> "_" <> sourceStem sourceFile <> "_" <> kind <> ":" <> ident
+  in if rank > 0 then base <> "#L" <> T.pack (show line) else base
