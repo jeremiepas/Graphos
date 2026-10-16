@@ -32,6 +32,10 @@ import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck, renderSpecReport, reportGates)
+import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
+import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
+import Graphos.Domain.Impact (Discharge(..), stableSignature)
+import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
 import Graphos.Infrastructure.SpecParse (parseSpecDir)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
@@ -672,6 +676,79 @@ main = do
             then BL.putStr (encode report) >> putStrLn ""
             else TIO.putStrLn (renderSpecReport report)
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
+
+    IntentcheckCmd specsFile graphPath probePaths asJson -> do
+      specsBytes <- BL.readFile specsFile
+      case parseSpecDocument specsBytes of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] intentcheck: failed to parse specs JSON: " ++ err
+          exitWith (ExitFailure 1)
+        Right doc -> do
+          mainLoad <- loadGraphFromFile (T.unpack graphPath)
+          case mainLoad of
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] intentcheck: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right mainResult -> do
+              let g = lrGraph mainResult
+                  report = runIntentCheck g doc graphPath
+              forM_ probePaths $ \p -> do
+                rl <- loadGraphFromFile (T.unpack p)
+                case rl of
+                  Left err -> hPutStrLn stderr ("[graphos] intentcheck: probe " ++ T.unpack p ++ ": " ++ T.unpack err)
+                  Right pg -> do
+                    let summ = case runProbes g doc p (irRows report) [lrGraph pg] of
+                               (s:_) -> s
+                               []    -> ProbeSummary "" [] True
+                    when (not (prMatches summ)) $
+                      hPutStrLn stderr ("[graphos] intentcheck [non-triviality]: probe " ++ T.unpack p ++ " differs from main graph")
+              if asJson
+                then BL.putStr (encode report) >> putStrLn ""
+                else TIO.putStrLn (renderIntentReport report)
+              if reportVerdict report
+                then exitSuccess
+                else do
+                  hPutStrLn stderr "[graphos] intentcheck: violated specs:"
+                  let msgs =
+                        [ "  " ++ maybe "(unnamed)" (("'" ++) . T.unpack) nm
+                            ++ if null (witnesses v) then ""
+                               else " — violating nodes: " ++ T.unpack (T.intercalate ", " (witnesses v))
+                        | (nm, v) <- violatedSpecs report ]
+                  mapM_ (hPutStrLn stderr) msgs
+                  exitWith (ExitFailure 1)
+
+    ImpactCmd beforePath afterPath ackIds mSpecsFile mNewSpec asJson asGate -> do
+      bLoad <- loadGraphFromFile beforePath
+      case bLoad of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] impact: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right bResult -> do
+          aLoad <- loadGraphFromFile afterPath
+          case aLoad of
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] impact: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right aResult -> do
+              let d = Discharge ackIds [stableSignature]
+                  rep = runImpact (lrGraph bResult) (lrGraph aResult) d
+              (admissible, failures, gateReport) <-
+                case mSpecsFile of
+                  Nothing -> pure (reportAdmissible rep, [], rep)
+                  Just sf -> do
+                    sb <- BL.readFile (T.unpack sf)
+                    case parseSpecDocument sb of
+                      Left err -> do
+                        hPutStrLn stderr ("[graphos] impact: failed to parse specs JSON: " ++ err)
+                        exitWith (ExitFailure 1)
+                      Right doc -> pure (runImpactGate (lrGraph bResult) (lrGraph aResult) d (Just doc) mNewSpec)
+              if asJson
+                then BL.putStr (encode gateReport) >> putStrLn ""
+                else TIO.putStrLn (renderImpactReport gateReport)
+              mapM_ (\f -> hPutStrLn stderr ("[graphos] impact: " ++ show f)) failures
+              if asGate && not admissible
+                then exitWith (ExitFailure 1)
+                else exitSuccess
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
       case mConfigPath of
