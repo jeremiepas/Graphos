@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - uses: cachix/install-nix-action@v31
 
@@ -24,6 +24,17 @@ jobs:
 
     - name: Install devenv.sh
       run: nix profile add nixpkgs#devenv
+
+    - name: Restore cabal store cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/state/cabal/store
+          ~/.cabal/store
+        key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
+        restore-keys: |
+          cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
+          cabal-${{ runner.os }}-ghc910-
 
     - name: Build
       run: devenv tasks run ci:release-build
