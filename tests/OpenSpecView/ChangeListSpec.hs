@@ -107,19 +107,15 @@ spec = do
         lookup' k = case Map.lookup k byName of
           Nothing -> error ("missing change in parsed list: " ++ k)
           Just c  -> c
+        -- Archived changes (e.g. honor-graphosignore, fix-ci-missing-hackage-
+        -- package-list) are intentionally NOT asserted here: they move to
+        -- openspec/changes/archive/ and would make this test stale at every
+        -- archive. Assert only on changes that are part of the active set.
         view = lookup' "openspec-view"
-        hg = lookup' "honor-graphosignore"
-        ci = lookup' "fix-ci-missing-hackage-package-list"
         ex = lookup' "extract-haskell-libs"
     (changeTotal view) `shouldBe` 13
     (changeCompleted view) `shouldBe` 0
     (changeStatus view) `shouldBe` "in-progress"
-    (changeTotal hg) `shouldBe` 13
-    (changeCompleted hg) `shouldBe` 13
-    (changeStatus hg) `shouldBe` "complete"
-    (changeTotal ci) `shouldBe` 12
-    (changeCompleted ci) `shouldBe` 12
-    (changeStatus ci) `shouldBe` "complete"
     (changeTotal ex) `shouldBe` 60
     (changeCompleted ex) `shouldBe` 2
     (changeStatus ex) `shouldBe` "in-progress"

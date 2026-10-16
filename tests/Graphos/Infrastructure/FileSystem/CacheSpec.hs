@@ -11,6 +11,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import System.FilePath ((</>))
 import Test.Hspec
 
+import Graphos.Domain.Config (defaultOutputDirName)
 import Graphos.Domain.Types
 import Graphos.Infrastructure.FileSystem.Cache
 
@@ -137,6 +138,13 @@ specBase = do
   where
     mkEdge eid s t r = Edge eid s t r 1.0 (Confidence 1.0) Nothing
 
+-- | The effective pipeline output directory for a project @root@ (multi-source-
+-- graphs 2.2). @evictToCap@ sweeps the caches under the effective output
+-- directory, so tests that seed entries via the legacy root-based helpers
+-- (@cacheDir@, @embedCacheDir@) must pass this to @evictToCap@.
+outDirOf :: FilePath -> FilePath
+outDirOf root = root </> defaultOutputDirName
+
 specEviction :: Spec
 specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ do
   it "cap exceeded evicts oldest-mtime entries first until under cap" $
@@ -152,7 +160,7 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
             , ("e2", 2000, replicate 40 'b')
             , ("e3", 3000, replicate 40 'c')
             ]
-      n <- evictToCap 80 root   -- 120 bytes total; evict e1 (40) → 80
+      n <- evictToCap 80 (outDirOf root)   -- 120 bytes total; evict e1 (40) → 80
       n `shouldBe` 1
       remaining <- listDirectory d
       remaining `shouldMatchList` ["e2.json", "e3.json"]
@@ -162,7 +170,7 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
       let d = cacheDir root
       createDirectoryIfMissing True d
       writeFile (d </> "x.json") (replicate 10 'x')
-      n <- evictToCap (512 * 1024 * 1024) root
+      n <- evictToCap (512 * 1024 * 1024) (outDirOf root)
       n `shouldBe` 0
       length <$> listDirectory d >>= (`shouldBe` 1)
 
@@ -171,13 +179,13 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
       let d = cacheDir root
       createDirectoryIfMissing True d
       writeFile (d </> "big.json") (replicate 1000 'y')
-      n <- evictToCap 0 root
+      n <- evictToCap 0 (outDirOf root)
       n `shouldBe` 0
       length <$> listDirectory d >>= (`shouldBe` 1)
 
   it "missing cache dirs are a no-op" $
     withSystemTempDirectory "graphos-cache-evict4" $ \root -> do
-      n <- evictToCap 64 root
+      n <- evictToCap 64 (outDirOf root)
       n `shouldBe` 0
 
   it "sweeps both the extraction and embedding caches" $
@@ -186,7 +194,7 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
       createDirectoryIfMissing True ed
       writeFile (ed </> "v.json") (replicate 50 'v')
       setFileTimes (ed </> "v.json") 1000 1000
-      n <- evictToCap 10 root
+      n <- evictToCap 10 (outDirOf root)
       n `shouldBe` 1
       length <$> listDirectory ed >>= (`shouldBe` 0)
   where
