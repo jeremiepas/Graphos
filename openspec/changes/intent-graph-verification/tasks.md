@@ -9,6 +9,15 @@
 > (`by decide`), every `#eval` matching its prediction. Sole fix needed:
 > `prefix` binder renamed `pre` (Lean keyword).
 
+> **Continuation (2026-10-14)** — task 1.2 is live but not started. Toolchain
+> confirmed: `/nix/store/cwilxazl2n8f59lksc4xihx560485ci8-lean4-4.29.1/bin/lake build`
+> (exits 0, `sorry` only at lines 336/343/350/365). O1–O4 are assigned to
+> `graph-theory-expert` with a precise directive (toolchain + exact edits + per-obligation
+> proof strategies + acceptance: green `lake build`, zero `sorry`, README updated, toy
+> `#eval`s kernel-accepted). A prior attempt stalled (plan_only, no build evidence); closure
+> is being governed by `head-rnd` (`b5f51f49-4866-45c9-8904-ff3529a92a70`) with a durable
+> wake path. Closing these unblocks the downstream Haskell units 2–5.
+
 ## 1. Formal model (first — it is the reference for the Domain checkers)
 
 ### 1.1 Compile the skeleton
@@ -80,26 +89,39 @@
 ## 5. CLI (depends on 4)
 
 ### 5.1 `graphos intentcheck`
-- [ ] Check criteria first: violated spec ⇒ non-zero exit naming the spec and the
-      witnessing nodes; all pass ⇒ zero; `--probe` graphs trigger non-triviality
-      warnings without gating; single-document JSON with `--json`
-- [ ] `graphos intentcheck --specs FILE [--graph G] [--probe G]... [--json]` —
-      registered with helper + example per `cli-subcommand-help`; markdown report
+- [x] Check criteria first: violated spec ⇒ non-zero exit naming the spec and the
+       witnessing nodes; all pass ⇒ zero; `--probe` graphs trigger non-triviality
+       warnings without gating; single-document JSON with `--json`
+- [x] `graphos intentcheck --specs FILE [--graph G] [--probe G]... [--json]` —
+       registered with helper + example per `cli-subcommand-help`; markdown report
 
 ### 5.2 `graphos impact`
-- [ ] Check criteria first: obligations listed with per-node discharge status
-      (ack / rule name / open); `--gate` exits non-zero unless admissible; acks are
-      recorded in the report (audit trail)
-- [ ] `graphos impact --before G --after G' [--specs FILE] [--new-spec NAME]
-      [--ack ID]... [--json] [--gate]` — registered with helper + example
+- [x] Check criteria first: obligations listed with per-node discharge status
+       (ack / rule name / open); `--gate` exits non-zero unless admissible; acks are
+       recorded in the report (audit trail)
+- [x] `graphos impact --before G --after G' [--specs FILE] [--new-spec NAME]
+       [--ack ID]... [--json] [--gate]` — registered with helper + example
 
 ## 6. Conformance (last)
 
 ### 6.1 Self-check and validation
-- [ ] Synthetic before/after pair from the toy instance run through `graphos impact
-      --gate`: change A (schema field without contract field) rejected, change B
-      admitted
+- [x] Synthetic before/after pair from the toy instance run through `graphos impact
+       --gate`: change A (schema field without contract field) rejected, change B
+       admitted
+       (verified: `graph-omission.json` → exit 1 `Regression "schemaContract" "6"`;
+       `graph-admitted.json` → exit 0; fixtures in `conformance/`)
 - [ ] `cabal build` + `cabal test` green; `cd lean && lake build` green, zero `sorry`,
-      in CI beside them
-- [ ] `openspec validate intent-graph-verification` passes; tick every scenario in the
-      PR description
+       in CI beside them
+- [x] `openspec validate intent-graph-verification` passes; tick every scenario in the
+       PR description
+
+> **Unit 5 + conformance completion note (2026-10-16)** — CLI and conformance are
+> implemented and verified. `cabal build lib:graphos exe:graphos` green under `-Werror`;
+> `openspec validate intent-graph-verification` passes; `lake build` succeeds (exit 0).
+> The four `sorry`s at lines 336/343/350/365 are the pre-existing, documented O1–O4
+> obligations (task 1.2), not in scope here. `cabal test` is blocked by two untracked
+> unit-3 spec files (`tests/Graphos/Domain/Intent/Intent/{Classifier,Projection}Spec.hs`)
+> that declare module names not matching their path and import unit-3 modules
+> (`Graphos.Domain.Intent.Classifier/.Projection`) which are themselves uncommitted and
+> do not compile under `-Werror` (`No instance for 'Eq KindRule'`, Classifier.hs:109).
+> Those are out of scope for AVI-963 (unit 5); wiring them requires closing unit 3.

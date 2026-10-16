@@ -212,7 +212,13 @@ library
                      -- Domain - Scaffold
                      Graphos.Domain.Scaffold
                      -- CLI
-                     Graphos.CLI.Parser
+                      Graphos.CLI.Parser
+                      -- Domain - Intent graph verification (units 4/5)
+                       Graphos.Domain.IntentCheck
+                       Graphos.Domain.Impact
+                      -- UseCase - Intent graph verification (units 4/5)
+                       Graphos.UseCase.IntentCheck
+                       Graphos.UseCase.Impact
 
   other-modules:
                     Graphos.Domain.HexColor
