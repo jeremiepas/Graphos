@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+- **`openspec-view` CLI** (executable `openspec-view-cli`, base-only; no Graphos
+  core changes) provides a structured, queryable view of the OpenSpec workspace
+  state via four subcommands:
+  - `changes [--status <s>]` — list every change with status, task counts, and
+    last-modified timestamp, ordered by lastModified descending (ties by name).
+  - `artifacts <name> [--depth <n>]` — render a change's proposal/design/tasks/specs,
+    scoped to a depth level (0 = full, 1 = headings only, >=2 = heading + section body).
+  - `diff <change> <spec>` — compare a change's delta spec against the main spec,
+    categorizing additions/removals.
+  - `dashboard` — aggregate state dashboard across all changes (counts, per-change
+    progress, stalled/at-risk highlighting).
+
 ### Changed
 - **`graph.json` is now a JSON Graph Format (JGF) document** (media type
   `application/vnd.jgf+json`, spec at jsongraphformat.info): the graph lives

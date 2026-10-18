@@ -318,6 +318,19 @@ executable graphos
   ghc-options:    -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base
+
+-- ───────────────────────────────────────────────
+-- openspec-view-cli: workspace metadata CLI (base-only)
+-- ───────────────────────────────────────────────
+executable openspec-view-cli
+  import:         shared
+  main-is:        Main.hs
+  hs-source-dirs: openview
+  build-depends:
+      base
+      , directory
+      , time
+      , openspec-view
     , graphos
     , optparse-applicative >= 0.17
     , text
