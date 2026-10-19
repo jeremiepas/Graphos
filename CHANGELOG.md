@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+- **`openspec-view` capability** — a dependency-free workspace-metadata tool
+  (built on `base` only; no new dependencies) that provides a structured,
+  queryable view of the OpenSpec workspace under `openspec/changes/`. It ships
+  as the `openspec-view` executable (`app/OpenSpecView/Main.hs`, modules under
+  `openspec-view/OpenSpecView/`) with four subcommands:
+  - `openspec-view changes [--status <state>]` — list all changes with status,
+    task counts, and last-modified timestamp (T1, T2, T3).
+  - `openspec-view artifacts <change> --depth SUMMARY|FULL|SECTIONS` — browse a
+    change's proposal, specs, design, and tasks at three scope levels (T4, T8).
+  - `openspec-view diff <change>` — compare the change's delta specs against the
+    main specs under `openspec/specs/` (T5).
+  - `openspec-view dashboard [--status <state>]` — aggregate per-change
+    progress and highlight stalled/behind changes (T6, T9).
+  - Global flags `--changes-root <dir>` and `--specs-root <dir>` override the
+    default `openspec/changes` / `openspec/specs` locations.
+  - **Impact**: no changes to Graphos core; this is a workspace metadata tool
+    that reads the existing OpenSpec directory structure. Unit tests live in
+    `tests/OpenSpecView/*Spec.hs`.
+
 ### Changed
 - **`graph.json` is now a JSON Graph Format (JGF) document** (media type
   `application/vnd.jgf+json`, spec at jsongraphformat.info): the graph lives

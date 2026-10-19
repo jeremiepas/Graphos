@@ -295,7 +295,7 @@ library
 -- ───────────────────────────────────────────────
 -- openspec-view: workspace metadata viewer (base-only)
 -- ───────────────────────────────────────────────
-library openspec-view
+library openspec-view-lib
   import:          shared
   hs-source-dirs:  openspec-view
   exposed-modules:
@@ -330,6 +330,19 @@ executable graphos
     , time
     , yaml
     , text-short           >= 0.1
+
+-- ───────────────────────────────────────────────
+-- openspec-view: workspace metadata viewer CLI (base-only)
+-- ───────────────────────────────────────────────
+executable openspec-view
+  import:         shared
+  main-is:        OpenSpecView/Main.hs
+  hs-source-dirs: app
+  build-depends:
+      base
+    , directory
+    , time
+    , openspec-view-lib
 
 -- ───────────────────────────────────────────────
 -- Test Suite
@@ -438,9 +451,9 @@ test-suite graphos-test
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec
   build-depends:
        base
-     , graphos
-     , openspec-view
-     , hspec                >= 2.10
+      , graphos
+      , openspec-view-lib
+      , hspec                >= 2.10
     , hspec-discover       >= 2.10
     , QuickCheck           >= 2.14
     , aeson
