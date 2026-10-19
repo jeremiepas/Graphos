@@ -20,7 +20,7 @@
 
 ## Phase 3: Integration (dependency: T3, T4, T5, T6)
 
-- [ ] **T7: Add CLI subcommands** — Wire up `openspec view changes`, `openspec view artifacts`, `openspec view diff`, `openspec view dashboard` subcommands.
+- [x] **T7: Add CLI subcommands** — Wire up `openspec view changes`, `openspec view artifacts`, `openspec view diff`, `openspec view dashboard` subcommands.
   - Check: All four subcommands execute without error
 - [ ] **T8: Add depth level support** — Implement summary/full/sections depth levels for artifact viewer.
   - Check: Each depth level produces correctly scoped output
