@@ -158,8 +158,17 @@ mergeGraphs old new =
       mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
                       (gEdges old <> gEdges new)
-      mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
-      mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
+      -- Rebuild adjacency from the merged edges using the exact buildGraph
+      -- construction, so a folded incremental merge is structurally identical
+      -- to a full build over the same edges (AVI-559 / G2 confluence). Note:
+      -- <> is Data.Map.union (left-wins), matching buildGraph, NOT
+      -- unionWith Set.union, which would over-merge backward adjacency.
+      fwdAdj        = Map.fromListWith Set.union
+          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems mergedEdges]
+      reverseParts  = Map.fromListWith Set.union
+          [(edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems mergedEdges]
+      mergedFwd     = fwdAdj
+      mergedBwd     = if directed then reverseParts else reverseParts <> fwdAdj
       mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
                       (Just a, Just b) -> Just (a <> b)
                       (Just a, Nothing) -> Just a
