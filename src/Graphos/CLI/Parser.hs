@@ -63,6 +63,11 @@ data Command
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
+
+  | OpenspecChangesCmd
+  | OpenspecDashboardCmd
+  | OpenspecArtifactsCmd FilePath
+  | OpenspecDiffCmd FilePath (Maybe FilePath)
   deriving (Show, Eq)
 
 pipelineOpts :: Parser PipelineConfig
@@ -313,9 +318,48 @@ migrateGraphOpts = MigrateGraphCmd
   <$> strArgument (metavar "GRAPH" <> help "Path to a graph.json in the legacy top-level format")
   <*> optional (strOption (long "output" <> short 'o' <> metavar "PATH" <> help "Output path (default: overwrite GRAPH in place)"))
 
+-- | @openspec view@ command family: inspect the openspec workspace.
+-- The surface is @graphos openspec view changes|artifacts|diff|dashboard@.
+openspecViewOpts :: Parser Command
+openspecViewOpts = subparser
+  ( command "view"
+      (info (openspecViewCmdOpts <**> helper)
+        (progDesc "Inspect the openspec workspace"))
+    )
+
+-- | The @view@ sub-verb. Each subcommand is its own top-level parser so the
+-- argument shapes stay readable and avoid deep paren nesting.
+openspecViewCmdOpts :: Parser Command
+openspecViewCmdOpts = subparser
+  ( command "changes" (info (openspecChangesOpts <**> helper) (progDesc "List active changes in the openspec workspace"))
+    <> command "dashboard" (info (openspecDashboardOpts <**> helper) (progDesc "Show the openspec state dashboard"))
+    <> command "artifacts" (info (openspecArtifactsOpts <**> helper) (progDesc "Show artifacts (proposal, specs, tasks) for a change"))
+    <> command "diff" (info (openspecDiffOpts <**> helper) (progDesc "Diff a base spec against a delta spec"))
+    )
+
+-- | @openspec view changes@: list active changes under the openspec root.
+openspecChangesOpts :: Parser Command
+openspecChangesOpts = pure OpenspecChangesCmd
+
+-- | @openspec view dashboard@: build and show the state dashboard.
+openspecDashboardOpts :: Parser Command
+openspecDashboardOpts = pure OpenspecDashboardCmd
+
+-- | @openspec view artifacts <CHANGE_DIR>@: show a change's artifacts.
+openspecArtifactsOpts :: Parser Command
+openspecArtifactsOpts = OpenspecArtifactsCmd
+  <$> argument str (metavar "CHANGE_DIR" <> help "Directory containing proposal.md / specs/ artifacts")
+
+-- | @openspec view diff <BASE_SPEC> [<DELTA_SPEC>]: diff two spec.md files.
+openspecDiffOpts :: Parser Command
+openspecDiffOpts = OpenspecDiffCmd
+  <$> argument str (metavar "BASE_SPEC" <> help "Baseline spec.md")
+  <*> optional (argument str (metavar "DELTA_SPEC" <> help "Delta spec.md (omit to treat the baseline as entirely new)") :: Parser FilePath)
+
 commandOpts :: Parser Command
 commandOpts = subparser
-  ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
+  ( command "openspec" (info openspecViewOpts (progDesc "Inspect the openspec workspace: view changes|artifacts|diff|dashboard"))
+    <> command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
   <> command "cypher" (info cypherOpts (progDesc "Run an openCypher/GQL query (read-only unless --write)"))
   <> command "path"  (info (pathOpts <**> helper) (progDesc "Find shortest path between two nodes"))
   <> command "explain" (info (explainOpts <**> helper) (progDesc "Explain a node"))

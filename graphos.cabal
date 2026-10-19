@@ -231,6 +231,7 @@ library
                       Graphos.OpenSpecView.List
                       Graphos.OpenSpecView.ArtifactView
                       Graphos.OpenSpecView.SpecDiff
+                      Graphos.OpenSpecView.Dashboard
 
   other-modules:
                     Graphos.Domain.HexColor
@@ -402,6 +403,7 @@ test-suite graphos-test
     Graphos.OpenSpecView.ListSpec
     Graphos.OpenSpecView.ArtifactViewSpec
     Graphos.OpenSpecView.SpecDiffSpec
+    Graphos.OpenSpecView.DashboardSpec
     Graphos.Regression.ContextNoiseRegressionSpec
     Graphos.Infrastructure.Export.HTMLSpec
     Graphos.Infrastructure.Export.JGFSpec

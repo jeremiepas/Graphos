@@ -24,6 +24,10 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
+import Graphos.OpenSpecView.List (parseChanges, renderChangeList)
+import Graphos.OpenSpecView.ArtifactView (parseArtifacts, renderArtifact, DepthLevel(..))
+import Graphos.OpenSpecView.SpecDiff (diffSpecSummary, parseRequirements)
+import Graphos.OpenSpecView.Dashboard (collectDashboard, renderDashboard, DashboardConfig(..))
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
@@ -776,6 +780,29 @@ main = do
             then BL.putStr (encode (filterReport checks report)) >> putStrLn ""
             else TIO.putStrLn (renderSpecReport (filterReport checks report))
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
+
+    OpenspecChangesCmd -> do
+      cis <- parseChanges "openspec"
+      TIO.putStrLn (renderChangeList cis)
+
+    OpenspecDashboardCmd -> do
+      now <- TCC.getCurrentTime
+      d <- collectDashboard "openspec" (DashboardConfig 30 now)
+      TIO.putStrLn (renderDashboard d)
+
+    OpenspecArtifactsCmd changeDir -> do
+      arts <- parseArtifacts changeDir
+      TIO.putStrLn (T.intercalate "\n" (map (renderArtifact DepthFull) arts))
+
+    OpenspecDiffCmd base mDelta -> do
+      case mDelta of
+        Nothing -> do
+          txt <- readFile base
+          TIO.putStrLn (diffSpecSummary (Just (parseRequirements txt)) [])
+        Just delta -> do
+          mainTxt <- readFile base
+          deltaTxt <- readFile delta
+          TIO.putStrLn (diffSpecSummary (Just (parseRequirements mainTxt)) (parseRequirements deltaTxt))
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
       case mConfigPath of
