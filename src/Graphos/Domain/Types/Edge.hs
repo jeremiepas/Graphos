@@ -45,6 +45,10 @@ data Relation
   | Supersedes
   | Constrains
   | Documents
+  -- Intent-graph-verification relations: a test exercises its target;
+  -- maps models parallel-structure correspondence (schema field <-> contract field).
+  | Tests
+  | Maps
   deriving (Eq, Show, Generic, Ord, Bounded, Enum)
 
 instance NFData Relation
@@ -74,6 +78,8 @@ relationToText = \case
   Supersedes    -> "supersedes"
   Constrains    -> "constrains"
   Documents     -> "documents"
+  Tests         -> "tests"
+  Maps          -> "maps"
 
 textToRelation :: Text -> Maybe Relation
 textToRelation = \case
@@ -91,6 +97,8 @@ textToRelation = \case
   "supersedes"     -> Just Supersedes
   "constrains"     -> Just Constrains
   "documents"      -> Just Documents
+  "tests"          -> Just Tests
+  "maps"           -> Just Maps
   _            -> Nothing
 
 newtype Confidence = Confidence Double

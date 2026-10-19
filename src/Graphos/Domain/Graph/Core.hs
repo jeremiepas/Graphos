@@ -238,21 +238,22 @@ makeStubNode filePath =
       hashPrefix = T.pack $ show dirHash
       nodeId' = hashPrefix <> T.pack "_" <> name
    in Node
-     { nodeId           = nodeId'
-     , nodeLabel        = fromText name
-     , nodeFileType     = CodeFile
+      { nodeId           = nodeId'
+      , nodeLabel        = fromText name
+      , nodeFileType     = CodeFile
       , nodeSourceFile   = fromText (T.pack filePath)
       , nodeSource       = Nothing
-     , nodeLineStart    = Nothing
-     , nodeCommunityId  = Nothing
-     , nodeDegree       = Nothing
-     , nodeIsBridge     = Nothing
-     , nodeExtra        = Nothing
-     , nodeLineEnd      = Nothing
-     , nodeKind         = Nothing
-     , nodeSignature    = Nothing
-     , nodePresentBits  = 0
-     }
+      , nodeLineStart    = Nothing
+      , nodeCommunityId  = Nothing
+      , nodeDegree       = Nothing
+      , nodeIsBridge     = Nothing
+      , nodeExtra        = Nothing
+      , nodeLineEnd      = Nothing
+      , nodeKind         = Nothing
+      , nodeSignature    = Nothing
+      , nodeBodyHash     = Nothing
+      , nodePresentBits  = 0
+      }
 
 -- | Check if a node is a file-level hub (synthetic AST node)
 isFileNode :: Graph -> Node -> Bool
