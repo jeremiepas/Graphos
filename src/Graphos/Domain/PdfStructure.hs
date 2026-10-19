@@ -372,6 +372,7 @@ makePdfFileNode filePath title =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText "File")
+        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
         }
 
@@ -429,6 +430,7 @@ makeSectionNode filePath section =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText (T.pack levelTag))
+        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
         }
 
@@ -458,6 +460,7 @@ makeParagraphNode filePath para =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText "Paragraph")
+        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
         }
 

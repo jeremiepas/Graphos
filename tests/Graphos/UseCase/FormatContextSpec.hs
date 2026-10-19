@@ -31,6 +31,7 @@ spec = describe "FormatContext" $ do
             , nodeLineEnd      = Just 50
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           result = formatNodeCompact "test_node" node
@@ -52,6 +53,7 @@ spec = describe "FormatContext" $ do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           result = formatNodeCompact "test_node2" node

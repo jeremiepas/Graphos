@@ -248,6 +248,7 @@ externalPackageNode pkg = Node
   , nodeDegree     = Nothing
   , nodeIsBridge   = Nothing
   , nodeExtra      = Just (object [ "layer" .= ("external" :: Text) ])
+  , nodeBodyHash = Nothing
   , nodePresentBits = bitNodeKind
   }
 

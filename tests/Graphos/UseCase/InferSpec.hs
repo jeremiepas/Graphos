@@ -17,13 +17,13 @@ import Graphos.UseCase.Infer (inferCommunityBridges, inferCodeDocEdges, inferSem
 
 -- Helpers
 testNode :: Text -> Node
-testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid = Node nid (fromText nid) CodeFile (fromText "test.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 docNode :: Text -> Text -> Node
-docNode nid lbl = Node nid (fromText lbl) DocFile (fromText "doc.md") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+docNode nid lbl = Node nid (fromText lbl) DocFile (fromText "doc.md") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 codeNode :: Text -> Text -> Node
-codeNode nid lbl = Node nid (fromText lbl) CodeFile (fromText "code.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+codeNode nid lbl = Node nid (fromText lbl) CodeFile (fromText "code.hs") (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 testEdge :: Text -> Text -> Edge
 testEdge src tgt = Edge (EdgeId (src <> "->" <> tgt)) src tgt Calls 1.0 (Confidence 1.0) Nothing

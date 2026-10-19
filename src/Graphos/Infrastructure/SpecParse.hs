@@ -113,6 +113,7 @@ mkNode nid label kind fp line =
         , nodeDegree = Nothing
         , nodeIsBridge = Nothing
         , nodeExtra = Nothing
+        , nodeBodyHash = Nothing
         , nodePresentBits = 0
         }
   in n { nodePresentBits = computePresentBits n }

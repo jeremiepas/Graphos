@@ -20,6 +20,8 @@ Dependency-free Lean 4 (core only, no Mathlib).
 ```bash
 lake build                              # with a Lean 4 toolchain (≥ 4.29)
 nix shell nixpkgs#lean4 -c lake build   # or via nix
+# confirmed-working binary (Lean 4.29.1 in the nix store):
+/nix/store/cwilxazl2n8f59lksc4xihx560485ci8-lean4-4.29.1/bin/lake build
 ```
 
 ## Guarantee → theorem map
@@ -33,6 +35,17 @@ nix shell nixpkgs#lean4 -c lake build   # or via nix
 | (O2) Fuel \|V\| suffices, under well-formedness (edge endpoints declared) — the theorem that dictates the exporter contract | `reach_complete` | **open (`sorry`)** |
 | (O3) The impact set is closed under reverse dependency | `impact_closed` | **open (`sorry`)** |
 | (O4) The `stableSignature` discharge rule preserves observable behaviour (reachable signature/label pairs) — the safety argument required of every rule | `stableSignature_safe` | **open (`sorry`)** |
+
+## Continuation (O1–O4)
+
+These four obligations are `open (sorry)` and are closed by task 1.2: replace the
+`sorry` at lines 336/343/350/365 with proof terms and run `lake build` to green
+with **zero `sorry`**, then flip these rows to "proved". O1/O2/O3 close by
+structural induction on saturation / `Path` (fuel `|V|`); O4 requires care over
+the scope of `observable` vs the `stableSignature` discharge rule — apply only the
+minimal scope-consistent refinement needed and note it here. Toy-instance `example`s
+must stay kernel-accepted. Closure unblocks the downstream Haskell units
+(`intent-graph-verification` O1–O4), now wired as blocked-by this unit.
 
 ## What the model abstracts
 

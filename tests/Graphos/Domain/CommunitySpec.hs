@@ -574,6 +574,7 @@ testNode nid = Node
   , nodeLineEnd = Nothing
   , nodeKind = Nothing
   , nodeSignature = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 
@@ -591,6 +592,7 @@ testDocNode nid = Node
   , nodeLineEnd = Nothing
   , nodeKind = Nothing
   , nodeSignature = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 
@@ -608,6 +610,7 @@ testNodeWithKind nid kind = Node
   , nodeLineEnd = Nothing
   , nodeKind = fmap fromText kind
   , nodeSignature = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 
@@ -625,6 +628,7 @@ testNodeWithFile nid ft = Node
   , nodeLineEnd = Nothing
   , nodeKind = Nothing
   , nodeSignature = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

@@ -431,6 +431,7 @@ symbolToNodes filePath symbols =
     , nodeLineEnd      = Just $ posLine (rangeEnd (dsrRange sym))
     , nodeKind         = Just (fromText $ symbolKindToText (dsrKind sym))
     , nodeSignature    = Nothing
+    , nodeBodyHash = Nothing
     , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
     }
   | sym <- symbols
@@ -529,6 +530,7 @@ makeStubNode filePath =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
+    , nodeBodyHash = Nothing
     , nodePresentBits  = 0
     }
 

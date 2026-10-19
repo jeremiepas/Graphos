@@ -121,5 +121,6 @@ pdfStubNode filePath =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText "File")
+        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
         }

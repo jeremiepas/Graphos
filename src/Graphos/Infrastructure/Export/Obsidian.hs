@@ -69,7 +69,7 @@ writeCommunityNote g dir cohesion (cid, members) = do
       filepath = dir ++ "/communities/" ++ filename
       score = Map.findWithDefault 0.0 cid cohesion
       memberList = T.intercalate ", " [formatNodeLink nb | nid <- members
-                                          , let nb = Map.findWithDefault (Node nid (fromString "unknown") CodeFile (fromString "") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0) nid (gNodes g)]
+                                          , let nb = Map.findWithDefault (Node nid (fromString "unknown") CodeFile (fromString "") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0) nid (gNodes g)]
       content = T.unlines
         [ "# Community " <> T.pack (show cid)
         , ""

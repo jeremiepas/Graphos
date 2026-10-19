@@ -384,6 +384,7 @@ extractImageSource appEnv config (EmbeddedImage archivePath mediaPath) = do
       , nodeDegree = Nothing
       , nodeIsBridge = Nothing
       , nodeExtra = Nothing
+      , nodeBodyHash = Nothing
       , nodePresentBits = bitNodeKind
       }
 
@@ -523,6 +524,7 @@ collapsedNode fp count = Node
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Just collapsedNodeExtra
+  , nodeBodyHash = Nothing
   , nodePresentBits  = bitNodeKind .|. bitNodeExtra
   }
   where

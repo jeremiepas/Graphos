@@ -22,6 +22,7 @@ mkNode = Node
   , nodeDegree      = Just 5
   , nodeIsBridge    = Just False
   , nodeExtra       = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

@@ -310,6 +310,7 @@ executable graphos
   build-depends:
       base
     , graphos
+    , openspec-view
     , optparse-applicative >= 0.17
     , text
     , containers
