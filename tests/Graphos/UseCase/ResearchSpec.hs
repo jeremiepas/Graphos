@@ -32,6 +32,7 @@ testNode nid = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

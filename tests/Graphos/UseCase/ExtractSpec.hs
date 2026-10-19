@@ -22,6 +22,7 @@ pdfStubNode path = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 
@@ -39,6 +40,7 @@ makeStubNode path = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

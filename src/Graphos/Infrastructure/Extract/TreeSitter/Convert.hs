@@ -204,6 +204,7 @@ tsNodeToGraphEdges gran filePath parentLabel node =
                         , nodeDegree       = Nothing
                         , nodeIsBridge     = Nothing
                         , nodeExtra        = Nothing
+                        , nodeBodyHash = Nothing
                         , nodePresentBits  = bitNodeKind
                         }
                   in ([edge], [targetNode])
@@ -269,6 +270,7 @@ makeNode filePath node = Node
   , nodeLineEnd      = Just (tsnEndRow node + 1)
            , nodeKind         = Just (fromText (T.pack $ tsTypeToKind (tsnType node)))
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
   }
 

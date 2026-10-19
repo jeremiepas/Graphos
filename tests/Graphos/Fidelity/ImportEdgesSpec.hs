@@ -243,8 +243,8 @@ runRealCorpus = do
 -- | A minimal graph with an optional @imports@ edge between two file nodes.
 simpleGraphWithEdge :: Bool -> FilePath -> FilePath -> LabeledGraph
 simpleGraphWithEdge withEdge fileA fileB =
-  let nodeA = Node "a" (fromText "A") CodeFile (fromText (T.pack fileA)) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
-      nodeB = Node "b" (fromText "B") CodeFile (fromText (T.pack fileB)) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+  let nodeA = Node "a" (fromText "A") CodeFile (fromText (T.pack fileA)) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+      nodeB = Node "b" (fromText "B") CodeFile (fromText (T.pack fileB)) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
       edge  = Edge (EdgeId "e1") "a" "b" Imports 1.0 (Confidence 1.0) Nothing
       (edges, adjFwd, adjBack) = if withEdge
         then ( Map.singleton (EdgeId "e1") edge
