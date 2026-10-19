@@ -21,8 +21,8 @@ spec = do
       toJSON (Confidence 1.0) `shouldBe` toJSON (1.0 :: Double)
 
   describe "Relation" $ do
-    it "has exactly 14 constructors (8 code + 5 spec-artifact + Documents per deterministic doc-code edges)" $ do
-      length [minBound .. maxBound :: Relation] `shouldBe` 14
+    it "has exactly 16 constructors (8 code + 6 spec-artifact + Documents + 2 intent-graph per deterministic doc-code edges)" $ do
+      length [minBound .. maxBound :: Relation] `shouldBe` 16
 
     it "round-trips through text representation" $ do
       property $ \rel -> textToRelation (relationToText rel) == Just rel
