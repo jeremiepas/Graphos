@@ -255,7 +255,12 @@ jobs:
         run: nix shell github:NixOS/nixpkgs/319e4cebef10cbb636c6ea392137b52ad105336a#elmPackages.elm github:NixOS/nixpkgs/319e4cebef10cbb636c6ea392137b52ad105336a#elmPackages.elm-test -c elm-test
 
   haddock:
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-24.04: `ubuntu-latest` began rolling out Ubuntu 26.04 on
+    # Oct 19, 2026 and broke `cabal haddock all` (build/test/studio-contract still
+    # passed on 26, so this is the Ubuntu 26 image, not the Node 24 action
+    # runtimes, which were already default since June 2026). No Haskell source
+    # changed between the green and red runs, so this is purely environmental.
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.actor == 'jeremiepas'
     needs: build
     steps:
