@@ -169,12 +169,6 @@ containmentRatio :: Int -> Int -> Double
 containmentRatio _ 0 = 0.0
 containmentRatio n d = fromIntegral n / fromIntegral d
 
--- | Size of the intersection between the new community and a cached entry's
--- members.
-intersectionSizeOf :: Set NodeId -> LabelCacheEntry -> Int
-intersectionSizeOf newMembers e =
-  Set.size (Set.intersection newMembers (Set.fromList (lceMembers e)))
-
 -- | Resolve a cached label for a new community.
 --
 -- The pipeline consults only entries recorded under the current model. An exact
@@ -199,8 +193,9 @@ matchCommunity entries model newMembers =
               kept    = filter keep scored
           in case kept of
                 [] -> Nothing
-                _  -> case head (sortBy cmp kept) of
-                          (_, _, e) -> Just (e, FuzzyMatch)
+                _  -> case sortBy cmp kept of
+                          ((_, _, e) : _) -> Just (e, FuzzyMatch)
+                          []              -> Nothing
           where
             toScored :: (Int, LabelCacheEntry) -> (Int, Int, LabelCacheEntry)
             toScored (position, e) =
