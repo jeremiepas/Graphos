@@ -114,6 +114,10 @@ bitNodeExtra = 1 `shiftL` 7
 bitNodeSource :: Word64
 bitNodeSource = 1 `shiftL` 8
 
+{-# NOINLINE bitNodeBodyHash #-}
+bitNodeBodyHash :: Word64
+bitNodeBodyHash = 1 `shiftL` 9
+
 -- | A node in the knowledge graph
 --
 -- Compact representation:
@@ -137,6 +141,7 @@ data Node = Node
   , nodeDegree       :: !(Maybe Int)
   , nodeIsBridge     :: !(Maybe Bool)
   , nodeExtra        :: !(Maybe Value)
+  , nodeBodyHash     :: !(Maybe ShortText)
     -- Compact representation: bit-field for optional field presence
   , nodePresentBits  :: !Word64
   } deriving (Eq, Show, Generic)
@@ -156,15 +161,16 @@ clearFieldPresent bits flag = bits .&. complement flag
 -- | Compute the present bits for a Node given its optional fields.
 computePresentBits :: Node -> Word64
 computePresentBits n = foldr (.|.) 0
-    [ if isJust (nodeLineStart n) then bitNodeLineStart      else 0
-    , if isJust (nodeLineEnd n)   then bitNodeLineEnd        else 0
-    , if isJust (nodeSignature n) then bitNodeSignature       else 0
-    , if isJust (nodeCommunityId n) then bitNodeCommunityId   else 0
-    , if isJust (nodeKind n)      then bitNodeKind             else 0
-    , if isJust (nodeDegree n)    then bitNodeDegree            else 0
-    , if isJust (nodeIsBridge n)  then bitNodeIsBridge          else 0
-    , if isJust (nodeExtra n)     then bitNodeExtra             else 0
-    , if isJust (nodeSource n)    then bitNodeSource            else 0
+    [ if isJust (nodeLineStart n)   then bitNodeLineStart      else 0
+    , if isJust (nodeLineEnd n)     then bitNodeLineEnd        else 0
+    , if isJust (nodeSignature n)   then bitNodeSignature       else 0
+    , if isJust (nodeCommunityId n) then bitNodeCommunityId    else 0
+    , if isJust (nodeKind n)        then bitNodeKind            else 0
+    , if isJust (nodeDegree n)      then bitNodeDegree          else 0
+    , if isJust (nodeIsBridge n)    then bitNodeIsBridge        else 0
+    , if isJust (nodeExtra n)       then bitNodeExtra           else 0
+    , if isJust (nodeSource n)      then bitNodeSource          else 0
+    , if isJust (nodeBodyHash n)    then bitNodeBodyHash        else 0
     ]
 
 instance NFData FileType
@@ -175,7 +181,7 @@ instance NFData Node where
        rnf (nodeLabel n) `seq`
        rnf (nodeFileType n) `seq`
        rnf (nodeSourceFile n) `seq`
-    rnf (nodeSource n) `seq`
+       rnf (nodeSource n) `seq`
        rnf (nodeLineStart n) `seq`
        rnf (nodeLineEnd n) `seq`
        rnf (nodeSignature n) `seq`
@@ -184,6 +190,7 @@ instance NFData Node where
        rnf (nodeDegree n) `seq`
        rnf (nodeIsBridge n) `seq`
        rnf (nodeExtra n) `seq`
+       rnf (nodeBodyHash n) `seq`
        rnf pb
 
 instance ToJSON Node where
@@ -201,6 +208,7 @@ instance ToJSON Node where
     , "degree"       .= nodeDegree n
     , "is_bridge"    .= nodeIsBridge n
     , "extra"        .= nodeExtra n
+    , "body_hash"    .= fmap toText (nodeBodyHash n)
     ]
 
 instance FromJSON Node where
@@ -218,6 +226,7 @@ instance FromJSON Node where
     degreeVal      <- v .:? "degree"
     isBridgeVal    <- v .:? "is_bridge"
     extraVal       <- v .:? "extra"
+    bodyHashVal    <- v .:? "body_hash"
 
     let presentBits = foldr (.|.) 0
           [ if isJust lineStartVal   then bitNodeLineStart      else 0
@@ -231,6 +240,7 @@ instance FromJSON Node where
           -- The writer always emits the nullable "source" key; a JSON null is
           -- absence (cache-tolerant multi-source round-trip), not presence.
           , if sourceIsText then bitNodeSource else 0
+          , if isJust bodyHashVal    then bitNodeBodyHash        else 0
           ]
         sourceIsText = case sourceVal of
           Just (String _) -> True
@@ -253,6 +263,7 @@ instance FromJSON Node where
       , nodeDegree       = degreeVal
       , nodeIsBridge     = isBridgeVal
       , nodeExtra        = extraVal
+      , nodeBodyHash     = fmap fromText bodyHashVal
       , nodePresentBits  = presentBits
       }
 

@@ -64,6 +64,8 @@ library
                     Graphos.Domain.Graph.Analysis
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.SpecCheck
+                    Graphos.Domain.IntentCheck
+                    Graphos.Domain.Impact
                     Graphos.UseCase.SpecCheck
                     Graphos.UseCase.SpecExtract
                     Graphos.UseCase.SpecAdjudicate
@@ -80,8 +82,10 @@ library
                      Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
-                   Graphos.Domain.Extraction
-                    Graphos.Domain.Labeling
+Graphos.Domain.Extraction
+                     Graphos.Domain.Intent.Classifier
+                     Graphos.Domain.Intent.Projection
+                     Graphos.Domain.Labeling
                     Graphos.Domain.Logging
                     -- Use Cases
                      Graphos.UseCase.Pipeline
@@ -344,6 +348,7 @@ test-suite graphos-test
   other-modules:
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
+    Graphos.Domain.IntentGraphVerificationSpec
     Graphos.Domain.ConfigSpec
     Graphos.Domain.EmbeddingSpec
     Graphos.Domain.Config.IngestSpec
@@ -434,6 +439,8 @@ test-suite graphos-test
       OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.WatchCacheSpec
+    Graphos.Domain.Intent.ClassifierSpec
+    Graphos.Domain.Intent.ProjectionSpec
     Graphos.Domain.Config.OutputSpec
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec
   build-depends:
@@ -471,6 +478,7 @@ test-suite graphos-test-focus
   hs-source-dirs: tests
   other-modules:
     Graphos.Domain.TypesSpec
+    Graphos.Domain.IntentGraphVerificationSpec
     Graphos.UseCase.DocLinkParitySpec
     Graphos.UseCase.FormatContextSpec
     Graphos.UseCase.InferDocumentSpec
