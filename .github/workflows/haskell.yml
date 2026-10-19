@@ -74,7 +74,11 @@ jobs:
         run: openspec validate --changes --json
 
   haddock:
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-24.04: `ubuntu-latest` began rolling out Ubuntu 26.04 on
+    # Oct 19, 2026 and broke `cabal haddock all` (build/test still passed on 26).
+    # Node 24 was already the default since June 2026 without breaking anything,
+    # so the regression is the Ubuntu 26 image, not the action runtimes.
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.actor == 'jeremiepas'
     needs: build-and-test
     steps:
