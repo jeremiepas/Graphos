@@ -280,6 +280,20 @@ where `eps` is a small tolerance (e.g. `2^-24`) accounting for `Double` rounding
 
 > **Constrains:** `modularity` (§2.2 wiring), `computeCommunityStats` (`Community.hs:92`), the fixtures in `tests/Graphos/Domain/CommunitySpec.hs` conventions (`testNode`, `cliqueEdges`, `buildGraph`).
 
+**Delivered by (AVI-1301).**
+- *Lean arm*: `formalization/lean/GraphosFormalization/Phase1/CrossCheckFixtures.lean`
+  pins every §5 row as concrete `EdgeGraph`/`Partition` data and proves its exact
+  `Qnum` (`by decide`); `formalization/lean/GraphosFormalization/Harness/CrossCheck.lean`
+  (`lake exe modularity-crosscheck`) evaluates `modularityNum` on those rows and
+  emits `formalization/lean/crosscheck/q-lean.tsv` (exact `num/den`).
+- *Haskell arm*: `tests/Graphos/Domain/ModularityCrossCheckSpec.hs` builds the
+  same fixtures through `extractionFromLists`/`buildGraph`, computes
+  `Q_hs = modularity g_f cm_f`, and asserts `|Q_lean − Q_hs| ≤ 2⁻²⁴` on all 11
+  (fixture, partition) rows, plus the §5 per-fixture invariants (fixtures 1–7).
+- *Drift guard*: `.github/workflows/lean.yml` re-runs
+  `lake exe modularity-crosscheck --check crosscheck/q-lean.tsv` (report-only),
+  so a Lean-side change that moves a value surfaces as table drift.
+
 ---
 
 ## 7. Acceptance-Criteria Mapping (AVI-618 checklist)

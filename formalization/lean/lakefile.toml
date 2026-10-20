@@ -18,3 +18,12 @@ name = "GraphosFormalization"
 [[lean_exe]]
 name = "ac3-cost"
 root = "GraphosFormalization.Harness.Ac3Cost"
+
+# AVI-1301: AVI-618 §6 Lean arm of the modularity cross-check. Evaluates the
+# exact `modularityNum` on the seven pinned §5 fixtures and prints the table the
+# Haskell test `ModularityCrossCheckSpec` compares against `modularity`
+# (|Q_lean - Q_hs| <= 2^-24). `--check` diffs against crosscheck/q-lean.tsv.
+# Not a default target, like ac3-cost.
+[[lean_exe]]
+name = "modularity-crosscheck"
+root = "GraphosFormalization.Harness.CrossCheck"
