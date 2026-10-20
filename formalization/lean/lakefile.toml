@@ -1,0 +1,12 @@
+# Graphos Lean formalization — separate verification companion.
+#
+# This is deliberately NOT a cabal component and has no dependency on the
+# Haskell build. It is built only by `.github/workflows/lean.yml`, which is
+# report-only (non-blocking). Requirements: docs/math-requirements/
+# AVI-616-consolidated-lean-formalization-requirements.md
+name = "GraphosFormalization"
+version = "0.1.0"
+defaultTargets = ["GraphosFormalization"]
+
+[[lean_lib]]
+name = "GraphosFormalization"
