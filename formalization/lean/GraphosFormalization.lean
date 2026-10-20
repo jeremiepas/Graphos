@@ -8,6 +8,8 @@
 
   Modules:
     * `GraphosFormalization.Basic`        — package skeleton / build smoke check.
+    * `GraphosFormalization.Phase1.Modularity` — Phase 1 modularity `Q` and
+      INV-Q0 (`modularity_edgesAbsent_zero`, AVI-618 §2).
     * `GraphosFormalization.Ext.Basic`    — Phase 2 objects and the merge operator.
     * `GraphosFormalization.Ext.Colimit`  — Phase 2 universal property
       (`mergedExtraction_isColimit`, AVI-620 §2).
@@ -15,5 +17,6 @@
   Maintenance owner: R&D cell.
 -/
 import GraphosFormalization.Basic
+import GraphosFormalization.Phase1.Modularity
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit

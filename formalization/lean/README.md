@@ -16,6 +16,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `lean-toolchain` | Pinned Lean 4 toolchain |
 | `GraphosFormalization.lean` | Root module (library entry point) |
 | `GraphosFormalization/Basic.lean` | Package skeleton / build smoke check |
+| `GraphosFormalization/Phase1/Modularity.lean` | Phase 1 modularity `Q`, INV-Q0: `modularity_edgesAbsent_zero` (AVI-618 §2) |
 | `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
 
@@ -37,8 +38,27 @@ build is a signal to the R&D cell, not a release gate.
 
 ## Status
 
-Phase 2 colimit layer in progress, authored under the requirements-layer
-authorship decomposition (AVI-948) with per-module requirement citations.
+Phase 1 modularity layer started; Phase 2 colimit layer in progress. Both are
+authored under the requirements-layer authorship decomposition (AVI-948) with
+per-module requirement citations.
+
+### Phase 1 — auditable modularity `Q` (AVI-618)
+
+| Artifact | Lean name | State |
+| --- | --- | --- |
+| §2 INV-Q0 — no-divide-by-zero / edges absent | `modularity_edgesAbsent_zero` | **proved** (`Phase1/Modularity.lean`), incl. 4-isolated-node fixture |
+| §2 INV-Q1 — range bound | `modularity_bounded` | pending (AVI-1294) |
+| §2 INV-Q2 — partition-only | `modularity_partitionOnly` | pending (AVI-1295) |
+| §2 INV-Q3 — local move non-decreasing | `modularity_localMoveNonDecreasing` | pending (AVI-1296) |
+| §2 INV-Q4 — deterministic summation | `modularity_deterministic` | pending (AVI-1297) |
+| §2 INV-Q5 — fixtures exact | `modularity_fixturesExact` | pending (AVI-1298) |
+
+`Phase1/Modularity.lean` also carries the shared objects those theorems build
+on (`SupportGraph`, `Partition`, `sigmaIn`, `sigmaTot`, `modularity`). `Q` is
+computed in `Float` (no Mathlib/Rat dependency) and pins `m = 0` to `0.0`,
+mirroring `Domain/Community.hs:151-167`.
+
+### Phase 2 — merged context graph as colimit (AVI-620)
 
 | Artifact (AVI-620) | Lean name | State |
 | --- | --- | --- |
@@ -47,7 +67,6 @@ authorship decomposition (AVI-948) with per-module requirement citations.
 | §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | pending (AVI-1303) |
 | §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | pending (AVI-1304) |
 | §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | pending (AVI-1306) |
-| Phase 1 auditable modularity `Q` (INV-Q0..Q5) | `modularity_*` | pending (AVI-1293..1298) |
 
 The colimit layer carries the consistency hypothesis explicitly
 (`familyConsistent`), so it stays valid regardless of how the AVI-949
