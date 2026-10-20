@@ -103,6 +103,30 @@
 
 **Reconciliation with AVI-524 §3.1.** Restates "strict colimit + order-independence" as a *named theorem*; the Lean author proves both (a) and (b); (b) is the concrete testable half.
 
+> **Authorship note (AVI-1303).** Proved in
+> `formalization/lean/GraphosFormalization/Ext/Strict.lean` as the bundled
+> `theorem mergedExtraction_strictColimit_orderIndependent`.
+> (a) is the binary universal property `mergedExtraction_strictColimit`:
+> `M = mergeExtractions A B` with the canonical legs `ι_A : A ↪ M`,
+> `ι_B : B ↪ M` receives every cocone `(g_A, g_B)` and the mediator
+> `u : M → X` is unique — uniqueness is derived from `Ext` being
+> poset-enriched (§1.1, `ViewEmbedding.unique`), and because both legs are
+> view-embeddings no separate compatibility hypothesis on the cocone is needed
+> (shared keys already agree in `X`).
+> (b) is `Extraction.merge_comm` for the binary case plus, for every
+> pairwise-consistent family `l`, `foldlMerge_perm` (`l ~ l' ⇒
+> foldl' l = foldl' l'`) and `foldlMerge_eq_foldr`
+> (`foldr l = foldl' l`). The mechanism is
+> `ExtView.union_comm` (left-biased `Map.union` commutes where the views agree)
+> feeding `unionList_perm`, so the whole fold collapses onto the order-free
+> `foldMerge` of `Ext/Basic.lean`. The `foldl'`/`foldr` divergence of §0.4 is
+> therefore *confined to conflicts* — exactly the §3.2 lax case, whose artifact
+> (AVI-1304) is the dual. Order-independence is thus conditional on the AVI-949
+> consistency guarantee, as the requirements anticipate.
+> Verified: `lake build` green on `leanprover/lean4 v4.14.0`; no `sorry`;
+> `#print axioms mergedExtraction_strictColimit_orderIndependent` reports only
+> `propext` and `Quot.sound`.
+
 ### 3.2 Inconsistent diagram ⇒ lax colimit + first/old-wins α → `mergedExtraction_laxColimit_oldWins` (hypotheses pinned; head-rnd correction M-5)
 
 > **Artifact.** The Lean formalization SHALL contain a lemma named `mergedExtraction_laxColimit_oldWins` (supersedes the CTE draft name `mergedExtraction_laxColimit_newWins`; see the correction banner).
