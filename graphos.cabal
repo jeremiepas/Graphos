@@ -78,6 +78,8 @@ library
                     Graphos.UseCase.SpecCheck
                     Graphos.UseCase.SpecExtract
                     Graphos.UseCase.SpecAdjudicate
+                    Graphos.UseCase.IntentCheck
+                    Graphos.UseCase.Impact
                     Graphos.Infrastructure.SpecParse
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
@@ -345,6 +347,7 @@ executable graphos
   build-depends:
       base
     , graphos
+    , openspec-view
     , optparse-applicative >= 0.17
     , text
     , containers
