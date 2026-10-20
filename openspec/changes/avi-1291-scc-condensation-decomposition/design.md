@@ -28,12 +28,13 @@ Adopts the mathematical register of `docs/math-requirements/AVI-518-shortest-pat
 
 | Req | Statement | Classification | Acceptance |
 |---|---|---|---|
-| G5-R1 | SCCs are the unique partition of `V` under `↔`; labeling deterministic (ascending seeds); INV-7 | new-feature | property (partition) + golden fixtures F1/F5 + INV-10 scenario |
+| G5-R1 | SCCs are the unique partition of `V` under `↔`; labeling deterministic (ascending seeds); INV-7 | requirement-creation (`stronglyConnectedComponents(WithCached)` exists, PR #30) | property (partition) + golden fixtures F1/F5 + INV-10 scenario |
 | G5-R2 | `cond(G)` is a DAG; topological order exists | new-feature | acyclicity assertion on fixtures |
-| G5-R3 | Reachability decided by hop-minimal `shortestPath` over `E`; DAG ⟺ singleton SCCs ∧ `ℓ = 0` (INV-8/9, INV-C5) | new-feature | golden fixture F3 + F2; forward-only traversal statement |
-| G5-R4 | SCC ≠ biconnected components / articulation points; no reuse | new-feature | disambiguation scenario (§1.4/§6.3) |
+| G5-R3a | Reachability decided by hop-minimal `shortestPath` over `E` (INV-8/9); forward-only traversal statement | requirement-creation (`shortestPathReachable` exists, PR #30) | golden fixture: `shortestPath a f == Just [a,b,c,d,f]`; INV-9 permutation property |
+| G5-R3b | `isAcyclicDirected`: DAG ⟺ singleton SCCs ∧ `ℓ = 0` | new-feature | fixtures F3 (self-loop) + F2 (DAG with undirected cycle) |
+| G5-R4 | SCC ≠ biconnected components / articulation points; no reuse | requirement-creation (constrains existing `Domain.Graph.Analysis`) | disambiguation scenario (§1.4/§6.3) |
 | G5-R5 | Connectivity decomposition coarsens SCC (connected/WCC/isolated; INV-C1/C3/C6) | new-feature | golden fixture F7 + property tests |
-| G5-R6 | Complexity `O(N + E)`; all-pairs forbidden (scale guard, GT-W4) | new-feature | complexity assertion on 78k/80k fixture |
+| G5-R6 | Complexity `O(N + E)`; all-pairs forbidden (scale guard, GT-W4) | requirement-creation (binds the new-feature routines as they land) | complexity assertion on 78k/80k fixture |
 
 ## 4. Surface grounding
 

@@ -2,7 +2,7 @@
 
 ### Requirement: SCC partition uniquely decomposes the node set (INV-7, Thm 2.2)
 
-The system SHALL provide `stronglyConnectedComponents :: Graph -> Map Int [NodeId]` whose values are the equivalence classes of mutual directed reachability `u ↔ v ⟺ (u ⤳ v) ∧ (v ⤳ u)` on the directed relation `E ⊆ V × V` (the ordered-pair projection of `gEdges`). The classes SHALL form a partition of `V`: `⋃_c comp c = Map.keys (gNodes g)`, pairwise disjoint, none empty. Component labeling SHALL be deterministic: seed nodes processed in ascending `NodeId` order and neighbors iterated in sorted order (the `fgl-adapter` bijective key-order indexing). Adding or removing a single edge SHALL only coarsen or refine the prior partition (INV-10): every pre-existing SCC is contained in exactly one post-delta SCC. (Source: AVI-518 §1.3, Thm 2.1–2.2, §5 INV-7/INV-10.) — classification: new-feature
+The system SHALL provide `stronglyConnectedComponents :: Graph -> Map Int [NodeId]` whose values are the equivalence classes of mutual directed reachability `u ↔ v ⟺ (u ⤳ v) ∧ (v ⤳ u)` on the directed relation `E ⊆ V × V` (the ordered-pair projection of `gEdges`). The classes SHALL form a partition of `V`: `⋃_c comp c = Map.keys (gNodes g)`, pairwise disjoint, none empty. Component labeling SHALL be deterministic: seed nodes processed in ascending `NodeId` order and neighbors iterated in sorted order (the `fgl-adapter` bijective key-order indexing). Adding or removing a single edge SHALL only coarsen or refine the prior partition (INV-10): every pre-existing SCC is contained in exactly one post-delta SCC. (Source: AVI-518 §1.3, Thm 2.1–2.2, §5 INV-7/INV-10.) — classification: requirement-creation
 
 #### Scenario: Partition property on an arbitrary graph
 - **WHEN** `stronglyConnectedComponents g` is computed on any `Graph`
@@ -32,13 +32,21 @@ The condensation `cond(G)` — vertex set = SCC classes, arc `A → B` (`A ≠ B
 - **WHEN** the condensation is computed on any `Graph` with `C ≥ 1` SCCs
 - **THEN** a topological ordering of the condensation vertices is produced (the SCC ids follow it under ascending-seed labeling)
 
-### Requirement: Directed reachability and acyclicity predicates (Thm 2.4, Thm 2.5, INV-8, INV-9, INV-C5)
+### Requirement: Directed reachability decided by hop-minimal shortest paths (Thm 2.4, INV-8, INV-9)
 
-The system SHALL provide a reachability predicate `shortestPathReachable` (or `Just _` pattern of `shortestPath`) such that `s ⤳ t` holds exactly when `shortestPath g s t == Just p` for a hop-minimal `E`-walk `p` with `head p = s`, `last p = t`, `length p − 1 = d(s,t)` (INV-8; IV: `shortestPath g u v == Just [u,v]` for every arc `(u,v) ∈ E`); reachability SHALL be invariant under any permutation of `gNodes/gEdges` keys (INV-9). The system SHALL provide `isAcyclicDirected :: Graph -> Bool` deciding DAG-hood exactly as: every SCC is a singleton **and** the self-loop count `ℓ = |{ u : (u,u) ∈ E }|` is `0` (Thm 2.5, INV-C5). Traversal SHALL act on the forward relation `E` (source→target) regardless of `gDirected`; `neighbors`/`degree` remain the symmetric accessors — the distinction is documented, not conflated (AVI-518 §6.2, AF-2). (Source: AVI-518 §2.4, §5; AVI-523 Thm 2.5.) — classification: new-feature
+The system SHALL provide a reachability predicate `shortestPathReachable` (or `Just _` pattern of `shortestPath`) such that `s ⤳ t` holds exactly when `shortestPath g s t == Just p` for a hop-minimal `E`-walk `p` with `head p = s`, `last p = t`, `length p − 1 = d(s,t)` (INV-8; IV: `shortestPath g u v == Just [u,v]` for every arc `(u,v) ∈ E`); reachability SHALL be invariant under any permutation of `gNodes/gEdges` keys (INV-9). Traversal SHALL act on the forward relation `E` (source→target) regardless of `gDirected`; `neighbors`/`degree` remain the symmetric accessors — the distinction is documented, not conflated (AVI-518 §6.2, AF-2). (Source: AVI-518 §2.4, §5; existing surface per AVI-530/PR #30.) — classification: requirement-creation
 
 #### Scenario: Shortest path decides reachability (INV-8)
 - **WHEN** the §8 fixture is queried
 - **THEN** `shortestPath a f == Just [a,b,c,d,f]` (length 3), `shortestPath a a == Just [a]`, and `shortestPath f a == Nothing` (no path found, consistent with `05-path`)
+
+#### Scenario: Key-permutation invariance (INV-9)
+- **WHEN** the same relation `E` is stored under two different key orders
+- **THEN** every reachability answer is identical
+
+### Requirement: Directed acyclicity predicate (Thm 2.5, INV-C5)
+
+The system SHALL provide `isAcyclicDirected :: Graph -> Bool` deciding DAG-hood exactly as: every SCC is a singleton **and** the self-loop count `ℓ = |{ u : (u,u) ∈ E }|` is `0` (Thm 2.5, INV-C5). (Source: AVI-518 §5; AVI-523 Thm 2.5.) — classification: new-feature
 
 #### Scenario: A self-loop is a directed cycle (INV-C5)
 - **WHEN** the fixture `F3` consists of node `{u}` and arc `(u,u)` (AVI-523 §8)
@@ -48,13 +56,9 @@ The system SHALL provide a reachability predicate `shortestPathReachable` (or `J
 - **WHEN** fixture `F2` (`a→b, a→c, b→d, c→d`, no back arcs) is checked
 - **THEN** `isAcyclicDirected == True` even though the undirected support graph has a cycle
 
-#### Scenario: Key-permutation invariance (INV-9)
-- **WHEN** the same relation `E` is stored under two different key orders
-- **THEN** every reachability answer is identical
-
 ### Requirement: SCC is not biconnected components (§1.4 disambiguation)
 
-SCC decomposition SHALL NOT be implemented by or aliased to `articulationPoints` / `biconnectedComponents`: those operate on the undirected support graph `G_s` and decompose edges/cut-vertices, while SCC operates on the directed relation `E` and partitions **nodes** into mutual-reachability classes. The `Domain.Graph.Analysis` undirected decompositions SHALL remain untouched and undocumented as SCC synonyms. (Source: AVI-518 §1.4, §6.3; AVI-523 §6.3.) — classification: new-feature
+SCC decomposition SHALL NOT be implemented by or aliased to `articulationPoints` / `biconnectedComponents`: those operate on the undirected support graph `G_s` and decompose edges/cut-vertices, while SCC operates on the directed relation `E` and partitions **nodes** into mutual-reachability classes. The `Domain.Graph.Analysis` undirected decompositions SHALL remain untouched and undocumented as SCC synonyms. (Source: AVI-518 §1.4, §6.3; AVI-523 §6.3.) — classification: requirement-creation
 
 #### Scenario: Undirected decomposition disagrees with SCC by design
 - **WHEN** fixture `F2` (a directed DAG) is analyzed
@@ -78,7 +82,7 @@ The system SHALL provide `connectedComponents`, `weaklyConnectedComponents :: Gr
 
 ### Requirement: Linear complexity and scale guard (AVI-518 §4, GT-W4)
 
-SCC decomposition (Tarjan single-DFS primary, Kosarajan two-pass alternative over the `gAdjBack` transpose), condensation build, one-source reachability/BFS/DFS, and the connectivity decompositions SHALL each be `O(N + E)` algorithmically (`O((N+E)·log N)` worst case over `Data.Map`/`Data.Set` adjacency), with no quadratic blow-up. Dense all-pairs reachability `O(N·(N+E))` SHALL NOT be run on the full graph — it SHALL be scoped to a queried subgraph, a community, or sampled sources (the `edgeBetweenness` cap pattern). No per-node `Set` allocation inside the traversal beyond `O(C)` component buckets. (Source: AVI-518 §3.1–3.3, §4 scale guard; AVI-523 §4; consolidated GT-W4.) — classification: new-feature
+SCC decomposition (Tarjan single-DFS primary, Kosarajan two-pass alternative over the `gAdjBack` transpose), condensation build, one-source reachability/BFS/DFS, and the connectivity decompositions SHALL each be `O(N + E)` algorithmically (`O((N+E)·log N)` worst case over `Data.Map`/`Data.Set` adjacency), with no quadratic blow-up. Dense all-pairs reachability `O(N·(N+E))` SHALL NOT be run on the full graph — it SHALL be scoped to a queried subgraph, a community, or sampled sources (the `edgeBetweenness` cap pattern). No per-node `Set` allocation inside the traversal beyond `O(C)` component buckets. (Source: AVI-518 §3.1–3.3, §4 scale guard; AVI-523 §4; consolidated GT-W4.) — classification: requirement-creation (checkable today on the existing decompositions; the same bound follows the new-feature routines of this capability when they land)
 
 #### Scenario: SCC stays linear at repository scale
 - **WHEN** `stronglyConnectedComponents` runs on a ~78k-node / ~80k-edge graph (the `bounded-edge-inference` budget)
