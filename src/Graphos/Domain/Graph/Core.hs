@@ -210,12 +210,17 @@ addEdges graph edges =
       bwdUpdates = Map.fromListWith Set.union
         [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
       -- For undirected graphs, also add reverse adjacency
+      -- Merge per-node neighbour sets ('Map.unionWith'), never 'Map.union':
+      -- the left-biased union kept a node's existing set and silently dropped
+      -- every added edge incident to a node that already had neighbours, so
+      -- inferred edges were invisible to clustering and traversal.
+      merge = Map.unionWith Set.union
       (fwdAdj, bwdAdj) = if directed
-        then (Map.union (gAdjFwd graph) fwdUpdates, Map.union (gAdjBack graph) bwdUpdates)
+        then (merge (gAdjFwd graph) fwdUpdates, merge (gAdjBack graph) bwdUpdates)
         else let revFwd = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
                  revBwd = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
-             in (Map.union (gAdjFwd graph) (fwdUpdates `Map.union` revFwd)
-                , Map.union (gAdjBack graph) (bwdUpdates `Map.union` revBwd))
+             in (merge (gAdjFwd graph) (fwdUpdates `merge` revFwd)
+                , merge (gAdjBack graph) (bwdUpdates `merge` revBwd))
       newHash = computeGraphHash nodes newEdgeMap
   in graph
     { gEdges    = newEdgeMap
@@ -238,22 +243,21 @@ makeStubNode filePath =
       hashPrefix = T.pack $ show dirHash
       nodeId' = hashPrefix <> T.pack "_" <> name
    in Node
-      { nodeId           = nodeId'
-      , nodeLabel        = fromText name
-      , nodeFileType     = CodeFile
+     { nodeId           = nodeId'
+     , nodeLabel        = fromText name
+     , nodeFileType     = CodeFile
       , nodeSourceFile   = fromText (T.pack filePath)
       , nodeSource       = Nothing
-      , nodeLineStart    = Nothing
-      , nodeCommunityId  = Nothing
-      , nodeDegree       = Nothing
-      , nodeIsBridge     = Nothing
-      , nodeExtra        = Nothing
-      , nodeLineEnd      = Nothing
-      , nodeKind         = Nothing
-      , nodeSignature    = Nothing
-      , nodeBodyHash     = Nothing
-      , nodePresentBits  = 0
-      }
+     , nodeLineStart    = Nothing
+     , nodeCommunityId  = Nothing
+     , nodeDegree       = Nothing
+     , nodeIsBridge     = Nothing
+     , nodeExtra        = Nothing
+     , nodeLineEnd      = Nothing
+     , nodeKind         = Nothing
+     , nodeSignature    = Nothing
+     , nodePresentBits  = 0
+     }
 
 -- | Check if a node is a file-level hub (synthetic AST node)
 isFileNode :: Graph -> Node -> Bool

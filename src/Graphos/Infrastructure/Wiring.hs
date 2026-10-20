@@ -40,6 +40,7 @@ import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
+import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
 import qualified Graphos.Infrastructure.Export.Obsidian as ExportObsidian
@@ -76,6 +77,7 @@ import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Ruby as TSRuby
 import qualified TreeSitter.Java as TSJava
 import qualified TreeSitter.Language as TS_LANG
+import qualified Graphos.Infrastructure.Extract.TreeSitter.Vendored as TSVendored
 
 -- UseCase imports (for delegation to sub-modules)
 import Graphos.UseCase.Extract.Haskell (extractHaskellStub)
@@ -193,7 +195,8 @@ productionExtractionPort logEnv = ExtractionPort
           result <- parseWithGrammar lang content
           case result of
             Nothing -> pure Nothing
-            Just nodes -> pure $ Just $ tsNodesToExtraction GranularityFunction filePath nodes
+            Just nodes -> Just <$> withImportEdges grammar filePath nodes
+                                     (tsNodesToExtraction GranularityFunction filePath nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
@@ -317,4 +320,7 @@ getGrammarPtr "rust"         = Just TSRust.tree_sitter_rust
 getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
 getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
 getGrammarPtr "java"         = Just TSJava.tree_sitter_java
+getGrammarPtr "cpp"          = Just TSVendored.tree_sitter_cpp
+getGrammarPtr "yaml"         = Just TSVendored.tree_sitter_yaml
+getGrammarPtr "sql"          = Just TSVendored.tree_sitter_sql
 getGrammarPtr _              = Nothing

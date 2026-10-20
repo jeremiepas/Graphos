@@ -6,6 +6,7 @@ module Graphos.Domain.Community
   , detectCommunitiesWithResolution
   , cohesionScore
   , scoreAllCohesion
+  , undirectedView
 
   , Resolution(..)
   , MergeStrategy(..)
@@ -89,10 +90,25 @@ detectCommunities g = detectCommunitiesWithResolution g defaultResolution
 -- merge yields identical community labels per node. This is the graph\/community
 -- half of view-permutation invariance (theorem T3) and INV-DETERMINISTIC-CLUSTER
 -- in the @merge-cluster-determinism-graph-half@ change design.
+--
+-- Community detection always runs on the undirected projection of the graph
+-- ('undirectedView'): modularity is defined over undirected adjacency, and on
+-- a directed graph the forward-only 'neighbors' left every sink node (a
+-- function, an import, a type with no outgoing edge) without neighbours, so
+-- Leiden could not place it and 'mergeSmallCommunities' fell back to the
+-- largest community — snowballing most of a @--directed@ code graph into one
+-- community.
 detectCommunitiesWithResolution :: Graph -> Resolution -> CommunityMap
-detectCommunitiesWithResolution g res =
-  let raw = leidenPhase g res
+detectCommunitiesWithResolution g0 res =
+  let g = undirectedView g0
+      raw = leidenPhase g res
   in mergeSmallCommunities g res raw
+
+-- | The undirected projection of a graph for community detection: the same
+-- nodes and edges, with 'neighbors' answering both directions. 'gAdjBack' is
+-- maintained for directed graphs too, so this is a flag flip, not a rebuild.
+undirectedView :: Graph -> Graph
+undirectedView g = g { gDirected = False }
 
 buildReverseIndex :: CommunityMap -> Map NodeId CommunityId
 buildReverseIndex commMap = Map.fromList

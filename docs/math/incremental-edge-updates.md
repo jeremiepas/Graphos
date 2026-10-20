@@ -297,7 +297,7 @@ Consequence: `Update(G, Δ)` currently returns a *subgraph of changed files*, no
 feasibility gap, not a notation problem.
 
 **Required fix (implementation is graphos-dev work):** reconcile old + new via
-`mergeGraphs oldGraph newExtractionGraph` (node-new-wins per `Map.union`), then detach edges
+`mergeGraphs oldGraph newExtractionGraph` (node-old-wins per `Map.union` left-bias), then detach edges
 incident to `R` using the §5.1 `deleteNodeIncident` helper, then recompute affected adjacency +
 affected inferred edges + re-`cluster` only `C(Δ)`, preserving all other communities from
 `G_t` (§5.2 re-use rule). The math above constrains *what* must hold; the algebra of the merge

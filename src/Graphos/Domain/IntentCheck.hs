@@ -97,10 +97,10 @@ witnesses :: Verdict -> [Text]
 witnesses (Satisfied ws) = ws
 witnesses (Violated ws)  = ws
 
--- | A verdict holds iff it is satisfied. @Violated []@ is the (witness-less)
--- failure produced by 'Not' when the negated spec holds, so any 'Violated' is a
--- failure — otherwise @not@ would not be the strict negation of the Lean model
--- (@sat G (.not φ) = ¬ sat G φ@).
+-- | A verdict holds iff the spec is satisfied. This is Lean's strict
+-- negation discipline: @holds ('Not' s)@ must evaluate to @not (holds s)@,
+-- so @'Violated' []@ (a violation without witness, e.g. the negation of a
+-- satisfied sub-spec) does /not/ hold.
 holds :: Verdict -> Bool
 holds (Satisfied _) = True
 holds (Violated _)  = False
@@ -136,18 +136,15 @@ evaluateSpec g = go
     labelEq :: Node -> Text -> Bool
     labelEq n t = toText (nodeLabel n) == t
 
-    reachVia :: Graph -> Relation -> Text -> Text -> Bool
-    reachVia gr rel s t = t `Set.member` (reachable gr rel s)
-
     go (Reaches fromK fromName rel toK) =
       let us = [ n | n <- nodesOfKind g fromK, labelEq n fromName ]
-          bad = [ n | n <- us, not (any (\w -> reachVia g rel (nodeId n) (nodeId w)) (nodesOfKind g toK)) ]
+          bad = [ n | n <- us, not (any (\w -> Set.member (nodeId w) (reachable g rel (nodeId n))) (nodesOfKind g toK)) ]
       in if null us then Violated [fromName]
          else if null bad then Satisfied []
          else Violated (map nodeId bad)
 
     go (Covered nodeK rel toK) =
-      let good n = any (\w -> reachVia g rel (nodeId w) (nodeId n)) (nodesOfKind g toK)
+      let good n = any (\w -> Set.member (nodeId n) (reachable g rel (nodeId w))) (nodesOfKind g toK)
           bad = [ n | n <- nodesOfKind g nodeK, not (good n) ]
       in if null bad then Satisfied [] else Violated [nodeId n | n <- bad]
 
@@ -160,14 +157,14 @@ evaluateSpec g = go
           fwdBad = [ n | n <- as, not (any (\w -> kindOf w toK) (edgesFrom g rel (nodeId n))) ]
           bckBad = [ n | n <- bs, not (any (\s -> kindOf s fromK) (edgesTo g rel (nodeId n))) ]
           bad    = fwdBad ++ bckBad
-      in if null bad then Satisfied [] else Violated [nodeId n | n <- bad]
+      in if null bad then Satisfied [] else Violated (map nodeId bad)
 
     go (Absent nodeK pre wl) =
       let bad = [ n
                 | n <- nodesOfKind g nodeK
                 , T.isPrefixOf pre (toText (nodeLabel n))
                 , not (toText (nodeLabel n) `elem` wl) ]
-      in if null bad then Satisfied [] else Violated [nodeId n | n <- bad]
+      in if null bad then Satisfied [] else Violated (map nodeId bad)
 
     go (And ss) =
       let vs = map go ss

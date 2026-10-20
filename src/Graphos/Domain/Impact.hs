@@ -6,11 +6,12 @@
 --
 -- A change is a before/after pair of projections; the node correspondence μ is
 -- the identity on NodeId (the stable id supplied by GraphOS). The touched set is
--- removed ∪ added ∪ changed (attributes or outgoing edges); the impact set is the
--- reflexive-transitive closure of the touched set under reverse dependency edges
--- (`calls`, `implements`, `references`, `maps`, `depends_on` — not `tests`); the
--- frontier is impact minus touched, and every frontier node is an obligation that
--- must be discharged by an ack or a registered rule.
+-- removed ∪ added ∪ changed (attributes or outgoing edges) and extends the
+-- baseline "Graphos.Domain.Graph.Diff" diff with the changed clause; the impact
+-- set is the reflexive-transitive closure of the touched set under reverse
+-- dependency edges ('depLabels' — notably not @tests@); the frontier is impact
+-- minus touched, and every frontier node is an obligation that must be
+-- discharged by an ack or a registered rule.
 module Graphos.Domain.Impact
   ( -- * Change
     Change(..)
@@ -37,6 +38,8 @@ import qualified Data.Set as Set
 import Data.List (nub)
 
 import Graphos.Domain.Graph.Core (Graph (gNodes, gEdges))
+import Graphos.Domain.Graph.Diff (graphDiff)
+import Graphos.Domain.Types.Graph (GraphDiff (..))
 import Graphos.Domain.Types.Node
   ( Node, nodeKind, nodeLabel, nodeSignature
   , nodeSourceFile, nodeLineStart, nodeLineEnd, nodeBodyHash )
@@ -53,9 +56,11 @@ data Change = Change
   , after  :: Graph
   } deriving (Eq, Show)
 
--- | Identity attributes shared by touched-detection and the stableSignature rule.
--- The body lives outside these (see 'bodyHash'): a body-only change keeps them
--- all equal.
+-- | Identity attributes shared by touched-detection and the stableSignature
+-- rule. The key includes the body hash ('bodyHash'): a body-only edit moves
+-- the key and therefore counts as touched (mirror of Lean's @n₁ ≠ n₂@). The
+-- 'stableSignature' rule then deliberately ignores the body — the whole
+-- point of the body/signature split.
 stableNodeKey :: Node -> (Text, Maybe Text, Maybe Text, Text, Maybe Int, Maybe Int, Maybe Text)
 stableNodeKey n =
   ( toText (nodeLabel n)
@@ -67,7 +72,8 @@ stableNodeKey n =
   , bodyHash n
   )
 
--- | Body identity from the dedicated nodeBodyHash field. Absent ⇒ Nothing.
+-- | Body identity carried under @body_hash@ in 'nodeExtra' (optional field from
+-- the graph-json-contract). Absent ⇒ Nothing.
 bodyHash :: Node -> Maybe Text
 bodyHash n = fmap toText (nodeBodyHash n)
 
@@ -79,16 +85,18 @@ sameEdgeSet :: [Edge] -> [Edge] -> Bool
 sameEdgeSet e1 e2 = all (`elem` e2) e1 && all (`elem` e1) e2
 
 -- | The touched set: removed ∪ added ∪ changed (attributes or out-edge set).
+-- The removed / added parts come from the baseline 'graphDiff' this module
+-- extends; "changed" (stable-key move, incl. body hash, or out-edge set move)
+-- is the extra clause required by the Lean model's touched definition.
 touched :: Change -> [Text]
 touched c = nub (removed ++ added ++ changed)
   where
-    b = gNodes (before c)
-    a = gNodes (after c)
-    removed = [ nid | (nid, _) <- Map.toList b, not (Map.member nid a) ]
-    added   = [ nid | (nid, _) <- Map.toList a, not (Map.member nid b) ]
+    d = graphDiff (before c) (after c)
+    removed = Map.keys (diffRemovedNodes d)
+    added   = Map.keys (diffAddedNodes d)
     changed = [ nid
-              | (nid, nb) <- Map.toList b
-              , Just na  <- [Map.lookup nid a]
+              | (nid, nb) <- Map.toList (gNodes (before c))
+              , Just na  <- [Map.lookup nid (gNodes (after c))]
               , stableNodeKey nb /= stableNodeKey na
                 || not (sameEdgeSet (outEdges (before c) nid) (outEdges (after c) nid))
               ]
