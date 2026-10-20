@@ -150,6 +150,26 @@ spec = do
         Set.fromList [Set.fromList ["a","b","c","d","e"]]
 
   describe "detectCommunitiesWithResolution" $ do
+    it "partitions a directed graph like its undirected projection (sink nodes are not snowballed into one community)" $ do
+      -- Six "files": a module node containing five sink symbols (module -> sym
+      -- edges only), files linked in a chain module_i -> module_{i+1}. With the
+      -- forward-only neighbours of a directed graph every sink had no
+      -- neighbour, and the small-community merge piled them into the largest
+      -- community.
+      let files = [1 .. 6 :: Int]
+          modId i = T.pack ("m" ++ show i)
+          symId i j = T.pack ("m" ++ show i ++ "_s" ++ show j)
+          nodes = [ testNode (modId i) | i <- files ]
+               ++ [ testNode (symId i j) | i <- files, j <- [1 .. 5 :: Int] ]
+          edges = [ testEdge (modId i) (symId i j) | i <- files, j <- [1 .. 5 :: Int] ]
+               ++ [ testEdge (modId i) (modId (i + 1)) | i <- init files ]
+          ext = extractionFromLists nodes edges
+          directed = detectCommunitiesWithResolution (buildGraph True ext) defaultResolution
+          undirected = detectCommunitiesWithResolution (buildGraph False ext) defaultResolution
+          largest cm = maximum (map length (Map.elems cm))
+      sort (map sort (Map.elems directed)) `shouldBe` sort (map sort (Map.elems undirected))
+      largest directed `shouldSatisfy` (<= 12)
+
     it "respects max iterations setting" $ do
       -- With 1 iteration, the algorithm should still produce a valid community map
       let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]

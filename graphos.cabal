@@ -459,6 +459,7 @@ test-suite graphos-test
       OpenSpecView.SpecDiffSpec
       OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
+    Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
     Graphos.Domain.Config.OutputSpec
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec

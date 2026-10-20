@@ -705,17 +705,7 @@ runPipelineStages appEnv config = do
             aggregatesResult  = coAggregates clusterOut
 
         lpLogInfo lp "  graph.json written incrementally"
-        epWriteNodes ep iw (Map.elems (gNodes (coGraphToWrite clusterOut)))
-        epWriteEdges ep iw (Map.elems (gEdges (coGraphToWrite clusterOut)))
-        epWriteCommunities ep iw finalCommMap
-        epWriteCohesion ep iw (coCohesion clusterOut)
-        epWriteGodNodes ep iw (analysisGodNodes analysis)
-        epWriteCommunityAggregates ep iw (coAggregates clusterOut)
-        epWriteCompositions ep iw (gCompositions enrichedGraph)
-        epWriteEmbeddingsPath ep iw (fmap T.pack embeddingsPath)
-        epWriteAnalysisTail ep iw llmLabelsResult
-        epFlushWriter ep iw
-        epCloseWriter ep iw
+        writeClusterOutput ep iw clusterOut embeddingsPath
         lpLogDebug lp "  Final graph, communities, and cohesion written incrementally"
 
         performGC
@@ -738,10 +728,7 @@ runPipelineStages appEnv config = do
         when (cfgNeo4j configWithStreaming) $ do
           lpLogInfo lp "  Neo4j: Cypher export + push complete"
 
-        when (cfgCommunityGraph configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
-          lpLogInfo lp "Step 7b: Exporting community-level graph..."
-          epExportCommunityGraph ep enrichedGraph finalCommMap (cfgOutputDir configWithStreaming ++ "/community_graph.json")
-          lpLogInfo lp $ T.pack $ "  Community graph: " ++ cfgOutputDir configWithStreaming ++ "/community_graph.json"
+        exportCommunityGraphIfRequested lp ep configWithStreaming clusterOut
 
         fspClearCheckpoint fsp (cfgOutputDir configWithStreaming)
 
@@ -879,9 +866,41 @@ clusterGraph appEnv graph config _embeddingsPath = do
         , coAggregates = aggregates
         }
 
+-- | Stream a clustered graph into an open incremental @graph.json@ writer and
+-- commit it (the writer renames its temp file over the target on close).
+-- Shared by the full pipeline and @--cluster-only@ so both persist the same
+-- sections: nodes, edges, communities, cohesion, god nodes, aggregates,
+-- compositions, the embeddings pointer, and the analysis tail.
+writeClusterOutput :: ExportPort -> IncrementalWriter -> ClusterOutput -> Maybe FilePath -> IO ()
+writeClusterOutput ep iw clusterOut embeddingsPath = do
+  epWriteNodes ep iw (Map.elems (gNodes (coGraphToWrite clusterOut)))
+  epWriteEdges ep iw (Map.elems (gEdges (coGraphToWrite clusterOut)))
+  epWriteCommunities ep iw (coCommunities clusterOut)
+  epWriteCohesion ep iw (coCohesion clusterOut)
+  epWriteGodNodes ep iw (analysisGodNodes (coAnalysis clusterOut))
+  epWriteCommunityAggregates ep iw (coAggregates clusterOut)
+  epWriteCompositions ep iw (gCompositions (coEnrichedGraph clusterOut))
+  epWriteEmbeddingsPath ep iw (fmap T.pack embeddingsPath)
+  epWriteAnalysisTail ep iw (coLabels clusterOut)
+  epFlushWriter ep iw
+  epCloseWriter ep iw
+
+-- | Step 7b: write @community_graph.json@ when @--community-graph@ is set and
+-- clustering ran.
+exportCommunityGraphIfRequested :: LoggingPort -> ExportPort -> PipelineConfig -> ClusterOutput -> IO ()
+exportCommunityGraphIfRequested lp ep config clusterOut =
+  when (cfgCommunityGraph config && not (cfgNoCluster config)) $ do
+    let path = cfgOutputDir config ++ "/community_graph.json"
+    lpLogInfo lp "Step 7b: Exporting community-level graph..."
+    epExportCommunityGraph ep (coEnrichedGraph clusterOut) (coCommunities clusterOut) path
+    lpLogInfo lp $ T.pack $ "  Community graph: " ++ path
+
 -- | Cluster-only entry point: load the last checkpoint, reconstruct the graph,
--- run only clustering + analysis, then exit. Enables incremental rebuilds and
--- debugging of large pipelines without re-running detect/extract/build.
+-- run clustering + analysis, then persist the result: @graph.json@ (with
+-- @metadata.graphos.communities@ filled), the report/HTML exports, and
+-- @community_graph.json@ when @--community-graph@ is set. Extraction and
+-- build are skipped; the checkpoint is kept so the run can be repeated with
+-- other clustering parameters.
 runClusterOnlyPipeline :: AppEnv -> PipelineConfig -> IO (Either Text Int)
 runClusterOnlyPipeline appEnv config = catch (do
   let lp = loggingPort appEnv
@@ -911,6 +930,37 @@ runClusterOnlyPipeline appEnv config = catch (do
       -- itself does not carry vectors).
       clusterOut <- clusterGraph appEnv graph config (gEmbeddingsPath graph)
       let commCount = Map.size (coCommunities clusterOut)
-      lpLogInfo lp $ T.pack $ "  Clustered into " ++ show commCount ++ " communities. Exiting (--cluster-only)."
+          outDir = cfgOutputDir config
+          graphPath = outDir ++ "/graph.json"
+          embeddingsPath = gEmbeddingsPath graph
+      lpLogInfo lp $ T.pack $ "  Clustered into " ++ show commCount ++ " communities."
+      lpLogInfo lp $ T.pack $ "Writing " ++ graphPath ++ " (--cluster-only)..."
+      iw <- epOpenIncrementalWriter ep graphPath
+      writeClusterOutput ep iw clusterOut embeddingsPath
+      lpLogInfo lp "Exporting outputs (--cluster-only)..."
+      _ <- withHeapGuard lp (cfgActiveBudgetBytes config) "export" $
+        UEP.epExportAll ep (coEnrichedGraph clusterOut) outDir (coAnalysis clusterOut)
+          config (checkpointDetection graph) (coLabels clusterOut) (coAggregates clusterOut)
+      exportCommunityGraphIfRequested lp ep config clusterOut
+      lpLogInfo lp "  Done (--cluster-only)."
       pure $ Right commCount
   ) (pipelineErrorHandler "Cluster-only pipeline error")
+-- | Detection summary for a cluster-only run, which has no detect stage: the
+-- distinct source files recorded on the checkpoint's nodes, so the report's
+-- corpus line stays meaningful.
+checkpointDetection :: Graph -> Detection
+checkpointDetection g =
+  let files = Set.fromList
+        [ toText (nodeSourceFile n)
+        | n <- Map.elems (gNodes g)
+        , not (T.null (toText (nodeSourceFile n)))
+        ]
+  in Detection
+       { detectionTotalFiles     = Set.size files
+       , detectionTotalWords     = 0
+       , detectionNeedsGraph     = True
+       , detectionWarning        = Nothing
+       , detectionFiles          = Map.empty
+       , detectionClassification = Map.empty
+       , detectionExclusions     = emptyExclusionCounts
+       }
