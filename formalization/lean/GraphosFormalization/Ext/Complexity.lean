@@ -76,6 +76,15 @@
 
   `Extraction.size_merge_eq_add` is stated for componentwise-disjoint views; the
   `Nat` fixtures below exercise it through `decide`.
+
+  ## AC-3 harness (AVI-1307)
+
+  The empirical arm lives outside this module: `Harness/Ac3Cost.lean` evaluates
+  `nwayFoldCost` on the AC-3 disjoint family at n = 100/200/400/800 (`lake exe
+  ac3-cost`), and `benchmarks/nway-fold-timing/` times the shipped
+  `foldl'`/`foldr` `mergeExtractions` over real `Data.Map`s. Both record ≈ ×2
+  per doubling; see `benchmarks/nway-fold-timing/README.md` for the recorded
+  run and the §7 sketch erratum.
 -/
 import GraphosFormalization.Ext.Strict
 

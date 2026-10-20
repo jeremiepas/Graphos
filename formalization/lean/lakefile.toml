@@ -10,3 +10,11 @@ defaultTargets = ["GraphosFormalization"]
 
 [[lean_lib]]
 name = "GraphosFormalization"
+
+# AVI-1307: Phase 2 timing harness, Lean arm. Evaluates `nwayFoldCost` on the
+# AC-3 disjoint family (n = 100/200/400/800) and prints its doubling ratios.
+# Deliberately NOT a default target (the default `lake build` stays lib-only);
+# `lean.yml` builds it explicitly. Run: `lake exe ac3-cost`.
+[[lean_exe]]
+name = "ac3-cost"
+root = "GraphosFormalization.Harness.Ac3Cost"
