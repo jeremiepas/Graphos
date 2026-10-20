@@ -17,6 +17,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization.lean` | Root module (library entry point) |
 | `GraphosFormalization/Basic.lean` | Package skeleton / build smoke check |
 | `GraphosFormalization/Phase1/Modularity.lean` | Phase 1 modularity `Q`, INV-Q0: `modularity_edgesAbsent_zero` (AVI-618 §2) |
+| `GraphosFormalization/Phase1/RangeBound.lean` | Phase 1 exact INV-Q1 range bound: `modularity_range_bound` / `modularity_bounded`, plus the tight `K_{2,2}` fixture (AVI-618 §3) |
 | `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
 
@@ -47,7 +48,7 @@ per-module requirement citations.
 | Artifact | Lean name | State |
 | --- | --- | --- |
 | §2 INV-Q0 — no-divide-by-zero / edges absent | `modularity_edgesAbsent_zero` | **proved** (`Phase1/Modularity.lean`), incl. 4-isolated-node fixture |
-| §2 INV-Q1 — range bound | `modularity_bounded` | pending (AVI-1294) |
+| §2 INV-Q1 — range bound | `modularity_range_bound` (alias `modularity_bounded`) | **proved** (`Phase1/RangeBound.lean`), exact division-free form `-2m² ≤ Qnum ≤ 4m²`; `K_{2,2}` bipartition attains `-1/2` exactly |
 | §2 INV-Q2 — partition-only | `modularity_partitionOnly` | pending (AVI-1295) |
 | §2 INV-Q3 — local move non-decreasing | `modularity_localMoveNonDecreasing` | pending (AVI-1296) |
 | §2 INV-Q4 — deterministic summation | `modularity_deterministic` | pending (AVI-1297) |
@@ -57,6 +58,22 @@ per-module requirement citations.
 on (`SupportGraph`, `Partition`, `sigmaIn`, `sigmaTot`, `modularity`). `Q` is
 computed in `Float` (no Mathlib/Rat dependency) and pins `m = 0` to `0.0`,
 mirroring `Domain/Community.hs:151-167`.
+
+`Phase1/RangeBound.lean` adds the **exact** layer INV-Q1 needs: core Lean has
+no `Rat`/`Finset` and no `Float` order lemmas, so a general inequality over the
+opaque `Float` expression is not provable without Mathlib. Following AVI-618 §6
+("the Lean side is proven over ℚ/ℝ (exact)"), the bound is stated division-free
+on the common denominator `(2m)²`:
+
+```
+Qnum(π) = Σ_c [2m·σ_in(c) − σ_tot(c)²] = (2m)²·Q(π)
+-2m² ≤ Qnum(π) ≤ 4m²        (m ≥ 1)   ⇔   -1/2 ≤ Q(π) ≤ 1
+```
+
+`G_s` is represented there by its edge set `A` (one record per unordered pair,
+`EdgeGraph`), matching `gEdges`/`csM` and the `neighbors` multi-edge collapse.
+The Float rendering remains the implementation's rounded evaluation and is
+covered by the AVI-1301 fixture cross-check.
 
 ### Phase 2 — merged context graph as colimit (AVI-620)
 

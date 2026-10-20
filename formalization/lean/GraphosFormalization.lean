@@ -10,6 +10,9 @@
     * `GraphosFormalization.Basic`        — package skeleton / build smoke check.
     * `GraphosFormalization.Phase1.Modularity` — Phase 1 modularity `Q` and
       INV-Q0 (`modularity_edgesAbsent_zero`, AVI-618 §2).
+    * `GraphosFormalization.Phase1.RangeBound` — exact (division-free) INV-Q1
+      range bound (`modularity_range_bound`, AVI-618 §3) and the tight
+      `K_{2,2}` fixture.
     * `GraphosFormalization.Ext.Basic`    — Phase 2 objects and the merge operator.
     * `GraphosFormalization.Ext.Colimit`  — Phase 2 universal property
       (`mergedExtraction_isColimit`, AVI-620 §2).
@@ -18,5 +21,6 @@
 -/
 import GraphosFormalization.Basic
 import GraphosFormalization.Phase1.Modularity
+import GraphosFormalization.Phase1.RangeBound
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
