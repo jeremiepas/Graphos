@@ -30,6 +30,11 @@
       (`modularity_fixturesExact`, AVI-618 §2 / §5 fixtures 1 & 2): the
       single-block fixture has `Q = 0` and the all-singletons fixture has
       `Q = −(1/(2m))²·Σ_v k_v² < 0`, exactly.
+    * `GraphosFormalization.Phase1.CrossCheckFixtures` — AVI-618 §6: the seven
+      §5 fixtures as concrete `EdgeGraph`/`Partition` data with their exact
+      `Qnum` (`crossCheckRows`, AVI-1301), consumed by the
+      `modularity-crosscheck` executable and compared against Haskell
+      `modularity` in `tests/Graphos/Domain/ModularityCrossCheckSpec.hs`.
     * `GraphosFormalization.Ext.Basic`    — Phase 2 objects and the merge operator.
     * `GraphosFormalization.Ext.Colimit`  — Phase 2 universal property
       (`mergedExtraction_isColimit`, AVI-620 §2).
@@ -61,6 +66,7 @@ import GraphosFormalization.Phase1.PartitionOnly
 import GraphosFormalization.Phase1.LocalMove
 import GraphosFormalization.Phase1.Determinism
 import GraphosFormalization.Phase1.FixturesExact
+import GraphosFormalization.Phase1.CrossCheckFixtures
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
 import GraphosFormalization.Ext.Strict

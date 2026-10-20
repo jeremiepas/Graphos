@@ -62,6 +62,17 @@ jobs:
       - name: lake build ac3-cost (AVI-1307 harness)
         run: lake build ac3-cost
 
+      # AVI-1301: Lean arm of the AVI-618 §6 modularity cross-check. The
+      # executable is not a default target, so build it explicitly, then diff
+      # its table against the checked-in `crosscheck/q-lean.tsv` the Haskell
+      # test (`Graphos.Domain.ModularityCrossCheckSpec`) reads. Drift means the
+      # Lean-side values moved away from the pinned §5 fixture table.
+      - name: lake build modularity-crosscheck (AVI-1301 harness)
+        run: lake build modularity-crosscheck
+
+      - name: check the pinned fixture table is current (AVI-1301)
+        run: lake exe modularity-crosscheck --check crosscheck/q-lean.tsv
+
       - name: Report package identity
         if: always()
         run: lake env lean --version

@@ -357,6 +357,7 @@ test-suite graphos-test
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
     Graphos.Domain.CommunitySpec
+    Graphos.Domain.ModularityCrossCheckSpec
     Graphos.Domain.Community.LabelSpec
     Graphos.Domain.Community.ClusterInvarianceSpec
     Graphos.Domain.Community.DeterminismSpec
