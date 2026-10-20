@@ -91,8 +91,10 @@ library
                      Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
-                   Graphos.Domain.Extraction
-                    Graphos.Domain.Labeling
+                    Graphos.Domain.Extraction
+                     Graphos.Domain.Intent.Classifier
+                     Graphos.Domain.Intent.Projection
+                     Graphos.Domain.Labeling
                     Graphos.Domain.Logging
                     -- Use Cases
                      Graphos.UseCase.Pipeline
@@ -463,6 +465,8 @@ test-suite graphos-test
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
+    Graphos.Domain.Intent.ClassifierSpec
+    Graphos.Domain.Intent.ProjectionSpec
     Graphos.Domain.Config.OutputSpec
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec
   build-depends:
