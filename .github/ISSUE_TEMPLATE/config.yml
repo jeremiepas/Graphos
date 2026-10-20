@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the README first
+    url: https://github.com/jeremiepas/Graphos#readme
+    about: Overview, supported file types, pipeline stages, and CLI usage.
+  - name: Documentation
+    url: https://github.com/jeremiepas/Graphos/tree/main/docs
+    about: Architecture docs, workflow guides, and design proposals.
+  - name: Discussions
+    url: https://github.com/jeremiepas/Graphos/discussions
+    about: Ask questions and discuss ideas before opening a feature request.

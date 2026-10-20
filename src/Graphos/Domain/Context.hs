@@ -290,6 +290,7 @@ conversationNodeToNode conv =
       , nodeLabel        = fromText (convQuestion conv)
       , nodeFileType     = DocFile
       , nodeSourceFile   = fromText ("memory/" <> convId conv <> ".md")
+      , nodeSource       = Nothing
       , nodeLineStart    = Nothing
       , nodeCommunityId  = Nothing
       , nodeDegree       = Nothing
@@ -298,6 +299,5 @@ conversationNodeToNode conv =
       , nodeLineEnd      = Nothing
       , nodeKind         = Just (fromText "Conversation")
       , nodeSignature    = Nothing
-      , nodeBodyHash = Nothing
       , nodePresentBits  = bitNodeKind
       }

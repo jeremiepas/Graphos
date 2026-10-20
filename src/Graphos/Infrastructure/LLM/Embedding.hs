@@ -9,7 +9,10 @@ module Graphos.Infrastructure.LLM.Embedding
   , generateEmbeddings
   , embeddingManager
   , parseEmbeddingsResponse
+  , truncateForEmbedding
+  , prepareEmbed
   , cosineSimilarity
+  , cosineSimilarityU
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -20,6 +23,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.List (sortBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as VU
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -46,7 +50,21 @@ import Network.HTTP.Types.Status (statusCode)
 import System.IO.Unsafe (unsafePerformIO)
 
 import Graphos.Domain.Config (EmbeddingConfig(..))
+import Graphos.Domain.Embedding (prepare)
 import Graphos.Infrastructure.LLM.OpenAI (resolveEnvVars)
+
+-- | Prepare one embed input for the API (Domain 'prepare', re-exported
+-- under a local name so this module's interface stays explicit).
+prepareEmbed :: EmbeddingConfig -> Text -> Text
+prepareEmbed = prepare
+
+-- | Tokens-per-word factor used to size the truncation budget. Kept in sync
+-- with 'Graphos.UseCase.FormatContext.countContextTokens' (~1.33 tokens per
+-- whitespace word) so the estimate matches the rest of the codebase; it is
+-- duplicated here (rather than imported) to keep this Infrastructure module
+-- from depending on UseCase.
+tokensPerWord :: Double
+tokensPerWord = 1.33
 
 -- | Shared connection manager (design D9): created lazily once per process
 -- and reused by every embedding call, so connections are kept alive across
@@ -98,7 +116,7 @@ postEmbeddings cfg nTexts payload = catch (do
 -- | Generate an embedding vector for a single text input using Ollama.
 -- Equivalent to a batch of one ('generateEmbeddings' with a singleton list,
 -- projected to its only vector); kept for tests and external callers.
-generateEmbedding :: EmbeddingConfig -> Text -> IO (Either Text [Double])
+generateEmbedding :: EmbeddingConfig -> Text -> IO (Either Text (VU.Vector Double))
 generateEmbedding cfg inputText = do
   r <- generateEmbeddings cfg [inputText]
   pure $ case r of
@@ -110,15 +128,49 @@ generateEmbedding cfg inputText = do
 -- | Generate embedding vectors for a list of texts in one API call.
 -- Payload: @{"model": …, "input": [t1, …, tn]}@ (OpenAI-compatible batch
 -- endpoint); returns one vector per input text, in input order.
-generateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])
+--
+-- Each input is /prepared/ ('Graphos.Domain.Embedding.prepare': doc-prefix
+-- prepend + token-fit truncation per 'embMaxTokens' and the model table)
+-- before it is sent — the original unprepared text MUST NOT reach the API.
+-- Small encoders reject documents past their context window, so an
+-- unprepared document would fail the whole request. Preparation preserves
+-- list length (one output text per input), so the response arity contract
+-- is unchanged.
+generateEmbeddings :: EmbeddingConfig -> [Text] -> IO (Either Text [VU.Vector Double])
 generateEmbeddings cfg inputTexts = do
-  r <- postEmbeddings cfg (length inputTexts) $ Aeson.object
+  let texts = map (prepareEmbed cfg) inputTexts
+  r <- postEmbeddings cfg (length texts) $ Aeson.object
         [ "model" Aeson..= embModel cfg
-        , "input" Aeson..= inputTexts
+        , "input" Aeson..= texts
         ]
   pure $ case r of
     Left err -> Left err
-    Right v  -> parseEmbeddingsResponse (length inputTexts) v
+    Right v  -> parseEmbeddingsResponse (length texts) v
+
+-- | Truncate an embedding input to at most @maxTokens@ estimated tokens so a
+-- long document never overflows a small encoder's context window. A
+-- BERT-class embedding model served by llama-server (e.g. a 512-token
+-- LFM2.5 / all-MiniLM encoder) answers HTTP 500 for oversized inputs — and
+-- because a failed batch withholds vectors for every sibling text, one
+-- oversized document can silently cost a whole batch. Bounding the input up
+-- front keeps every request within the model's contract.
+--
+-- @maxTokens <= 0@ disables truncation (unbounded, the historical behavior).
+-- Otherwise the leading @floor(maxTokens / 1.33)@ whitespace words are kept,
+-- mirroring 'Graphos.UseCase.FormatContext.countContextTokens' so the result
+-- fits that estimate. This is a coarse word-heuristic, not a real subword
+-- tokenizer: dense code or non-Latin text may still count more tokens per
+-- word, so lower @embedding.maxTokens@ if a model rejects inputs at the
+-- default.
+truncateForEmbedding :: Int -> Text -> Text
+truncateForEmbedding maxTokens t
+  | maxTokens <= 0 = t
+  | otherwise =
+      let wordBudget = max 1 (floor (fromIntegral maxTokens / tokensPerWord :: Double))
+          ws         = T.words t
+      in if length ws <= wordBudget
+           then t
+           else T.unwords (take wordBudget ws)
 
 -- | Parse an OpenAI-compatible batch embeddings response, validating the
 -- OpenAI @index@ contract before trusting element order:
@@ -129,7 +181,7 @@ generateEmbeddings cfg inputTexts = do
 --
 -- Items are sorted by @index@ so the returned vectors are in input order
 -- regardless of the order the server chose to send them.
-parseEmbeddingsResponse :: Int -> Aeson.Value -> Either Text [[Double]]
+parseEmbeddingsResponse :: Int -> Aeson.Value -> Either Text [VU.Vector Double]
 parseEmbeddingsResponse n v = do
   obj     <- asObject v "response"
   dataVal <- maybe (Left (missingDataMsg v)) Right (KeyMap.lookup "data" obj)
@@ -150,7 +202,7 @@ parseEmbeddingsResponse n v = do
     sortByIndex = sortBy (comparing fst)
 
 -- | Parse one @data@ item into its @(index, vector)@ pair.
-parseEmbeddingItem :: Aeson.Value -> Either Text (Int, [Double])
+parseEmbeddingItem :: Aeson.Value -> Either Text (Int, VU.Vector Double)
 parseEmbeddingItem item = do
   iobj   <- asObject item "data item"
   idxVal <- maybe (Left "Missing 'index' in embedding data item") Right
@@ -160,7 +212,7 @@ parseEmbeddingItem item = do
                   (KeyMap.lookup "embedding" iobj)
   vec    <- asArray embVal "embedding"
   ds     <- mapM numToDouble (V.toList vec)
-  Right (idx, ds)
+  Right (idx, VU.fromList ds)
 
 -- | Extract the integer @index@ field from a JSON number.
 indexToInt :: Aeson.Value -> Either Text Int
@@ -189,6 +241,21 @@ cosineSimilarity a b
       let dot = sum (zipWith (*) a b)
           normA = sqrt (sum (map (\x -> x * x) a))
           normB = sqrt (sum (map (\x -> x * x) b))
+      in if normA == 0.0 || normB == 0.0
+         then 0.0
+         else dot / (normA * normB)
+
+-- | Cosine similarity over unboxed vectors (the in-memory representation).
+-- Kept in sync with 'cosineSimilarity' (which now exists for legacy callers);
+-- the UseCase port delegates here via 'Graphos.UseCase.Port.LLMPort'.
+cosineSimilarityU :: VU.Vector Double -> VU.Vector Double -> Double
+cosineSimilarityU a b
+  | VU.length a /= VU.length b = 0.0
+  | VU.null a = 0.0
+  | otherwise =
+      let dot = VU.sum (VU.zipWith (*) a b)
+          normA = sqrt (VU.sum (VU.map (\x -> x * x) a))
+          normB = sqrt (VU.sum (VU.map (\x -> x * x) b))
       in if normA == 0.0 || normB == 0.0
          then 0.0
          else dot / (normA * normB)

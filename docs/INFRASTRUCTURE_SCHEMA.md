@@ -422,7 +422,7 @@ Graph {
 
 | Format | Module | Description |
 |--------|--------|-------------|
-| JSON | `Export/JSON.hs` | `graph.json` — full graph serialization |
+| JSON | `Export/JSON.hs` | `graph.json` — full graph serialization as a JGF document (`application/vnd.jgf+json`, `graph.metadata.graphos.schemaVersion`) |
 | HTML | `Export/HTML.hs` | Interactive vis.js visualization |
 | Neo4j | `Export/Neo4j.hs` | Cypher CREATE/MERGE statements |
 | Memgraph | `Export/Memgraph.hs` | Cypher for Memgraph |

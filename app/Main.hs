@@ -14,8 +14,10 @@ import qualified Data.ByteString.Lazy as BL
 import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
-import System.Process (createProcess, proc)
-import System.Environment (getArgs, getExecutablePath, withArgs)
+import System.Process (createProcess, proc, waitForProcess)
+import qualified System.Process as Process
+import System.Environment (getArgs, getExecutablePath, withArgs, lookupEnv, getEnvironment)
+import Text.Read (readMaybe)
 import System.FilePath ((</>))
 import qualified Data.Time.Clock as TCC (getCurrentTime)
 import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
@@ -26,21 +28,24 @@ import OpenSpecView.ChangeList (readAllChangeInfos, ChangeInfo(..))
 import OpenSpecView.ArtifactView (displayChangeArtifacts)
 import OpenSpecView.SpecDiff (diffPaths, renderSpecDiff)
 import OpenSpecView.StateDashboard (showDashboard)
-import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig)
+import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
+import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
+import Graphos.Domain.Impact (Discharge(..), stableSignature)
+import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
+import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
-import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON)
+import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
 import Graphos.Infrastructure.Wiring (productionAppEnv)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
-import Graphos.UseCase.SpecCheck (runSpecCheck, renderSpecReport, reportGates)
-import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
-import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
-import Graphos.Domain.Impact (Discharge(..), stableSignature)
-import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
-import Graphos.Infrastructure.SpecParse (parseSpecDir)
+import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
+import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
+import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
+import Graphos.Infrastructure.Wiring (productionLLMPort)
+import Graphos.Domain.Config (defaultLabelingConfig)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
@@ -68,8 +73,9 @@ import Graphos.Infrastructure.Observability.SDK
   , OtelConfig(..)
   , defaultOtelConfig
   )
-import Graphos.Domain.Config (defaultGraphosConfig, ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges)
-import Graphos.Infrastructure.Config (loadConfig)
+import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
+import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
+import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
 import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
@@ -97,6 +103,22 @@ loadGraphOpt :: Bool -> FilePath -> IO (Either T.Text LoadResult)
 loadGraphOpt strict path =
   if strict then loadGraphFromFileStrict path else loadGraphFromFile path
 
+-- | Empty analysis payload for 'exportGraphWithLabels' (migrate-graph):
+-- the loaded analysis sections are carried by 'LoadResult' fields that the
+-- JGF writer takes from the graph itself; only the community labels are
+-- preserved explicitly.
+emptyAnalysisForMigrate :: LoadResult -> Analysis
+emptyAnalysisForMigrate lr = Analysis
+  { analysisCommunities   = lrCommunities lr
+  , analysisNullModel     = DefaultNullModel
+  , analysisCohesion      = lrCohesion lr
+  , analysisGodNodes      = lrGodNodes lr
+  , analysisSurprises     = []
+  , analysisQuestions     = []
+  , analysisArticulation  = []
+  , analysisBccCount      = 0
+  }
+
 parseHeapSize :: String -> Maybe Int
 parseHeapSize s = case reads s of
   [(n, "")] -> case () of
@@ -119,25 +141,106 @@ stripRTSFlags args = go args False Nothing
       other -> let (rest, p, h) = go as profile heap
                in (other : rest, p, h)
 
-reexecWithRTS :: Bool -> Maybe String -> IO ()
-reexecWithRTS profile heapStr = do
+-- | Environment marker set on the re-exec'd child process: its presence means
+-- budget establishment already happened in the parent (never derive or
+-- re-exec again); its value carries the active heap budget in bytes (empty
+-- when the parent re-exec'd for profiling only, with no budget).
+reexecEnvVar :: String
+reexecEnvVar = "GRAPHOS_MEMORY_BUDGET"
+
+-- | Whether an explicit @-o/--output@ flag was passed on the command line.
+-- Comparing against the parser default cannot distinguish an omitted flag from
+-- a literal @-o graphos-out@, so the decision factors through the raw argv.
+-- Covers every optparse-applicative spelling: @--output VALUE@, @--output=VALUE@,
+-- @-o VALUE@ and @-oVALUE@.
+cliOutputFlagGiven :: IO Bool
+cliOutputFlagGiven = do
+  args <- getArgs
+  pure (go args)
+  where
+    go [] = False
+    go (a : rest)
+      | a == "--output"          = True
+      | a == "-o"                = True
+      | isPrefixOf "--output=" a = True
+      | isPrefixOf "-o" a        = True
+      | otherwise                = go rest
+    isPrefixOf []      _      = True
+    isPrefixOf _       []     = False
+    isPrefixOf (x:xs) (y:ys)  = x == y && isPrefixOf xs ys
+
+-- | Effective output directory for the Run branch (multi-source-graphs 2.2):
+-- CLI @-o@ wins; otherwise the graphos.yaml @output:@ key; otherwise the
+-- canonical 'defaultOutputDirName'.
+effectiveRunOutputDir :: PipelineConfig -> GraphosConfig -> IO FilePath
+effectiveRunOutputDir config graphosCfg = do
+  given <- cliOutputFlagGiven
+  pure $ if given
+    then cfgOutputDir config
+    else effectiveOutputDir graphosCfg
+
+-- | Establish the active heap budget before the pipeline starts (Workflow 01,
+-- memory-budget-guard): an explicit @--max-heap@ (or fixed graphos.yaml
+-- @memory.budget@) wins; otherwise a default is derived from MemAvailable
+-- minus the safety reserve; otherwise the run is uncapped with a WARN.
+-- Re-executes the binary under the corresponding RTS @-M@ cap — in that case
+-- this never returns (the parent waits for the child and exits with its
+-- code). Returns the active budget when execution continues in-process.
+establishMemoryBudget :: PipelineConfig -> IO (Maybe Integer)
+establishMemoryBudget config = do
+  let profile = cfgRtsProfile config
+      cliBytes = fmap (\mb -> fromIntegral mb * 1024 * 1024) (cfgMaxHeap config) :: Maybe Integer
+  yamlSetting <- if isJust cliBytes
+    then pure BudgetAuto  -- the CLI flag decides; skip the config read
+    else memBudget . gcMemory <$> loadConfigSilent
+  let explicitBytes = case (cliBytes, yamlSetting) of
+        (Just b, _)             -> Just b
+        (Nothing, BudgetFixed b) -> Just b
+        _                        -> Nothing
+      optOut = cfgNoMemoryBudget config || yamlSetting == BudgetOff
+      uncapped reason = do
+        hPutStrLn stderr $ "[memory] WARNING: no budget applied (" ++ reason ++ ") — the run is uncapped"
+        if profile then reexecWithRTS profile Nothing else pure Nothing
+  case explicitBytes of
+    Just b -> do
+      hPutStrLn stderr $ "[memory] budget: " ++ formatBytes b ++ " (explicit)"
+      reexecWithRTS profile (Just b)
+    Nothing
+      | optOut -> uncapped (if cfgNoMemoryBudget config
+                              then "--no-memory-budget"
+                              else "memory.budget: off")
+      | otherwise -> do
+          mInfo <- readMemInfo
+          case (deriveBudget mInfo Nothing memorySafetyReserve, mInfo) of
+            (Just derived, Just mi) -> do
+              hPutStrLn stderr $ "[memory] budget: " ++ formatBytes derived
+                ++ " (derived from available " ++ formatBytes (miMemAvailable mi) ++ ")"
+              reexecWithRTS profile (Just derived)
+            _ -> uncapped "memory info unavailable"
+
+-- | Re-execute the binary with RTS flags (@-M@ heap cap and/or profiling),
+-- marking the child via 'reexecEnvVar', then wait and exit with the child's
+-- exit code — so heap-exhaustion (2) and pre-flight (1) exits survive the
+-- re-exec unchanged.
+reexecWithRTS :: Bool -> Maybe Integer -> IO a
+reexecWithRTS profile mBudgetBytes = do
   originalArgs <- getArgs
   exePath <- getExecutablePath
+  envs <- getEnvironment
   let rtsFlags = concat
-        [ if profile then "-s -hT" else ""
-        , if profile && isJust heapStr then " " else ""
-        , maybe "" (\sz -> "-M" ++ sz) heapStr
+        [ if profile then ["-s", "-hT"] else []
+        , maybe [] (\b -> ["-M" ++ show b]) mBudgetBytes
         ]
-  case rtsFlags of
-    "" -> pure ()
-    _ -> do
-      hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ rtsFlags
-      hFlush stderr
-      let (cleanArgs, _, _) = stripRTSFlags originalArgs
-          finalArgs = words ("+RTS " ++ rtsFlags ++ " --") ++ cleanArgs
-      let spec = proc exePath finalArgs
-      _ <- createProcess spec
-      exitSuccess
+  hPutStrLn stderr $ "[graphos] Re-executing with RTS flags: +RTS " ++ unwords rtsFlags
+  hFlush stderr
+  let (cleanArgs, _, _) = stripRTSFlags originalArgs
+      finalArgs = ["+RTS"] ++ rtsFlags ++ ["--"] ++ cleanArgs
+      childEnv = (reexecEnvVar, maybe "" show mBudgetBytes)
+                   : filter ((/= reexecEnvVar) . fst) envs
+      spec = (proc exePath finalArgs) { Process.env = Just childEnv }
+  (_, _, _, ph) <- createProcess spec
+  code <- waitForProcess ph
+  exitWith code
 
 runClusterOnlyMode :: AppEnv -> LogEnv -> ObservabilityEnv -> PipelineConfig -> IO ()
 runClusterOnlyMode appEnv env obsEnv config' = do
@@ -174,11 +277,19 @@ main = do
   cmd <- withArgs args (execParser opts)
   case cmd of
     Run config -> do
-      let heapStr = fmap (\mb -> show (mb * 1024 * 1024)) (cfgMaxHeap config)
-      when (cfgRtsProfile config || isJust (cfgMaxHeap config)) $
-        reexecWithRTS (cfgRtsProfile config) heapStr
+      -- Budget establishment (memory-budget-guard): the parent derives (or
+      -- takes the explicit) heap budget and re-execs under RTS -M; the child
+      -- recognizes the env marker and reads the active budget from it.
+      reexecMarker <- lookupEnv reexecEnvVar
+      activeBudget <- case reexecMarker of
+        Just v  -> pure (readMaybe v :: Maybe Integer)
+        Nothing -> establishMemoryBudget config
       -- Load graphos.yaml config and merge with CLI defaults
       graphosCfg <- loadConfig
+      -- Effective output directory (multi-source-graphs 2.2): the CLI -o
+      -- always wins; otherwise the graphos.yaml `output:` key; otherwise the
+      -- canonical "graphos-out".
+      outputDir <- effectiveRunOutputDir config graphosCfg
       let obsCfg = gcObservability graphosCfg
           -- Merge config file + CLI flags: CLI flags override config file values
           -- SDK reads OTEL_* env vars; we set them from CLI flags
@@ -197,12 +308,14 @@ main = do
           debugDir = case cfgDebugTraceDir config of
                        Just d  -> d
                        Nothing -> if null (obsDebugTraceDir obsCfg)
-                                    then cfgOutputDir config ++ "/traces"
+                                    then outputDir ++ "/traces"
                                     else obsDebugTraceDir obsCfg
-          config' = config { cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
+          config' = config { cfgOutputDir    = outputDir
+                           , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
+                            , cfgActiveBudgetBytes = activeBudget
                             }
       -- Fail-fast on a corrupt existing graph.json before doing any work.
       -- Strict by default; pass --no-strict-graph for tolerant loading.
@@ -465,6 +578,7 @@ main = do
 
     ResearchCmd termsArg seedsArg graphPath _doHtml doJson termsFileArg labelArg _researchMode commonOpts -> do
       hSetBuffering stdout NoBuffering
+      graphosCfg <- loadConfigSilent
       loadResult <- loadGraphOpt (cqoStrictGraph commonOpts) graphPath
       case loadResult of
         Left err -> hPutStrLn stderr $ "Error: " ++ T.unpack err
@@ -494,11 +608,14 @@ main = do
                     | otherwise = t : go (Map.insert t () seen) rest
           rv <- buildResearchViewIO g idx commMap comps dedupedTerms seedsArg edgeMode
           ts <- TTF.formatTime TTF.defaultTimeLocale "%Y%m%dT%H%M%S" <$> TCC.getCurrentTime
-          let lbl = maybe ts id labelArg
-              dir = "graphos-out"
+          -- Effective output directory (multi-source-graphs 2.2): research
+          -- HTML lands next to the graph it was built from (config `output:`
+          -- honored; CLI research has no -o, so the config value always wins).
+          let outDir = effectiveOutputDir graphosCfg
+              lbl = maybe ts id labelArg
               base = "research-" ++ lbl
-              htmlPath = dir </> (base ++ ".html")
-          createDirectoryIfMissing True dir
+              htmlPath = outDir </> (base ++ ".html")
+          createDirectoryIfMissing True outDir
           writeFile htmlPath (T.unpack (renderResearchHtml rv))
           hPutStrLn stderr $ "Wrote research HTML to " ++ htmlPath
           when doJson $ do
@@ -668,17 +785,44 @@ main = do
           when (sfrEmbeddingCount res > 0) $
             logInfo env $ T.pack $ "  Embeddings: " ++ show (sfrEmbeddingCount res) ++ " vectors"
 
-    SpeccheckCmd specsDir asJson strictCov -> do
-      parsed <- parseSpecDir specsDir
+    SpeccheckCmd specsDir asJson strictCov checkNames strictDups mGraph adjudicate -> do
+      parsed <- case mGraph of
+        Just graphPath -> do
+          loadResult <- loadGraphFromFile graphPath
+          pure $ case loadResult of
+            Left err -> Left err
+            Right loaded -> Right
+              ( Map.elems (gNodes (lrGraph loaded))
+              , Map.elems (gEdges (lrGraph loaded))
+              )
+        Nothing -> parseSpecCorpus specsDir
       case parsed of
         Left err -> do
           hPutStrLn stderr $ "[graphos] speccheck: " ++ T.unpack err
           exitWith (ExitFailure 1)
         Right (specNodes, specEdges) -> do
-          let report = runSpecCheck specNodes specEdges strictCov
+          let checks = [ c | Just c <- map parseCheckName checkNames ]
+              -- Duplication candidates need node embeddings; the structural
+              -- corpus parse carries none, so they only appear when a graph
+              -- with an embeddings sidecar is loaded (future: --embeddings).
+              dups = []
+              spofs = spofDecisions specNodes specEdges
+          madj <- if adjudicate
+            then do
+              let report0 = runSpecCheck'
+                              specNodes specEdges strictCov strictDups dups spofs Nothing
+              adjns <- SpecAdjudicate.adjudicateCandidates
+                         productionLLMPort defaultLabelingConfig specNodes
+                         (srCandidates report0) 2
+              pure (Just
+                [ (SpecAdjudicate.adjPair a, SpecAdjudicate.adjVerdict a, SpecAdjudicate.adjRationale a)
+                | a <- adjns ])
+            else pure Nothing
+          let report = runSpecCheck'
+                         specNodes specEdges strictCov strictDups dups spofs madj
           if asJson
-            then BL.putStr (encode report) >> putStrLn ""
-            else TIO.putStrLn (renderSpecReport report)
+            then BL.putStr (encode (filterReport checks report)) >> putStrLn ""
+            else TIO.putStrLn (renderSpecReport (filterReport checks report))
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
 
     IntentcheckCmd specsFile graphPath probePaths asJson -> do
@@ -688,14 +832,14 @@ main = do
           hPutStrLn stderr $ "[graphos] intentcheck: failed to parse specs JSON: " ++ err
           exitWith (ExitFailure 1)
         Right doc -> do
-          mainLoad <- loadGraphFromFile (T.unpack graphPath)
+          mainLoad <- loadGraphFromFile graphPath
           case mainLoad of
             Left err -> do
               hPutStrLn stderr $ "[graphos] intentcheck: " ++ T.unpack err
               exitWith (ExitFailure 1)
             Right mainResult -> do
               let g = lrGraph mainResult
-                  report = runIntentCheck g doc graphPath
+                  report = runIntentCheck g doc (T.pack graphPath)
               forM_ probePaths $ \p -> do
                 rl <- loadGraphFromFile (T.unpack p)
                 case rl of
@@ -703,7 +847,7 @@ main = do
                   Right pg -> do
                     let summ = case runProbes g doc p (irRows report) [lrGraph pg] of
                                (s:_) -> s
-                               []    -> ProbeSummary "" [] True
+                               []    -> ProbeSummary T.empty [] True
                     when (not (prMatches summ)) $
                       hPutStrLn stderr ("[graphos] intentcheck [non-triviality]: probe " ++ T.unpack p ++ " differs from main graph")
               if asJson
@@ -789,6 +933,22 @@ main = do
           putStrLn $ "  Found " ++ show (length servers) ++ " LSP server(s):"
           mapM_ (\s -> putStrLn $ "    " ++ T.unpack (lsiName s) ++ " (" ++ lsiCommand s ++ ") - " ++ show (lsiExtensions s)) servers
 
+    MigrateGraphCmd graphPath mOutputPath -> do
+      let outPath = maybe graphPath id mOutputPath
+      putStrLn $ "[graphos] Migrate-graph: loading " ++ graphPath
+      loadResult <- loadGraphFromFile graphPath
+      case loadResult of
+        Left err -> do
+          putStrLn $ "Error: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right loaded -> do
+          let g = lrGraph loaded
+          exportGraphWithLabels g (emptyAnalysisForMigrate loaded) (Just (lrCommunityLabels loaded)) outPath
+          putStrLn $ "[graphos] Migrated " ++ graphPath ++ " -> " ++ outPath
+                     ++ " (JGF envelope, application/vnd.jgf+json)"
+          putStrLn $ "[graphos] Nodes: " ++ show (Map.size (gNodes g))
+                     ++ ", edges: " ++ show (Map.size (gEdges g))
+
     Serve dir graphPath port apiOnly noApi -> do
       putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
       startServeServer dir graphPath port apiOnly noApi
@@ -868,6 +1028,7 @@ toLabeledGraph gr = LG.LabeledGraph
   , LG.gAdjBack = gAdjBack gr
   }
 
+
 -- ───────────────────────────────────────────────
 -- openspec view changes — compact change listing
 -- ───────────────────────────────────────────────
@@ -894,7 +1055,12 @@ renderChangesList infos =
 -- graphos init — generate config file
 -- ───────────────────────────────────────────────
 
--- | Generate a graphos.yaml config file with defaults and comments.
+-- | Generate a graphos.yaml config file with defaults and comments
+-- (multi-source-graphs 2.3 / workflow 15). The file is produced by rendering
+-- the default 'GraphosConfig' through 'writeConfigYaml' (the Config-module
+-- export) followed by the commented documentation sections — the commented
+-- @sources:@ example and @output:@ key among them — so a generated file both
+-- parses as a valid config and documents every optional section.
 initConfigFile :: IO ()
 initConfigFile = do
   let path = "graphos.yaml"
@@ -902,291 +1068,11 @@ initConfigFile = do
   if exists
     then putStrLn $ "[init] " ++ path ++ " already exists. Delete it first if you want to regenerate."
     else do
-      writeFile path defaultConfigYaml
+      cfg <- generateDefaultConfig
+      writeConfigYaml path cfg
+      appendFile path configDocComments
       putStrLn $ "[init] Created " ++ path ++ " with default configuration."
-      putStrLn "[init] Edit it to customize LSP servers, extractors, and file extensions."
-
--- | Default graphos.yaml content with comments explaining each section.
-defaultConfigYaml :: String
-defaultConfigYaml = unlines
-  [ "# ───────────────────────────────────────────────"
-  , "# Graphos Configuration"
-  , "# ───────────────────────────────────────────────"
-  , "# This file configures extraction, LLM, embedding, vision, and observability."
-  , "# Any field left out will fall back to built-in defaults."
-  , "# User values override defaults (for LSP/language_ids maps)."
-  , "#"
-  , "# Config resolution (later wins):"
-  , "#   1. Built-in defaults"
-  , "#   2. Global config: ~/.config/graphos/graphos.yaml"
-  , "#   3. This file (project graphos.yaml)"
-  , "#   4. CLI flags (--otel, --metrics, --embed, --no-embed, etc.)"
-  , ""
-  , "# ──── Ingest (single-file) ───────────────────"
-  , "# Settings for `graphos ingest <file>`. Optimized for codebase analysis."
-  , "ingest:"
-  , "  embed: true                   # generate embeddings by default (override with --no-embed)"
-  , "  merge: true                  # merge into existing graph.json"
-  , "  deduplicate: true            # skip unchanged files via SHA256"
-  , "  resolution: 0.8              # smaller communities for single-file graphs"
-  , "  min_comm_size: 2             # minimum community size for ingest"
-  , "  max_leiden_iter: 20          # converge quickly on small graphs"
-  , "  index_path: graphos-out/index.json"
-  , "  url:"
-  , "    timeout: 30                # seconds to wait for URL response"
-  , "    user_agent: graphos/0.1.0"
-  , "    retry: 1                   # retries on download failure"
-  , "  categories:                  # per-category overrides (Nothing = inherit top-level)"
-  , "    image:"
-  , "      embed: false             # images: don't embed by default"
-  , "    video:"
-  , "      embed: false             # videos: don't embed by default"
-  , ""
-  , "# ──── Extraction granularity ──────────────────"
-  , "# fine     — statement-level nodes (verbose, ~100+ nodes/file)"
-  , "# function — functions/types/classes + module-level constants (default)"
-  , "# file     — one node per file"
-  , "# Per-extension override: add `granularity: file` under an extractors entry."
-  , "# CLI flag --granularity overrides both."
-  , "granularity: function"
-  , ""
-  , "# ──── Extractors ─────────────────────────────"
-  , "# How to extract symbols from each file type."
-  , "#   tree-sitter — fast AST parsing, no server needed (default for all)"
-  , "#   lsp         — Language Server Protocol (richer semantic info, requires server)"
-  , "#   stub        — single node per file (no parsing)"
-  , "#"
-  , "# All languages default to tree-sitter. Uncomment `mode: lsp` to switch."
-  , "extractors:"
-  , "  # TypeScript (default: tree-sitter)"
-  , "  \".ts\":"
-  , "    mode: tree-sitter"
-  , "    grammar: typescript"
-  , "    language_id: typescript"
-  , "  \".tsx\":"
-  , "    mode: tree-sitter"
-  , "    grammar: tsx"
-  , "    language_id: typescriptreact"
-  , "  \".js\":"
-  , "    mode: tree-sitter"
-  , "    grammar: javascript"
-  , "    language_id: javascript"
-  , "  \".jsx\":"
-  , "    mode: tree-sitter"
-  , "    grammar: javascript"
-  , "    language_id: javascriptreact"
-  , "  # Haskell (default: tree-sitter; uncomment for LSP)"
-  , "  \".hs\":"
-  , "    mode: tree-sitter"
-  , "    grammar: haskell"
-  , "    language_id: haskell"
-  , "    # mode: lsp"
-  , "    # language_id: haskell"
-  , "  \".lhs\":"
-  , "    mode: tree-sitter"
-  , "    grammar: haskell"
-  , "    language_id: haskell"
-  , "  # Go (default: tree-sitter; uncomment for LSP)"
-  , "  \".go\":"
-  , "    mode: tree-sitter"
-  , "    grammar: go"
-  , "    language_id: go"
-  , "    # mode: lsp"
-  , "    # language_id: go"
-  , "  # Rust (default: tree-sitter; uncomment for LSP)"
-  , "  \".rs\":"
-  , "    mode: tree-sitter"
-  , "    grammar: rust"
-  , "    language_id: rust"
-  , "    # mode: lsp"
-  , "    # language_id: rust"
-  , "  # Python (default: tree-sitter; uncomment for LSP)"
-  , "  \".py\":"
-  , "    mode: tree-sitter"
-  , "    grammar: python"
-  , "    language_id: python"
-  , "    # mode: lsp"
-  , "    # language_id: python"
-  , "  \".pyw\":"
-  , "    mode: tree-sitter"
-  , "    grammar: python"
-  , "    language_id: python"
-  , "  # C/C++ (default: tree-sitter; uncomment for LSP)"
-  , "  \".c\":"
-  , "    mode: tree-sitter"
-  , "    grammar: c"
-  , "    language_id: c"
-  , "    # mode: lsp"
-  , "    # language_id: c"
-  , "  \".cpp\":"
-  , "    mode: tree-sitter"
-  , "    grammar: cpp"
-  , "    language_id: cpp"
-  , "  \".h\":"
-  , "    mode: tree-sitter"
-  , "    grammar: c"
-  , "    language_id: c"
-  , "  \".hpp\":"
-  , "    mode: tree-sitter"
-  , "    grammar: cpp"
-  , "    language_id: cpp"
-  , "  # Nix (default: tree-sitter; uncomment for LSP)"
-  , "  \".nix\":"
-  , "    mode: tree-sitter"
-  , "    grammar: nix"
-  , "    language_id: nix"
-  , "    # mode: lsp"
-  , "    # language_id: nix"
-  , "  # Ruby (default: tree-sitter; uncomment for LSP)"
-  , "  \".rb\":"
-  , "    mode: tree-sitter"
-  , "    grammar: ruby"
-  , "    language_id: ruby"
-  , "    # mode: lsp"
-  , "    # language_id: ruby"
-  , "  # Java (default: tree-sitter; uncomment for LSP)"
-  , "  \".java\":"
-  , "    mode: tree-sitter"
-  , "    grammar: java"
-  , "    language_id: java"
-  , "    # mode: lsp"
-  , "    # language_id: java"
-  , "  # JSON: tree-sitter with file-level granularity (data files don't inflate the graph)"
-  , "  \".json\":"
-  , "    mode: tree-sitter"
-  , "    grammar: json"
-  , "    language_id: json"
-  , "    granularity: file"
-  , "  # Markdown: tree-sitter with built-in parser"
-  , "  \".md\":"
-  , "    mode: tree-sitter"
-  , "    grammar: markdown"
-  , "    language_id: markdown"
-  , "  \".rst\":"
-  , "    mode: tree-sitter"
-  , "    grammar: markdown"
-  , "    language_id: rest"
-  , "  \".adoc\":"
-  , "    mode: tree-sitter"
-  , "    grammar: markdown"
-  , "    language_id: asciidoc"
-  , ""
-  , "# ──── PDF Extraction ───────────────────────────"
-  , "# How aggressively to extract content from PDF files."
-  , "#   small  — file node + title only (minimal graph footprint)"
-  , "#   medium — file + titles + sections, no subsections/paragraphs (default)"
-  , "#   large  — full hierarchy: all section levels + paragraphs (~max nodes)"
-  , "pdf_extraction: medium"
-  , ""
-  , "# ──── LSP Servers ─────────────────────────────"
-  , "# Map file extension → {command, args, language_id}."
-  , "# Set command to \"\" to explicitly disable an extension's LSP."
-  , "# Unlisted extensions use defaults from Graphos.Domain.Config."
-  , "# lsp:"
-  , "#   \".ts\":"
-  , "#     command: typescript-language-server"
-  , "#     args: [\"--stdio\"]"
-  , "#     language_id: typescript"
-  , ""
-  , "# ──── Language IDs ─────────────────────────────"
-  , "# Override or add language IDs for file extensions."
-  , "# language_ids:"
-  , "#   \".nix\": nix"
-  , ""
-  , "# ──── File Extension Categories ────────────────"
-  , "# Full override for each category (replaces defaults)."
-  , "# file_extensions:"
-  , "#   code: [\".py\", \".ts\", \".tsx\", \".js\", \".jsx\", \".go\", \".rs\", \".hs\", \".nix\"]"
-  , "#   doc: [\".md\"]"
-  , "#   paper: [\".pdf\"]"
-  , "#   image: [\".png\", \".jpg\", \".jpeg\", \".webp\", \".gif\"]"
-  , "#   video: [\".mp4\", \".mov\", \".mkv\", \".webm\"]"
-  , "#   office: [\".docx\", \".pptx\", \".xlsx\", \".doc\", \".ppt\"]"
-  , ""
-  , "# ──── Neo4j ──────────────────────────────────────"
-  , "# Used by: graphos . --neo4j --neo4j-push"
-  , "# push_mode: full (all nodes), subgraph (communities + representatives), community (communities only)"
-  , "neo4j:"
-  , "  uri: \"http://localhost:7474\""
-  , "  user: \"neo4j\""
-  , "  password: \"graphos_dev\""
-  , "  push_mode: \"subgraph\""
-  , "  subgraph_size: 7"
-  , ""
-  , "# ──── Memgraph ────────────────────────────────────"
-  , "# In-memory graph database, Bolt-protocol compatible."
-  , "# Used by: graphos . --memgraph --memgraph-push bolt://localhost:7688"
-  , "# No auth by default — leave user/password empty for local dev."
-  , "memgraph:"
-  , "  uri: \"bolt://localhost:7688\""
-  , "  user: \"\""
-  , "  password: \"\""
-  , "  push_mode: \"subgraph\""
-  , "  subgraph_size: 7"
-  , ""
-  , "# ──── LLM Labeling ────────────────────────────────"
-  , "# Community labeling via LLM. Default: local Ollama (zero-config)."
-  , "# Supports any OpenAI-compatible API (OpenAI, Ollama, LiteLLM, etc.)."
-  , "# Set api_key to env var reference ${VAR} or a literal string."
-  , "# Use headers for custom auth (e.g. X-API-Key for enterprise gateways)."
-  , "# For OpenAI: uncomment provider/model/api_key/base_url below."
-  , "labeling:"
-  , "  provider: ollama              # ollama | openai | litellm (default: ollama)"
-  , "  model: llama3.2               # default: llama3.2 (ollama); gpt-4o-mini (openai)"
-  , "  api_key: \"\"                   # empty for ollama; ${OPENAI_API_KEY} for openai"
-  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
-  , "  batch_size: 20                # communities per LLM call (default: 20)"
-  , "  # headers:                    # custom HTTP headers for auth (default: none)"
-  , "  #   X-API-Key: \"${MY_TOKEN}\""
-  , "  #   X-Tenant-ID: \"my-tenant\""
-  , "  # --- OpenAI example (uncomment to use) ---"
-  , "  # provider: openai"
-  , "  # model: gpt-4o-mini"
-  , "  # api_key: \"${OPENAI_API_KEY}\""
-  , "  # base_url: \"https://api.openai.com/v1\""
-  , ""
-  , "# ──── Embedding ───────────────────────────────────"
-  , "# Local embedding generation via Ollama. Disabled by default."
-  , "# Enable with --embed flag or embedding.enabled: true."
-  , "# Targets small local models (nomic-embed-text, all-minilm)."
-  , "embedding:"
-  , "  enabled: false               # default: false (enable with --embed)"
-  , "  provider: ollama              # ollama (default, only local for now)"
-  , "  model: nomic-embed-text       # default: nomic-embed-text"
-  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
-  , "  dimension: 0                  # 0 = auto-detect from model"
-  , "  # batchSize: 64               # max texts per API request (default: 64, must be >= 1)"
-  , "  # concurrency: 1              # batches processed in parallel (default: 1 = sequential)"
-  , "  # headers:                    # custom HTTP headers for auth (default: none)"
-  , "  #   X-API-Key: \"${MY_TOKEN}\""
-  , ""
-  , "# ──── Vision ──────────────────────────────────────"
-  , "# Multimodal LLM for image analysis. Disabled by default."
-  , "# Enable with --vision flag or vision.enabled: true."
-  , "# When apiKey/baseUrl not set, inherits from labeling config."
-  , "vision:"
-  , "  enabled: false                # default: false (enable with --vision)"
-  , "  model: qwen3.6-moe            # default: qwen3.6-moe (ollama)"
-  , "  api_key: \"\"                   # empty: inherits from labeling"
-  , "  base_url: \"http://localhost:11434/v1\"  # default: ollama local"
-  , "  max_tokens: 1000             # max tokens for vision response"
-  , "  batch_size: 5                 # images per batch with GC between"
-  , "  # headers:                    # custom HTTP headers for auth (default: none)"
-  , "  #   X-API-Key: \"${MY_TOKEN}\""
-  , ""
-  , "# ──── Observability ─────────────────────────────────"
-  , "# Tracing, metrics, and debug instrumentation."
-  , "# CLI flags (--otel, --metrics, --debug-trace) override these values."
-  , "# Use --no-observability to completely disable all observability."
-  , "observability:"
-  , "  enabled: false               # default: false (enable with --otel)"
-  , "  endpoint: \"http://localhost:4318\"  # OTLP collector endpoint"
-  , "  metricsPort: 0               # Prometheus metrics port (0 = disabled)"
-  , "  serviceName: graphos"
-  , "  serviceVersion: \"0.1.0\""
-  , "  exportInterval: 15           # metrics export interval in seconds"
-  , "  debugTraceDir: \"\"            # directory for debug trace JSONL (empty = disabled)"
-  ]
+      putStrLn "[init] Edit it to customize LSP servers, extractors, sources, and file extensions."
 
 -- ───────────────────────────────────────────────
 -- Helpers for --agents

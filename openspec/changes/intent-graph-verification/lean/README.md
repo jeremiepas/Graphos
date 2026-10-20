@@ -6,46 +6,38 @@ decidable spec logic whose verifier *is* the decision procedure
 obligations), the discharge discipline and the admissibility gate.
 Dependency-free Lean 4 (core only, no Mathlib).
 
-> **Status: compiles (task 1.1 done).** `lake build` green on Lean 4.30.0
-> with `sorry` only on the four named obligations O1–O4. The only adjustment
-> needed from the first draft: the `prefix` binder renamed `pre` (Lean
-> keyword). All toy-instance `example`s are kernel-accepted by `decide` —
-> including the rejection of the schema-field-without-contract-field graph
-> and the admissibility of the corrected change — and every `#eval` matches
-> its predicted value (touched-set order aside). Four proof obligations
-> remain `sorry`-marked by design and are closed by task 1.2. The change is
-> complete only when `lake build` is green with **zero `sorry`**, per the
-> `spec-graph-verification` precedent.
+> **Status: complete (tasks 1.1 + 1.2 done).** `lake build` green on Lean 4
+> (core only, no Mathlib) with **zero `sorry`**: the four obligations O1–O4
+> are proved (kernel-checked, standard axioms only — `propext`,
+> `Classical.choice`, `Quot.sound`). The only adjustment needed from the
+> first draft was the `prefix` binder renamed `pre` (Lean keyword). All
+> toy-instance `example`s are kernel-accepted by `decide` — including the
+> rejection of the schema-field-without-contract-field graph and the
+> admissibility of the corrected change — and every `#eval` matches its
+> predicted value. Per the `spec-graph-verification` precedent, the change
+> is complete iff `lake build` is green with **zero `sorry`**. O2 and O4
+> carry a well-formedness hypothesis (`∀ e ∈ edges, src ∈ ids ∧ dst ∈ ids`)
+> — that hypothesis *is* the exporter contract (Decision 4): the exporter
+> emits only edges whose endpoints are declared nodes and the loader
+> verifies it. O4's conclusion is set-equality over `observable` (see its
+> docstring for the two counterexamples that forced the formulation).
 
 ```bash
 lake build                              # with a Lean 4 toolchain (≥ 4.29)
 nix shell nixpkgs#lean4 -c lake build   # or via nix
-# confirmed-working binary (Lean 4.29.1 in the nix store):
-/nix/store/cwilxazl2n8f59lksc4xihx560485ci8-lean4-4.29.1/bin/lake build
 ```
 
 ## Guarantee → theorem map
 
 | Guarantee | Theorem | Status |
 |---|---|---|
-| **The verifier is sound** — a `true` verdict means the spec holds in the model | `check_sound` (one line: `of_decide_eq_true`, because `sat` is decidable by bounded quantification) | stated, proof term supplied |
-| **The verifier is complete** — a holding spec is reported `true` | `check_complete` (`decide_eq_true`) | stated, proof term supplied |
-| The omission fixture is decided by the kernel — schema field without contract field is rejected, corrected change accepted | `example : ¬ sat G₁ specSchemaContract := by decide` and the `admissible cB … = true` example (section 5) | stated, kernel-checked once it compiles |
-| (O1) Computed reachability implies a real path | `reach_sound` | **open (`sorry`)** |
-| (O2) Fuel \|V\| suffices, under well-formedness (edge endpoints declared) — the theorem that dictates the exporter contract | `reach_complete` | **open (`sorry`)** |
-| (O3) The impact set is closed under reverse dependency | `impact_closed` | **open (`sorry`)** |
-| (O4) The `stableSignature` discharge rule preserves observable behaviour (reachable signature/label pairs) — the safety argument required of every rule | `stableSignature_safe` | **open (`sorry`)** |
-
-## Continuation (O1–O4)
-
-These four obligations are `open (sorry)` and are closed by task 1.2: replace the
-`sorry` at lines 336/343/350/365 with proof terms and run `lake build` to green
-with **zero `sorry`**, then flip these rows to "proved". O1/O2/O3 close by
-structural induction on saturation / `Path` (fuel `|V|`); O4 requires care over
-the scope of `observable` vs the `stableSignature` discharge rule — apply only the
-minimal scope-consistent refinement needed and note it here. Toy-instance `example`s
-must stay kernel-accepted. Closure unblocks the downstream Haskell units
-(`intent-graph-verification` O1–O4), now wired as blocked-by this unit.
+| **The verifier is sound** — a `true` verdict means the spec holds in the model | `check_sound` (one line: `of_decide_eq_true`, because `sat` is decidable by bounded quantification) | proved |
+| **The verifier is complete** — a holding spec is reported `true` | `check_complete` (`decide_eq_true`) | proved |
+| The omission fixture is decided by the kernel — schema field without contract field is rejected, corrected change accepted | `example : ¬ sat G₁ specSchemaContract := by decide` and the `admissible cB … = true` example (section 5) | proved, kernel-checked |
+| (O1) Computed reachability implies a real path | `reach_sound` | **proved** — no well-formedness needed |
+| (O2) Fuel \|V\| suffices, under well-formedness (edge endpoints declared) — the theorem that dictates the exporter contract | `reach_complete` | **proved** — saturation at \|V\| via a discrete-growth pigeonhole (`ClosureToolkit`) |
+| (O3) The impact set is closed under reverse dependency | `impact_closed` | **proved** — same saturation argument |
+| (O4) The `stableSignature` discharge rule preserves observable behaviour (dependency-labelled signature/label pairs of direct successors) | `stableSignature_safe` | **proved** — set-equality conclusion, well-formedness of both graphs; see the O4 docstring in `IntentGraph.lean` for why the original list-equality statement is false (edge-list reordering; dangling arcs to undeclared nodes) and why non-dependency labels are excluded |
 
 ## What the model abstracts
 
@@ -56,5 +48,6 @@ must stay kernel-accepted. Closure unblocks the downstream Haskell units
   verification. Only `nontrivial` (a spec accepts some probe and rejects
   some probe) is decidable and modeled.
 - **Rule safety beyond the graph**: O4's "observable behaviour" is the
-  graph-level definition (reachable signature/label pairs); runtime
-  behavioural equality is out of model, which is why acks exist.
+  graph-level definition (signature/label pairs over direct
+  dependency-labelled successors); runtime behavioural equality is out of
+  model, which is why acks exist.

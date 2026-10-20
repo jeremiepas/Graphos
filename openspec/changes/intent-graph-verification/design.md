@@ -112,3 +112,21 @@ it, which the projection contract states as a requirement.
 identical verdicts asserted); `cd lean && lake build` green with **no `sorry`** at
 change completion; `graphos impact` self-run on a synthetic before/after pair derived
 from the toy instance; `openspec validate intent-graph-verification` passes.
+
+## Proof notes (2026-10-15 — O1–O4 closed)
+
+- O2/O3 needed the fuel-saturation argument made explicit: closure under a
+  successor map with fuel |V| saturates when every successor of a declared
+  node stays declared. Proved without Mathlib by a discrete-growth
+  pigeonhole (`ClosureToolkit`: a `cnt` measure counts universe-elements in
+  the working set; each non-saturated step grows it by ≥ 1, and it is
+  bounded by |V|).
+- O4 required two formulation repairs, both forced by kernel-checkable
+  counterexamples and documented in the O4 docstring: the conclusion is
+  set-equality (list identity is falsified by edge-list reordering, which
+  no hypothesis controls), and the observable range is the
+  dependency-labelled successors of declared nodes (the original
+  all-labels/dangling-edge variants let nodes enter or leave the observable
+  while `v` stays frontier). The safety content Decision 3 requires is
+  preserved: a `stableSignature`-accepted frontier node keeps exactly the
+  same dependency-visible signature/label pairs before and after.

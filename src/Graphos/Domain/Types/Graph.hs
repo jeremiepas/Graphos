@@ -65,6 +65,8 @@ instance FromJSON NullModel where
     _                        -> fail ("unknown NullModel tag: " ++ T.unpack s)
   parseJSON _                = fail "expected a string tag for NullModel"
 
+instance NFData NullModel
+
 data Extraction = Extraction
   { extractionNodes :: !(Map NodeId Node)
   , extractionEdges :: !(Map EdgeId Edge)

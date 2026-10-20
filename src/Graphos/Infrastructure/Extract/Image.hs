@@ -75,6 +75,7 @@ makeImageNode filePath analysis = Node
   , nodeLabel = fromText (T.pack (takeFileName filePath))
   , nodeFileType = ImageFile
   , nodeSourceFile = fromText (T.pack filePath)
+  , nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
@@ -87,7 +88,6 @@ makeImageNode filePath analysis = Node
       , "kind" Aeson..= showKind (iaKind analysis)
       , "entities" Aeson..= map entityToJSON (iaEntities analysis)
       ]
-  , nodeBodyHash = Nothing
   , nodePresentBits = bitNodeKind
   }
 
@@ -98,6 +98,7 @@ makeEntityNode filePath entity = Node
   , nodeLabel = fromText (entityLabel entity)
   , nodeFileType = ImageFile
   , nodeSourceFile = fromText (T.pack filePath)
+  , nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
@@ -108,7 +109,6 @@ makeEntityNode filePath entity = Node
   , nodeExtra = Just $ Aeson.object
       [ "confidence" Aeson..= entityConfidence entity
       ]
-  , nodeBodyHash = Nothing
   , nodePresentBits = bitNodeKind
   }
 
@@ -131,6 +131,7 @@ imageStubNode fp = Node
   , nodeLabel = fromText (T.pack (takeFileName fp))
   , nodeFileType = ImageFile
   , nodeSourceFile = fromText (T.pack fp)
+  , nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
@@ -139,7 +140,6 @@ imageStubNode fp = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits = bitNodeKind
   }
 
