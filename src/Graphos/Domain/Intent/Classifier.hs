@@ -1,5 +1,6 @@
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Pure, config-driven deterministic intent-kind classifier.
 --
 -- The intent kinds (@Handler@, @Validator@, @Test@, @SchemaField@,
@@ -78,10 +79,10 @@ data KindRule = KindRule
   , ruleNamePatterns :: !(Maybe [Text]) -- label/name patterns (OR)
   , ruleFileTypes    :: !(Maybe [Text]) -- file-type text (OR)
   , ruleIntent       :: !IntentKind
-  }
+  } deriving (Eq)
 
 instance Show KindRule where
-  show r = "KindRule " ++ ruleName r
+  show r = "KindRule " ++ T.unpack (ruleName r)
 
 instance ToJSON KindRule where
   toJSON r = object
@@ -119,15 +120,15 @@ instance FromJSON ClassifierConfig where
 defaultClassifierConfig :: ClassifierConfig
 defaultClassifierConfig = ClassifierConfig
   [ -- Modules / namespaces / packages (LSP symbol kinds)
-    KindRule "module-symbol" (Just ["Module","Namespace","Package"]) Nothing Nothing Nothing Module
+    KindRule "module-symbol" Nothing (Just ["Module","Namespace","Package"]) Nothing Nothing Module
   , -- Handlers: name or handler directory
-    KindRule "handler-name" Nothing Nothing ["*Handler*","*handle*"] Nothing Handler
+    KindRule "handler-name" Nothing Nothing (Just ["*Handler*","*handle*"]) Nothing Handler
   , KindRule "handler-path" (Just ["**/handlers/**","**/handler/**"]) Nothing Nothing Nothing Handler
   , -- Validators: name or validator directory
-    KindRule "validator-name" Nothing Nothing ["*Validator*","*validate*","*validation*"] Nothing Validator
+    KindRule "validator-name" Nothing Nothing (Just ["*Validator*","*validate*","*validation*"]) Nothing Validator
   , KindRule "validator-path" (Just ["**/validators/**","**/validation/**"]) Nothing Nothing Nothing Validator
   , -- Tests: spec/test naming or test directory
-    KindRule "test-name" Nothing Nothing ["*Spec*","*spec*","*Test*","*test*"] Nothing Test
+    KindRule "test-name" Nothing Nothing (Just ["*Spec*","*spec*","*Test*","*test*"]) Nothing Test
   , KindRule "test-path" (Just ["**/tests/**","**/test/**","**/testing/**"]) Nothing Nothing Nothing Test
   , -- Schema fields: a field inside a schema / models directory
     KindRule "schema-field" (Just ["**/schema/**","**/schemas/**","**/models/**"]) (Just ["Field"]) Nothing Nothing SchemaField
@@ -141,7 +142,7 @@ defaultClassifierConfig = ClassifierConfig
 -- | Case-insensitive glob match (@*@ and @**@ any sequence, @?@ one char).
 matchGlob :: Text -> Text -> Bool
 matchGlob pattern subject =
-  mp (T.toLower (T.unpack pattern)) (T.toLower (T.unpack subject))
+  mp (T.unpack (T.toLower pattern)) (T.unpack (T.toLower subject))
   where
     mp [] [] = True
     mp [] _  = False
@@ -151,7 +152,6 @@ matchGlob pattern subject =
       | c == '*'  = mp cs (d:ds) || mp (c:cs) ds
       | c == '?'  = mp cs ds
       | otherwise = c == d && mp cs ds
-    mp _ [] = False
 
 fileTypeText :: FileType -> Text
 fileTypeText = \case
@@ -183,7 +183,9 @@ matchRule r path mSymbolKind name fileType =
   pathOk && symbolOk && nameOk && fileTypeOk
   where
     pathOk     = maybe True (\gs -> any (`matchGlob` path)   gs) (rulePathGlobs r)
-    symbolOk   = maybe True (\ks -> mSymbolKind `elem` ks)     (ruleSymbolKinds r)
+    symbolOk   = case ruleSymbolKinds r of
+                   Nothing -> True
+                   Just ks -> maybe (null ks) (`elem` ks) mSymbolKind
     nameOk     = maybe True (\ps -> any (`matchGlob` name)     ps) (ruleNamePatterns r)
     fileTypeOk = maybe True (\fs -> fileType `elem` fs)        (ruleFileTypes r)
 

@@ -18,6 +18,15 @@ extra-source-files: assets/viewer/viewer.css
                     assets/viewer/viewer.js
                     assets/viewer/vis-network.min.js
                     assets/viewer/VIS-NETWORK-LICENSE
+                    vendor/README.md
+                    vendor/tree-sitter-cpp/LICENSE
+                    vendor/tree-sitter-cpp/src/tree_sitter/parser.h
+                    vendor/tree-sitter-yaml/LICENSE
+                    vendor/tree-sitter-yaml/src/schema.generated.cc
+                    vendor/tree-sitter-yaml/src/tree_sitter/parser.h
+                    vendor/tree-sitter-sql/LICENSE
+                    vendor/tree-sitter-sql/grammar.js
+                    vendor/tree-sitter-sql/src/tree_sitter/parser.h
 
 source-repository head
   type:     git
@@ -82,7 +91,7 @@ library
                      Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
-Graphos.Domain.Extraction
+                    Graphos.Domain.Extraction
                      Graphos.Domain.Intent.Classifier
                      Graphos.Domain.Intent.Projection
                      Graphos.Domain.Labeling
@@ -155,6 +164,8 @@ Graphos.Domain.Extraction
                            Graphos.Infrastructure.Extract.TreeSitter.Grammar
                            Graphos.Infrastructure.Extract.TreeSitter.Convert
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
+                           Graphos.Infrastructure.Extract.TreeSitter.Imports
+                           Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
                       -- Infrastructure - Image/Office/Markdown extractors
@@ -235,6 +246,17 @@ Graphos.Domain.Extraction
   other-modules:
                     Graphos.Domain.HexColor
                     Paths_graphos
+
+  -- Vendored tree-sitter grammars (no Hackage package; ABI 11, see vendor/README.md).
+  -- All three ship an identical tree_sitter/parser.h, so one include dir serves them.
+  include-dirs:     vendor/tree-sitter-cpp/src
+  c-sources:        vendor/tree-sitter-cpp/src/parser.c
+                    vendor/tree-sitter-yaml/src/parser.c
+                    vendor/tree-sitter-sql/src/parser.c
+  cxx-sources:      vendor/tree-sitter-cpp/src/scanner.cc
+                    vendor/tree-sitter-yaml/src/scanner.cc
+                    vendor/tree-sitter-sql/src/scanner.cc
+  extra-libraries:  stdc++
 
   build-depends:
       aeson                >= 2.0
@@ -359,6 +381,7 @@ test-suite graphos-test
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
     Graphos.Domain.CommunitySpec
+    Graphos.Domain.ModularityCrossCheckSpec
     Graphos.Domain.Community.LabelSpec
     Graphos.Domain.Community.ClusterInvarianceSpec
     Graphos.Domain.Community.DeterminismSpec
@@ -400,6 +423,8 @@ test-suite graphos-test
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
+    Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
+    Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
@@ -438,6 +463,7 @@ test-suite graphos-test
       OpenSpecView.SpecDiffSpec
       OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
+    Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
     Graphos.Domain.Intent.ClassifierSpec
     Graphos.Domain.Intent.ProjectionSpec
@@ -507,3 +533,22 @@ test-suite graphos-test-focus
     , wai                  >= 3.2
     , http-types           >= 0.12
     , yaml                 >= 0.11
+
+-- ───────────────────────────────────────────────
+-- Benchmark: AVI-1307 Phase 2 n-way fold timing (AC-3)
+-- ───────────────────────────────────────────────
+-- Report-only empirical evidence for `mergedExtraction_nwayFold_linear`
+-- (formalization/lean/GraphosFormalization/Ext/Complexity.lean, AVI-620 §4/§5
+-- AC-3). Not built by `cabal build all` / `cabal test`; run explicitly:
+--   devenv shell -- cabal bench nway-fold-timing
+benchmark nway-fold-timing
+  import:         shared
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: benchmarks/nway-fold-timing
+  ghc-options:    -O2 -rtsopts "-with-rtsopts=-A64m"
+  build-depends:
+      base                 >= 4.17 && < 5
+    , containers           >= 0.6
+    , deepseq              >= 1.4
+    , graphos

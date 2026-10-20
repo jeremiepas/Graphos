@@ -20,6 +20,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , implementationDetailTypes
   , functionBoundaryTypes
     , makeNodeId
+    , fileModuleNode
     , tsNodeLabel
     , tsNodeUntruncatedLabel
     -- | Group 3 node-identity helpers (AVI-984): stable identity scheme
@@ -31,6 +32,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
 
 
 import Data.List (isPrefixOf)
+import System.FilePath (takeExtension)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
@@ -53,7 +55,9 @@ structureTypes =
   [ "module", "program", "source_file"
   , "package_clause"        -- Go
   , "mod_item"              -- Rust
-  , "document"              -- JSON
+  , "document"              -- JSON, YAML
+  , "translation_unit"      -- C++
+  , "stream"                -- YAML
   ]
 
 -- | Tier 2 — API surface: definitions visible from outside a function body.
@@ -86,6 +90,16 @@ apiSurfaceTypes =
   , "static_item", "extern_item", "attribute_item"
     -- Haskell
   , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
+    -- Ruby
+  , "method", "singleton_method"
+    -- C++
+  , "class_specifier", "struct_specifier", "union_specifier", "enum_specifier"
+  , "namespace_definition", "template_declaration", "alias_declaration"
+  , "declaration", "preproc_include"
+    -- SQL
+  , "create_table_statement", "create_function_statement", "create_type_statement"
+  , "create_domain_statement", "create_index_statement", "create_schema_statement"
+  , "create_sequence"
   ]
 
 importExportTypes :: [String]
@@ -105,6 +119,8 @@ implementationDetailTypes =
   , "with_statement", "try_statement", "except_clause"
     -- JSON values: every pair/object/array of every JSON file
   , "object", "array", "pair"
+    -- SQL DML
+  , "select_statement", "insert_statement", "update_statement", "delete_statement"
   ]
 
 -- | AST types that delimit a function body. At 'GranularityFunction' the
@@ -116,6 +132,8 @@ functionBoundaryTypes =
   , "arrow_function", "generator_function_declaration"
   , "constructor"
   , "function_item"       -- Rust
+  , "method", "singleton_method"  -- Ruby
+  , "create_function_statement"   -- SQL
   ]
 
 -- | All node types that can represent definitions (fine level).
@@ -153,7 +171,7 @@ tsNodeToGraphNodes gran filePath node =
       self = [makeNode filePath node | isDef]
       children = if descendInto gran isDef node
         then concatMap (tsNodeToGraphNodes gran filePath) (tsnChildren node)
-        else []
+        else map (makeNode filePath) (opaqueBodyUses gran isDef node)
   in self ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
@@ -163,23 +181,32 @@ tsNodeToGraphEdges gran filePath parentLabel node =
       isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
       tType = tsnType node
       
-      -- Parent → child edge (Contains)
-      myEdges = case (parentLabel, isDef) of
-        (Just p, True) ->
-          [ Edge
-            { edgeId        = EdgeId (makeNodeId filePath p <> "->" <> makeNodeId filePath myLabel <> ":contains")
+      containsEdge p targetId = Edge
+            { edgeId        = EdgeId (makeNodeId filePath p <> "->" <> targetId <> ":contains")
             , edgeSource    = makeNodeId filePath p
-            , edgeTarget    = makeNodeId filePath myLabel
+            , edgeTarget    = targetId
             , edgeRelation  = Contains
             , edgeConfidence = Confidence 1.0
             , edgeWeight    = 1.0
             , edgeExtra     = Nothing
             }
-          ]
+
+      -- Parent → child edge (Contains)
+      myEdges = case (parentLabel, isDef) of
+        (Just p, True) ->
+          [ containsEdge p (if tType `elem` perOccurrenceTypes
+                              then defNodeId filePath node
+                              else makeNodeId filePath myLabel) ]
         _ -> []
 
+      -- Function → `use` edges for `use` items inside an opaque function body
+      bodyUseEdges = [ containsEdge myLabel (defNodeId filePath u) | u <- opaqueBodyUses gran isDef node ]
+
       -- Imports/Exports edges
-      (importEdges, importNodes) = if tType `elem` importExportTypes
+      -- Go/Rust/Ruby imports are resolved with repository context in
+      -- Graphos.Infrastructure.Extract.TreeSitter.Imports; Go's
+      -- @import_declaration@ must not go through the TypeScript specifier path.
+      (importEdges, importNodes) = if tType `elem` importExportTypes && takeExtension filePath /= ".go"
         then case extractSpecifier node of
                 Just (targetPath, targetName) ->
                   let targetId = if "external:" `isPrefixOf` targetPath
@@ -228,7 +255,7 @@ tsNodeToGraphEdges gran filePath parentLabel node =
                     let (e, n) = tsNodeToGraphEdges gran filePath parentLabel child
                     in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
 
-  in (myEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
+  in (myEdges ++ bodyUseEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
 
       where
         extractSpecifier :: TSNodeInfo -> Maybe (FilePath, Text)
@@ -260,10 +287,46 @@ stripQuotes t0
 -- Helpers
 -- ───────────────────────────────────────────────
 
+-- | AST types that get one node per occurrence: the same text repeated in a
+-- file (a Rust @use super::*;@ at module level and again in @mod tests@) is
+-- several items, so the id carries the start line.
+perOccurrenceTypes :: [String]
+perOccurrenceTypes = ["use_declaration"]
+
+-- | Node id of a definition node.
+defNodeId :: FilePath -> TSNodeInfo -> NodeId
+defNodeId filePath node
+  | tsnType node `elem` perOccurrenceTypes =
+      makeNodeId filePath (tsNodeUntruncatedLabel node) <> "#L" <> T.pack (show (tsnStartRow node + 1))
+  | otherwise = makeNodeId filePath (tsNodeUntruncatedLabel node)
+
+-- | The file's module node (the root @source_file@/@program@/… node), the
+-- source of the file's import edges. When the grammar could not parse the
+-- file and the root is an @ERROR@ node, the root is still returned, as a
+-- @Module@, so that the imports read from the partial tree have a source.
+fileModuleNode :: FilePath -> [TSNodeInfo] -> Maybe Node
+fileModuleNode filePath nodes =
+  case filter tsnIsNamed nodes of
+    (n : _)
+      | tsnType n `elem` structureTypes -> Just (makeNode filePath n)
+      | otherwise -> Just (makeNode filePath n) { nodeKind = Just (fromText "Module") }
+    [] -> Nothing
+
+-- | Import items (Rust @use@) inside a function body that the walker does
+-- not enter at 'GranularityFunction'. They still get a node each, contained
+-- by the function, so a body-local @use@ is not lost.
+opaqueBodyUses :: Granularity -> Bool -> TSNodeInfo -> [TSNodeInfo]
+opaqueBodyUses GranularityFunction True node
+  | tsnType node `elem` functionBoundaryTypes = concatMap uses (tsnChildren node)
+  where
+    uses n | tsnType n == "use_declaration" && tsnIsNamed n = [n]
+           | otherwise = concatMap uses (tsnChildren n)
+opaqueBodyUses _ _ _ = []
+
 -- | Make a Graphos Node from a TSNodeInfo.
 makeNode :: FilePath -> TSNodeInfo -> Node
 makeNode filePath node = Node
-  { nodeId           = makeNodeId filePath (tsNodeUntruncatedLabel node)
+  { nodeId           = defNodeId filePath node
   , nodeLabel        = fromText (tsNodeLabel node)
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText (T.pack filePath)
@@ -390,6 +453,34 @@ tsTypeToKind t = case t of
   "instance_declaration" -> "Instance"
   "pattern_declaration" -> "Pattern"
   "type_signature" -> "Signature"
+  -- Ruby-specific
+  "method" -> "Method"
+  "singleton_method" -> "Method"
+  -- C++-specific
+  "translation_unit" -> "Module"
+  "class_specifier" -> "Class"
+  "struct_specifier" -> "Struct"
+  "union_specifier" -> "Struct"
+  "enum_specifier" -> "Enum"
+  "namespace_definition" -> "Namespace"
+  "template_declaration" -> "Template"
+  "alias_declaration" -> "Type"
+  "declaration" -> "Declaration"
+  "preproc_include" -> "Import"
+  -- SQL-specific
+  "create_table_statement" -> "Table"
+  "create_function_statement" -> "Function"
+  "create_type_statement" -> "Type"
+  "create_domain_statement" -> "Type"
+  "create_index_statement" -> "Index"
+  "create_schema_statement" -> "Schema"
+  "create_sequence" -> "Sequence"
+  "select_statement" -> "Query"
+  "insert_statement" -> "Query"
+  "update_statement" -> "Query"
+  "delete_statement" -> "Query"
+  -- YAML
+  "stream" -> "Document"
   -- General
   "module" -> "Module"
   "program" -> "Module"

@@ -469,6 +469,15 @@ spec = do
       Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
       Set.member "b" (Map.findWithDefault Set.empty "c" (gAdjBack g')) `shouldBe` True
 
+    it "keeps existing neighbours and adds the new ones for a node that already has adjacency" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph True ext
+          g' = addEdges g [testEdge "a" "c"]
+      Map.findWithDefault Set.empty "a" (gAdjFwd g') `shouldBe` Set.fromList ["b", "c"]
+      let gu = addEdges (buildGraph False ext) [testEdge "a" "c"]
+      Map.findWithDefault Set.empty "a" (gAdjFwd gu) `shouldBe` Set.fromList ["b", "c"]
+      Map.findWithDefault Set.empty "a" (gAdjBack gu) `shouldBe` Set.fromList ["b", "c"]
+
     it "adds multiple edges to the graph" $ do
       let ext = extractionFromLists [testNode "a", testNode "b", testNode "c", testNode "d"] [testEdge "a" "b"]
           g = buildGraph False ext
