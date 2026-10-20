@@ -1,3 +1,7 @@
+## Purpose
+
+Binds the two readings of the merged context graph — the structural colimit reading `π_struct` and the modularity reading `π_mod` → `G_s` — as disjoint-field pure projections of the one merged object `M = mergeGraphs …`: single-object determinacy, combinatorial grounding of the support graph on the colimit, fresh community detection on the apex (the CT-R10 non-commutativity boundary preserved), the intra-detection monotonicity boundary, cohesion cross-reading consistency, bounded query cost, and order-independence on consistent diagrams with divergence bounded by `Δ` at conflicts. Consumes `merge-confluence` (M1–M5), `community-detection`, and `leiden-scalability` as-is; modifies neither.
+
 ## ADDED Requirements
 
 ### Requirement: Single-object determinacy and projection independence (UQI-1, UQI-2)
