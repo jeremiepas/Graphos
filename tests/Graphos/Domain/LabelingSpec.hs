@@ -17,9 +17,9 @@ import Graphos.Domain.Labeling
   , batchCommunities
   , LabelCacheEntry(..)
   , MatchKind(..)
-   , fingerprintOf
-   , matchCommunity
-   )
+  , fingerprintOf
+  , matchCommunity
+  )
 import Graphos.Domain.Community (CommunityComposition(..))
 
 testNode :: Text -> Node
@@ -174,7 +174,7 @@ spec = do
         `shouldNotBe` fingerprintOf (Set.fromList ["a", "b", "c"])
   
   describe "matchCommunity" $ do
-    let entry _ model members label =
+    let entry _cid model members label =
           LabelCacheEntry (fingerprintOf members) (Set.toList members) label model "2026-10-06T00:00:00Z"
   
     it "exact hit reuses the cached label with no LLM call" $ do
