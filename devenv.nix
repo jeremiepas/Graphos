@@ -45,34 +45,96 @@ in
 
   # CI tasks - runnable locally and in CI
   tasks = {
-    # cabal update is required before configure: a clean-slate CI runner has
-    # no Hackage index, so dependency resolution (e.g. zip-archive) fails with
-    # "unknown package" without it. Best-effort update with retries; always
-    # proceed to build even if update fails (cached index may suffice).
+    # ci:build drives the CI `build-and-test` Haskell step. The historic failure
+    # was flaky at the build step on every feature PR — including doc-only ones,
+    # where no code changes — while origin/main stayed green. Root cause: the
+    # build reached for the network during the long GHC compile. Two things fix
+    # that:
+    #
+    #   1. A warm store cache (shared across branches via the stable cache key in
+    #      .github/workflows/haskell.yml) already contains every dependency, so a
+    #      fully OFFLINE configure+build is deterministic and needs no network.
+    #     That is the primary path and is what makes doc-only PRs green.
+    #   2. A genuinely cold runner (empty store, never built before) falls back to
+    #      the network, wrapped in retries so a transient package-fetch blip does
+    #      not fail the job.
+    #
+    # cabal update is only useful on a cold runner; on a warm run it would refresh
+    # the Hackage index past what the cache holds and could make an otherwise
+    # complete offline resolve fail, so it is skipped unless the offline path
+    # misses something.
     "ci:build" = {
       exec = ''
         set -e
-        echo "=== cabal update (best-effort) ==="
-        for i in 1 2 3; do
-          if cabal update 2>&1; then
-            echo "cabal update succeeded on attempt $i"
-            break
+
+        # Retry a command a few times, backing off, to absorb transient network
+        # blips during dependency fetch — the classic cause of flaky Haskell CI.
+        run_retry () {
+          local cmd="$1"
+          local attempt=1
+          local max=3
+          while true; do
+            echo ">>> [attempt $attempt/$max] $cmd"
+            if eval "$cmd"; then
+              return 0
+            fi
+            if [ "$attempt" -ge "$max" ]; then
+              echo ">>> command failed after $attempt attempts: $cmd" >&2
+              return 1
+            fi
+            echo ">>> $cmd failed, retrying in $((attempt * 10))s..."
+            sleep $((attempt * 10))
+            attempt=$((attempt + 1))
+          done
+        }
+
+        # Primary path: offline build. With a warm restored store cache every
+        # dependency is already present, so configure+build need no network and are
+        # fully deterministic. This is what keeps every PR green, including the
+        # doc-only ones that change no Haskell source.
+        if run_retry 'cabal configure --enable-tests --flag dev --offline' \
+           && run_retry 'cabal build all --offline'; then
+          echo "=== offline build succeeded (warm store cache) ==="
+          # `cabal configure --offline` persists `offline: True` into
+          # cabal.project.local (cabal >= 3.16 persistent project state). That is
+          # correct for this offline build, but the file is uploaded as part of
+          # the build-products artifact and consumed by downstream jobs (test,
+          # haddock, bin) whose plain `cabal ...` calls inherit --offline and die
+          # with Cabal-7125 (--offline refuses to download) if their solve needs
+          # anything from the network. Strip the flag so the artifact carries
+          # only the intended configure state (tests/dev flags), matching what
+          # the network fallback path writes.
+          if [ -f cabal.project.local ]; then
+            sed -i '/^offline:/d' cabal.project.local
           fi
-          echo "cabal update attempt $i failed, retrying in $((i * 10))s..."
-          sleep $((i * 10))
-        done
-        echo "=== proceeding to build ==="
-        cabal configure --enable-tests --flag dev -j4
-        cabal build all -j4
+          exit 0
+        fi
+
+        # Cold runner: the store was empty, so refresh the Hackage index and fetch
+        # over the network. Retries absorb transient blips here too.
+        echo "=== offline build missed packages (cold runner); fetching from the network ===" >&2
+        run_retry 'cabal update'
+        run_retry 'cabal configure --enable-tests --flag dev'
+        run_retry 'cabal build all'
       '';
     };
     "ci:test" = {
       exec = "cabal test all";
       after = [ "ci:build@succeeded" ];
     };
+    # Test without building: the CI `test` job restores dist-newstyle from the
+    # build job's `build-products` artifact, so no build dependency is needed.
+    "ci:test-only" = {
+      exec = "cabal test all";
+    };
     "ci:haddock" = {
       exec = "cabal haddock all";
       after = [ "ci:build@succeeded" ];
+    };
+    # Haddock without building: the CI `haddock` job restores dist-newstyle from
+    # the build job's `build-products` artifact, so no build dependency is needed.
+    "ci:haddock-only" = {
+      exec = "cabal haddock all";
     };
     # Best-effort cabal update with retries; always proceed to build.
     "ci:release-build" = {

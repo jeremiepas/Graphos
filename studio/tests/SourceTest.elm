@@ -120,7 +120,7 @@ suite =
         , describe "overview decoder (/api/overview)"
             [ test "decodes aggregates, totals and graph_hash" <|
                 \_ ->
-                    D.decodeString Source.overviewDecoder overviewJson
+                    D.decodeString Api.overviewDecoder overviewJson
                         |> Result.map
                             (\o ->
                                 ( ( o.nodeCount, o.edgeCount, o.communityCount )
@@ -131,7 +131,7 @@ suite =
                         |> Expect.equal ( Ok ( ( 1200000, 4000000, 8000 ), "sha:abc123", 1 ) )
             , test "accepts the older `hash` field name and defaults missing totals" <|
                 \_ ->
-                    D.decodeString Source.overviewDecoder overviewHashAliasJson
+                    D.decodeString Api.overviewDecoder overviewHashAliasJson
                         |> Result.map (\o -> ( o.graphHash, o.nodeCount, o.edgeCount ))
                         |> Expect.equal ( Ok ( "fp:def456", 12, 11 ) )
             ]

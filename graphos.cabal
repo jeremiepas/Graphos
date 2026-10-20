@@ -64,6 +64,8 @@ library
                     Graphos.Domain.Graph.Analysis
                     Graphos.Domain.Graph.Diff
                     Graphos.Domain.SpecCheck
+                    Graphos.Domain.IntentCheck
+                    Graphos.Domain.Impact
                     Graphos.UseCase.SpecCheck
                     Graphos.UseCase.SpecExtract
                     Graphos.UseCase.SpecAdjudicate
@@ -218,6 +220,7 @@ library
                        Graphos.Domain.Config.Ingest
                        Graphos.Domain.Config.Memory
                        Graphos.Domain.Config.Observability
+                       Graphos.Domain.Config.Output
                        Graphos.Domain.Config.Source
                        Graphos.Domain.Config.Vision
                        -- Domain - Embedding preparation
@@ -288,8 +291,24 @@ library
       , cryptohash-sha256    >= 0.11
       , cryptohash-sha1      >= 0.11
      , file-embed            >= 0.0.15
-    , text-short            >= 0.1
-    , unix                  >= 2.8
+     , text-short            >= 0.1
+     , unix                  >= 2.8
+
+-- ───────────────────────────────────────────────
+-- openspec-view: workspace metadata viewer (base-only)
+-- ───────────────────────────────────────────────
+library openspec-view
+  import:          shared
+  hs-source-dirs:  openspec-view
+  exposed-modules:
+                    OpenSpecView
+                    OpenSpecView.ChangeList
+                    OpenSpecView.ArtifactView
+                    OpenSpecView.SpecDiff
+                     OpenSpecView.StateDashboard
+  build-depends:   base
+                  , directory
+                  , time
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -327,6 +346,7 @@ test-suite graphos-test
   other-modules:
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
+    Graphos.Domain.IntentGraphVerificationSpec
     Graphos.Domain.ConfigSpec
     Graphos.Domain.EmbeddingSpec
     Graphos.Domain.Config.IngestSpec
@@ -411,12 +431,19 @@ test-suite graphos-test
     Graphos.UseCase.InferBetweennessWiringSpec
     Graphos.UseCase.IngestSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
+      OpenSpecView.ChangeListSpec
+      OpenSpecView.ArtifactViewSpec
+      OpenSpecView.SpecDiffSpec
+      OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.WatchCacheSpec
+    Graphos.Domain.Config.OutputSpec
+    Graphos.Infrastructure.FileSystem.OutputPlacementSpec
   build-depends:
-      base
-    , graphos
-    , hspec                >= 2.10
+       base
+     , graphos
+     , openspec-view
+     , hspec                >= 2.10
     , hspec-discover       >= 2.10
     , QuickCheck           >= 2.14
     , aeson
@@ -447,6 +474,7 @@ test-suite graphos-test-focus
   hs-source-dirs: tests
   other-modules:
     Graphos.Domain.TypesSpec
+    Graphos.Domain.IntentGraphVerificationSpec
     Graphos.UseCase.DocLinkParitySpec
     Graphos.UseCase.FormatContextSpec
     Graphos.UseCase.InferDocumentSpec

@@ -98,6 +98,7 @@ nodeMetadata n = object $
   [ "file_type"   .= nodeFileType n
   , "source_file" .= toText (nodeSourceFile n)
   ] ++
+  [ "source" .= toText src | Just src <- [nodeSource n] ] ++
   [ "line_start"   .= v | Just v <- [nodeLineStart n] ] ++
   [ "line_end"     .= v | Just v <- [nodeLineEnd n] ] ++
   [ "signature"    .= toText sig | Just sig <- [nodeSignature n] ] ++

@@ -22,7 +22,9 @@ module Graphos.Infrastructure.FileSystem.Cache
   , saveSemanticCache
   , clearCache
   , cacheDir
+  , cacheDirIn
   , embedCacheDir
+  , embedCacheDirIn
   , evictToCap
   , loadPipelineCheckpoint
   , savePipelineCheckpoint
@@ -51,13 +53,22 @@ import Data.Word (Word64, Word8)
 import Numeric (showHex)
 import qualified Crypto.Hash.SHA256 as Hash
 
+import Graphos.Domain.Config (defaultOutputDirName)
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
--- | Get the cache directory path
+-- | Get the cache directory for the effective pipeline output directory
+-- (multi-source-graphs 2.2): @<outDir>/cache/@. The port-level convention —
+-- caches always live under the effective output directory, never a hardcoded
+-- project-root name.
+cacheDirIn :: FilePath -> FilePath
+cacheDirIn outDir = outDir </> "cache"
+
+-- | Legacy root-based cache directory (pre-change project-root convention
+-- @<root>/graphos-out/cache/@), retained for tests and legacy callers.
 cacheDir :: FilePath -> FilePath
-cacheDir root = root </> "graphos-out" </> "cache"
+cacheDir root = cacheDirIn (root </> defaultOutputDirName)
 
 -- | Load cached extraction for a file under the content-only (legacy) key.
 -- Retained for the semantic-cache helpers and tests; new wiring calls the
@@ -104,7 +115,7 @@ entryPath h root = cacheDir root </> h ++ ".json"
 
 -- | Entry path under the port-level convention: @<outDir>/cache/<key>.json@.
 entryPathIn :: FilePath -> String -> FilePath
-entryPathIn outDir h = outDir </> "cache" </> h ++ ".json"
+entryPathIn outDir h = cacheDirIn outDir </> h ++ ".json"
 
 writeEntry :: FilePath -> Extraction -> IO ()
 writeEntry entry result = writeFileAtomic entry (encode (extractionToCached result))
@@ -153,9 +164,13 @@ clearCache root = do
 -- ───────────────────────────────────────────────
 
 -- | The embedding cache lives inside the extraction cache root
--- (project-root convention: @<root>/graphos-out/cache/embeddings/@).
+-- (port-level convention: @<outDir>/cache/embeddings/@).
+embedCacheDirIn :: FilePath -> FilePath
+embedCacheDirIn outDir = cacheDirIn outDir </> "embeddings"
+
+-- | Legacy root-based embedding-cache directory — retained for tests.
 embedCacheDir :: FilePath -> FilePath
-embedCacheDir root = cacheDir root </> "embeddings"
+embedCacheDir root = embedCacheDirIn (root </> defaultOutputDirName)
 
 -- | Evict the oldest-mtime entries across the extraction and embedding caches
 -- until the combined size is at or below the cap (bytes). A cap of 0 disables
@@ -165,12 +180,16 @@ embedCacheDir root = cacheDir root </> "embeddings"
 -- Sound by construction (AVI-521 INV-CACHE-SOUND): both caches are
 -- content-addressed, so eviction can only turn a would-be hit into a miss
 -- whose recomputation yields the same result — never a wrong result.
+--
+-- The sweep runs over the pipeline's effective output directory: the caller
+-- (UseCase.Pipeline.Core) passes @cfgOutputDir@, so a configured @output:@
+-- relocates the bounded caches with the rest of the artifacts (2.2).
 evictToCap :: Word64 -> FilePath -> IO Int
-evictToCap capBytes root
+evictToCap capBytes outDir
   | capBytes == 0 = pure 0
   | otherwise = do
-      exs <- cacheEntries (cacheDir root)
-      ems <- cacheEntries (embedCacheDir root)
+      exs <- cacheEntries (cacheDirIn outDir)
+      ems <- cacheEntries (embedCacheDirIn outDir)
       -- Oldest mtime first; ties broken by path for determinism.
       let ordered = sortBy (comparing (\(_, mt, p) -> (mt, p))) (exs ++ ems)
           -- Integer arithmetic: under the cap this difference is negative and

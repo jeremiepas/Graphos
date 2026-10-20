@@ -4,10 +4,16 @@
 > compiles and closes its obligations first. Vocabulary/contract next (small,
 > unblocks everything). Checkers mirror Lean. CLI last, conformance at the end.
 
-> **Status (2026-09-17)** — task 1.1 done at proposal time: `lake build` green
-> on Lean 4.30.0, `sorry` only on O1–O4, all toy examples kernel-accepted
-> (`by decide`), every `#eval` matching its prediction. Sole fix needed:
-> `prefix` binder renamed `pre` (Lean keyword).
+> **Status (2026-10-15)** — task 1.1 done at proposal time: `lake build` green
+> on Lean 4, all toy examples kernel-accepted (`by decide`), every `#eval`
+> matching its prediction. Sole fix needed: `prefix` binder renamed `pre`
+> (Lean keyword). **Task 1.2 done 2026-10-15**: O1–O4 proved — `lake build`
+> green, zero `sorry`, standard axioms only (`propext`, `Classical.choice`,
+> `Quot.sound`). Two formulation repairs were required and are documented in
+> the code (O4 docstring) and `lean/README.md`: O4's conclusion is
+> set-equality over a dependency-labelled `observable` (the original
+> list-equality over all labels is falsifiable), and O4 carries the same
+> well-formedness hypothesis as O2 — Decision 4's exporter contract.
 
 ## 1. Formal model (first — it is the reference for the Domain checkers)
 
@@ -20,13 +26,14 @@
       decidability instances elaborated as written; `lake-manifest.json` generated
 
 ### 1.2 Close the proof obligations
-- [ ] O1 `reach_sound`: fuel-bounded `reach` implies an inductive `Path`
-- [ ] O2 `reach_complete`: fuel |V| saturates, under well-formedness (edge endpoints
+- [x] O1 `reach_sound`: fuel-bounded `reach` implies an inductive `Path`
+- [x] O2 `reach_complete`: fuel |V| saturates, under well-formedness (edge endpoints
       declared) — this theorem *is* the justification for the exporter contract
-- [ ] O3 `impact_closed`: the computed impact set is closed under reverse dependency
-- [ ] O4 `stableSignature_safe`: the shipped discharge rule preserves observable
-      behaviour (reachable signature/label pairs) — the safety argument Decision 3 requires
-- [ ] Check criteria: `lake build` green, zero `sorry`, theorem map in `lean/README.md`
+- [x] O3 `impact_closed`: the computed impact set is closed under reverse dependency
+- [x] O4 `stableSignature_safe`: the shipped discharge rule preserves observable
+      behaviour (dependency-labelled signature/label pairs of direct successors)
+      — the safety argument Decision 3 requires
+- [x] Check criteria: `lake build` green, zero `sorry`, theorem map in `lean/README.md`
       updated from "obligation" to "proved"
 
 ## 2. Vocabulary + contract (small, unblocks everything)

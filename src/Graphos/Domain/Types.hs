@@ -8,7 +8,7 @@ module Graphos.Domain.Types
   , FileType(..)
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-  , bitNodeIsBridge, bitNodeExtra
+  , bitNodeIsBridge, bitNodeExtra, bitNodeSource
   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
 
@@ -122,7 +122,7 @@ import Graphos.Domain.Types.Node
   ( NodeId, Node(..), FileType(..)
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-  , bitNodeIsBridge, bitNodeExtra
+  , bitNodeIsBridge, bitNodeExtra, bitNodeSource
   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
   )
