@@ -25,6 +25,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
 | `GraphosFormalization/Ext/Strict.lean` | Phase 2 consistent case: strict colimit + fold order-independence, `mergedExtraction_strictColimit_orderIndependent` (AVI-620 §3.1) |
+| `GraphosFormalization/Ext/Lax.lean` | Phase 2 conflicting case: no matching-family cocone + lax colimit with the first/old-wins non-invertible comparison, `mergedExtraction_laxColimit_oldWins` (AVI-620 §3.2) |
 
 ## Build
 
@@ -144,7 +145,7 @@ fixture values are also computed concretely: `Qnum = 0` and
 | §2 colimit universal property | `mergedExtraction_isColimit` | **proved** (`Ext/Colimit.lean`) |
 | §2 least-upper-bound form | `mergedExtraction_isColimit_iff` | **proved** |
 | §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | **proved** (`Ext/Strict.lean`) |
-| §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | pending (AVI-1304) |
+| §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | **proved** (`Ext/Lax.lean`), incl. the AC-4 conflicting-`EdgeId` fixture |
 | §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | pending (AVI-1306) |
 
 The colimit layer carries the consistency hypothesis explicitly
@@ -168,12 +169,29 @@ family, `foldl'` is invariant under permutation of the view list
 `merge_assoc`/`merge_self`/`merge_empty_left`/`merge_empty_right`, and
 `consistent_merge_left` (a `foldl'` accumulator stays consistent).
 
-> **Scope caveat (AVI-1303).** The order-independence half is *conditional on
-> consistency by design*: on a conflicting key the folds genuinely differ
-> (`foldl'` makes the **last** view win, `foldr` the **first** — AVI-620 §0.4),
-> which is exactly the lax case `mergedExtraction_laxColimit_oldWins`
-> (AVI-1304). The AVI-949 consistency guarantee is therefore what makes the
-> streaming and build lanes interchangeable; without it this theorem says
-> nothing about the shipped folds. The concrete fixture at the end of
-> `Ext/Strict.lean` evaluates both folds on a `Nat`-keyed view (`0 ↦ 10`,
-> `1 ↦ 11`) to the same value, so the statements are not vacuous.
+> **Scope caveat (AVI-1303, corrected by AVI-1304).** The order-independence half
+> is *conditional on consistency by design*, but not for the reason originally
+> recorded here. On a conflicting key the merge genuinely loses information
+> (`A ⊕ B ≠ B ⊕ A`), which is the lax case `mergedExtraction_laxColimit_oldWins`
+> (AVI-1304, `Ext/Lax.lean`); what is *not* true is that the two fold sites
+> differ on conflicts. Both shipped folds put the accumulator / list head in the
+> **first** operand position, so under first/old-wins they all agree
+> (`Ext/Lax.lean:foldrMerge_eq_foldlMerge_all`, unconditional). The AVI-949
+> consistency guarantee is what makes the *result* order-independent
+> (commutation + permutation invariance), not what makes `foldr` and `foldl'`
+> agree. The §0.4 prose that claimed a `foldl'`-last-wins / `foldr`-first-wins
+> divergence is a requirements erratum tracked as AVI-1319.
+
+`Ext/Lax.lean` proves the §3.2 dual. For `A, B` sharing a conflicting **edge**
+key (same `EdgeId` encoding `(src,tgt,relation)`, different payload —
+`Convert.hs:165`): (a) no view receives both `A` and `B`, so the two-object
+diagram has **no cocone** (`Extraction.no_cocone_of_conflict`,
+`no_pairCocone_of_conflict`), the canonical cocone of §3.1 loses its second leg
+(`not_leg_merge_of_conflict`), and `familyConsistent [A, B]` fails — the §2/§3.1
+hypotheses are unsatisfiable, a strictly stronger failure than a missing
+mediator; (b) `A ⊕ B` carries the **first** operand's value at `k`
+(`merge_apply_left_of_conflict`), `B ⊕ A` the second's, `A ⊕ B ≠ B ⊕ A`, and no
+view-embedding relates the two merges in either direction
+(`not_le_merge_swap`, `not_le_merge_swap'`) — the first/old-wins comparison is
+non-invertible. AC-4 is instantiated on a concrete conflicting-`EdgeId` fixture
+(`ac4_conflictingEdge_firstWins`), so the statement is falsifiable, not vacuous.
