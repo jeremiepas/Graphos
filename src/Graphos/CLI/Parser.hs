@@ -2,7 +2,7 @@
 module Graphos.CLI.Parser
   ( -- * Command type
     Command(..)
-    , ViewSubcommand(..)
+  , ViewSubcommand(..)
     -- * Parsers
   , pipelineOpts
   , queryOpts
@@ -19,6 +19,7 @@ module Graphos.CLI.Parser
   , mergeOpts
   , ingestOpts
   , subgraphOpts
+  , migrateGraphOpts
   , commandOpts
   , granularityReader
     -- * Install-skill target
@@ -55,17 +56,20 @@ data Command
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
-   | SpeccheckCmd FilePath Bool Bool
-   | IntentcheckCmd FilePath Text [Text] Bool
-   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
-   | LServers
-   | Serve FilePath FilePath Int Bool Bool
+  | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
+  | IntentcheckCmd FilePath FilePath [Text] Bool
+  | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
+  | ViewCmd ViewSubcommand
+  | LServers
+ | Serve FilePath FilePath Int Bool Bool
+
+  | MigrateGraphCmd FilePath (Maybe FilePath)
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
-  | ViewCmd ViewSubcommand
   deriving (Show, Eq)
 
+-- | Subcommands for the OpenSpec artifact viewer.
 data ViewSubcommand
   = ViewChanges FilePath
   | ViewArtifacts FilePath
@@ -135,6 +139,9 @@ pipelineOpts = PipelineConfig
       <*> optional (option detectModeReader (long "detect-mode" <> metavar "MODE" <> help "Generated/vendored/minified detection mode: exclude|collapse|off (default: exclude)"))
       <*> switch (long "no-detect" <> help "Disable generated/vendored/minified detection (equivalent to --detect-mode off)")
       <*> optional (option auto (long "minified-threshold" <> help "Longest allowed line length before a file is classified as Minified (default: 5000)"))
+      <*> switch (long "fail-on-low-memory" <> help "Abort before any stage (exit 1) when available memory is below the heap budget (default: warn only)")
+      <*> switch (long "no-memory-budget" <> help "Disable the machine-derived default heap budget (run uncapped; --max-heap still applies when given)")
+      <*> pure Nothing
 
 
 granularityReader :: ReadM Granularity
@@ -305,9 +312,13 @@ subgraphOpts = SubgraphCmd
 
 speccheckOpts :: Parser Command
 speccheckOpts = SpeccheckCmd
-  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec)")
+  <$> strOption (long "specs" <> value "openspec" <> help "OpenSpec root to verify (default: openspec; ADRs under ../docs/proposals are included automatically)")
   <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
   <*> switch (long "strict-coverage" <> help "Gate on unimplemented requirements too (default: warn only)")
+  <*> many (strOption (long "check" <> metavar "NAME" <> help "Restrict to one check: cycles|coverage|candidates|stale|duplicates|spof (repeatable)"))
+  <*> switch (long "strict-duplicates" <> help "Gate on duplication candidates too (default: advisory)")
+  <*> optional (strOption (long "graph" <> metavar "G" <> help "Load spec artifacts from a graph.json instead of parsing the openspec/ tree"))
+  <*> switch (long "adjudicate" <> help "Adjudicate contradiction candidates pairwise via the configured LLM")
 
 intentcheckOpts :: Parser Command
 intentcheckOpts = IntentcheckCmd
@@ -353,6 +364,11 @@ viewDashboardOpts :: Parser ViewSubcommand
 viewDashboardOpts = ViewDashboard
   <$> strOption (long "root" <> value "openspec/changes" <> metavar "ROOT" <> help "Directory containing change folders (default: openspec/changes)")
 
+migrateGraphOpts :: Parser Command
+migrateGraphOpts = MigrateGraphCmd
+  <$> strArgument (metavar "GRAPH" <> help "Path to a graph.json in the legacy top-level format")
+  <*> optional (strOption (long "output" <> short 'o' <> metavar "PATH" <> help "Output path (default: overwrite GRAPH in place)"))
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
@@ -366,15 +382,16 @@ commandOpts = subparser
   <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
-   <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
-   <> command "intentcheck" (info (intentcheckOpts <**> helper) (progDesc "Verify intent specs against a graph: violated spec -> non-zero exit, all pass -> zero" <> footer "Example: graphos intentcheck --specs specs.json --graph graphos-out/graph.json"))
-   <> command "impact" (info (impactOpts <**> helper) (progDesc "Analyze change impact obligations: per-node discharge status, --gate exits non-zero unless admissible" <> footer "Example: graphos impact --before before.json --after after.json --gate"))
+  <> command "migrate-graph" (info migrateGraphOpts (progDesc "Upgrade a legacy graph.json to the JGF envelope format (in place unless --output)" <> footer "Example: graphos migrate-graph graphos-out/graph.json"))
+  <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
+  <> command "intentcheck" (info (intentcheckOpts <**> helper) (progDesc "Verify intent specs against a graph: violated spec -> non-zero exit, all pass -> zero" <> footer "Example: graphos intentcheck --specs specs.json --graph graphos-out/graph.json"))
+  <> command "impact" (info (impactOpts <**> helper) (progDesc "Analyze change impact obligations: per-node discharge status, --gate exits non-zero unless admissible" <> footer "Example: graphos impact --before before.json --after after.json --gate"))
+  <> command "view" (info (viewOpts <**> helper) (progDesc "View OpenSpec changes, artifacts, diffs, and dashboard"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
     <> command "install-skill" (info installSkillOpts (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
     <> command "research" (info (researchOpts <**> helper) (progDesc "Multi-query knowledge research with subgraph extraction"))
-    <> command "view" (info (viewOpts <**> helper) (progDesc "View OpenSpec changes, artifacts, diffs, and dashboard"))
     )
   <|> Run <$> pipelineOpts
 
@@ -450,6 +467,9 @@ renderCommandReference = unlines $
   , "  --graph FILE / --config CONFIG / --out, -o FILE"
   , "  --boundary-hops N / --no-derive"
   , ""
+  , "graphos migrate-graph GRAPH      Upgrade a legacy graph.json to the JGF format"
+  , "  --output, -o PATH              (default: overwrite in place)"
+  , ""
   , "graphos init                    Generate graphos.yaml"
   , ""
   , "graphos push [opts]             Push to Neo4j"
@@ -458,11 +478,6 @@ renderCommandReference = unlines $
   , "graphos serve [opts]            Serve HTML + query API"
   , "  --dir DIR / --graph FILE / --port N"
   , "  --api-only / --no-api"
-    , "graphos lservers                List LSP servers"
-    , ""
-    , "graphos view changes [--root DIR]  List changes and task status"
-    , "graphos view artifacts CHANGE_DIR  Show a change's artifacts"
-    , "graphos view diff DELTA MAIN       Diff two spec files"
-    , "graphos view dashboard [--root DIR]  Show aggregate state dashboard"
-    , "```"
-    ]
+  , "graphos lservers                List LSP servers"
+  , "```"
+  ]

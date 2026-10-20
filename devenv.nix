@@ -95,6 +95,18 @@ in
         if run_retry 'cabal configure --enable-tests --flag dev --offline' \
            && run_retry 'cabal build all --offline'; then
           echo "=== offline build succeeded (warm store cache) ==="
+          # `cabal configure --offline` persists `offline: True` into
+          # cabal.project.local (cabal >= 3.16 persistent project state). That is
+          # correct for this offline build, but the file is uploaded as part of
+          # the build-products artifact and consumed by downstream jobs (test,
+          # haddock, bin) whose plain `cabal ...` calls inherit --offline and die
+          # with Cabal-7125 (--offline refuses to download) if their solve needs
+          # anything from the network. Strip the flag so the artifact carries
+          # only the intended configure state (tests/dev flags), matching what
+          # the network fallback path writes.
+          if [ -f cabal.project.local ]; then
+            sed -i '/^offline:/d' cabal.project.local
+          fi
           exit 0
         fi
 
@@ -110,9 +122,19 @@ in
       exec = "cabal test all";
       after = [ "ci:build@succeeded" ];
     };
+    # Test without building: the CI `test` job restores dist-newstyle from the
+    # build job's `build-products` artifact, so no build dependency is needed.
+    "ci:test-only" = {
+      exec = "cabal test all";
+    };
     "ci:haddock" = {
       exec = "cabal haddock all";
       after = [ "ci:build@succeeded" ];
+    };
+    # Haddock without building: the CI `haddock` job restores dist-newstyle from
+    # the build job's `build-products` artifact, so no build dependency is needed.
+    "ci:haddock-only" = {
+      exec = "cabal haddock all";
     };
     # Best-effort cabal update with retries; always proceed to build.
     "ci:release-build" = {

@@ -33,17 +33,18 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
+import GHC.Generics (Generic)
 
 import Graphos.Domain.Types.Node
   ( Node(..), NodeId
   , nodeId, nodeLabel, nodeSourceFile, nodeSignature, nodeBodyHash
   , nodeLineStart, nodeLineEnd, nodeKind
-  , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature, bitNodeBodyHash
+  , computePresentBits
   , FileType(..) )
-import Graphos.Domain.Graph.Core (buildGraph)
+import Graphos.Domain.Graph.Core (Graph(..), buildGraph)
 import Graphos.Domain.Types.Graph (extractionFromLists)
 import Graphos.Domain.Types.Edge
-  ( Edge(..), EdgeId(..), Confidence(..)
+  ( Edge(..), EdgeId(..), Confidence(..), Relation
   , edgeSource, edgeTarget, edgeRelation )
 import Graphos.Domain.Intent.Classifier (ClassifierConfig, classifyNode, IntentKind(..))
 
@@ -117,9 +118,13 @@ instance ToJSON IntentProjection where
     ]
 
 instance FromJSON IntentProjection where
-  parseJSON = withObject "IntentProjection" $ \v -> IntentProjection
-    <$> v .:  "nodes"
-    <*> v .:  "edges"
+  parseJSON = withObject "IntentProjection" $ \v -> do
+    ns <- v .: "nodes"
+    es <- v .: "edges"
+    pure IntentProjection
+      { intentNodes = Map.fromList [(intentNodeId n, n) | n <- ns]
+      , intentEdges = es
+      }
 
 -- | Project a built graph. Node ids pass through verbatim; each node's intent
 -- kind comes from the classifier; signature and body hash are carried through.
@@ -141,7 +146,7 @@ projectionFromGraph cfg g =
       , intentKind         = classifyNode cfg n
       , intentSourceFile   = toText (nodeSourceFile n)
       , intentSignature    = fmap toText (nodeSignature n)
-      , intentBodyHash     = nodeBodyHash n
+      , intentBodyHash     = fmap toText (nodeBodyHash n)
       , intentLineStart    = nodeLineStart n
       , intentLineEnd      = nodeLineEnd n
       }
@@ -160,33 +165,38 @@ projectionToGraph p =
   buildGraph False $ extractionFromLists (map mkNode (Map.elems (intentNodes p)))
                               (map mkEdge (intentEdges p))
   where
-    mkNode n = Node
-      { nodeId           = intentNodeId n
-      , nodeLabel        = fromText (intentLabel n)
-      , nodeFileType     = CodeFile
-      , nodeSourceFile   = fromText (intentSourceFile n)
-      , nodeLineStart    = intentLineStart n
-      , nodeLineEnd      = intentLineEnd n
-      , nodeSignature    = fmap fromText (intentSignature n)
-      , nodeCommunityId  = Nothing
-      , nodeKind         = Just (toText (intentKind n))
-      , nodeDegree       = Nothing
-      , nodeIsBridge     = Nothing
-      , nodeExtra        = Nothing
-      , nodeBodyHash     = intentBodyHash n
-      , nodePresentBits  = presentBits n
-      }
+    mkNode n =
+      let node = Node
+            { nodeId           = intentNodeId n
+            , nodeLabel        = fromText (intentLabel n)
+            , nodeFileType     = CodeFile
+            , nodeSourceFile   = fromText (intentSourceFile n)
+            , nodeSource       = Nothing
+            , nodeLineStart    = intentLineStart n
+            , nodeLineEnd      = intentLineEnd n
+            , nodeSignature    = fmap fromText (intentSignature n)
+            , nodeCommunityId  = Nothing
+            , nodeKind         = Just (fromText (intentKindText (intentKind n)))
+            , nodeDegree       = Nothing
+            , nodeIsBridge     = Nothing
+            , nodeExtra        = bodyExtra (intentBodyHash n)
+            , nodePresentBits  = 0
+            }
+      in node { nodePresentBits = computePresentBits node }
+
+    bodyExtra :: Maybe Text -> Maybe Value
+    bodyExtra Nothing  = Nothing
+    bodyExtra (Just b) = Just (object [ "body_hash" .= b ])
+
+    intentKindText :: IntentKind -> Text
+    intentKindText k = case toJSON k of
+      String t -> t
+      _        -> "other"
 
     mkEdge e = Edge
       (EdgeId (intentEdgeSource e <> "->" <> intentEdgeTarget e))
       (intentEdgeSource e) (intentEdgeTarget e) (intentEdgeRelation e)
       1.0 (Confidence 1.0) Nothing
-
-    presentBits n =
-      (maybe 0 (const bitNodeLineStart)     intentLineStart n)
-        .|. maybe 0 (const bitNodeLineEnd)       intentLineEnd n
-        .|. maybe 0 (const bitNodeSignature)     (intentSignature n)
-        .|. maybe 0 (const bitNodeBodyHash)      (intentBodyHash n)
 
 -- | Well-formedness: Right [] when every edge endpoint is a declared node;
 -- otherwise Left naming the dangling endpoint(s).

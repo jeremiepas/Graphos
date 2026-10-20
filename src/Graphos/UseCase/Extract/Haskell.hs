@@ -61,6 +61,7 @@ haskellStubNodes filePath content =
                , nodeLabel        = fromText mnText
                , nodeFileType     = CodeFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
                , nodeLineStart    = Just 1
                , nodeCommunityId  = Nothing
                , nodeDegree       = Nothing
@@ -69,7 +70,6 @@ haskellStubNodes filePath content =
                , nodeLineEnd      = Nothing
                , nodeKind         = Just (fromText "Module")
                , nodeSignature    = Nothing
-               , nodeBodyHash = Nothing
                , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
                }
               ]
@@ -79,6 +79,7 @@ haskellStubNodes filePath content =
         , nodeLabel        = fromText (T.pack imp)
         , nodeFileType     = CodeFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
    , nodeLineStart    = Nothing
    , nodeCommunityId  = Nothing
    , nodeDegree       = Nothing
@@ -87,7 +88,6 @@ haskellStubNodes filePath content =
         , nodeLineEnd      = Nothing
         , nodeKind         = Just (fromText "Module")
         , nodeSignature    = Nothing
-        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeKind
         }
         | imp <- imports
@@ -97,6 +97,7 @@ haskellStubNodes filePath content =
         , nodeLabel        = fromText (T.pack declName)
         , nodeFileType     = CodeFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
    , nodeLineStart    = Nothing
    , nodeCommunityId  = Nothing
    , nodeDegree       = Nothing
@@ -105,7 +106,6 @@ haskellStubNodes filePath content =
         , nodeLineEnd      = Nothing
         , nodeKind         = Just (fromText declKind')
         , nodeSignature    = Nothing
-        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeKind
         }
         | (declName, declKind') <- decls

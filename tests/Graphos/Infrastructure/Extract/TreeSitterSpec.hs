@@ -148,11 +148,11 @@ spec = do
           ([_e], tn:_) -> do
             let srcNode = Node { nodeId = makeNodeId filePath "module", nodeLabel = fromText "module"
                               , nodeFileType = CodeFile, nodeSourceFile = fromText (T.pack filePath)
+                              , nodeSource = Nothing
                               , nodeLineStart = Nothing, nodeCommunityId = Nothing
                               , nodeDegree = Nothing, nodeIsBridge = Nothing
                               , nodeExtra = Nothing, nodeLineEnd = Nothing
                               , nodeKind = Just (fromText "Module"), nodeSignature = Nothing
-                              , nodeBodyHash = Nothing
                               , nodePresentBits = 0 }
             toText (nodeSourceFile srcNode) `shouldBe` T.pack filePath
             toText (nodeSourceFile tn) `shouldSatisfy` (/= T.pack filePath)

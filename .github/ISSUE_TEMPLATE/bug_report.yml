@@ -1,0 +1,50 @@
+name: Bug report
+description: Report something in Graphos that isn't working as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the problem.
+      placeholder: Describe the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal commands or actions that trigger the bug.
+      placeholder: |
+        1. Run `graphos scan ...`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include error output, logs, or the relevant part of the audit report.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Graphos version, and — if relevant to the bug — which language(s) / LSP server(s) were involved.
+      placeholder: |
+        - OS:
+        - Graphos version:
+        - Language(s) / LSP server(s):
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that helps diagnose the problem — config files, `.graphosignore` patterns, graph output snippets.

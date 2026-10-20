@@ -37,6 +37,7 @@ structTestNode nid = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -45,7 +46,6 @@ structTestNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

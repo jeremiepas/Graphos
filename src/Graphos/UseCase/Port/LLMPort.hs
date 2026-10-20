@@ -14,6 +14,7 @@ module Graphos.UseCase.Port.LLMPort
 
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import qualified Data.Vector.Unboxed as VU
 import Graphos.Domain.Config (LabelingConfig, EmbeddingConfig, VisionConfig)
 import Graphos.Domain.Types (CommunityId)
 
@@ -41,9 +42,9 @@ data LLMPort = LLMPort
     -- | Parse labels from LLM response
   , lpParseLabelsFromResponse :: Text -> Map CommunityId Text
     -- | Generate an embedding for a single text
-  , lpGenerateEmbedding    :: EmbeddingConfig -> Text -> IO (Either Text [Double])
+  , lpGenerateEmbedding    :: EmbeddingConfig -> Text -> IO (Either Text (VU.Vector Double))
     -- | Generate embeddings for a batch of texts (one vector per input, in input order)
-  , lpGenerateEmbeddings   :: EmbeddingConfig -> [Text] -> IO (Either Text [[Double]])
+  , lpGenerateEmbeddings   :: EmbeddingConfig -> [Text] -> IO (Either Text [VU.Vector Double])
     -- | Analyze image with vision model
   , lpAnalyzeImage         :: VisionConfig -> LabelingConfig -> FilePath -> IO (Either Text ImageAnalysis)
     -- | Validate a URL string
@@ -51,11 +52,12 @@ data LLMPort = LLMPort
   }
 
 -- | Cosine similarity between two vectors (for IngestIndex).
-cosineSimilarity :: [Double] -> [Double] -> Double
-cosineSimilarity a b =
-  let dotProd = sum (zipWith (*) a b)
-      normA = sqrt (sum (zipWith (*) a a))
-      normB = sqrt (sum (zipWith (*) b b))
-  in if normA == 0 || normB == 0
-       then 0.0
-       else dotProd / (normA * normB)
+cosineSimilarity :: VU.Vector Double -> VU.Vector Double -> Double
+cosineSimilarity a b
+  | VU.length a /= VU.length b || VU.null a || VU.null b = 0.0
+  | normA == 0 || normB == 0 = 0.0
+  | otherwise = dotProd / (normA * normB)
+  where
+    dotProd = VU.sum (VU.zipWith (*) a b)
+    normA   = sqrt (VU.sum (VU.map (\x -> x * x) a))
+    normB   = sqrt (VU.sum (VU.map (\x -> x * x) b))

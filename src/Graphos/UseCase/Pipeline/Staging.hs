@@ -82,9 +82,20 @@ withStagedOutput final action = do
   createDirectoryIfMissing True parentDir
   staging <- newStagingPath final
   createDirectoryIfMissing False staging
-  result <- action staging `catch` \e -> cleanupStaging staging >> throwIO (e :: SomeException)
+  -- The persistent cache moves into staging BEFORE the body runs (design D3):
+  -- the body then reads the previous run's cache warm and writes this run's
+  -- entries into the same directory, and the swap promotes everything at once.
+  -- The move is a rename with rollback: should the body fail (Left or
+  -- exception), the cache is renamed back into the old output so a failed
+  -- rebuild leaves it intact.
+  cacheMoved <- moveCacheIntoStaging final staging
+  let rollbackCache =
+        when cacheMoved (renameDirectory (staging </> "cache") (final </> "cache") `catch` ignoreErr)
+  result <- action staging `catch` \e ->
+    rollbackCache >> cleanupStaging staging >> throwIO (e :: SomeException)
   case result of
     Left err -> do
+      rollbackCache
       cleanupStaging staging
       pure (Left err)
     Right a -> do
@@ -93,10 +104,28 @@ withStagedOutput final action = do
       swapRes <- try (swapIntoPlace staging final)
       case swapRes of
         Left (e :: SomeException) -> do
+          rollbackCache
           cleanupStaging staging
           pure (Left (T.pack ("failed to swap staged output into place: " ++ show e)))
         Right () ->
           pure (Right a)
+
+-- | Rename the previous output's @cache/@ into the staging directory so the
+-- pipeline body reads/writes it warm. Returns whether the move happened
+-- (a missing old cache is not an error — the rebuild starts cold).
+-- The rename happens inside the parent of both directories, so it is atomic
+-- and the original output stays consistent.
+moveCacheIntoStaging :: FilePath -> FilePath -> IO Bool
+moveCacheIntoStaging oldOut staging = do
+  let src = oldOut </> "cache"
+      dst = staging </> "cache"
+  srcExists <- doesDirectoryExist src
+  if srcExists
+    then do
+      renameDirectory src dst `catch` \(_ :: SomeException) -> pure ()
+      isThere <- doesDirectoryExist dst
+      pure isThere
+    else pure False
 
 -- | Move persistent state (cache, memory, ...) from the old output directory
 -- into the staging directory before the swap, so a rebuild does not lose it.
@@ -112,7 +141,9 @@ carryOverState oldOut staging =
       when srcExists $
         renameDirectory src dst `catch` ignoreErr
 
--- | Unique staging directory path: @<final>.staging-<timestamp>-<pid>@.
+carryOverEntries :: [FilePath]
+carryOverEntries = ["cache", "memory", "debug", "traces"]
+
 newStagingPath :: FilePath -> IO FilePath
 newStagingPath final = do
   now <- getCurrentTime
@@ -183,8 +214,6 @@ sweepStaleDirs final = do
 -- This list must mirror the persistent state the rest of the code base writes
 -- into the output directory; it is intentionally free of generated artifacts
 -- (reports, graphs, HTML) that a rebuild regenerates anyway.
-carryOverEntries :: [FilePath]
-carryOverEntries = ["cache", "memory", "debug", "traces"]
 
 -- | Rewrite a path that pointed into the staging directory to point into the
 -- final output directory (used to fix up result paths after the swap).

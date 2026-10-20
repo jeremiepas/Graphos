@@ -89,6 +89,37 @@ spec = do
         graphV2 <- TIO.readFile (out </> "graph.json")
         graphV2 `shouldBe` "v2"
 
+    it "carries the cache pre-body: failed rebuild leaves the old cache in place" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "old.json") "old-cache"
+          pure (Right ())
+        -- A later rebuild fails; the cache must be back in the old output.
+        result <- withStagedOutput out $ \_staging ->
+          pure (Left (T.pack "boom"))
+        case result of
+          Left e -> e `shouldSatisfy` ("boom" `T.isInfixOf`)
+          Right _ -> fail "expected the rebuild to fail"
+        stillThere <- doesFileExist (out </> "cache" </> "old.json")
+        stillThere `shouldBe` True
+
+    it "carries the cache pre-body: successful swap keeps old and new cache entries" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "old.json") "old-cache"
+          pure (Right ())
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "cache" </> "new.json") "new-cache"
+          pure (Right ())
+        oldKept <- doesFileExist (out </> "cache" </> "old.json")
+        newKept <- doesFileExist (out </> "cache" </> "new.json")
+        oldKept `shouldBe` True
+        newKept `shouldBe` True
+
     it "runs on a missing output directory (first build)" $ do
       withSystemTempDirectory "graphos-staging" $ \root -> do
         let out = root </> "nested" </> "graphos-out"
@@ -125,15 +156,19 @@ spec = do
     it "returns Left instead of throwing when the swap into place fails" $ do
       -- Regression (AVI-567): a post-success swap IO failure must come back
       -- through the Either channel, not escape as a thrown exception.
+      -- The sabotaged parent is a dedicated subdirectory owned by the test —
+      -- never /tmp itself, whose permissions are outside the test's control.
       withSystemTempDirectory "graphos-staging" $ \root -> do
-        let out = root </> "out"
+        let lockedParent = root </> "locked"
+            out = lockedParent </> "out"
+        createDir lockedParent
         -- Establish a prior good output so the swap takes the two-rename path.
         _ <- withStagedOutput out $ \staging -> do
           writeFile (staging </> "graph.json") "old-good"
           pure (Right ())
-        -- Stage the new build inside a writable root so the action succeeds;
+        -- Stage the new build inside a writable parent so the action succeeds;
         -- the sabotage applies only to the swap itself.
-        result <- rootSabotagedSwap root $ \staging -> do
+        result <- rootSabotagedSwap out $ \staging -> do
           writeFile (staging </> "graph.json") "new"
           pure (Right ())
         case result of
@@ -141,11 +176,12 @@ spec = do
             err `shouldSatisfy` \t -> any (`T.isInfixOf` t) ["failed to swap", "permission denied"]
           Right () ->
             fail "expected the swap to fail"
-        -- The prior output is intact and no staging leftovers remain.
+        -- The prior output is intact (a read-only parent still allows reads).
         content <- TIO.readFile (out </> "graph.json")
         content `shouldBe` "old-good"
+        -- No staging leftovers leak outside the sabotaged parent.
         siblings <- listDirectory root
-        siblings `shouldSatisfy` all (== "out")
+        siblings `shouldSatisfy` all (== "locked")
 
   describe "relocateStagedPath" $ do
     it "rewrites staged paths to final paths after the swap" $ do

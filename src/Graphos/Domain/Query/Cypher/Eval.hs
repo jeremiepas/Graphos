@@ -263,6 +263,7 @@ freshNode nid lbl = Node
   , nodeLabel       = fromText nid
   , nodeFileType    = CodeFile
   , nodeSourceFile  = fromText ""
+  , nodeSource      = Nothing
   , nodeLineStart   = Nothing
   , nodeLineEnd     = Nothing
   , nodeSignature   = Nothing
@@ -271,7 +272,6 @@ freshNode nid lbl = Node
   , nodeDegree      = Nothing
   , nodeIsBridge    = Nothing
   , nodeExtra       = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

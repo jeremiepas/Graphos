@@ -1,5 +1,3 @@
-name: Haskell CI
-
 on:
   push:
     branches: ["main", "develop"]
@@ -13,11 +11,11 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build:
     if: github.actor == 'jeremiepas'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: cachix/install-nix-action@v31
 
@@ -34,21 +32,27 @@ jobs:
           path: |
             ~/.local/state/cabal/store
             ~/.cabal/store
-            dist-newstyle
-          # Stable key shared across every branch/PR (no github.sha): all feature
-          # PRs restore the same warm store cache, so configure+build need no
-          # network and stay deterministic. This is what stops the flaky package
-          # fetch that used to break the Haskell step on every PR.
-          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}
+            ~/.local/state/cabal/packages
+            ~/.cabal/packages
+            ~/.cache/cabal/packages
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
           restore-keys: |
-            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
             cabal-${{ runner.os }}-ghc910-
 
       - name: Build
         run: devenv tasks run ci:build
 
-      - name: Run tests
-        run: devenv tasks run ci:test
+      - name: Upload build products
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-products
+          # cabal.project.local is written by `cabal configure` and carries the
+          # configure state (tests/dev flags). Without it the test job's saved
+          # config is invalidated and the re-plan drops the test suites.
+          path: |
+            dist-newstyle
+            cabal.project.local
 
       - name: Save binary artifact
         if: success() && github.event_name == 'push'
@@ -73,16 +77,12 @@ jobs:
         continue-on-error: true
         run: openspec validate --changes --json
 
-  haddock:
-    # Pinned to ubuntu-24.04: `ubuntu-latest` began rolling out Ubuntu 26.04 on
-    # Oct 19, 2026 and broke `cabal haddock all` (build/test still passed on 26).
-    # Node 24 was already the default since June 2026 without breaking anything,
-    # so the regression is the Ubuntu 26 image, not the action runtimes.
-    runs-on: ubuntu-24.04
-    if: github.event_name == 'push' && github.actor == 'jeremiepas'
-    needs: build-and-test
+  test:
+    if: github.actor == 'jeremiepas'
+    needs: build
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: cachix/install-nix-action@v31
 
@@ -94,18 +94,212 @@ jobs:
         run: nix profile add nixpkgs#devenv
 
       - name: Restore cabal store cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.local/state/cabal/store
             ~/.cabal/store
-            dist-newstyle
-          # Stable key shared across branches (no github.sha) so this job also
-          # restores a warm store cache and needs no network during the build.
-          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}
+            ~/.local/state/cabal/packages
+            ~/.cabal/packages
+            ~/.cache/cabal/packages
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
           restore-keys: |
-            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project') }}-
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
             cabal-${{ runner.os }}-ghc910-
 
+      - name: Download build products
+        uses: actions/download-artifact@v4
+        with:
+          name: build-products
+          # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
+          path: .
+
+      - name: Restore executable bits
+        # upload-artifact does not preserve the executable bit; test binaries
+        # in dist-newstyle are spawned directly by `cabal test all`.
+        run: chmod -R u+x dist-newstyle
+
+      - name: Run tests
+        run: devenv tasks run ci:test-only
+
+  fixture:
+    # graphos-fixture (AVI-1071): run the binary built by `build` over the
+    # test corpus and upload the resulting graph.json files, so the studio
+    # contract test can validate its decoders against real binary output
+    # (not the hand-written fixture). No build happens here — the binary
+    # comes from the build-products artifact.
+    if: github.actor == 'jeremiepas'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
+
+      - name: Restore cabal store cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.local/state/cabal/store
+            ~/.cabal/store
+            ~/.local/state/cabal/packages
+            ~/.cabal/packages
+            ~/.cache/cabal/packages
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
+          restore-keys: |
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
+            cabal-${{ runner.os }}-ghc910-
+
+      - name: Download build products
+        uses: actions/download-artifact@v4
+        with:
+          name: build-products
+          # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
+          path: .
+
+      - name: Restore executable bits
+        # upload-artifact does not preserve the executable bit; the graphos
+        # binary in dist-newstyle is executed directly below.
+        run: chmod -R u+x dist-newstyle
+
+      - name: Locate graphos binary (devenv tasks run ci:bin)
+        # ci:bin is the single source of truth for the binary path. Its output
+        # reaches the caller differently across devenv versions (2.1 prints
+        # the path flush on stdout; 2.4+ prints it indented on stderr), so
+        # capture both streams, strip indentation, and fall back to the same
+        # cabal query in a devenv shell when no path was printed.
+        run: |
+          set -euo pipefail
+          OUT=$(devenv tasks run ci:bin --show-output 2>&1 || true)
+          printf '%s\n' "$OUT"
+          BIN=$(printf '%s\n' "$OUT" | sed -E 's/^[[:space:]]+//' | grep -E '^/' | tail -n 1 || true)
+          if [ -z "$BIN" ]; then
+            echo "ci:bin printed no path — falling back to devenv shell -- cabal list-bin" >&2
+            BIN=$(devenv shell -- cabal list-bin graphos 2>/dev/null | grep -E '^/' | tail -n 1 || true)
+          fi
+          if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+            echo "graphos binary not found" >&2
+            exit 1
+          fi
+          echo "graphos binary: $BIN"
+          echo "BIN_PATH=$BIN" >> "$GITHUB_ENV"
+
+      - name: Generate graph.json fixtures from the test corpus
+        # One staged input dir + one output dir per corpus input, so each
+        # graph.json is generated from exactly one file. graphos analyzes a
+        # directory (not a single file), and `--detect-mode off` is required:
+        # generated.rs / minified.js are detection corpus files that the
+        # default exclude mode would filter out ("No supported files found").
+        run: |
+          set -euo pipefail
+          BIN="$BIN_PATH"
+          mkdir -p graphos-fixture
+          for input in generated.rs minified.js source.js; do
+            mkdir -p "fixture-corpus/$input" "fixture-out/$input"
+            cp "test-corpus/$input" "fixture-corpus/$input/"
+            "$BIN" "fixture-corpus/$input" \
+              --output "fixture-out/$input" \
+              --no-viz --no-observability --detect-mode off
+            test -f "fixture-out/$input/graph.json"
+            # flat, unambiguous per-input name inside the artifact
+            cp "fixture-out/$input/graph.json" "graphos-fixture/$input.graph.json"
+          done
+
+      - name: Upload graphos fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphos-fixture
+          path: graphos-fixture/
+          retention-days: 14
+
+  studio-contract:
+    # Studio contract test (AVI-1071): decode the real graph.json uploaded by
+    # `fixture` through the studio graph decoders, via elm-test. elm-test
+    # cannot read files at test runtime, so a codegen pre-step embeds the
+    # downloaded fixtures as Elm string constants before running the suite.
+    if: github.actor == 'jeremiepas'
+    needs: fixture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Download graphos fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: graphos-fixture
+          path: graphos-fixture
+
+      - name: Restore elm package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.elm
+          key: elm-${{ runner.os }}-${{ hashFiles('studio/elm.json') }}
+
+      - name: Generate contract fixtures (codegen pre-step)
+        run: studio/tests/generate-contract-fixtures.sh graphos-fixture
+
+      # Same pinned-nixpkgs nix shell approach as studio.yml. This pin must
+      # provide Elm 0.19.2 — studio/elm.json requires it (the older pin
+      # shipped 0.19.1, which cannot build the studio).
+      - name: Contract test (elm-test)
+        working-directory: studio
+        run: nix shell github:NixOS/nixpkgs/319e4cebef10cbb636c6ea392137b52ad105336a#elmPackages.elm github:NixOS/nixpkgs/319e4cebef10cbb636c6ea392137b52ad105336a#elmPackages.elm-test -c elm-test
+
+  haddock:
+    # Pinned to ubuntu-24.04: `ubuntu-latest` began rolling out Ubuntu 26.04 on
+    # Oct 19, 2026 and broke `cabal haddock all` (build/test/studio-contract still
+    # passed on 26, so this is the Ubuntu 26 image, not the Node 24 action
+    # runtimes, which were already default since June 2026). No Haskell source
+    # changed between the green and red runs, so this is purely environmental.
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.actor == 'jeremiepas'
+    needs: build
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
+
+      - name: Restore cabal store cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.local/state/cabal/store
+            ~/.cabal/store
+            ~/.local/state/cabal/packages
+            ~/.cabal/packages
+            ~/.cache/cabal/packages
+          key: cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}
+          restore-keys: |
+            cabal-${{ runner.os }}-ghc910-${{ hashFiles('graphos.cabal', 'cabal.project', 'devenv.nix') }}-
+            cabal-${{ runner.os }}-ghc910-
+
+      - name: Download build products
+        uses: actions/download-artifact@v4
+        with:
+          name: build-products
+          # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
+          path: .
+
+      - name: Restore executable bits
+        # upload-artifact does not preserve the executable bit; binaries in
+        # dist-newstyle are spawned directly by `cabal haddock all`.
+        run: chmod -R u+x dist-newstyle
+
       - name: Haddock
-        run: devenv tasks run ci:haddock
+        run: devenv tasks run ci:haddock-only

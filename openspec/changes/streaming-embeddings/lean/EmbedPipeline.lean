@@ -28,6 +28,10 @@ Théorèmes clés :
 Lean 4 core uniquement, pas de Mathlib.
 -/
 
+-- Les théorèmes génériques n'utilisent pas toujours DecidableEq α ;
+-- l'inclusion automatique de la variable de section est inutile et bruyante.
+set_option linter.unusedSectionVars false
+
 namespace EmbedPipeline
 
 variable {α β : Type} [DecidableEq α]
@@ -76,11 +80,18 @@ theorem lookup_table (f : α → β) {keys : List α} {t : α} (ht : t ∈ keys)
   induction keys with
   | nil => cases ht
   | cons x xs ih =>
-    by_cases h : x = t
-    · subst h; simp [table]
-    · rcases ht with _ | ht'
-      · exact absurd rfl h
-      · simpa [table, List.lookup, h] using ih ht'
+    rcases List.mem_cons.mp ht with h0 | ht'
+    · subst h0
+      rw [table, List.map_cons, List.lookup]
+      split
+      · rfl
+      · next hbeq => exact absurd rfl (not_eq_of_beq_eq_false hbeq)
+    · rw [table, List.map_cons, List.lookup]
+      split
+      · next hbeq =>
+        have hxe : x = t := (eq_of_beq hbeq).symm
+        rw [hxe]
+      · next hbeq => exact ih ht'
 
 /-! ## 3. Déduplication -/
 
@@ -185,13 +196,16 @@ theorem mem_of_lookup_eq_some {l : List (α × β)} {a : α} {b : β}
   | nil => cases h
   | cons p ps ih =>
     obtain ⟨k, v⟩ := p
-    by_cases hk : k = a
-    · subst hk
-      simp [List.lookup] at h
-      simp [h]
-    · simp only [List.lookup, beq_eq_false_iff_ne, ne_eq, hk,
-        not_false_eq_true, if_neg] at h
-      · exact List.mem_cons_of_mem _ (ih h)
+    rcases beq : (a == k) with _ | _
+    · have h' : ps.lookup a = some b := by
+        rw [List.lookup, beq] at h; exact h
+      exact List.mem_cons_of_mem _ (ih h')
+    · have h' : some v = some b := by
+        rw [List.lookup, beq] at h; exact h
+      have hv : v = b := by simpa using h'
+      have hka : k = a := (eq_of_beq beq).symm
+      simp only [List.mem_cons]
+      exact Or.inl (by simp [hka, hv])
 
 theorem lookup_append_of_none {l₁ l₂ : List (α × β)} {a : α}
     (h : l₁.lookup a = none) : (l₁ ++ l₂).lookup a = l₂.lookup a := by
@@ -199,11 +213,15 @@ theorem lookup_append_of_none {l₁ l₂ : List (α × β)} {a : α}
   | nil => rfl
   | cons p ps ih =>
     obtain ⟨k, v⟩ := p
-    by_cases hk : k = a
-    · subst hk; simp [List.lookup] at h
-    · simp only [List.cons_append, List.lookup, beq_eq_false_iff_ne, ne_eq,
-        hk, not_false_eq_true, if_neg] at h ⊢
-      exact ih h
+    rcases beq : (a == k) with _ | _
+    · have h' : ps.lookup a = none := by
+        rw [List.lookup, beq] at h; exact h
+      have ih' : (ps ++ l₂).lookup a = l₂.lookup a := ih h'
+      simp only [List.cons_append, List.lookup, beq]
+      exact ih'
+    · have h' : some v = none := by
+        rw [List.lookup, beq] at h; exact h
+      simp at h'
 
 theorem lookup_append_of_some {l₁ l₂ : List (α × β)} {a : α} {b : β}
     (h : l₁.lookup a = some b) : (l₁ ++ l₂).lookup a = some b := by
@@ -211,11 +229,16 @@ theorem lookup_append_of_some {l₁ l₂ : List (α × β)} {a : α} {b : β}
   | nil => cases h
   | cons p ps ih =>
     obtain ⟨k, v⟩ := p
-    by_cases hk : k = a
-    · subst hk; simp [List.lookup] at h ⊢; exact h
-    · simp only [List.cons_append, List.lookup, beq_eq_false_iff_ne, ne_eq,
-        hk, not_false_eq_true, if_neg] at h ⊢
-      exact ih h
+    rcases beq : (a == k) with _ | _
+    · have h' : ps.lookup a = some b := by
+        rw [List.lookup, beq] at h; exact h
+      have ih' : (ps ++ l₂).lookup a = some b := ih h'
+      simp only [List.cons_append, List.lookup, beq]
+      exact ih'
+    · have h' : some v = some b := by
+        rw [List.lookup, beq] at h; exact h
+      simp only [List.cons_append, List.lookup, beq]
+      exact h'
 
 /-- Le run avec cache : seules les clés absentes du cache sont calculées
     (par batches) ; le cache s'enrichit ; la distribution lit le cache
@@ -248,8 +271,8 @@ theorem runCached_fst (k : Nat) (f : α → β) {cache : List (α × β)} (fb : 
     mem_dedup.mpr (List.mem_map_of_mem hn)
   cases hc : cache.lookup n.2 with
   | some v =>
-    have := hs _ (mem_of_lookup_eq_some hc)
-    rw [lookup_append_of_some hc, this]
+    have hv : v = f n.snd := hs _ (mem_of_lookup_eq_some hc)
+    rw [lookup_append_of_some hc, Option.getD_some, hv]
   | none =>
     have hmiss : n.2 ∈ (dedup (nodes.map Prod.snd)).filter
         (fun t => (cache.lookup t).isNone) :=
@@ -278,23 +301,34 @@ def nodes : List (Nat × String) :=
 def f (t : String) : Nat := t.length
 
 -- Le pipeline (batches de 2, 5 nœuds mais 3 textes uniques) = la baseline.
-example : pipeline 1 f 0 nodes = baseline f nodes := by decide
+example : pipeline 1 f 0 nodes = baseline f nodes := by
+  rw [pipeline_eq_baseline]
 
--- Tailles de batch différentes : même résultat.
-example : pipeline 0 f 0 nodes = pipeline 9 f 0 nodes := by decide
+-- Tailles de batch différentes : même résultat (toutes valent la baseline).
+example : pipeline 0 f 0 nodes = pipeline 9 f 0 nodes := by
+  rw [pipeline_eq_baseline, pipeline_eq_baseline]
 
--- Run caché depuis un cache vide : résultat = baseline, et le cache produit
--- resservi tel quel redonne encore la baseline (réutilisation inter-runs).
-example : (runCached 1 f [] 0 nodes).1 = baseline f nodes := by decide
+-- Run caché depuis un cache vide : résultat = baseline.
+example : (runCached 1 f [] 0 nodes).1 = baseline f nodes := by
+  rw [runCached_fst]
+  exact sound_table f []
+
+-- Le cache produit resservi tel quel redonne encore la baseline
+-- (réutilisation inter-runs) : le run interne fabrique un cache sain,
+-- donc le run externe ne recalcule rien de neuf.
 example :
     (runCached 1 f (runCached 1 f [] 0 nodes).2 0 nodes).1
-      = baseline f nodes := by decide
+      = baseline f nodes := by
+  rw [runCached_fst]
+  rw [runCached]
+  simp only [List.nil_append, batchedTable_eq_table]
+  exact sound_table f _
 
 -- Échec par-texte : β := Option Nat, "Promise" échoue ; le pipeline préserve
 -- exactement quels nœuds ont un vecteur.
 def g (t : String) : Option Nat := if t = "Promise" then none else some t.length
 
-example : pipeline 1 g none nodes = baseline g nodes := by decide
+example : pipeline 1 g none nodes = baseline g nodes := pipeline_eq_baseline 1 g none nodes
 
 end Toy
 

@@ -272,6 +272,7 @@ explainNodeWithIndex g idx term =
     , nodeLabel        = fromText "unknown"
     , nodeFileType     = CodeFile
     , nodeSourceFile   = fromText ""
+    , nodeSource       = Nothing
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -280,7 +281,6 @@ explainNodeWithIndex g idx term =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
-    , nodeBodyHash = Nothing
     , nodePresentBits  = 0
     }) nid (gNodes g)) best
 

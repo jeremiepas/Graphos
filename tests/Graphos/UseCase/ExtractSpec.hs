@@ -14,6 +14,7 @@ pdfStubNode path = Node
   , nodeLabel = fromText path
   , nodeFileType = PaperFile
   , nodeSourceFile = fromText path
+,   nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
@@ -22,7 +23,6 @@ pdfStubNode path = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 
@@ -32,6 +32,7 @@ makeStubNode path = Node
   , nodeLabel = fromText path
   , nodeFileType = CodeFile
   , nodeSourceFile = fromText path
+,   nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
@@ -40,7 +41,6 @@ makeStubNode path = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

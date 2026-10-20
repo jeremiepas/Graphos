@@ -37,6 +37,7 @@ mkNodeKV (k, ft, src) = Node
   , nodeLabel        = fromText k
   , nodeFileType     = ft
   , nodeSourceFile   = fromText src
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -45,7 +46,6 @@ mkNodeKV (k, ft, src) = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

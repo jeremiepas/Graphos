@@ -24,10 +24,10 @@ module Graphos.Domain.Types.Node
     -- * Compact representation helpers
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
-   , bitNodeIsBridge, bitNodeExtra, bitNodeBodyHash
-   , computePresentBits
+  , bitNodeIsBridge, bitNodeExtra, bitNodeSource
+  , nodeBodyHash, bitNodeBodyHash
+  , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
-  , computeBodyHash
   ) where
 
 import Control.DeepSeq (NFData(..))
@@ -41,10 +41,6 @@ import qualified Data.Text as T
 import Data.Text.Short (ShortText, fromText, toText)
 import GHC.Generics (Generic)
 import GHC.Word (Word64)
-import qualified Data.ByteString as BS
-import Data.Word (Word8)
-import Numeric (showHex)
-import qualified Crypto.Hash.SHA256 as Hash
 
 -- | Unique identifier for a node (derived from file + entity name)
 -- TODO: Migrate to newtype NodeId = NodeId Text (dedicated migration task after Domain types stablized)
@@ -115,9 +111,23 @@ bitNodeIsBridge = 1 `shiftL` 6
 bitNodeExtra :: Word64
 bitNodeExtra = 1 `shiftL` 7
 
+{-# NOINLINE bitNodeSource #-}
+bitNodeSource :: Word64
+bitNodeSource = 1 `shiftL` 8
+
+-- | Body identity carried under @body_hash@ in 'nodeExtra' (the
+-- body/signature split of the intent-graph model). Absent ⇒ Nothing.
+nodeBodyHash :: Node -> Maybe ShortText
+nodeBodyHash n = case nodeExtra n of
+  Just (Object km) -> case KM.lookup (Key.fromText "body_hash") km of
+    Just (String t) -> Just (fromText t)
+    _               -> Nothing
+  _                 -> Nothing
+
+-- | Presence bit for the body hash carried in 'nodeExtra'.
 {-# NOINLINE bitNodeBodyHash #-}
 bitNodeBodyHash :: Word64
-bitNodeBodyHash = 1 `shiftL` 8
+bitNodeBodyHash = bitNodeExtra
 
 -- | A node in the knowledge graph
 --
@@ -132,6 +142,7 @@ data Node = Node
   , nodeLabel        :: !ShortText
   , nodeFileType     :: !FileType
   , nodeSourceFile   :: !ShortText
+  , nodeSource       :: !(Maybe ShortText)
     -- Optional fields (tracked via nodePresentBits)
   , nodeLineStart    :: !(Maybe Int)
   , nodeLineEnd      :: !(Maybe Int)
@@ -141,9 +152,6 @@ data Node = Node
   , nodeDegree       :: !(Maybe Int)
   , nodeIsBridge     :: !(Maybe Bool)
   , nodeExtra        :: !(Maybe Value)
-    -- Optional SHA-256 of the symbol's source span (intent-graph-verification).
-    -- Absent on graphs produced before this field existed.
-  , nodeBodyHash     :: !(Maybe Text)
     -- Compact representation: bit-field for optional field presence
   , nodePresentBits  :: !Word64
   } deriving (Eq, Show, Generic)
@@ -171,7 +179,7 @@ computePresentBits n = foldr (.|.) 0
     , if isJust (nodeDegree n)    then bitNodeDegree            else 0
     , if isJust (nodeIsBridge n)  then bitNodeIsBridge          else 0
     , if isJust (nodeExtra n)     then bitNodeExtra             else 0
-    , if isJust (nodeBodyHash n)  then bitNodeBodyHash          else 0
+    , if isJust (nodeSource n)    then bitNodeSource            else 0
     ]
 
 instance NFData FileType
@@ -182,23 +190,24 @@ instance NFData Node where
        rnf (nodeLabel n) `seq`
        rnf (nodeFileType n) `seq`
        rnf (nodeSourceFile n) `seq`
+    rnf (nodeSource n) `seq`
        rnf (nodeLineStart n) `seq`
        rnf (nodeLineEnd n) `seq`
        rnf (nodeSignature n) `seq`
        rnf (nodeCommunityId n) `seq`
        rnf (nodeKind n) `seq`
        rnf (nodeDegree n) `seq`
-        rnf (nodeIsBridge n) `seq`
-        rnf (nodeExtra n) `seq`
-        rnf (nodeBodyHash n) `seq`
-        rnf pb
+       rnf (nodeIsBridge n) `seq`
+       rnf (nodeExtra n) `seq`
+       rnf pb
 
 instance ToJSON Node where
   toJSON n = object
-    ( [ "id"           .= nodeId n
-    , "label"        .= toText (nodeLabel n)
-    , "file_type"    .= nodeFileType n
-    , "source_file"  .= toText (nodeSourceFile n)
+    [ "id"            .= nodeId n
+    , "label"         .= toText (nodeLabel n)
+    , "file_type"     .= nodeFileType n
+    , "source_file"   .= toText (nodeSourceFile n)
+    , "source"        .= fmap toText (nodeSource n)
     , "line_start"   .= nodeLineStart n
     , "line_end"     .= nodeLineEnd n
     , "signature"    .= fmap toText (nodeSignature n)
@@ -208,9 +217,6 @@ instance ToJSON Node where
     , "is_bridge"    .= nodeIsBridge n
     , "extra"        .= nodeExtra n
     ]
-      ++ case nodeBodyHash n of
-           Just h  -> [ "body_hash" .= h ]
-           Nothing -> [] )
 
 instance FromJSON Node where
   parseJSON = withObject "Node" $ \v -> do
@@ -218,6 +224,7 @@ instance FromJSON Node where
     labelVal       <- v .:  "label"
     fileTypeVal    <- v .:  "file_type"
     sourceFileVal  <- v .:? "source_file" .!= ""
+    sourceVal      <- v .:? "source"
     lineStartVal   <- v .:? "line_start"
     lineEndVal     <- v .:? "line_end"
     signatureVal   <- v .:? "signature"
@@ -226,7 +233,6 @@ instance FromJSON Node where
     degreeVal      <- v .:? "degree"
     isBridgeVal    <- v .:? "is_bridge"
     extraVal       <- v .:? "extra"
-    bodyHashVal    <- v .:? "body_hash"
 
     let presentBits = foldr (.|.) 0
           [ if isJust lineStartVal   then bitNodeLineStart      else 0
@@ -237,14 +243,23 @@ instance FromJSON Node where
           , if isJust degreeVal      then bitNodeDegree            else 0
           , if isJust isBridgeVal    then bitNodeIsBridge          else 0
           , if isJust extraVal       then bitNodeExtra             else 0
-          , if isJust bodyHashVal    then bitNodeBodyHash          else 0
+          -- The writer always emits the nullable "source" key; a JSON null is
+          -- absence (cache-tolerant multi-source round-trip), not presence.
+          , if sourceIsText then bitNodeSource else 0
           ]
+        sourceIsText = case sourceVal of
+          Just (String _) -> True
+          _               -> False
+        sourceVal' = case sourceVal of
+          Just (String s) -> Just s
+          _               -> Nothing
 
     pure Node
       { nodeId           = nodeIdVal
       , nodeLabel        = fromText labelVal
       , nodeFileType     = fileTypeVal
       , nodeSourceFile   = fromText sourceFileVal
+      , nodeSource       = fromText <$> sourceVal'
       , nodeLineStart    = lineStartVal
       , nodeLineEnd      = lineEndVal
       , nodeSignature    = fmap fromText signatureVal
@@ -253,7 +268,6 @@ instance FromJSON Node where
       , nodeDegree       = degreeVal
       , nodeIsBridge     = isBridgeVal
       , nodeExtra        = extraVal
-      , nodeBodyHash     = bodyHashVal
       , nodePresentBits  = presentBits
       }
 
@@ -277,18 +291,3 @@ setNodeExtraCapturedAt ts n =
              Just (Object km) -> km
              _                -> KM.empty
   in n { nodeExtra = Just (Object (KM.insert key (String ts) base)) }
-
--- | SHA-256 digest (hex) of a byte span, used for the optional 'nodeBodyHash'.
---
--- Mirrors the content-addressing scheme in
--- 'Graphos.Infrastructure.FileSystem.Cache' (cryptohash-sha256 + hex): identical
--- span bytes always yield the same digest, so the field is stable across runs
--- and machines. Pure, so it can be computed at extraction time with no IO.
-computeBodyHash :: BS.ByteString -> Text
-computeBodyHash bs =
-  T.pack (concatMap byteToHex (BS.unpack (Hash.hash bs :: BS.ByteString)))
-  where
-    byteToHex :: Word8 -> String
-    byteToHex w = case showHex (fromIntegral w :: Int) "" of
-      s | length s == 1 -> '0' : s
-        | otherwise     -> s

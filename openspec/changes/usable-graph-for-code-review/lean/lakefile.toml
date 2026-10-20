@@ -1,0 +1,5 @@
+name = "ReviewGraph"
+defaultTargets = ["ReviewGraph"]
+
+[[lean_lib]]
+name = "ReviewGraph"
