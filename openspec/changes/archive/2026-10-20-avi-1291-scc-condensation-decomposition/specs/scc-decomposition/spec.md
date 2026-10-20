@@ -1,3 +1,7 @@
+## Purpose
+
+Binds the SCC/condensation register: mutual-reachability SCC is the unique partition of the node set (INV-7), the condensation of that partition is a DAG, directed reachability is decided by hop-minimal shortest paths, directed acyclicity is a pure predicate, SCC is distinguished from biconnected components, undirected/weak connectivity decompositions coarsen the SCC partition, and every decomposition runs inside the linear `O(N + E)` budget with the all-pairs scale guard. Surfaces already present in `Domain.Graph` (`stronglyConnectedComponents(WithCached)`, `shortestPathReachable`) are pinned as requirement-creation; the missing surfaces (condensation build, acyclicity predicate, connectivity decompositions + cached variants) are adopted as new-feature ahead of the separate implementation change.
+
 ## ADDED Requirements
 
 ### Requirement: SCC partition uniquely decomposes the node set (INV-7, Thm 2.2)

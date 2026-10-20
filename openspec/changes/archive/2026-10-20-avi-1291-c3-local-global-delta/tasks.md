@@ -7,5 +7,5 @@
 
 ## 2. Handoff
 
-- [ ] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: none — behavior already implemented per AVI-647; optional LG-C3 fiber-product property test only) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving.
-- [ ] 2.2 After the gate: archive this change (syncs the delta into `openspec/specs/merge-confluence/spec.md`) and record the subsumption decision in the adoption-issue summary comment. (Not in this spec-only issue.)
+- [x] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: none — behavior already implemented per AVI-647; optional LG-C3 fiber-product property test only) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving.
+- [x] 2.2 After the gate: archive this change (syncs the delta into `openspec/specs/merge-confluence/spec.md`) and record the subsumption decision in the adoption-issue summary comment. (Not in this spec-only issue.)

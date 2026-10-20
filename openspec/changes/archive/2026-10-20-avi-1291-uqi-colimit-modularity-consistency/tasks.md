@@ -7,5 +7,5 @@
 
 ## 2. Handoff
 
-- [ ] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: none for the spec adoption; property tests only) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving.
-- [ ] 2.2 After the gate: archive this change (syncs to `openspec/specs/colimit-modularity-consistency/spec.md`), then route property-test implementation (P-1…P-6 acceptance) to `head-of-dev` as a separate change. (Not in this spec-only issue.)
+- [x] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: none for the spec adoption; property tests only) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving.
+- [x] 2.2 After the gate: archive this change (syncs to `openspec/specs/colimit-modularity-consistency/spec.md`), then route property-test implementation (P-1…P-6 acceptance) to `head-of-dev` as a separate change. (Not in this spec-only issue.)

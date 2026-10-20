@@ -7,5 +7,5 @@
 
 ## 2. Handoff
 
-- [ ] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: implementation restricted to the missing surface — condensation build, `isAcyclicDirected`, `connectedComponents`, `weaklyConnectedComponents`, `isolatedNodes`, `hasCycleUndirected` + `*WithCached` variants, property + golden tests; `stronglyConnectedComponents(WithCached)` and `shortestPathReachable` already exist per AVI-530/PR #30) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving (AVI-518 §7 GAP-1 lists the surface).
-- [ ] 2.2 After the gate: archive this change (syncs to `openspec/specs/scc-decomposition/spec.md`), then route the GAP-1 implementation to `head-of-dev` as a separate change. (Not in this spec-only issue.)
+- [x] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: implementation restricted to the missing surface — condensation build, `isAcyclicDirected`, `connectedComponents`, `weaklyConnectedComponents`, `isolatedNodes`, `hasCycleUndirected` + `*WithCached` variants, property + golden tests; `stronglyConnectedComponents(WithCached)` and `shortestPathReachable` already exist per AVI-530/PR #30) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving (AVI-518 §7 GAP-1 lists the surface).
+- [x] 2.2 After the gate: archive this change (syncs to `openspec/specs/scc-decomposition/spec.md`), then route the GAP-1 implementation to `head-of-dev` as a separate change. (Not in this spec-only issue.)

@@ -8,5 +8,5 @@
 
 ## 2. Handoff
 
-- [ ] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: `Pipeline.Incremental` reconciliation rework, `Domain.Graph.Mutation.deleteNodeIncident`, property tests) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving.
-- [ ] 2.2 After the gate: archive this change (syncs to `openspec/specs/community-incremental-update/spec.md`), then route the PROP-EQV implementation (AVI-519 §7 required fix) to `head-of-dev` as a separate change. (Not in this spec-only issue.)
+- [x] 2.1 `head-of-dev` feasibility gate: confirm Haskell impact (expected: `Pipeline.Incremental` reconciliation rework, `Domain.Graph.Mutation.deleteNodeIncident`, property tests) via a comment on [AVI-1291](/AVI/issues/AVI-1291) — required before archiving.
+- [x] 2.2 After the gate: archive this change (syncs to `openspec/specs/community-incremental-update/spec.md`), then route the PROP-EQV implementation (AVI-519 §7 required fix) to `head-of-dev` as a separate change. (Not in this spec-only issue.)

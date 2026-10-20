@@ -36,7 +36,7 @@ The adoption instructions allow either a delta requirement or a recorded decisio
 | LG-C4 (conflict ⇒ pushout, not pullback; over-identification) | Partially — M4 quantifies divergence `Δ` but does not state the non-pullback boundary | **ADD requirement** (aligned with M4's `Δ`, no policy change) |
 | LG-C5 (`Struct` natural iso on keys + canonical `gDirected`) | Partially — M3 pins canonical form/hash; the naturality statement is absent | **ADD requirement** |
 
-Nothing in this delta contradicts or weakens M1–M5: LG-C2 is scoped to the agreement region where old-wins and last-write-wins produce identical values (so it is policy-agnostic), and LG-C4 restates the conflict boundary in pullback language without touching M4's divergence semantics.
+Nothing in this delta contradicts or weakens M1–M5: LG-C2 is scoped to the agreement region of identical payloads, where any deterministic winner selection returns the same value (policy-agnostic by identical-payload scoping — the feasibility-gate wording note, AVI-1310 2026-10-20), and LG-C4 restates the conflict boundary in pullback language without touching M4's divergence semantics.
 
 ## 3. Requirements register → spec mapping (classification: requirement-creation throughout)
 
