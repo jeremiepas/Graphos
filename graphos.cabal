@@ -162,6 +162,7 @@ library
                            Graphos.Infrastructure.Extract.TreeSitter.Grammar
                            Graphos.Infrastructure.Extract.TreeSitter.Convert
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
+                           Graphos.Infrastructure.Extract.TreeSitter.Imports
                            Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
@@ -421,6 +422,7 @@ test-suite graphos-test
     Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
     Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
+    Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec

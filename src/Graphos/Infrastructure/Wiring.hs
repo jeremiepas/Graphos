@@ -40,6 +40,7 @@ import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
+import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
 import qualified Graphos.Infrastructure.Export.Obsidian as ExportObsidian
@@ -194,7 +195,8 @@ productionExtractionPort logEnv = ExtractionPort
           result <- parseWithGrammar lang content
           case result of
             Nothing -> pure Nothing
-            Just nodes -> pure $ Just $ tsNodesToExtraction GranularityFunction filePath nodes
+            Just nodes -> Just <$> withImportEdges grammar filePath nodes
+                                     (tsNodesToExtraction GranularityFunction filePath nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
