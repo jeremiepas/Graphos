@@ -18,6 +18,15 @@ extra-source-files: assets/viewer/viewer.css
                     assets/viewer/viewer.js
                     assets/viewer/vis-network.min.js
                     assets/viewer/VIS-NETWORK-LICENSE
+                    vendor/README.md
+                    vendor/tree-sitter-cpp/LICENSE
+                    vendor/tree-sitter-cpp/src/tree_sitter/parser.h
+                    vendor/tree-sitter-yaml/LICENSE
+                    vendor/tree-sitter-yaml/src/schema.generated.cc
+                    vendor/tree-sitter-yaml/src/tree_sitter/parser.h
+                    vendor/tree-sitter-sql/LICENSE
+                    vendor/tree-sitter-sql/grammar.js
+                    vendor/tree-sitter-sql/src/tree_sitter/parser.h
 
 source-repository head
   type:     git
@@ -153,6 +162,7 @@ library
                            Graphos.Infrastructure.Extract.TreeSitter.Grammar
                            Graphos.Infrastructure.Extract.TreeSitter.Convert
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
+                           Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
                       -- Infrastructure - Image/Office/Markdown extractors
@@ -233,6 +243,17 @@ library
   other-modules:
                     Graphos.Domain.HexColor
                     Paths_graphos
+
+  -- Vendored tree-sitter grammars (no Hackage package; ABI 11, see vendor/README.md).
+  -- All three ship an identical tree_sitter/parser.h, so one include dir serves them.
+  include-dirs:     vendor/tree-sitter-cpp/src
+  c-sources:        vendor/tree-sitter-cpp/src/parser.c
+                    vendor/tree-sitter-yaml/src/parser.c
+                    vendor/tree-sitter-sql/src/parser.c
+  cxx-sources:      vendor/tree-sitter-cpp/src/scanner.cc
+                    vendor/tree-sitter-yaml/src/scanner.cc
+                    vendor/tree-sitter-sql/src/scanner.cc
+  extra-libraries:  stdc++
 
   build-depends:
       aeson                >= 2.0
@@ -399,6 +420,7 @@ test-suite graphos-test
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
+    Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
