@@ -7,7 +7,9 @@
 
 > **Correction banner (2026-09-30, head-rnd arbitration M-5).** The CTE Phase 2 draft pinned `Map.union` as **second-wins / new-wins**. Source verified against `src/Graphos/Domain/Graph/Core.hs:129-136`: `mergeExtractions a b` is `extNodes a Map.union extNodes b` — `Data.Map.union` is **left-biased**, so the **first (old) operand wins** on a shared key. Call-site evidence: `mergeIntoRunning` in `UseCase/Extract/Core.hs` merges `running ⊕ ext` (accumulator first → existing running view wins); `UseCase/Build.hs:12` folds `mergeExtractions e acc` with `foldr` (earlier view wins on conflicts). This doc pins **first/old-wins** and renames the lax-colimit artifact accordingly (`mergedExtraction_laxColimit_newWins` → `mergedExtraction_laxColimit_oldWins`). This matches the corpus precedent (commits `2ee8bca` "Fix wrong-direction merge precedence in docs (old wins...)" and `a7e6eb2` "correct doc to reflect left-biased Map.union (old-wins)").
 
-> **Grounding.** Pinned to the colimit corpus (AVI-524 `functoriality-context-graph.md`) and to `src/Graphos/Domain/` + `src/Graphos/UseCase/`: merge semantics from `Domain/Graph/Core.hs:129` (`mergeExtractions`, first/old-wins) and the fold sites `UseCase/Build.hs:12` (`foldr`) and `UseCase/Extract/Core.hs:124, 466, 506` (strict `foldl'`), plus the streaming lane `mergeIntoRunning` (`Extract/Core.hs`, accumulator-first).
+> **Erratum banner (2026-10-20, AVI-1319).** The original §0.3 rows for `foldl' ⊕ emptyExtraction` / `foldr ⊕ emptyExtraction` and the §0.4 bullet "Fold-order discrepancy is real and recorded" claimed a *fold-shape* divergence: under the first/old-wins `⊕`, `foldl'` was said to make the **last** view win conflicts while `foldr` makes the **first** win. Source re-verification (AVI-1304 → AVI-1319) shows this is **not** what the shipped code does: every shipped fold/accumulation site puts the accumulator or the list head in the **first** operand position, so all of them are **earliest/oldest view wins**, and `foldr ⊕ emptyExtraction ≡ foldl' ⊕ emptyExtraction` on **every** input, conflicting keys included (`foldrMerge_eq_foldlMerge_all`, `Ext/Lax.lean`, no consistency hypothesis). §0.3/§0.4 and the related §7/§8/§9 passages are corrected in place. The **operator-level** first/old-wins pin (M-5) is untouched — it is exactly what AC-4 tests.
+
+> **Grounding.** Pinned to the colimit corpus (AVI-524 `functoriality-context-graph.md`) and to `src/Graphos/Domain/` + `src/Graphos/UseCase/`: merge semantics from `Domain/Graph/Core.hs:129` (`mergeExtractions`, first/old-wins) and the fold sites `UseCase/Build.hs:12` (`foldr`) and `UseCase/Extract/Core.hs:599, 639` (strict `foldl'`), plus the streaming lane `mergeIntoRunning` (`Extract/Core.hs:164-165`, accumulator-first). Line refs re-verified 2026-10-20 on `AVI-616-r-and-d-proof-math`; the earlier `Extract/Core.hs:124, 466, 506` citations were stale.
 
 ---
 
@@ -43,15 +45,15 @@
 |---|---|---|---|
 | `mergeExtractions :: Extraction -> Extraction -> Extraction` | key-wise `Map.union` on both node & edge maps; **first operand wins** on any shared key (left-biased `Map.union`) | binary op `mergeExtractions` | `Domain/Graph/Core.hs:129-136` |
 | `⊕ ≡ mergeExtractions` | infix reading of the merge (colimit binary op) | `⊕` | derived |
-| `foldl' ⊕ emptyExtraction [E₁…Eₙ]` | left-associative n-way merge (streaming path); with a first/old-wins `⊕` the **last** view of the list wins conflicts | `foldl'` | `Extract/Core.hs:124, 466, 506` |
-| `foldr ⊕ emptyExtraction [E₁…Eₙ]` | right-associative n-way merge (build path); earlier view wins conflicts | `foldr` | `Build.hs:12` |
-| `mergeIntoRunning` | streaming accumulation `running ⊕ ext` (accumulator first → older running view wins) | `foldl`-like | `Extract/Core.hs` streaming lane |
+| `foldl' ⊕ emptyExtraction [E₁…Eₙ]` | left-associative n-way merge (streaming + per-server merge sites): expanded as `⊕ acc e` — the accumulator (the earlier/older view) sits in the **first** operand position, so the **earliest** view of the list wins conflicts; ≡ `foldr ⊕ emptyExtraction` on **every** input, conflicting keys included (§0.4, AVI-1319) | `foldl'` | `Extract/Core.hs:599, 639` |
+| `foldr ⊕ emptyExtraction [E₁…Eₙ]` | right-associative n-way merge (build path): expanded as `⊕ e₁ (⊕ e₂ …)` — the list head (the earliest view) sits in the **first** operand position of the outermost merge, so the **earliest** view wins conflicts; ≡ `foldl' ⊕ emptyExtraction` on **every** input, conflicting keys included (§0.4, AVI-1319) | `foldr` | `Build.hs:12` |
+| `mergeIntoRunning` | streaming accumulation `running ⊕ ext` (accumulator first → older running view wins) | `foldl`-like | `Extract/Core.hs:164-165` |
 
 ### 0.4 Reconciliation notes (divergences, not overwrites)
 
 - **No redefinition.** `NodeId`, `EdgeId`, `Relation`, `Graph`, `gDirected` are used identically to AVI-618 §0; both glossaries agree on every shared symbol.
 - **First/old-wins is explicit, not assumed.** `Map.union` (Core.hs:131-132) keeps the **first** operand's value on a shared key. §3.2 pins it as the lax-colimit comparison α; §5 AC-4 tests it directly.
-- **Fold-order discrepancy is real and recorded.** `Build.hs:12` uses `foldr`; `Extract/Core.hs:124, 466, 506` use strict `foldl'`. Both are first-biased at the *operator* level, but at the *list* level `foldl'` makes the **last** view dominate conflicts (accumulator is first operand) while `foldr` makes the **first** view dominate. On consistent inputs the results are identical (§3.1); on conflicting keys the lanes differ (§3.2, AC-4). Flagged as a Phase 2 feasibility question for Graphos Dev (§9).
+- **Fold shapes agree everywhere — no `foldl'` last-wins divergence (AVI-1319 erratum, 2026-10-20).** `Build.hs:12` uses `foldr`; `Extract/Core.hs:599, 639` use strict `foldl'`. Under the pinned first/old-wins `⊕`, **every** shipped fold/accumulation site puts the accumulator or the list head in the **first** operand position (`foldl'`: `⊕ acc e`; `foldr`: `⊕ e₁ (…)`; `mergeIntoRunning`: `⊕ running ext`), so all of them resolve conflicts **earliest/oldest view wins**, and `foldr ⊕ emptyExtraction ≡ foldl' ⊕ emptyExtraction` on **every** input, conflicting keys included — Lean witness `foldrMerge_eq_foldlMerge_all` (`Ext/Lax.lean`, unconditional, no consistency hypothesis; AVI-1304). There is no `foldl' (\acc e -> ⊕ e acc)` site anywhere in the codebase — the earlier "foldl' → last view wins" reading had no code counterpart and is corrected here. The streaming and build lanes can therefore diverge **only if they are fed different view orders** (streaming production order vs the explicit list passed to `buildGraphFromExtractions`), never because of the fold shape: fed the same order, both lanes are byte-identical on conflicting keys too. Order-dependence on conflicting inputs remains recorded (§3.2, AC-4). The per-lane view-order intent stays a Phase 2 feasibility question for Graphos Dev (§9).
 
 ---
 
@@ -72,7 +74,7 @@
 
 - **Cocone** over `F` into `X : Extraction`: a family of view-embeddings `{gᵢ : Eᵢ → X}`.
 - **Compatible cocone (matching family):** legs agree on every shared key `k ∈ keys(Eᵢ) ∩ keys(Eⱼ)` — exactly **consistency** (§3.1).
-- **Canonical cocone:** `(M, {ιᵢ})` with `M = foldl' ⊕ emptyExtraction [E₁…Eₙ]` (or `foldr`, equivalent on consistent families) and `ιᵢ : Eᵢ ↪ M` the key inclusions.
+- **Canonical cocone:** `(M, {ιᵢ})` with `M = foldl' ⊕ emptyExtraction [E₁…Eₙ]` (or `foldr` — equivalent on **every** family, conflicting keys included: AVI-1319, §0.4) and `ιᵢ : Eᵢ ↪ M` the key inclusions.
 
 ---
 
@@ -228,7 +230,7 @@ main = defaultMain
 ## 7. Determinism Lens
 
 - **Deterministic by construction.** `Map.union` is pure; `foldl' ⊕ emptyExtraction` over a fixed view list is an order-determined reduction. No randomness affecting values, no concurrency in the merge itself.
-- **Order-sensitivity is localized.** On consistent inputs the result is independent of view order and parenthesization (§3.1). On inconsistent inputs the result depends on order — *but* is deterministic given the order; and under first/old-wins, `foldl'` (streaming, accumulator-first) is dominated by the **recent** view while `foldr` (batch) is dominated by the **earliest** view (§0.4). This is recorded, tested (AC-4), and gated on the Dev feasibility answers (§9).
+- **Order-sensitivity is localized.** On consistent inputs the result is independent of view order and parenthesization (§3.1). On inconsistent inputs the result depends on the order in which views are fed — but is deterministic given the order. Every shipped fold shape (`foldl'` and `foldr` alike, first/old-wins `⊕`) resolves conflicts **earliest view wins** (§0.4, AVI-1319): the lanes never diverge because of the fold shape, only if they are fed different view orders. This is recorded, tested (AC-4), and gated on the Dev feasibility answers (§9).
 - **No observable non-determinism.** Same input list ⇒ byte-identical output on every run.
 
 ---
@@ -240,8 +242,9 @@ main = defaultMain
 | M-1 | `Ext` poset-enriched; morphisms = value-preserving view-embeddings | Matches AVI-524 §1; forced by `Map.union` key-wise semantics. |
 | M-2 | Consistent diagram ⇒ strict colimit; inconsistent ⇒ lax colimit | AVI-524 §3.1/§3.2; lax α pinned at the operator level. |
 | M-3 | Complexity stated in key operations, not allocations | Matches `Map.union` cost model (Core.hs:126-128). |
-| M-4 | Fold-order discrepancy (foldr vs foldl′) is a feasibility question, not fixed here | Requirements-only scope; consistent inputs agree; inconsistent inputs differ between lanes. |
+| M-4 | Fold-order discrepancy (foldr vs foldl′) is a feasibility question, not fixed here — **superseded by the AVI-1319 erratum (2026-10-20):** the fold shapes are behaviorally identical (§0.4); the surviving question is the view order each lane is fed (§9) | Requirements-only scope; consistent inputs agree (§3.1); on conflicting inputs every shipped site is earliest-wins, so the lanes agree whenever fed the same view order. |
 | **M-5** | **Merge precedence = first/old-wins (not second/new-wins); artifact renamed `mergedExtraction_laxColimit_oldWins`** | **Head-rnd arbitration, 2026-09-30.** Source-verified: `Core.hs:129-136` (`Map.union` left-biased), streaming lane `mergeIntoRunning` (`running ⊕ ext`), `Build.hs:12` `foldr` (earlier view wins on conflicts). Corpus precedent: commits `2ee8bca`, `a7e6eb2`. Falsifiable: AC-4 re-pinned to first-wins. |
+| **M-6** | **Fold-order erratum (AVI-1319, 2026-10-20): all shipped fold/accumulation sites are first/old-wins at the list level — earliest/oldest view wins; `foldr` ≡ `foldl'` on every input; no `foldl'` last-wins divergence exists.** §0.3/§0.4 (and §7/M-4/§9) corrected; the operator pin (M-5) and the Lean artifacts (AVI-1303/AVI-1304) are untouched — the prose correction changes no Lean statement. | Source re-verification: `Build.hs:12` (`foldr` = list head first), `Extract/Core.hs:599, 639` (`List.foldl' mergeExtractions` = accumulator first), `:164-165` (`mergeIntoRunning` = running first), `Core.hs:131-132` (left-biased `Map.union`). No reversed-operand fold site (`\acc e -> ⊕ e acc`) exists anywhere in the codebase. Lean witness: `foldrMerge_eq_foldlMerge_all` (`Ext/Lax.lean`, unconditional). Falsifiable: a reversed-operand fold site reintroduces the lane divergence. |
 
 ---
 
@@ -252,9 +255,9 @@ main = defaultMain
 Four questions for Graphos Dev (original gate AVI-640 was cancelled before review; **replacement issue** tracks them — see the consolidated layer):
 
 1. **Consistency guarantee.** Does the pipeline *guarantee* views agree on shared keys before the fold, or are conflicts silently resolved (a) or surfaced as errors (b)? (Gates AC-4 and the strict-vs-lax split.)
-2. **Fold-order decision.** Is the `Build.hs:12` `foldr` vs `Extract/Core.hs:124,466,506` strict `foldl'` difference intentional? Under first/old-wins the two lanes resolve list-level conflicts differently: `foldr` → earliest view wins; `foldl'` (accumulator first) → *last* view wins.
+2. **Fed-view-order decision (fold-shape question closed, AVI-1319).** The `Build.hs:12` `foldr` vs `Extract/Core.hs:599, 639` strict `foldl'` difference is behaviorally inert: under first/old-wins both fold shapes resolve list-level conflicts with the **earliest** view winning on **every** input (§0.4) — there is no "foldl' → last view wins" lane in the code. The substantive question: is the batch lane guaranteed to be fed the **same view order** as the streaming lane (the explicit list passed to `buildGraphFromExtractions` vs streaming production order)? If not, is the per-lane precedence intended and documented?
 3. **Edge-conflict intent.** For a shared `EdgeId` with differing `weight`/`confidence`/`extra`: is first/old-wins the intended resolution, or should these merge (e.g. max-confidence) rather than overwrite?
-4. **Streaming merge parity.** `mergeIntoRunning` merges accumulator-first (same operand order as the `foldl'` lanes) while the batch `foldr` uses the opposite list-level precedence — confirm intent and parity on consistent inputs.
+4. **Streaming merge parity.** All shipped accumulation sites share the same precedence — `mergeIntoRunning` (accumulator first, same operand order as the `foldl'` lanes), the `foldl'` folds (accumulator first), and the batch `foldr` (list head first) all resolve conflicts **earliest/oldest wins** (AVI-1319, §0.4). Confirm intent and fed-order parity: fed the same view order, the lanes must be byte-identical (conflicting keys included).
 
 ### 9.2 Requirements-only gate
 
