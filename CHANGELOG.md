@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-_No unreleased changes yet._
+### Fixed
+- `--cluster-only` now persists its output: `graph.json` (with communities
+  filled, written atomically), the report exports and `community_graph.json`
+  under `--community-graph`, plus the checkpoint, instead of dropping them.
+- Leiden no longer collapses code graphs: doc↔code co-location links are
+  capped (one node per doc file to one node per code file; docs spanning more
+  than 25 code files are skipped), `--edge-density Sparse` drops the
+  co-location heuristic, community detection and cohesion run on the
+  undirected projection, and `addEdges` merges adjacency sets instead of
+  keeping only the old set.
 
 ## 0.1.1 - 2026-10-20
 
