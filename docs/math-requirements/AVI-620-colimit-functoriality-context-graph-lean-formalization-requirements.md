@@ -188,6 +188,46 @@
 
 **Justification (for the author).** `mergeExtractions` is `Map.union`, `O(n₁ + n₂)` per its cost model comment (`Core.hs:126-128`: "Map-based union for O(n₁+n₂) deduplication"); the left fold visits each key a bounded number of times.
 
+> **Authorship note (AVI-1306).** Proved in
+> `formalization/lean/GraphosFormalization/Ext/Complexity.lean` as
+> `mergedExtraction_nwayFold_linear`.
+> The statement is bundled with the fold it prices: for any node/edge key
+> universes `s`, `t` and every view family `l`,
+> `(foldlCost s t emptyExtraction l).fst = foldlMerge l` (i.e. literally
+> `foldl' ⊕ emptyExtraction`, `Extract/Core.hs:124,466,506`) **and**
+> `nwayFoldCost s t l ≤ (l.map size).sum` with
+> `size E = |extNodes E| + |extEdges E|` (§4's `|keys(E)|`).
+> Keys are counted against a candidate universe list (`ExtView.keysIn`), since
+> the extensional view model `K → Option V` carries no intrinsic support; for a
+> duplicate-free universe containing the family's keys this is exactly the
+> literal cardinality, and the bound holds uniformly in `s`, `t`.
+> **Cost model, and a reading correction.** The per-step charge formalized is
+> `min(|keys acc|) (|keys Eᵢ|)`: the **smaller operand's** key count. That is
+> the key-proportional term of what `Data.Map.union` actually does — the
+> `containers` documentation states `O(m·log(n/m+1))`, `m = min(n₁,n₂)` — and it
+> is what "the left fold visits each key a bounded number of times" means
+> precisely: every key of every input view is charged **once**, at the step
+> where its view is the smaller operand, and is never re-scanned; the
+> accumulator is not re-charged. Under the *literal* reading of the coarse
+> `O(n₁+n₂)` comment (charging both operands at every step) the fold is
+> `Θ(n·Σᵢ|keys(Eᵢ)|)` in the worst case (growing accumulator) and the §4 bound
+> is **false**; the coarse comment is an upper bound, not the algorithm's bound.
+> The `log` factor of the `split` path is node/pointer depth, not a key
+> operation, and is outside the counted unit. §0.3/§4 prose should be read
+> accordingly (§4's bound holds for key visits, which is the unit §4 and M-3
+> pin). Recorded here rather than silently patched.
+> **Non-vacuity.** `Extraction.size_merge_eq_add` shows the charge is attained
+> on componentwise-disjoint views, and the `Nat` fixtures in the module compute
+> it: four disjoint three-key views over `[0,12)` charge `0+3+3+3 = 9` against a
+> total size of `12`, and two charge `3` against `6`. The asymptotic ratio per
+> family doubling is `(2n−1)/(n−1) → 2` — `2.01, 2.005, 2.0025` at n =
+> 100→200, 200→400, 400→800, consistent with the AC-3 recorded `2.01, 1.99,
+> 2.01` to two decimal places (the exact per-run timing is AVI-1307's harness,
+> which this theorem now unblocks).
+> Verified: `lake build` green on `leanprover/lean4 v4.14.0`; no `sorry`;
+> `#print axioms mergedExtraction_nwayFold_linear` reports only `propext` and
+> `Quot.sound`.
+
 ---
 
 ## 5. Acceptance-criteria mapping
