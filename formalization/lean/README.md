@@ -21,6 +21,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Phase1/PartitionOnly.lean` | Phase 1 INV-Q2 partition-only invariance: `modularity_partitionOnly`, member-list corollary and exact-layer key-order invariance (AVI-618 §2) |
 | `GraphosFormalization/Phase1/LocalMove.lean` | Phase 1 INV-Q3 local-moving monotonicity: `modularity_localMoveNonDecreasing` (+ strict form), per-move `ΔQnum` identity, and exact witnesses for the two shipped-gate defects (AVI-618 §2, §5 fixture 4) |
 | `GraphosFormalization/Phase1/Determinism.lean` | Phase 1 INV-Q4 deterministic fold order: `modularity_deterministic`, insertion-order independence of the `Map.elems` fold, canonicalisation stability, and fixture 7 bit-equality (AVI-618 §2, §5 fixture 7) |
+| `GraphosFormalization/Phase1/FixturesExact.lean` | Phase 1 INV-Q5 fixture exactness: `modularity_fixturesExact` — single block ⇒ `Qnum = 0`, all-singletons ⇒ `Qnum = −Σ_v k_v² < 0` (AVI-618 §2, §5 fixtures 1 & 2) |
 | `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
 
@@ -55,7 +56,7 @@ per-module requirement citations.
 | §2 INV-Q2 — partition-only | `modularity_partitionOnly` | **proved** (`Phase1/PartitionOnly.lean`): member-list invariance of `modularity`, plus exact-layer block-order (`Qnum`) invariance |
 | §2 INV-Q3 — local move non-decreasing | `modularity_localMoveNonDecreasing` (+ `_strict`) | **proved** (`Phase1/LocalMove.lean`) for the corrected gain rule `ΔQ > 0`; see the caveat below |
 | §2 INV-Q4 — deterministic summation | `modularity_deterministic` | **proved** (`Phase1/Determinism.lean`): fold order is the unique ascending-`CommunityId` enumeration of the map's domain, so `Q` is bit-identical across calls and across insertion orders; see the caveat below |
-| §2 INV-Q5 — fixtures exact | `modularity_fixturesExact` | pending (AVI-1298) |
+| §2 INV-Q5 — fixtures exact | `modularity_fixturesExact` | **proved** (`Phase1/FixturesExact.lean`) on the exact layer: single block ⇒ `Qnum = 0`; all-singletons ⇒ `Qnum = −Σ_v k_v² < 0`; §5 triangle gives `Q = −1/3` exactly |
 
 `Phase1/Modularity.lean` also carries the shared objects those theorems build
 on (`SupportGraph`, `Partition`, `sigmaIn`, `sigmaTot`, `modularity`). `Q` is
@@ -115,6 +116,25 @@ Qnum(π) = Σ_c [2m·σ_in(c) − σ_tot(c)²] = (2m)²·Q(π)
 `EdgeGraph`), matching `gEdges`/`csM` and the `neighbors` multi-edge collapse.
 The Float rendering remains the implementation's rounded evaluation and is
 covered by the AVI-1301 fixture cross-check.
+
+`Phase1/FixturesExact.lean` proves INV-Q5 on that same exact layer: on the §5
+fixtures, `Qnum = 0` for the single block containing all nodes
+(`singleBlock_modularityNum`) and `Qnum = −Σ_v k_v²` for the all-singletons
+partition (`singletons_modularityNum`), which is strictly negative as soon as
+`m ≥ 1` (`singletons_modularityNum_neg`). The bundle is
+`modularity_fixturesExact`. `k_v` is `deg v = σ_tot([v])`; the handshake check
+`singletons_sum_deg` (`Σ_v k_v = 2m`) exercises it against
+`sum_sigmaTot_eq_two_m`. On the §5 triangle (`m = 3`, all degrees `2`) both
+fixture values are also computed concretely: `Qnum = 0` and
+`Qnum = −12 = −(2²·3)`, i.e. `Q = −1/3`.
+
+> **Caveat (AVI-1298).** As for INV-Q1, the claims are stated on the exact
+> numerator `Qnum = (2m)²·Q` rather than on the `Float` rendering: kernel Lean
+> cannot reduce `Float` arithmetic (opaque `Float.add`/`Float.div`, no
+> `DecidableEq`, no order lemmas), and AVI-618 §6 pins the Lean side to exact
+> ℚ/ℝ arithmetic. The `Float`/`Double` values on the pinned fixtures are the
+> AVI-1301 cross-check's job (`|Q_lean − Q_hs| ≤ 2⁻²⁴`, exactly `0` on rational
+> fixtures).
 
 ### Phase 2 — merged context graph as colimit (AVI-620)
 
