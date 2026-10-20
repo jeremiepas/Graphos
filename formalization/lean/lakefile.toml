@@ -10,3 +10,20 @@ defaultTargets = ["GraphosFormalization"]
 
 [[lean_lib]]
 name = "GraphosFormalization"
+
+# AVI-1307: Phase 2 timing harness, Lean arm. Evaluates `nwayFoldCost` on the
+# AC-3 disjoint family (n = 100/200/400/800) and prints its doubling ratios.
+# Deliberately NOT a default target (the default `lake build` stays lib-only);
+# `lean.yml` builds it explicitly. Run: `lake exe ac3-cost`.
+[[lean_exe]]
+name = "ac3-cost"
+root = "GraphosFormalization.Harness.Ac3Cost"
+
+# AVI-1301: AVI-618 §6 Lean arm of the modularity cross-check. Evaluates the
+# exact `modularityNum` on the seven pinned §5 fixtures and prints the table the
+# Haskell test `ModularityCrossCheckSpec` compares against `modularity`
+# (|Q_lean - Q_hs| <= 2^-24). `--check` diffs against crosscheck/q-lean.tsv.
+# Not a default target, like ac3-cost.
+[[lean_exe]]
+name = "modularity-crosscheck"
+root = "GraphosFormalization.Harness.CrossCheck"

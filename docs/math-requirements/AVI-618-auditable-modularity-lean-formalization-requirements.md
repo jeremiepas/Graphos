@@ -158,6 +158,26 @@ Each invariant becomes exactly one named Lean `theorem`/`lemma` stub below. Stat
 
 > **Constrains:** `modularity` fold order (`Community.hs`); determinism lens. No `IntMap`/`Set` iteration may leak into the sum (INV-Q4).
 > **Acceptance property.** `∀ g cm. modularity g cm == modularity g cm` (reflexive) and the fold order is `Map.elems` ascending-key; fixture 7 in §5 (two calls bit-equal).
+>
+> **Reconciliation (AVI-1297).** Formally proved in
+> `formalization/lean/GraphosFormalization/Phase1/Determinism.lean` against the
+> surface above. `CommunityMap` is modelled as the finite function a
+> `Data.Map` denotes (duplicate-free key list plus `block : CommunityId →
+> List V`), so the fold order is
+> `keysInFoldOrder cm = mergeSort cm.keys (· ≤ ·)`. Proved: this order is
+> ascending, is a permutation of the map's domain, and is *the same list* for
+> any two enumerations of that domain (`keysInFoldOrder_unique`) — hence
+> `modularity_foldOrder_perm` (same bindings, different insertion order ⇒
+> bit-equal `Q`) and `modularity_canonicalOrder_stable` (re-canonicalising
+> never changes `Q`). The acceptance property is `modularity_deterministic`,
+> and fixture 7 below is recorded on both the `Partition` and `CommunityMap`
+> surfaces. Lean's `=` on `Float` is equality of the IEEE-754 binary64 payload
+> (bit equality); `Float.beq`/`==` is deliberately not used because it is not
+> reflexive on `NaN`. Kernel Lean cannot evaluate `Float` arithmetic
+> (`Float.add` is `opaque @[extern]`, and `Float` has no `DecidableEq`), so the
+> non-associativity witness is stated on `Nat` (`fold_order_matters`); general
+> `Float` order-invariance is false by design — the exact layer's
+> order-invariance is `modularityNum_blocksPerm` (INV-Q2).
 
 ### INV-Q5 — canonical fixtures pin exact values → `theorem modularity_fixturesExact`
 
@@ -169,6 +189,20 @@ Each invariant becomes exactly one named Lean `theorem`/`lemma` stub below. Stat
 
 > **Constrains:** `modularity` on the pinned fixtures (§5 fixtures 1 & 2).
 > **Acceptance property.** Fixture 1 ⇒ `modularity g cm == 0`; Fixture 2 ⇒ `modularity g cm == -(1/(2*m))^2 * Σ k_v^2` and `< 0`.
+>
+> **Reconciliation (AVI-1298).** Proved in
+> `formalization/lean/GraphosFormalization/Phase1/FixturesExact.lean` as
+> `theorem modularity_fixturesExact`, on the exact layer shared with INV-Q1
+> (`Qnum = (2m)²·Q`): fixture 1 ⇒ `Qnum = 0`; fixture 2 ⇒ `Qnum = −Σ_v k_v²`,
+> and `Qnum < 0` whenever `m ≥ 1`. The acceptance property above is the `Float`
+> rendering of the same values. Kernel Lean cannot evaluate `Float` arithmetic
+> (`Float.add`/`Float.div` are `opaque @[extern]`, `Float` has no `DecidableEq`
+> and no order lemmas), so the `== 0` / `< 0` assertions are pinned to the
+> implementation by the AVI-1301 fixture cross-check instead. The §5 triangle
+> (`m = 3`, all degrees `2`) is instantiated concretely:
+> `triangleSingletons_modularityNum` gives `Qnum = −12` and
+> `triangleSingletons_Q_eq_neg_third` gives `3·Qnum = −(2m)²`, i.e.
+> `Q = −12/36 = −1/3`, exactly as tabulated in §5.
 
 ---
 
@@ -245,6 +279,20 @@ where `eps` is a small tolerance (e.g. `2^-24`) accounting for `Double` rounding
 **Cross-check script spec (authorship PO/DevOps).** A script that, for each fixture `f` above: (a) builds `g_f` via `extractionFromLists`/`buildGraph` (`Graph.hs`), (b) computes `Q_hs = modularity g_f cm_f`, (c) evaluates the Lean theorem/lemma on `f`'s exact rational adjacency, (d) asserts `|Q_lean − Q_hs| ≤ eps`. The script names every fixture in the table and the exact `Q` column; a mismatch is a spec violation.
 
 > **Constrains:** `modularity` (§2.2 wiring), `computeCommunityStats` (`Community.hs:92`), the fixtures in `tests/Graphos/Domain/CommunitySpec.hs` conventions (`testNode`, `cliqueEdges`, `buildGraph`).
+
+**Delivered by (AVI-1301).**
+- *Lean arm*: `formalization/lean/GraphosFormalization/Phase1/CrossCheckFixtures.lean`
+  pins every §5 row as concrete `EdgeGraph`/`Partition` data and proves its exact
+  `Qnum` (`by decide`); `formalization/lean/GraphosFormalization/Harness/CrossCheck.lean`
+  (`lake exe modularity-crosscheck`) evaluates `modularityNum` on those rows and
+  emits `formalization/lean/crosscheck/q-lean.tsv` (exact `num/den`).
+- *Haskell arm*: `tests/Graphos/Domain/ModularityCrossCheckSpec.hs` builds the
+  same fixtures through `extractionFromLists`/`buildGraph`, computes
+  `Q_hs = modularity g_f cm_f`, and asserts `|Q_lean − Q_hs| ≤ 2⁻²⁴` on all 11
+  (fixture, partition) rows, plus the §5 per-fixture invariants (fixtures 1–7).
+- *Drift guard*: `.github/workflows/lean.yml` re-runs
+  `lake exe modularity-crosscheck --check crosscheck/q-lean.tsv` (report-only),
+  so a Lean-side change that moves a value surfaces as table drift.
 
 ---
 

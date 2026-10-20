@@ -357,6 +357,7 @@ test-suite graphos-test
     Graphos.Domain.Types.IngestSpec
     Graphos.Domain.GraphSpec
     Graphos.Domain.CommunitySpec
+    Graphos.Domain.ModularityCrossCheckSpec
     Graphos.Domain.Community.LabelSpec
     Graphos.Domain.Community.ClusterInvarianceSpec
     Graphos.Domain.Community.DeterminismSpec
@@ -503,3 +504,22 @@ test-suite graphos-test-focus
     , wai                  >= 3.2
     , http-types           >= 0.12
     , yaml                 >= 0.11
+
+-- ───────────────────────────────────────────────
+-- Benchmark: AVI-1307 Phase 2 n-way fold timing (AC-3)
+-- ───────────────────────────────────────────────
+-- Report-only empirical evidence for `mergedExtraction_nwayFold_linear`
+-- (formalization/lean/GraphosFormalization/Ext/Complexity.lean, AVI-620 §4/§5
+-- AC-3). Not built by `cabal build all` / `cabal test`; run explicitly:
+--   devenv shell -- cabal bench nway-fold-timing
+benchmark nway-fold-timing
+  import:         shared
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: benchmarks/nway-fold-timing
+  ghc-options:    -O2 -rtsopts "-with-rtsopts=-A64m"
+  build-depends:
+      base                 >= 4.17 && < 5
+    , containers           >= 0.6
+    , deepseq              >= 1.4
+    , graphos
