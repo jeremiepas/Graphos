@@ -53,7 +53,9 @@ structureTypes =
   [ "module", "program", "source_file"
   , "package_clause"        -- Go
   , "mod_item"              -- Rust
-  , "document"              -- JSON
+  , "document"              -- JSON, YAML
+  , "translation_unit"      -- C++
+  , "stream"                -- YAML
   ]
 
 -- | Tier 2 — API surface: definitions visible from outside a function body.
@@ -86,6 +88,16 @@ apiSurfaceTypes =
   , "static_item", "extern_item", "attribute_item"
     -- Haskell
   , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
+    -- Ruby
+  , "method", "singleton_method"
+    -- C++
+  , "class_specifier", "struct_specifier", "union_specifier", "enum_specifier"
+  , "namespace_definition", "template_declaration", "alias_declaration"
+  , "declaration", "preproc_include"
+    -- SQL
+  , "create_table_statement", "create_function_statement", "create_type_statement"
+  , "create_domain_statement", "create_index_statement", "create_schema_statement"
+  , "create_sequence"
   ]
 
 importExportTypes :: [String]
@@ -105,6 +117,8 @@ implementationDetailTypes =
   , "with_statement", "try_statement", "except_clause"
     -- JSON values: every pair/object/array of every JSON file
   , "object", "array", "pair"
+    -- SQL DML
+  , "select_statement", "insert_statement", "update_statement", "delete_statement"
   ]
 
 -- | AST types that delimit a function body. At 'GranularityFunction' the
@@ -116,6 +130,8 @@ functionBoundaryTypes =
   , "arrow_function", "generator_function_declaration"
   , "constructor"
   , "function_item"       -- Rust
+  , "method", "singleton_method"  -- Ruby
+  , "create_function_statement"   -- SQL
   ]
 
 -- | All node types that can represent definitions (fine level).
@@ -390,6 +406,34 @@ tsTypeToKind t = case t of
   "instance_declaration" -> "Instance"
   "pattern_declaration" -> "Pattern"
   "type_signature" -> "Signature"
+  -- Ruby-specific
+  "method" -> "Method"
+  "singleton_method" -> "Method"
+  -- C++-specific
+  "translation_unit" -> "Module"
+  "class_specifier" -> "Class"
+  "struct_specifier" -> "Struct"
+  "union_specifier" -> "Struct"
+  "enum_specifier" -> "Enum"
+  "namespace_definition" -> "Namespace"
+  "template_declaration" -> "Template"
+  "alias_declaration" -> "Type"
+  "declaration" -> "Declaration"
+  "preproc_include" -> "Import"
+  -- SQL-specific
+  "create_table_statement" -> "Table"
+  "create_function_statement" -> "Function"
+  "create_type_statement" -> "Type"
+  "create_domain_statement" -> "Type"
+  "create_index_statement" -> "Index"
+  "create_schema_statement" -> "Schema"
+  "create_sequence" -> "Sequence"
+  "select_statement" -> "Query"
+  "insert_statement" -> "Query"
+  "update_statement" -> "Query"
+  "delete_statement" -> "Query"
+  -- YAML
+  "stream" -> "Document"
   -- General
   "module" -> "Module"
   "program" -> "Module"

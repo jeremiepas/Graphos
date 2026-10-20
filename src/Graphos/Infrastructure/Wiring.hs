@@ -76,6 +76,7 @@ import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Ruby as TSRuby
 import qualified TreeSitter.Java as TSJava
 import qualified TreeSitter.Language as TS_LANG
+import qualified Graphos.Infrastructure.Extract.TreeSitter.Vendored as TSVendored
 
 -- UseCase imports (for delegation to sub-modules)
 import Graphos.UseCase.Extract.Haskell (extractHaskellStub)
@@ -317,4 +318,7 @@ getGrammarPtr "rust"         = Just TSRust.tree_sitter_rust
 getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
 getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
 getGrammarPtr "java"         = Just TSJava.tree_sitter_java
+getGrammarPtr "cpp"          = Just TSVendored.tree_sitter_cpp
+getGrammarPtr "yaml"         = Just TSVendored.tree_sitter_yaml
+getGrammarPtr "sql"          = Just TSVendored.tree_sitter_sql
 getGrammarPtr _              = Nothing
