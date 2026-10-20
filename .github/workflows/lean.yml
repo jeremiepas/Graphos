@@ -56,6 +56,12 @@ jobs:
       - name: lake build
         run: lake build
 
+      # AVI-1307: the AC-3 timing harness is not a default target (a local
+      # `lake build` stays lib-only), so build it explicitly to keep it from
+      # rotting. Report-only, like the rest of this job.
+      - name: lake build ac3-cost (AVI-1307 harness)
+        run: lake build ac3-cost
+
       - name: Report package identity
         if: always()
         run: lake env lean --version

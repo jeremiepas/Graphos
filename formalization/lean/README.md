@@ -27,6 +27,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Ext/Strict.lean` | Phase 2 consistent case: strict colimit + fold order-independence, `mergedExtraction_strictColimit_orderIndependent` (AVI-620 §3.1) |
 | `GraphosFormalization/Ext/Lax.lean` | Phase 2 conflicting case: no matching-family cocone + lax colimit with the first/old-wins non-invertible comparison, `mergedExtraction_laxColimit_oldWins` (AVI-620 §3.2) |
 | `GraphosFormalization/Ext/Complexity.lean` | Phase 2 §4 n-way fold complexity: `mergedExtraction_nwayFold_linear` — the key-visit cost of `foldl' ⊕ emptyExtraction` is `≤ Σᵢ \|keys(Eᵢ)\|` (AVI-620 §4) |
+| `GraphosFormalization/Harness/Ac3Cost.lean` | Phase 2 AC-3 cost harness: evaluates `nwayFoldCost` on the AC-3 disjoint family (n = 100/200/400/800) and prints its doubling ratios (AVI-620 §5 AC-3 / §7, AVI-1307) |
 
 ## Build
 
@@ -37,6 +38,25 @@ lake build
 
 `elan` downloads the pinned toolchain on first run. `.lake/` is a build directory
 and is gitignored.
+
+The AC-3 timing harness is a separate executable (not a default target, so
+`lake build` stays library-only):
+
+```bash
+lake build ac3-cost      # or: lake exe ac3-cost
+```
+
+On NixOS the elan-bundled `clang` cannot run, so the executable must be linked
+with the system C compiler and the toolchain's bundled `libc++`/`libuv`:
+
+```bash
+T="$HOME/.elan/toolchains/leanprover--lean4---v4.14.0"
+printf '#!/bin/sh\nexec cc -L%s/lib "$@"\n' "$T" > /tmp/leancc && chmod +x /tmp/leancc
+LEAN_CC=/tmp/leancc lake build ac3-cost
+```
+
+The Haskell arm of the same harness lives in `benchmarks/nway-fold-timing/`
+(`devenv shell -- cabal bench nway-fold-timing`).
 
 ## CI posture
 
@@ -148,6 +168,7 @@ fixture values are also computed concretely: `Qnum = 0` and
 | §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | **proved** (`Ext/Strict.lean`) |
 | §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | **proved** (`Ext/Lax.lean`), incl. the AC-4 conflicting-`EdgeId` fixture |
 | §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | **proved** (`Ext/Complexity.lean`), `cost ≤ Σᵢ \|keys(Eᵢ)\|` with constant `1` |
+| §5 AC-3 empirical timing | `ac3-cost` harness (Lean arm) + `benchmarks/nway-fold-timing` (Haskell arm) | **recorded** (`Harness/Ac3Cost.lean`, AVI-1307): cost model `2.010/2.005/2.002` per doubling; shipped fold measured `2.062/2.045/2.087` (slope 1.046, not quadratic) |
 
 The colimit layer carries the consistency hypothesis explicitly
 (`familyConsistent`), so it stays valid regardless of how the AVI-949
@@ -220,4 +241,5 @@ containing the family's keys this is the literal cardinality.
 > charge `9` against `12`), so the constant cannot be improved asymptotically;
 > the `(2n−1)/(n−1) → 2` doubling ratio matches the AC-3 recorded
 > `2.01, 1.99, 2.01` to two decimal places. The timing harness itself is
-> AVI-1307.
+> AVI-1307 (`Harness/Ac3Cost.lean`, Lean arm, plus the Haskell arm in
+> `benchmarks/nway-fold-timing/`).

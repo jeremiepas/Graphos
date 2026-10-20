@@ -236,7 +236,7 @@
 |---|---|---|
 | **AC-1** named Lean theorem/lemma | §2, §3.1, §3.2, §4 artifacts | Lean `#check`/`theorem` bodies compile under pinned hypotheses; names present. |
 | **AC-2** explicit statement incl. complexity | §2–§4; §4 pins `O(Σᵢ |keys(Eᵢ)|)` | Complexity statement read from the theorem statement. |
-| **AC-3** empirical timing evidence | §7 AC-3 | Three `foldl' ⊕` runs at n = 100/200/400/800 (disjoint, viewSize 1000): as recorded by the CTE (2026-09-11) each doubling ≈ ×2 (linear); harness reproduced below. |
+| **AC-3** empirical timing evidence | §7 AC-3; harness `benchmarks/nway-fold-timing/` (Haskell arm) + `formalization/lean/GraphosFormalization/Harness/Ac3Cost.lean` (Lean arm), AVI-1307 | Three `foldl' ⊕` runs at n = 100/200/400/800 (disjoint, viewSize 1000): as recorded by the CTE (2026-09-11) each doubling ≈ ×2 (linear); re-run 2026-10-20 at authorship, same ratios — see the note below. |
 | **AC-4** first/old-wins on edge keys (corrected M-5) | §3.2 `mergedExtraction_laxColimit_oldWins` | `mergeExtractions (mk [eA]) (mk [eB])`, `eA`,`eB` sharing `EdgeId` but differing in `weight`: result carries the **first** operand's value (Core.hs:131-132); `mergeExtractions A B ≠ mergeExtractions B A` at that key. |
 
 ```haskell
@@ -256,6 +256,29 @@ main = defaultMain
 ```
 
 **AC-3 observed data (three recorded runs, µs):** `foldl'` = 3052/6126/12162/24506; `foldr` = 2927/6027/12056/24649. Ratios per doubling ≈ 2.01, 1.99, 2.01 for both — linear to 2 d.p. (Provenance: measured 2026-09-11 during Phase 2 by the CTE; re-run at authorship.)
+
+> **Authorship re-run (2026-10-20, AVI-1307).** The harness now exists in two
+> arms and both reproduce the AC-3 ratios:
+> [`benchmarks/nway-fold-timing/`](../../benchmarks/nway-fold-timing/README.md)
+> (Haskell: times the shipped `foldl'`/`foldr` `mergeExtractions` over real
+> `Extraction`/`Data.Map` values, disjoint views of `viewSize = 1000`) and
+> [`formalization/lean/GraphosFormalization/Harness/Ac3Cost.lean`](../lean/GraphosFormalization/Harness/Ac3Cost.lean)
+> (Lean: evaluates `nwayFoldCost` on the same fixture, `lake exe ac3-cost`).
+> Recorded: Lean cost model `2.010/2.005/2.002` per doubling
+> (`cost = 3(n−1)` against the `3n` bound, i.e. §4 attained); shipped fold
+> `2.070/2.079/2.021` (log-log slope 1.040) — linear, not the ×4/slope-2
+> quadratic regime. Absolute µs differ from the 2026-09-11 table (real `Node`
+> payloads, full forcing); the ratios, which are the claim, agree.
+>
+> **Erratum to the sketch above (AVI-1307).** The pasted Criterion code does not
+> compile (`mkView` is applied to two arguments), its `disjointViews` steps by
+> `13` with `viewSize = 1000` so the views overlap in 987 keys, and its bench
+> bodies fold `n` copies of a *constant* 1000-key view (`mkView (999*1000)`)
+> rather than the family, measuring fold-length growth with a fixed operand.
+> That shape is still linear in `n`, which is why the recorded ratios look
+> right, but it is not the disjoint-family fixture AC-3's prose pins. The
+> harness above measures the disjoint family; see the harness README for the
+> reproduction of the recorded shape (2.151/1.868/2.123) and the comparison.
 
 ---
 
@@ -319,7 +342,7 @@ Four questions for Graphos Dev (original gate AVI-640 was cancelled before revie
 |---|---|---|
 | AC-1 named Lean theorem/lemma | §2–§4 explicit names | DONE (spec); bodies are PO/DevOps |
 | AC-2 explicit statement incl. complexity | §4 pins `O(Σᵢ |keys(Eᵢ)|)` | DONE |
-| AC-3 empirical timing evidence | recorded CTE runs, n=100/200/400/800 | LINEAR (×2 per doubling); re-run at authorship |
+| AC-3 empirical timing evidence | recorded CTE runs, n=100/200/400/800 | LINEAR (×2 per doubling); re-run 2026-10-20 (AVI-1307): cost model `2.010/2.005/2.002`, shipped fold `2.070/2.079/2.021` per doubling |
 | AC-4 first/old-wins on edge keys | `Map.union` left-biased (Core.hs:131-132); re-verified 2026-09-30 across the three call sites | PINNED (AC-4 test pending Graphos Dev confirmation of intent) |
 
 ---
