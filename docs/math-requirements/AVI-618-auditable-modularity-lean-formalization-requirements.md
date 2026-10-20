@@ -189,6 +189,20 @@ Each invariant becomes exactly one named Lean `theorem`/`lemma` stub below. Stat
 
 > **Constrains:** `modularity` on the pinned fixtures (§5 fixtures 1 & 2).
 > **Acceptance property.** Fixture 1 ⇒ `modularity g cm == 0`; Fixture 2 ⇒ `modularity g cm == -(1/(2*m))^2 * Σ k_v^2` and `< 0`.
+>
+> **Reconciliation (AVI-1298).** Proved in
+> `formalization/lean/GraphosFormalization/Phase1/FixturesExact.lean` as
+> `theorem modularity_fixturesExact`, on the exact layer shared with INV-Q1
+> (`Qnum = (2m)²·Q`): fixture 1 ⇒ `Qnum = 0`; fixture 2 ⇒ `Qnum = −Σ_v k_v²`,
+> and `Qnum < 0` whenever `m ≥ 1`. The acceptance property above is the `Float`
+> rendering of the same values. Kernel Lean cannot evaluate `Float` arithmetic
+> (`Float.add`/`Float.div` are `opaque @[extern]`, `Float` has no `DecidableEq`
+> and no order lemmas), so the `== 0` / `< 0` assertions are pinned to the
+> implementation by the AVI-1301 fixture cross-check instead. The §5 triangle
+> (`m = 3`, all degrees `2`) is instantiated concretely:
+> `triangleSingletons_modularityNum` gives `Qnum = −12` and
+> `triangleSingletons_Q_eq_neg_third` gives `3·Qnum = −(2m)²`, i.e.
+> `Q = −12/36 = −1/3`, exactly as tabulated in §5.
 
 ---
 

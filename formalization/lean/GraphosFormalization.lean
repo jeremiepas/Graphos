@@ -26,6 +26,10 @@
       deterministic pure function of `(g, cm)`, folding communities in
       ascending `CommunityId` order, which is the unique order of the map's
       key set (insertion-order independence, canonicalisation stability).
+    * `GraphosFormalization.Phase1.FixturesExact` — INV-Q5
+      (`modularity_fixturesExact`, AVI-618 §2 / §5 fixtures 1 & 2): the
+      single-block fixture has `Q = 0` and the all-singletons fixture has
+      `Q = −(1/(2m))²·Σ_v k_v² < 0`, exactly.
     * `GraphosFormalization.Ext.Basic`    — Phase 2 objects and the merge operator.
     * `GraphosFormalization.Ext.Colimit`  — Phase 2 universal property
       (`mergedExtraction_isColimit`, AVI-620 §2).
@@ -38,5 +42,6 @@ import GraphosFormalization.Phase1.RangeBound
 import GraphosFormalization.Phase1.PartitionOnly
 import GraphosFormalization.Phase1.LocalMove
 import GraphosFormalization.Phase1.Determinism
+import GraphosFormalization.Phase1.FixturesExact
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
