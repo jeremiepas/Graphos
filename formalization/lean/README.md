@@ -20,6 +20,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Phase1/RangeBound.lean` | Phase 1 exact INV-Q1 range bound: `modularity_range_bound` / `modularity_bounded`, plus the tight `K_{2,2}` fixture (AVI-618 §3) |
 | `GraphosFormalization/Phase1/PartitionOnly.lean` | Phase 1 INV-Q2 partition-only invariance: `modularity_partitionOnly`, member-list corollary and exact-layer key-order invariance (AVI-618 §2) |
 | `GraphosFormalization/Phase1/LocalMove.lean` | Phase 1 INV-Q3 local-moving monotonicity: `modularity_localMoveNonDecreasing` (+ strict form), per-move `ΔQnum` identity, and exact witnesses for the two shipped-gate defects (AVI-618 §2, §5 fixture 4) |
+| `GraphosFormalization/Phase1/Determinism.lean` | Phase 1 INV-Q4 deterministic fold order: `modularity_deterministic`, insertion-order independence of the `Map.elems` fold, canonicalisation stability, and fixture 7 bit-equality (AVI-618 §2, §5 fixture 7) |
 | `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
 
@@ -53,7 +54,7 @@ per-module requirement citations.
 | §2 INV-Q1 — range bound | `modularity_range_bound` (alias `modularity_bounded`) | **proved** (`Phase1/RangeBound.lean`), exact division-free form `-2m² ≤ Qnum ≤ 4m²`; `K_{2,2}` bipartition attains `-1/2` exactly |
 | §2 INV-Q2 — partition-only | `modularity_partitionOnly` | **proved** (`Phase1/PartitionOnly.lean`): member-list invariance of `modularity`, plus exact-layer block-order (`Qnum`) invariance |
 | §2 INV-Q3 — local move non-decreasing | `modularity_localMoveNonDecreasing` (+ `_strict`) | **proved** (`Phase1/LocalMove.lean`) for the corrected gain rule `ΔQ > 0`; see the caveat below |
-| §2 INV-Q4 — deterministic summation | `modularity_deterministic` | pending (AVI-1297) |
+| §2 INV-Q4 — deterministic summation | `modularity_deterministic` | **proved** (`Phase1/Determinism.lean`): fold order is the unique ascending-`CommunityId` enumeration of the map's domain, so `Q` is bit-identical across calls and across insertion orders; see the caveat below |
 | §2 INV-Q5 — fixtures exact | `modularity_fixturesExact` | pending (AVI-1298) |
 
 `Phase1/Modularity.lean` also carries the shared objects those theorems build
@@ -76,6 +77,28 @@ strictly increases if any move is accepted (AVI-618 §2, §5 fixture 4).
 > `codeSigmaTotUpdate_drifts`); the Haskell fix is a separate dev ticket. Until
 > it lands, `Q (localMovesFrom g cm0) ≥ Q cm0` does not hold for the shipped
 > code, so the AVI-1301 fixture cross-check must pin the *corrected* rule.
+
+`Phase1/Determinism.lean` models `CommunityMap` as the finite function a
+`Data.Map` denotes (a duplicate-free key list plus `block : CommunityId →
+List V`), so the fold order is `keysInFoldOrder cm = mergeSort cm.keys (· ≤ ·)`.
+It proves that this order is ascending, is a permutation of the domain, and is
+*the same list* for any two enumerations of that domain
+(`keysInFoldOrder_unique`) — hence `modularity_foldOrder_perm` (two maps with
+different insertion order give bit-equal `Q`) and
+`modularity_canonicalOrder_stable` (re-canonicalising never changes `Q`). The
+acceptance property `∀ g cm. modularity g cm = modularity g cm` is
+`modularity_deterministic`, plus fixture 7 in both its `Partition` and
+`CommunityMap` forms.
+
+> **Caveat (AVI-1297).** Lean's `Float` is the native binary64 payload, so `=`
+> on `Float` *is* bit equality; the theorem deliberately uses `=` rather than
+> `Float.beq` (`==`), which is not reflexive on `NaN`. Kernel Lean cannot
+> evaluate `Float` arithmetic (`Float.add` is `opaque @[extern]` and `Float` has
+> no `DecidableEq`), so the concrete non-associativity witness is stated on
+> `Nat` (`fold_order_matters`); the `Float`-level determinism claim needs no
+> computation. General `Float` order-invariance is *false* by design — the exact
+> layer's order-invariance is `modularityNum_blocksPerm` in
+> `Phase1/PartitionOnly.lean`.
 
 `Phase1/RangeBound.lean` adds the **exact** layer INV-Q1 needs: core Lean has
 no `Rat`/`Finset` and no `Float` order lemmas, so a general inequality over the
