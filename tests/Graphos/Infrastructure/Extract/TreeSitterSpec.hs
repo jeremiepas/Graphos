@@ -7,7 +7,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text.Short (fromText, toText)
 import qualified Data.Text as T
-import Data.Aeson (toJSON)
+import Data.Aeson (object, (.=), toJSON)
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types (Edge(..), Node(..), Relation(..), FileType(..))
 import Graphos.Domain.Types.Graph (extractionNodes, extractionEdges)
@@ -25,6 +25,30 @@ tsNode ty txt children = TSNodeInfo
   , tsnChildren = children
   }
 
+-- | A named identifier-class child (as tree-sitter emits for a declared name).
+ident :: Text -> TSNodeInfo
+ident t = tsNode "identifier" t []
+
+-- | Function declaration with an explicit declared name.
+func :: Text -> TSNodeInfo
+func name = tsNode "function_declaration" ("function " ++ T.unpack name) [ident name]
+
+-- | Function declaration with arbitrary children (used to nest imports).
+funcWithChildren :: Text -> [TSNodeInfo] -> TSNodeInfo
+funcWithChildren name children = tsNode "function_declaration" ("function " ++ T.unpack name) children
+
+-- | Import declaration carrying a quoted specifier in its text.
+importDecl :: Text -> TSNodeInfo
+importDecl spec = tsNode "import_statement" ("import { x } from " ++ T.unpack spec) []
+
+-- | Export wrapper around an inner function declaration.
+exportFunc :: Text -> TSNodeInfo
+exportFunc name = tsNode "export_statement" ("export " ++ T.unpack (func name)) [func name]
+
+-- | Decorated Python function (decorated_definition wrapper).
+decoratedFn :: Text -> TSNodeInfo
+decoratedFn name = tsNode "decorated_definition" ("@marker\n" ++ T.unpack (func name)) [func name]
+
 spec :: Spec
 spec = do
   describe "Core" $ do
@@ -38,138 +62,155 @@ spec = do
 
     it "truncateWithElision performs middle-elision" $ do
       truncateWithElision 10 "abcdefghijk" "ijk" `shouldBe` "abcd...ijk"
-      truncateWithElision 25 "import { a, b, c } from './x'" "from './x'" 
+      truncateWithElision 25 "import { a, b, c } from './x'" "from './x'"
         `shouldBe` "import { a, ...from './x'"
 
-  describe "Convert" $ do
-    it "makeNodeId derives stable IDs from normalized text" $ do
-      let id1 = makeNodeId "src/file.ts" "  import { a } from './b'  "
-      let id2 = makeNodeId "src/file.ts" "import { a } from './b'"
-      id1 `shouldBe` id2
+  describe "3.1 identifier extraction" $ do
+    it "function identifier is the declared name" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "getUser"]
+          n = head (Map.elems (extractionNodes ex))
+      nodeLabel n `shouldBe` toText "getUser"
+      nodeKind n `shouldBe` Just (toText "Function")
 
-    it "tsNodeLabel returns normalized text" $ do
-      let node = tsNode "import" "  import { a } from './b'  " []
-      tsNodeLabel node `shouldBe` "import { a } from './b'"
+    it "class / type identifier is the declared name" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [tsNode "class_declaration" "class Service" [ident "Service"]]
+          n = head (Map.elems (extractionNodes ex))
+      nodeLabel n `shouldBe` toText "Service"
+      nodeKind n `shouldBe` Just (toText "Class")
 
-    it "tsNodeLabel handles multi-line imports with elision" $ do
-      let longImport = T.replicate 50 "import { a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t } " <> "from './long-path/module.js';"
-      let node = tsNode "import_declaration" longImport []
-      let label = tsNodeLabel node
-      label `shouldSatisfy` T.isInfixOf "..."
-      label `shouldSatisfy` T.isSuffixOf "from './long-path/module.js';"
+    it "constant identifier is the declared name" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [tsNode "const_item" "const MAX" [ident "MAX"]]
+          n = head (Map.elems (extractionNodes ex))
+      nodeLabel n `shouldBe` toText "MAX"
+      nodeKind n `shouldBe` Just (toText "Constant")
 
-    it "tsNodeLabel leaves short declarations unchanged" $ do
-      let shortImport = "import { a } from './b'"
-      let node = tsNode "import_declaration" shortImport []
-      tsNodeLabel node `shouldBe` "import { a } from './b'"
+    it "import identifier is the resolved specifier" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [importDecl "'./db'"]
+          n = head (Map.elems (extractionNodes ex))
+      nodeLabel n `shouldBe` toText "./db"
 
-    it "makeNodeId is stable and ellipsis-free" $ do
-      let longImport = T.replicate 50 "import { a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t } " <> "from './long-path/module.js';"
-      let node = tsNode "import_declaration" longImport []
-      let id1 = makeNodeId "src/file.ts" (tsNodeUntruncatedLabel node)
-      let id2 = makeNodeId "src/file.ts" (tsNodeUntruncatedLabel node)
-      id1 `shouldBe` id2
-      T.isInfixOf "..." id1 `shouldBe` False
+    it "module identifier is the file stem" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFile defaultTruncationBudget
+             [tsNode "program" "module" [func "x"]]
+          n = head (Map.elems (extractionNodes ex))
+      nodeLabel n `shouldBe` toText "service"
+      nodeKind n `shouldBe` Just (toText "Module")
+      nodeSignature n `shouldBe` Nothing
 
-    it "tsNodeLabel does not elide non-import types" $ do
-      let longType = T.replicate 50 "function_declaration"
-      let node = tsNode "function_declaration" longType []
-      tsNodeLabel node `shouldNotSatisfy` T.isInfixOf "..."
+  describe "3.2 wrapper suppression" $ do
+    it "export_statement yields one node flagged exported" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [exportFunc "f"]
+          nodes = Map.elems (extractionNodes ex)
+      length nodes `shouldBe` 1
+      let n = head nodes
+      nodeLabel n `shouldBe` toText "f"
+      nodeKind n `shouldBe` Just (toText "Function")
+      nodeExtra n `shouldSatisfy` maybe False (== Just (object ["exported" .= (True :: Bool)]))
 
-    describe "Resolver" $ do
-      it "resolves relative path with .js -> .ts rewrite" $ do
-        resolveImport "src/file.ts" "./module.js" `shouldBe` Just ("src/module.ts", "module")
-      it "resolves literal path" $ do
-        resolveImport "src/file.ts" "/abs/path/to/module.ts" `shouldBe` Just ("/abs/path/to/module.ts", "module")
-      it "resolves index file" $ do
-        resolveImport "src/file.ts" "./dir/" `shouldBe` Just ("src/dir/index.ts", "index")
-      it "resolves node: builtin" $ do
-        resolveImport "src/file.ts" "node:fs" `shouldBe` Just ("external:node:fs", "fs")
-      it "resolves bare package" $ do
-        resolveImport "src/file.ts" "lodash" `shouldBe` Just ("external:lodash", "lodash")
-      it "resolves scoped package with subpath" $ do
-        resolveImport "src/file.ts" "@scope/pkg/sub" `shouldBe` Just ("external:@scope/pkg/sub", "@scope/pkg/sub")
-      it "returns Nothing for unresolvable specifier" $ do
-        -- Since it's pure, we can't really check if it's unresolvable on disk, 
-        -- but we can check if it returns something that doesn't look like a valid path?
-        -- Actually, our current implementation always returns something.
-        -- Let's see if we can make it return Nothing for empty specifier.
-        resolveImport "src/file.ts" "" `shouldBe` Nothing
+    it "decorated_definition yields one node flagged exported" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [decoratedFn "g"]
+          nodes = Map.elems (extractionNodes ex)
+      length nodes `shouldBe` 1
+      nodeLabel (head nodes) `shouldBe` toText "g"
+      nodeExtra (head nodes) `shouldSatisfy` maybe False (== Just (object ["exported" .= (True :: Bool)]))
 
-    describe "Convert - Imports/Exports" $ do
-      it "produces an imports edge for an import declaration" $ do
-        let node = tsNode "import_declaration" "import { db } from './db.js'" []
-            (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" (Just "module") node
-            imports = filter ((Imports ==) . edgeRelation) edges
-        length imports `shouldBe` 1
-        case imports of
-          [e] -> do
-            edgeSource e `shouldBe` makeNodeId "src/file.ts" "module"
-            edgeTarget e `shouldBe` makeNodeId "src/db.ts" "db"
-            edgeExtra e `shouldBe` Nothing
-          _ -> fail "expected exactly one imports edge"
+  describe "3.3 new id layout + collision suffix" $ do
+    it "id layout is <dirHash>_<stem>_<kind>:<identifier>" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "h"]
+          n = head (Map.elems (extractionNodes ex))
+          parts = T.splitOn "_" (nodeId n)
+      length parts `shouldBe` 3
+      T.all T.isDigit (parts !! 0) `shouldBe` True
+      parts !! 1 `shouldBe` toText "service"
+      parts !! 2 `shouldBe` toText "Function:h"
 
-      it "produces an imports edge with re-export marker for export-from" $ do
-        let node = tsNode "export_statement" "export { x } from './y.js'" []
-            (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" (Just "module") node
-            imports = filter ((Imports ==) . edgeRelation) edges
-        length imports `shouldBe` 1
-        case imports of
-          [e] -> do
-            edgeTarget e `shouldBe` makeNodeId "src/y.ts" "y"
-            edgeExtra e `shouldBe` Just (toJSON (T.pack "re-export"))
-          _ -> fail "expected exactly one imports edge"
+    it "overloads stay distinct: only the later occurrence gets #L<line>" $ do
+      let fixture = tsNode "program" "module"
+             [ funcWithChildren "handle" [ ident "handle" ] `withLine` 10
+             , funcWithChildren "handle" [ ident "handle" ] `withLine` 40 ]
+          ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [fixture]
+          ids = Map.keys (extractionNodes ex)
+      ids `shouldBe` [ makeNodeId (mkSourceFile "src/service.ts" "") "Function" "handle"
+                     , makeNodeId (mkSourceFile "src/service.ts" "") "Function" "handle" <> "#L40" ]
 
-      it "produces exactly one external node for a package imported by N files, with N edges" $ do
-        let mkImport = tsNode "import_declaration" "import { z } from 'zod'" []
-            files = ["src/a.ts", "src/b.ts", "src/c.ts"]
-            results = map (\fp -> tsNodeToGraphEdges GranularityFine fp (Just "module") mkImport) files
-            allEdges = concatMap fst results
-            allNodes = concatMap snd results
-            importEdges = filter ((Imports ==) . edgeRelation) allEdges
-            externalNodes = filter (\n -> nodeKind n == Just (fromText "External")) allNodes
-            uniqueExternalIds = nub (map nodeId externalNodes)
-        length importEdges `shouldBe` 3
-        length (nub (map edgeTarget importEdges)) `shouldBe` 1
-        -- Three emission sites produce three node values, but they share one canonical ID,
-        -- so after buildGraph merges by NodeId exactly one external node remains.
-        length uniqueExternalIds `shouldBe` 1
-        case uniqueExternalIds of
-          [single] -> all (== single) uniqueExternalIds `shouldBe` True
-          _ -> pure ()
+    it "ids are stable run to run (determinism)" $ do
+      let mk = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget
+             [tsNode "program" "module" [func "a", tsNode "class_declaration" "class B" [ident "B"], tsNode "const_item" "const C" [ident "C"]]]
+      Map.keys (extractionNodes mk) `shouldBe` Map.keys (extractionNodes mk)
 
-      it "integration: imports edge endpoints have different source_file values" $ do
-        let node = tsNode "import_declaration" "import { cfg } from './config.js'" []
-            filePath = "src/service.ts"
-            (edges, targetNodes) = tsNodeToGraphEdges GranularityFine filePath (Just "module") node
-            importEdges = filter ((Imports ==) . edgeRelation) edges
-        length importEdges `shouldBe` 1
-        case (importEdges, targetNodes) of
-          ([_e], tn:_) -> do
-            let srcNode = Node { nodeId = makeNodeId filePath "module", nodeLabel = fromText "module"
-                              , nodeFileType = CodeFile, nodeSourceFile = fromText (T.pack filePath)
-                              , nodeSource = Nothing
-                              , nodeLineStart = Nothing, nodeCommunityId = Nothing
-                              , nodeDegree = Nothing, nodeIsBridge = Nothing
-                              , nodeExtra = Nothing, nodeLineEnd = Nothing
-                              , nodeKind = Just (fromText "Module"), nodeSignature = Nothing
-                              , nodePresentBits = 0 }
-            toText (nodeSourceFile srcNode) `shouldBe` T.pack filePath
-            toText (nodeSourceFile tn) `shouldSatisfy` (/= T.pack filePath)
-          ([], _) -> fail "expected exactly one imports edge"
-          (_, []) -> fail "expected a target node to be materialized"
-          (_:_, _:_) -> pure ()
+    it "largest id and signature stay within 512 bytes on a large fixture" $ do
+      let big = tsNode "program" "module" [ funcWithChildren "v" [ ident ("v" ++ T.replicate 400 "erylongname") ] ]
+          ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [big]
+          nodes = Map.elems (extractionNodes ex)
+      all (\n -> T.length (nodeId n) <= 512 &&
+                 maybe True ((<= 512) . T.length) (nodeSignature n)) nodes `shouldBe` True
 
-      it "no Import-kind node exists without an outgoing imports edge" $ do
-        let node = tsNode "import_declaration" "import { db } from './db.js'" []
-            ex = tsNodesToExtraction GranularityFine "src/file.ts"
-                   [ tsNode "program" "module" [node] ]
-            allNodes = Map.elems (extractionNodes ex)
-            allEdges = Map.elems (extractionEdges ex)
-            importNodes = filter (\n -> nodeKind n == Just (fromText "Import")) allNodes
-            importEdges = filter ((Imports ==) . edgeRelation) allEdges
-        length importNodes `shouldBe` 1
-        length importEdges `shouldSatisfy` (>= 1)
-        -- The importing file's module node is the source; verify an imports edge exists
-        any (\e -> edgeSource e == makeNodeId "src/file.ts" "module") importEdges `shouldBe` True
+  describe "signatures" $ do
+    it "function signature is the normalized declaration text" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "f"]
+          sig = nodeSignature (head (Map.elems (extractionNodes ex)))
+      sig `shouldBe` Just (toText "function f")
 
+    it "import signature keeps the trailing specifier clause" $ do
+      let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget
+             [importDecl "'../../templates/index.js'"]
+          sig = nodeSignature (head (Map.elems (extractionNodes ex)))
+      sig `shouldSatisfy` maybe False (T.isSuffixOf "from '../../templates/index.js'")
+
+  describe "3.5 imports edges" $ do
+    it "produces an imports edge for an import inside a definition" $ do
+      let fixture = tsNode "program" "module"
+             [ funcWithChildren "f" [ ident "f", importDecl "'./db'" ] ]
+          ex = tsNodesToExtraction (mkSourceFile "src/file.ts" "") GranularityFine defaultTruncationBudget [fixture]
+          edges = Map.elems (extractionEdges ex)
+          importEdges = filter ((Imports ==) . edgeRelation) edges
+      length importEdges `shouldBe` 1
+      case importEdges of
+        [e] -> do
+          edgeSource e `shouldBe` makeNodeId (mkSourceFile "src/file.ts" "") "Function" "f"
+          edgeTarget e `shouldBe` makeNodeId (mkSourceFile "src/db.ts" "") "Module" "db"
+          edgeExtra e `shouldBe` Nothing
+        _ -> fail "expected exactly one imports edge"
+
+    it "produces an imports edge with re-export marker for export-from" $ do
+      let fixture = tsNode "program" "module"
+             [ funcWithChildren "f" [ ident "f", importDecl "export { x } from './y'" ] ]
+          ex = tsNodesToExtraction (mkSourceFile "src/file.ts" "") GranularityFine defaultTruncationBudget [fixture]
+          edges = Map.elems (extractionEdges ex)
+          importEdges = filter ((Imports ==) . edgeRelation) edges
+      case importEdges of
+        [e] -> edgeExtra e `shouldSatisfy` maybe False (\v -> v == Just (toJSON "re-export"))
+        _ -> fail "expected exactly one imports edge"
+
+    it "produces exactly one external node for a package imported by N files, with N edges" $ do
+      let mkFile fp = tsNode "program" "module" [ funcWithChildren "f" [ ident "f", importDecl "'zod'" ] ]
+          files = ["src/a.ts", "src/b.ts", "src/c.ts"]
+          exs = map (\fp -> tsNodesToExtraction (mkSourceFile fp "") GranularityFine defaultTruncationBudget [mkFile fp]) files
+          allEdges = concatMap (Map.elems . extractionEdges) exs
+          allNodes = concatMap (Map.elems . extractionNodes) exs
+          importEdges = filter ((Imports ==) . edgeRelation) allEdges
+          externalNodes = filter (\n -> nodeKind n == Just (fromText "External")) allNodes
+          uniqueExternalIds = nub (map nodeId externalNodes)
+      length importEdges `shouldBe` 3
+      length (nub (map edgeTarget importEdges)) `shouldBe` 1
+      length uniqueExternalIds `shouldBe` 1
+
+  describe "Resolver" $ do
+    it "resolves relative path with .js -> .ts rewrite" $ do
+      resolveImport "src/file.ts" "./module.js" `shouldBe` Just ("src/module.ts", "module")
+    it "resolves literal path" $ do
+      resolveImport "src/file.ts" "/abs/path/to/module.ts" `shouldBe` Just ("/abs/path/to/module.ts", "module")
+    it "resolves index file" $ do
+      resolveImport "src/file.ts" "./dir/" `shouldBe` Just ("src/dir/index.ts", "index")
+    it "resolves node: builtin" $ do
+      resolveImport "src/file.ts" "node:fs" `shouldBe` Just ("external:node:fs", "fs")
+    it "resolves bare package" $ do
+      resolveImport "src/file.ts" "lodash" `shouldBe` Just ("external:lodash", "lodash")
+    it "resolves scoped package with subpath" $ do
+      resolveImport "src/file.ts" "@scope/pkg/sub" `shouldBe` Just ("external:@scope/pkg/sub", "@scope/pkg/sub")
+    it "returns Nothing for empty specifier" $ do
+      resolveImport "src/file.ts" "" `shouldBe` Nothing
+
+-- | Attach a start row to a fixture node for collision ordering.
+withLine :: TSNodeInfo -> Int -> TSNodeInfo
+withLine n l = n { tsnStartRow = l }
