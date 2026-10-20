@@ -158,6 +158,26 @@ Each invariant becomes exactly one named Lean `theorem`/`lemma` stub below. Stat
 
 > **Constrains:** `modularity` fold order (`Community.hs`); determinism lens. No `IntMap`/`Set` iteration may leak into the sum (INV-Q4).
 > **Acceptance property.** `∀ g cm. modularity g cm == modularity g cm` (reflexive) and the fold order is `Map.elems` ascending-key; fixture 7 in §5 (two calls bit-equal).
+>
+> **Reconciliation (AVI-1297).** Formally proved in
+> `formalization/lean/GraphosFormalization/Phase1/Determinism.lean` against the
+> surface above. `CommunityMap` is modelled as the finite function a
+> `Data.Map` denotes (duplicate-free key list plus `block : CommunityId →
+> List V`), so the fold order is
+> `keysInFoldOrder cm = mergeSort cm.keys (· ≤ ·)`. Proved: this order is
+> ascending, is a permutation of the map's domain, and is *the same list* for
+> any two enumerations of that domain (`keysInFoldOrder_unique`) — hence
+> `modularity_foldOrder_perm` (same bindings, different insertion order ⇒
+> bit-equal `Q`) and `modularity_canonicalOrder_stable` (re-canonicalising
+> never changes `Q`). The acceptance property is `modularity_deterministic`,
+> and fixture 7 below is recorded on both the `Partition` and `CommunityMap`
+> surfaces. Lean's `=` on `Float` is equality of the IEEE-754 binary64 payload
+> (bit equality); `Float.beq`/`==` is deliberately not used because it is not
+> reflexive on `NaN`. Kernel Lean cannot evaluate `Float` arithmetic
+> (`Float.add` is `opaque @[extern]`, and `Float` has no `DecidableEq`), so the
+> non-associativity witness is stated on `Nat` (`fold_order_matters`); general
+> `Float` order-invariance is false by design — the exact layer's
+> order-invariance is `modularityNum_blocksPerm` (INV-Q2).
 
 ### INV-Q5 — canonical fixtures pin exact values → `theorem modularity_fixturesExact`
 

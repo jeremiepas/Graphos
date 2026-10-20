@@ -21,6 +21,11 @@
       Leiden local-moving pass never decreases `Q`; plus the exact witnesses
       showing the shipped `bestCommunityFor` gate and `localMovingLoop`'s
       `σ_tot` update do not yet implement the sound rule.
+    * `GraphosFormalization.Phase1.Determinism` — INV-Q4
+      (`modularity_deterministic`, AVI-618 §2 / §5 fixture 7): `Q` is a
+      deterministic pure function of `(g, cm)`, folding communities in
+      ascending `CommunityId` order, which is the unique order of the map's
+      key set (insertion-order independence, canonicalisation stability).
     * `GraphosFormalization.Ext.Basic`    — Phase 2 objects and the merge operator.
     * `GraphosFormalization.Ext.Colimit`  — Phase 2 universal property
       (`mergedExtraction_isColimit`, AVI-620 §2).
@@ -32,5 +37,6 @@ import GraphosFormalization.Phase1.Modularity
 import GraphosFormalization.Phase1.RangeBound
 import GraphosFormalization.Phase1.PartitionOnly
 import GraphosFormalization.Phase1.LocalMove
+import GraphosFormalization.Phase1.Determinism
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
