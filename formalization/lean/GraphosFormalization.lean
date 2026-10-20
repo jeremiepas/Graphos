@@ -33,6 +33,10 @@
     * `GraphosFormalization.Ext.Basic`    — Phase 2 objects and the merge operator.
     * `GraphosFormalization.Ext.Colimit`  — Phase 2 universal property
       (`mergedExtraction_isColimit`, AVI-620 §2).
+    * `GraphosFormalization.Ext.Strict`  — Phase 2 consistent case (§3.1):
+      strict colimit with unique mediator, binary merge commutation, and
+      order-independence of both fold sites
+      (`mergedExtraction_strictColimit_orderIndependent`, AVI-620 §3.1).
 
   Maintenance owner: R&D cell.
 -/
@@ -45,3 +49,4 @@ import GraphosFormalization.Phase1.Determinism
 import GraphosFormalization.Phase1.FixturesExact
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
+import GraphosFormalization.Ext.Strict

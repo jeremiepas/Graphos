@@ -24,6 +24,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Phase1/FixturesExact.lean` | Phase 1 INV-Q5 fixture exactness: `modularity_fixturesExact` — single block ⇒ `Qnum = 0`, all-singletons ⇒ `Qnum = −Σ_v k_v² < 0` (AVI-618 §2, §5 fixtures 1 & 2) |
 | `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
+| `GraphosFormalization/Ext/Strict.lean` | Phase 2 consistent case: strict colimit + fold order-independence, `mergedExtraction_strictColimit_orderIndependent` (AVI-620 §3.1) |
 
 ## Build
 
@@ -142,7 +143,7 @@ fixture values are also computed concretely: `Qnum = 0` and
 | --- | --- | --- |
 | §2 colimit universal property | `mergedExtraction_isColimit` | **proved** (`Ext/Colimit.lean`) |
 | §2 least-upper-bound form | `mergedExtraction_isColimit_iff` | **proved** |
-| §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | pending (AVI-1303) |
+| §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | **proved** (`Ext/Strict.lean`) |
 | §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | pending (AVI-1304) |
 | §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | pending (AVI-1306) |
 
@@ -150,3 +151,29 @@ The colimit layer carries the consistency hypothesis explicitly
 (`familyConsistent`), so it stays valid regardless of how the AVI-949
 feasibility answers land: inconsistent families satisfy its premise only when
 they genuinely agree on every shared key.
+
+`Ext/Strict.lean` proves the §3.1 pair of claims as one named bundle. (a) is the
+*binary* universal property: for consistent `A, B`, `M = mergeExtractions A B`
+with the canonical legs `ι_A : A ↪ M`, `ι_B : B ↪ M` receives every cocone and
+the mediator is unique (`mergedExtraction_strictColimit`; uniqueness again comes
+from `Ext` being poset-enriched, so no extra compatibility hypothesis on the
+cocone legs is needed — two view-embeddings into `X` already agree on shared
+keys). (b) is order independence at both levels: `mergeExtractions A B =
+mergeExtractions B A` (`Extraction.merge_comm`) and, for every pairwise-consistent
+family, `foldl'` is invariant under permutation of the view list
+(`foldlMerge_perm`) and agrees with the build-path `foldr`
+(`foldlMerge_eq_foldr`). The intermediate lemmas are reusable:
+`ExtView.union_comm` (left-biased `Map.union` commutes on consistent views),
+`unionList_perm` (the n-way union is order-free on a consistent family),
+`merge_assoc`/`merge_self`/`merge_empty_left`/`merge_empty_right`, and
+`consistent_merge_left` (a `foldl'` accumulator stays consistent).
+
+> **Scope caveat (AVI-1303).** The order-independence half is *conditional on
+> consistency by design*: on a conflicting key the folds genuinely differ
+> (`foldl'` makes the **last** view win, `foldr` the **first** — AVI-620 §0.4),
+> which is exactly the lax case `mergedExtraction_laxColimit_oldWins`
+> (AVI-1304). The AVI-949 consistency guarantee is therefore what makes the
+> streaming and build lanes interchangeable; without it this theorem says
+> nothing about the shipped folds. The concrete fixture at the end of
+> `Ext/Strict.lean` evaluates both folds on a `Nat`-keyed view (`0 ↦ 10`,
+> `1 ↦ 11`) to the same value, so the statements are not vacuous.
