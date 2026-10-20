@@ -34,13 +34,22 @@
   ## Why this is the *strict* half of §3
 
   §3.2 (`mergedExtraction_laxColimit_oldWins`, AVI-1304) is where `Map.union`'s
-  left bias becomes observable: on a **conflicting** key the two folds differ,
-  because at the list level `foldl'` makes the *last* view win while `foldr`
-  makes the *first* win (§0.4). Consistency is exactly what removes those
-  conflicts, so the union becomes commutative and associative *as used*, and the
-  whole fold collapses to the order-free `foldMerge` of `Ext/Basic.lean`. The
-  two facts are not independent: commutation under consistency is what makes the
-  lax comparison 2-cell invertible, i.e. what makes the colimit strict.
+  left bias becomes observable: on a **conflicting** key the merge is not
+  commutative, so the comparison 2-cell of the lax colimit is non-invertible and
+  the strict universal property has no instance (no cocone exists at all).
+  Consistency is exactly what removes those conflicts, so the union becomes
+  commutative and associative *as used*, and the whole fold collapses to the
+  order-free `foldMerge` of `Ext/Basic.lean`. The two facts are not independent:
+  commutation under consistency is what makes the lax comparison 2-cell
+  invertible, i.e. what makes the colimit strict.
+
+  Correction (AVI-1304): an earlier revision of this header said the two fold
+  *sites* differ on a conflicting key (`foldl'` last-wins, `foldr` first-wins).
+  That is not the shipped behaviour — all shipped folds are accumulator/head
+  first, hence earliest-win — and it is not true in this model either
+  (`Ext/Lax.lean:foldrMerge_eq_foldlMerge_all`). The conflict makes the *merge*
+  order-dependent, not the fold shape. See `Ext/Lax.lean` and the AVI-620 §0.4
+  erratum (AVI-1319).
 
   ## Modelling notes
 

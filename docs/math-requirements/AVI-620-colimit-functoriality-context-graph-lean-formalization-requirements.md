@@ -138,6 +138,42 @@
 > (a) No matching-family cocone exists, so the strict universal property of §2 **fails**: no `u : M → X` satisfies both `u ∘ ι_A = g_A` and `u ∘ ι_B = g_B` when `g_A(k) ≠ g_B(k)`.
 > (b) `Map.union` realises a **lax colimit**: the canonical comparison 2-cell `α : ⊕(A,B) ⇒ ⊕(B,A)` is the **first/old-wins projection** — `value_{⊕(A,B)}(k) = value_A(k)` (Core.hs:131-132) — and it is **non-invertible**: `mergeExtractions A B ≠ mergeExtractions B A` on the conflicting key `k` (the first operand's value survives in the first composition; the second operand's in the dual).
 
+> **Authorship note (AVI-1304).** Proved in
+> `formalization/lean/GraphosFormalization/Ext/Lax.lean` as the bundled
+> `theorem mergedExtraction_laxColimit_oldWins`.
+> (a) is `Extraction.no_cocone_of_conflict`: a conflicting key leaves the pair
+> with **no common upper bound at all**, so the two-object diagram has no cocone
+> (`no_pairCocone_of_conflict`), the canonical cocone of §3.1 loses its second
+> leg (`not_leg_merge_of_conflict`), and `familyConsistent [A, B]` fails
+> (`not_familyConsistent_pair_of_conflict`) — the hypothesis of §2/§3.1 is
+> unsatisfiable. The requirement's prose ("no `u : M → X` satisfies both …")
+> presupposes both legs exist; the sharp formal reading is that no such `M`
+> exists, which is strictly stronger.
+> (b) is `merge_apply_left_of_conflict` / `merge_apply_right_of_conflict`
+> (`(A⊕B)(k) = value_A(k)`, `(B⊕A)(k) = value_B(k)`, `Core.hs:131-132`),
+> `merge_ne_merge_swap` (`A⊕B ≠ B⊕A`), and
+> `not_le_merge_swap`/`not_le_merge_swap'`: no view-embedding relates the two
+> merges in **either** direction, so the comparison is non-invertible in the
+> sharpest sense available in the poset-enriched `Ext` (it is not even a
+> morphism). AC-4 is instantiated on a concrete conflicting-`EdgeId` fixture
+> (`ac4_conflictingEdge_firstWins`: same `(src,tgt,relation)`, different
+> `weight`; the first operand's value survives and the duals differ), so the
+> lemma is not vacuous.
+> Verified: `lake build` green on `leanprover/lean4 v4.14.0`; no `sorry`;
+> `#print axioms mergedExtraction_laxColimit_oldWins` reports only `propext`.
+
+> **Erratum recorded (AVI-1304, §0.3/§0.4; tracked as AVI-1319).** Both shipped
+> fold sites put the accumulator / list head in the **first** operand position
+> (`Build.hs:12` `foldr mergeExtractions`, `Extract/Core.hs:599,639`
+> `List.foldl' mergeExtractions emptyExtraction`, streaming
+> `mergeIntoRunning = mergeExtractions running ext`), so under the first/old-wins
+> operator all of them are "earliest/oldest view wins" and `foldr` and `foldl'`
+> agree on **every** input (`foldrMerge_eq_foldlMerge_all`, unconditional — no
+> consistency hypothesis). The §0.3/§0.4 sentence "`foldl'` makes the last view
+> win" therefore does not describe the shipped call sites; the lanes can differ
+> only if they are *fed different view orders*. The operator-level pin of §0.3
+> (first/old-wins) is unaffected and is exactly what AC-4 tests.
+
 ---
 
 ## 4. Complexity Assertion → `mergedExtraction_nwayFold_linear`

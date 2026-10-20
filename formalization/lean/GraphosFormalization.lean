@@ -37,6 +37,10 @@
       strict colimit with unique mediator, binary merge commutation, and
       order-independence of both fold sites
       (`mergedExtraction_strictColimit_orderIndependent`, AVI-620 §3.1).
+    * `GraphosFormalization.Ext.Lax`     — Phase 2 conflicting case (§3.2):
+      no matching-family cocone (strict universal property fails) and the
+      lax colimit with the first/old-wins, non-invertible comparison
+      (`mergedExtraction_laxColimit_oldWins`, AVI-620 §3.2, AVI-1304).
 
   Maintenance owner: R&D cell.
 -/
@@ -50,3 +54,4 @@ import GraphosFormalization.Phase1.FixturesExact
 import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
 import GraphosFormalization.Ext.Strict
+import GraphosFormalization.Ext.Lax
