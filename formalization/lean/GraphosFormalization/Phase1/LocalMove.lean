@@ -359,7 +359,7 @@ below are exact, and both were confirmed against the built Haskell library
 `ΔQnum(d) = 2·(gate(d) − gate(c vacated))`, so `gate(d) > 0` can hold while
 `gate(d) < gate(c vacated)` and the move *lowers* `Q`.
 
-Star `K₁,` on `{0,1,2}` centred at `2` plus leaf `3` (`m = 3`), start
+Star `K₁,₃` on `{0,1,2}` centred at `2` plus leaf `3` (`m = 3`), start
 `{{0,1,2}, {3}}`: node `2` has `k = 3`, `e_c = 2`, `e_d = 1`, `σ_tot(c) = 5`,
 `σ_tot(d) = 1`, so
 
