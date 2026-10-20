@@ -2,18 +2,16 @@ module Studio.Data.Source exposing
     ( ConnMode(..)
     , ConnStatus
     , SourceKind(..)
-    , NodeSlice
-    , Overview
-    , NeighborhoodSlice
+     , NodeSlice
+     , NeighborhoodSlice
     , sizeThresholdBytes
     , exceedsSizeLimit
     , resolveKind
     , resolveMode
     , slicesAvailable
     , slicesReason
-    , connStatusLabel
-    , overviewDecoder
-    , communitySliceDecoder
+     , connStatusLabel
+     , communitySliceDecoder
     , neighborhoodSliceDecoder
     )
 
@@ -143,10 +141,6 @@ sizeThresholdBytes =
     100 * 1024 * 1024
 
 
-
--- FILE-MODE SIZE GUARD
-
-
 {-| Refuse files above `limit` before reading, so an oversized file keeps the
 tab responsive and recommends connected mode. Pure: shared by the file picker
 and drag-drop in `Main.elm`. -}
@@ -157,29 +151,6 @@ exceedsSizeLimit limit size =
 
 
 -- WIRE FORMAT: OVERVIEW (`GET /api/overview`)
-
-
-{-| Aggregates + graph totals + content hash. Zero nodes or edges (per the slice
-API spec): this is the only data a fresh remote-mode load requires. -}
-type alias Overview =
-    { aggregates : List Graph.Aggregate
-    , nodeCount : Int
-    , edgeCount : Int
-    , communityCount : Int
-    , graphHash : String
-    }
-
-
-{-| Decode `/api/overview`. Accepts `graph_hash` or the older `hash` name. -}
-overviewDecoder : D.Decoder Overview
-overviewDecoder =
-    D.map5 Overview
-        (D.field "community_aggregates" (D.list Graph.aggregateDecoder))
-        (D.oneOf [ D.field "node_count" D.int, D.succeed 0 ])
-        (D.oneOf [ D.field "edge_count" D.int, D.succeed 0 ])
-        (D.oneOf [ D.field "community_count" D.int, D.succeed 0 ])
-        (D.oneOf [ D.field "graph_hash" D.string, D.field "hash" D.string ])
-
 
 
 -- WIRE FORMAT: COMMUNITY SLICE (`GET /api/slice/community`)
