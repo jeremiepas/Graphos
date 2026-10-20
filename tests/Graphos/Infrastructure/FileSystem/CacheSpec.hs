@@ -141,7 +141,7 @@ specEviction :: Spec
 specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ do
   it "cap exceeded evicts oldest-mtime entries first until under cap" $
     withSystemTempDirectory "graphos-cache-evict" $ \root -> do
-      let d = cacheDir root
+      let d = cacheDirIn root
       createDirectoryIfMissing True d
       -- three entries, oldest first: e1 < e2 < e3
       mapM_ (\(name, mt, content) -> do
@@ -159,7 +159,7 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
 
   it "under cap is a no-op" $
     withSystemTempDirectory "graphos-cache-evict2" $ \root -> do
-      let d = cacheDir root
+      let d = cacheDirIn root
       createDirectoryIfMissing True d
       writeFile (d </> "x.json") (replicate 10 'x')
       n <- evictToCap (512 * 1024 * 1024) root
@@ -168,7 +168,7 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
 
   it "0 disables eviction" $
     withSystemTempDirectory "graphos-cache-evict3" $ \root -> do
-      let d = cacheDir root
+      let d = cacheDirIn root
       createDirectoryIfMissing True d
       writeFile (d </> "big.json") (replicate 1000 'y')
       n <- evictToCap 0 root
@@ -182,7 +182,7 @@ specEviction = describe "LRU size-cap eviction (wire-incremental-update 2.2)" $ 
 
   it "sweeps both the extraction and embedding caches" $
     withSystemTempDirectory "graphos-cache-evict5" $ \root -> do
-      let ed = embedCacheDir root
+      let ed = embedCacheDirIn root
       createDirectoryIfMissing True ed
       writeFile (ed </> "v.json") (replicate 50 'v')
       setFileTimes (ed </> "v.json") 1000 1000

@@ -1,0 +1,109 @@
+# Graphos Lean formalization (`formalization/lean/`)
+
+Lean 4 **verification companion** for the Graphos context graph. This package is
+built independently of the Haskell project: it is **not** a cabal component, has
+**no** FFI, and no runtime coupling with the `graphos` executable.
+
+- Requirements: [`docs/math-requirements/AVI-616-consolidated-lean-formalization-requirements.md`](../../docs/math-requirements/AVI-616-consolidated-lean-formalization-requirements.md)
+- Board scope: Phase 1 + 2 + 3 · CI posture **report-only** · maintenance owner **R&D cell**
+- Toolchain: pinned in [`lean-toolchain`](./lean-toolchain) (`leanprover/lean4:v4.14.0`); `elan`/`lake` read it automatically.
+
+## Layout
+
+| Path | Purpose |
+| --- | --- |
+| `lakefile.toml` | Lake package `GraphosFormalization`, no dependencies |
+| `lean-toolchain` | Pinned Lean 4 toolchain |
+| `GraphosFormalization.lean` | Root module (library entry point) |
+| `GraphosFormalization/Basic.lean` | Package skeleton / build smoke check |
+| `GraphosFormalization/Phase1/Modularity.lean` | Phase 1 modularity `Q`, INV-Q0: `modularity_edgesAbsent_zero` (AVI-618 §2) |
+| `GraphosFormalization/Phase1/RangeBound.lean` | Phase 1 exact INV-Q1 range bound: `modularity_range_bound` / `modularity_bounded`, plus the tight `K_{2,2}` fixture (AVI-618 §3) |
+| `GraphosFormalization/Phase1/PartitionOnly.lean` | Phase 1 INV-Q2 partition-only invariance: `modularity_partitionOnly`, member-list corollary and exact-layer key-order invariance (AVI-618 §2) |
+| `GraphosFormalization/Phase1/LocalMove.lean` | Phase 1 INV-Q3 local-moving monotonicity: `modularity_localMoveNonDecreasing` (+ strict form), per-move `ΔQnum` identity, and exact witnesses for the two shipped-gate defects (AVI-618 §2, §5 fixture 4) |
+| `GraphosFormalization/Ext/Basic.lean` | Phase 2 objects: `Extraction`, `mergeExtractions`, `emptyExtraction`, `foldMerge`, consistency, `ViewEmbedding` |
+| `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
+
+## Build
+
+```bash
+cd formalization/lean
+lake build
+```
+
+`elan` downloads the pinned toolchain on first run. `.lake/` is a build directory
+and is gitignored.
+
+## CI posture
+
+`.github/workflows/lean.yml` runs `lake build` with `continue-on-error: true`.
+The job surfaces results on the PR but **never blocks a merge** — a failing Lean
+build is a signal to the R&D cell, not a release gate.
+
+## Status
+
+Phase 1 modularity layer started; Phase 2 colimit layer in progress. Both are
+authored under the requirements-layer authorship decomposition (AVI-948) with
+per-module requirement citations.
+
+### Phase 1 — auditable modularity `Q` (AVI-618)
+
+| Artifact | Lean name | State |
+| --- | --- | --- |
+| §2 INV-Q0 — no-divide-by-zero / edges absent | `modularity_edgesAbsent_zero` | **proved** (`Phase1/Modularity.lean`), incl. 4-isolated-node fixture |
+| §2 INV-Q1 — range bound | `modularity_range_bound` (alias `modularity_bounded`) | **proved** (`Phase1/RangeBound.lean`), exact division-free form `-2m² ≤ Qnum ≤ 4m²`; `K_{2,2}` bipartition attains `-1/2` exactly |
+| §2 INV-Q2 — partition-only | `modularity_partitionOnly` | **proved** (`Phase1/PartitionOnly.lean`): member-list invariance of `modularity`, plus exact-layer block-order (`Qnum`) invariance |
+| §2 INV-Q3 — local move non-decreasing | `modularity_localMoveNonDecreasing` (+ `_strict`) | **proved** (`Phase1/LocalMove.lean`) for the corrected gain rule `ΔQ > 0`; see the caveat below |
+| §2 INV-Q4 — deterministic summation | `modularity_deterministic` | pending (AVI-1297) |
+| §2 INV-Q5 — fixtures exact | `modularity_fixturesExact` | pending (AVI-1298) |
+
+`Phase1/Modularity.lean` also carries the shared objects those theorems build
+on (`SupportGraph`, `Partition`, `sigmaIn`, `sigmaTot`, `modularity`). `Q` is
+computed in `Float` (no Mathlib/Rat dependency) and pins `m = 0` to `0.0`,
+mirroring `Domain/Community.hs:151-167`.
+
+`Phase1/LocalMove.lean` proves INV-Q3 at the exact layer: a move of node `i`
+(`k = deg i`) from block `c` to block `d` changes `Qnum` by
+`4m(e_d − e_c) + 2k(σ_tot(c) − σ_tot(d) − k)`, which is exactly
+`2(gate(d) − gate(c))` for the code's own gain numerator
+`gate = 2m·e − σ_tot·k` — provided the source block is scored **after** `i` is
+vacated. A pass is a chain of accepted moves, hence `Q` never decreases, and
+strictly increases if any move is accepted (AVI-618 §2, §5 fixture 4).
+
+> **Caveat (AVI-1296).** The shipped `bestCommunityFor` gate does *not* vacate
+> the source block, and `localMovingLoop` stores
+> `σ_tot(c) − k_i + e_c` instead of `σ_tot(c) − k_i`. Both are proven unsound
+> here on exact fixtures (`starK13_literal_move_decreases_q`,
+> `codeSigmaTotUpdate_drifts`); the Haskell fix is a separate dev ticket. Until
+> it lands, `Q (localMovesFrom g cm0) ≥ Q cm0` does not hold for the shipped
+> code, so the AVI-1301 fixture cross-check must pin the *corrected* rule.
+
+`Phase1/RangeBound.lean` adds the **exact** layer INV-Q1 needs: core Lean has
+no `Rat`/`Finset` and no `Float` order lemmas, so a general inequality over the
+opaque `Float` expression is not provable without Mathlib. Following AVI-618 §6
+("the Lean side is proven over ℚ/ℝ (exact)"), the bound is stated division-free
+on the common denominator `(2m)²`:
+
+```
+Qnum(π) = Σ_c [2m·σ_in(c) − σ_tot(c)²] = (2m)²·Q(π)
+-2m² ≤ Qnum(π) ≤ 4m²        (m ≥ 1)   ⇔   -1/2 ≤ Q(π) ≤ 1
+```
+
+`G_s` is represented there by its edge set `A` (one record per unordered pair,
+`EdgeGraph`), matching `gEdges`/`csM` and the `neighbors` multi-edge collapse.
+The Float rendering remains the implementation's rounded evaluation and is
+covered by the AVI-1301 fixture cross-check.
+
+### Phase 2 — merged context graph as colimit (AVI-620)
+
+| Artifact (AVI-620) | Lean name | State |
+| --- | --- | --- |
+| §2 colimit universal property | `mergedExtraction_isColimit` | **proved** (`Ext/Colimit.lean`) |
+| §2 least-upper-bound form | `mergedExtraction_isColimit_iff` | **proved** |
+| §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | pending (AVI-1303) |
+| §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | pending (AVI-1304) |
+| §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | pending (AVI-1306) |
+
+The colimit layer carries the consistency hypothesis explicitly
+(`familyConsistent`), so it stays valid regardless of how the AVI-949
+feasibility answers land: inconsistent families satisfy its premise only when
+they genuinely agree on every shared key.

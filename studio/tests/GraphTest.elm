@@ -122,6 +122,60 @@ suite =
                                 ]
                                 ()
             ]
+        , describe "JGF envelope (real binary output shape)"
+            [ test "decodes nodes, edges, aggregates and labels" <|
+                \_ ->
+                    case D.decodeString Graph.decoder jgfJson of
+                        Err err ->
+                            Expect.fail (D.errorToString err)
+
+                        Ok g ->
+                            Expect.all
+                                [ \_ -> Graph.nodeCount g |> Expect.equal 2
+                                , \_ -> Graph.edgeCount g |> Expect.equal 1
+                                , \_ ->
+                                    Dict.get "fn_add" g.nodes
+                                        |> Maybe.map
+                                            (\n ->
+                                                { lineStart = n.lineStart, signature = n.signature, kind = n.kind, communityId = n.communityId }
+                                            )
+                                        |> Expect.equal (Just { lineStart = Just 1, signature = Just "function add", kind = Just "Function", communityId = Just 3 })
+                                , \_ ->
+                                    Dict.get "e1" g.edges
+                                        |> Maybe.map
+                                            (\e ->
+                                                ( e.relation, e.weight, e.confidence )
+                                            )
+                                        |> Expect.equal (Just ( "references", Just 0.5, Just 0.6 ))
+                                , \_ ->
+                                    -- JGF writes aggregate ids as JSON strings ("3")
+                                    Graph.aggregateFor g 3
+                                        |> Maybe.map .label
+                                        |> Expect.equal (Just "Math")
+                                , \_ -> Graph.communityLabel g 3 |> Expect.equal "Math"
+                                , \_ ->
+                                    Graph.communityMembers g 3
+                                        |> List.map .id
+                                        |> List.sort
+                                        |> Expect.equal [ "doc_readme", "fn_add" ]
+                                ]
+                                ()
+            , test "synthesizes aggregates when the graphos metadata omits them" <|
+                \_ ->
+                    case D.decodeString Graph.decoder jgfMinimalJson of
+                        Err err ->
+                            Expect.fail (D.errorToString err)
+
+                        Ok g ->
+                            Expect.all
+                                [ \_ -> Graph.nodeCount g |> Expect.equal 1
+                                , \_ ->
+                                    g.aggregates
+                                        |> List.map (\a -> ( a.id, a.memberCount ))
+                                        |> Expect.equal [ ( 3, 1 ) ]
+                                ]
+                                ()
+            ]
         , describe "file-mode size guard"
             [ test "refuses above the documented threshold" <|
                 \_ ->
@@ -133,3 +187,99 @@ suite =
                         |> Expect.equal False
             ]
         ]
+
+
+{-| The JGF envelope (`graphos.code-knowledge-graph`) written by the graphos
+binary — nodes/edges under `graph` with field data in `metadata`, analysis
+sections under `graph.metadata.graphos`, aggregate ids as JSON strings.
+Mirrors `Graphos.Domain.Types.JGF`.
+-}
+jgfJson : String
+jgfJson =
+    """
+{
+  "graph": {
+    "directed": true,
+    "type": "graphos.code-knowledge-graph",
+    "nodes": {
+      "fn_add": {
+        "id": "fn_add",
+        "label": "add",
+        "metadata": {
+          "file_type": "code",
+          "source_file": "src/Math.js",
+          "line_start": 1,
+          "line_end": 2,
+          "signature": "function add",
+          "community_id": 3,
+          "kind": "Function"
+        }
+      },
+      "doc_readme": {
+        "id": "doc_readme",
+        "label": "README",
+        "metadata": {
+          "file_type": "doc",
+          "source_file": "README.md",
+          "community_id": 3
+        }
+      }
+    },
+    "edges": [
+      {
+        "source": "fn_add",
+        "relation": "references",
+        "target": "doc_readme",
+        "directed": true,
+        "metadata": { "id": "e1", "weight": 0.5, "confidence": 0.6 }
+      }
+    ],
+    "metadata": {
+      "graphos": {
+        "schemaVersion": "1.0",
+        "community_aggregates": [
+          {
+            "id": "3",
+            "member_count": 2,
+            "cohesion": 0.5,
+            "bridge_count": 0,
+            "color": "#7dd3fc",
+            "label": "Math",
+            "representative_labels": [ "add" ]
+          }
+        ],
+        "community_labels": { "3": "Math" }
+      }
+    }
+  }
+}
+"""
+
+
+{-| JGF envelope with no analysis sections — aggregates must be synthesized
+from node community assignments, like flat exports without
+`community_aggregates`.
+-}
+jgfMinimalJson : String
+jgfMinimalJson =
+    """
+{
+  "graph": {
+    "directed": true,
+    "type": "graphos.code-knowledge-graph",
+    "nodes": {
+      "fn_add": {
+        "id": "fn_add",
+        "label": "add",
+        "metadata": {
+          "file_type": "code",
+          "source_file": "src/Math.js",
+          "community_id": 3
+        }
+      }
+    },
+    "edges": [],
+    "metadata": { "graphos": { "schemaVersion": "1.0" } }
+  }
+}
+"""
