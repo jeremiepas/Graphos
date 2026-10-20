@@ -45,6 +45,12 @@
       complexity: the key-visit cost of `foldl' ⊕ emptyExtraction` is at most
       `Σᵢ (|extNodes Eᵢ| + |extEdges Eᵢ|)` — one linear pass
       (`mergedExtraction_nwayFold_linear`, AVI-620 §4, AVI-1306).
+    * `GraphosFormalization.Seam.SupportGraph` — the Phase 1/2 **seam**
+      (AVI-616 §1.1): the colimit `M` → `buildGraph gDirected M` → `Graph` →
+      `neighbors` → simple support graph `G_s`, pinned as a function of `M` so
+      that `Q` only sees the symmetric closure of the valid endpoint pairs
+      (`buildGraph_supportAdj_merge_swap`, `ac4_seam_modularity_eq`,
+      `dangling_resurrection`, AVI-1308).
 
   Maintenance owner: R&D cell.
 -/
@@ -60,3 +66,4 @@ import GraphosFormalization.Ext.Colimit
 import GraphosFormalization.Ext.Strict
 import GraphosFormalization.Ext.Lax
 import GraphosFormalization.Ext.Complexity
+import GraphosFormalization.Seam.SupportGraph
