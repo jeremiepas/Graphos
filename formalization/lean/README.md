@@ -26,6 +26,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Ext/Colimit.lean` | Phase 2 universal property: `mergedExtraction_isColimit` (AVI-620 §2) |
 | `GraphosFormalization/Ext/Strict.lean` | Phase 2 consistent case: strict colimit + fold order-independence, `mergedExtraction_strictColimit_orderIndependent` (AVI-620 §3.1) |
 | `GraphosFormalization/Ext/Lax.lean` | Phase 2 conflicting case: no matching-family cocone + lax colimit with the first/old-wins non-invertible comparison, `mergedExtraction_laxColimit_oldWins` (AVI-620 §3.2) |
+| `GraphosFormalization/Ext/Complexity.lean` | Phase 2 §4 n-way fold complexity: `mergedExtraction_nwayFold_linear` — the key-visit cost of `foldl' ⊕ emptyExtraction` is `≤ Σᵢ \|keys(Eᵢ)\|` (AVI-620 §4) |
 
 ## Build
 
@@ -146,7 +147,7 @@ fixture values are also computed concretely: `Qnum = 0` and
 | §2 least-upper-bound form | `mergedExtraction_isColimit_iff` | **proved** |
 | §3.1 strict colimit + order independence | `mergedExtraction_strictColimit_orderIndependent` | **proved** (`Ext/Strict.lean`) |
 | §3.2 lax colimit / first-wins | `mergedExtraction_laxColimit_oldWins` | **proved** (`Ext/Lax.lean`), incl. the AC-4 conflicting-`EdgeId` fixture |
-| §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | pending (AVI-1306) |
+| §4 n-way fold complexity | `mergedExtraction_nwayFold_linear` | **proved** (`Ext/Complexity.lean`), `cost ≤ Σᵢ \|keys(Eᵢ)\|` with constant `1` |
 
 The colimit layer carries the consistency hypothesis explicitly
 (`familyConsistent`), so it stays valid regardless of how the AVI-949
@@ -195,3 +196,28 @@ view-embedding relates the two merges in either direction
 (`not_le_merge_swap`, `not_le_merge_swap'`) — the first/old-wins comparison is
 non-invertible. AC-4 is instantiated on a concrete conflicting-`EdgeId` fixture
 (`ac4_conflictingEdge_firstWins`), so the statement is falsifiable, not vacuous.
+
+`Ext/Complexity.lean` proves the §4 linear-pass claim. The fold is priced by a
+cost-annotated `foldl'` (`foldlCost`) that returns *the very same value* as
+`foldlMerge` (`foldlCost_fst`), so the bound is about the fold Graphos runs. Each
+step is charged the **smaller operand's** key count — the key-proportional term
+of `Data.Map.union`'s `O(m·log(n/m+1))` — and the induction `foldlCost_snd_le`
+then gives `cost ≤ Σᵢ (|extNodes Eᵢ| + |extEdges Eᵢ|)` (`Extraction.size`, §4's
+`|keys(Eᵢ)|`). Keys are counted against a candidate universe list, since the
+extensional view model has no intrinsic support; with a duplicate-free universe
+containing the family's keys this is the literal cardinality.
+
+> **Modelling note (AVI-1306).** Charging *both* operands at every step — the
+> literal reading of the coarse `O(n₁+n₂)` comment at `Core.hs:126-128` — makes
+> the fold `Θ(n·Σᵢ|keys(Eᵢ)|)` for a growing accumulator, i.e. the §4 bound would
+> be false. The theorem therefore prices the smaller operand, which is what
+> `Data.Map.union` actually traverses and what "each key is visited a bounded
+> number of times" means: every key is charged once, at the step where its view
+> is the smaller operand, and never re-scanned. The `log` of the `split` path is
+> node/pointer depth, outside the key-operation unit that §4 and M-3 pin. The
+> charge is attained on componentwise-disjoint views
+> (`Extraction.size_merge_eq_add`: four disjoint three-key views over `[0,12)`
+> charge `9` against `12`), so the constant cannot be improved asymptotically;
+> the `(2n−1)/(n−1) → 2` doubling ratio matches the AC-3 recorded
+> `2.01, 1.99, 2.01` to two decimal places. The timing harness itself is
+> AVI-1307.

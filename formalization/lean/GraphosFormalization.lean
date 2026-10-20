@@ -41,6 +41,10 @@
       no matching-family cocone (strict universal property fails) and the
       lax colimit with the first/old-wins, non-invertible comparison
       (`mergedExtraction_laxColimit_oldWins`, AVI-620 §3.2, AVI-1304).
+    * `GraphosFormalization.Ext.Complexity` — Phase 2 §4 n-way fold
+      complexity: the key-visit cost of `foldl' ⊕ emptyExtraction` is at most
+      `Σᵢ (|extNodes Eᵢ| + |extEdges Eᵢ|)` — one linear pass
+      (`mergedExtraction_nwayFold_linear`, AVI-620 §4, AVI-1306).
 
   Maintenance owner: R&D cell.
 -/
@@ -55,3 +59,4 @@ import GraphosFormalization.Ext.Basic
 import GraphosFormalization.Ext.Colimit
 import GraphosFormalization.Ext.Strict
 import GraphosFormalization.Ext.Lax
+import GraphosFormalization.Ext.Complexity
