@@ -134,7 +134,7 @@ Every requirement is classified graph-only / category-only / joint; misrouting i
 | GT-R2,8,9,10 (partition/cohesion invariants) | ✓ | | ✓ (JOINT-2/3) |
 | CT-R1,2,3,4,6,8,12 (category structure/cost) | | ✓ | |
 | CT-R5,9 (colimit/naturality of structure) | | ✓ | ✓ (JOINT-1/2) |
-| CT-R7 (new-wins policy) | | ✓ | ✓ (affects cohesion consumers) |
+| CT-R7 (old-wins policy) | | ✓ | ✓ (affects cohesion consumers) |
 | CT-R10 (non-natural detection) | ✓ | | ✓ (JOINT-3) |
 | CT-R11 (cohesion across merge) | ✓ | ✓ | ✓ |
 | JOINT-1,2,3 (simultaneous object) | | | ✓ |
