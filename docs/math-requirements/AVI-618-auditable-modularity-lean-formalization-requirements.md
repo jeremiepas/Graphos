@@ -130,6 +130,26 @@ Each invariant becomes exactly one named Lean `theorem`/`lemma` stub below. Stat
 > **Constrains:** `localMovingPass` (`Community.hs:178`) MUST be reachable from a starting assignment — expose `localMovesFrom :: Graph -> CommunityMap -> CommunityMap` (new, cheap) or expose `buildLeidenState`/`localMovingPass`. **Do NOT** claim INV-Q3 across `mergeSmallCommunities` (merges may decrease `Q`; §5 fixture 4 tests only the local-move step). Weighted caveat applies (AVI-510 §2.2).
 > **Acceptance property.** `∀ g cm0. Q (localMovesFrom g cm0) ≥ Q cm0` (INV-Q3); fixture 6 in §5.
 
+> **Reconciliation (AVI-1296).** The proof sketch above is wrong as a statement
+> about the *shipped* code: `bestScore > 0` is the gain relative to *isolation*,
+> not to the current partition, because `bestCommunityFor` does not vacate `i`
+> from its current community before scoring (`σ_tot(c)` still contains `i`).
+> With the true aggregates, `ΔQnum(d) = 2·(gate(d) − gate(c vacated))`, so
+> `gate(d) > 0` does not imply `ΔQ > 0`. Independently, `localMovingLoop`
+> (`Community.hs:527-530`) stores `σ_tot(c) − k_i + e_c` instead of
+> `σ_tot(c) − k_i`, so the `σ_tot` map drifts off the true degree sum.
+>
+> Exact counter-witnesses (confirmed against the built Haskell library): on
+> `K₁,₃` (`m = 3`), start `{{0,1,2},{3}}`, the centre's literal gate is `3 > 0`
+> while `ΔQnum = −6` (`Q: −1/18 → −2/9`); on `K₃` + pendant (`m = 4`), start
+> `{{0,1,2},{3}}`, `localMovesFrom` gives `Q: −1/32 → −1/8`.
+>
+> The Lean theorem `modularity_localMoveNonDecreasing` (`Phase1/LocalMove.lean`)
+> is therefore proved for the corrected rule — score the source block *after*
+> vacating `i` (equivalently accept iff `ΔQ > 0`) — where acceptance does imply a
+> strict increase. The Haskell fix and the regression fixtures are tracked as a
+> dev ticket; the acceptance property above holds only once it lands.
+
 ### INV-Q4 — deterministic summation order → `theorem modularity_deterministic`
 
 **Statement.** `modularity g cm` is a deterministic pure function of `(g, cm)`. The fold over communities MUST use a fixed order; `Data.Map.Strict.elems` iterates in ascending `CommunityId` order, so folding `Map.elems` is deterministic. For any `(g, cm)`, two calls return bit-equal `Double`s.
