@@ -28,6 +28,7 @@ built independently of the Haskell project: it is **not** a cabal component, has
 | `GraphosFormalization/Ext/Lax.lean` | Phase 2 conflicting case: no matching-family cocone + lax colimit with the first/old-wins non-invertible comparison, `mergedExtraction_laxColimit_oldWins` (AVI-620 §3.2) |
 | `GraphosFormalization/Ext/Complexity.lean` | Phase 2 §4 n-way fold complexity: `mergedExtraction_nwayFold_linear` — the key-visit cost of `foldl' ⊕ emptyExtraction` is `≤ Σᵢ \|keys(Eᵢ)\|` (AVI-620 §4) |
 | `GraphosFormalization/Harness/Ac3Cost.lean` | Phase 2 AC-3 cost harness: evaluates `nwayFoldCost` on the AC-3 disjoint family (n = 100/200/400/800) and prints its doubling ratios (AVI-620 §5 AC-3 / §7, AVI-1307) |
+| `GraphosFormalization/Seam/SupportGraph.lean` | Phase 1/2 **seam**: merged `M` → `buildGraph` → `Graph` → `neighbors` → `G_s`, pinned so that `Q` only sees the support relation (AVI-616 §1.1, AVI-1308) |
 
 ## Build
 
@@ -66,9 +67,10 @@ build is a signal to the R&D cell, not a release gate.
 
 ## Status
 
-Phase 1 modularity layer started; Phase 2 colimit layer in progress. Both are
-authored under the requirements-layer authorship decomposition (AVI-948) with
-per-module requirement citations.
+Phase 1 modularity layer started; Phase 2 colimit layer in progress; the Phase
+1/2 **seam** between them is pinned ([`Seam/SupportGraph.lean`](./GraphosFormalization/Seam/SupportGraph.lean),
+AVI-1308). All are authored under the requirements-layer authorship
+decomposition (AVI-948) with per-module requirement citations.
 
 ### Phase 1 — auditable modularity `Q` (AVI-618)
 
@@ -243,3 +245,65 @@ containing the family's keys this is the literal cardinality.
 > `2.01, 1.99, 2.01` to two decimal places. The timing harness itself is
 > AVI-1307 (`Harness/Ac3Cost.lean`, Lean arm, plus the Haskell arm in
 > `benchmarks/nway-fold-timing/`).
+
+### Seam — `M → Graph → G_s` (AVI-616 §1.1, AVI-1308)
+
+`Seam/SupportGraph.lean` pins the one spec seam Phase 2 left open: how the
+colimit object `M` becomes the simple support graph `G_s` that Phase 1's `Q`
+consumes.
+
+```
+M : Extraction ──buildGraph gDirected──▶ Graph ──neighbors──▶ G_s = (V, A) ──▶ Q
+```
+
+Objects and functions:
+
+| Seam item | Lean name | Haskell surface |
+| --- | --- | --- |
+| extraction edge (endpoints + opaque payload) | `SeamEdge` | `Types/Graph.hs:73` (`edgeSource`/`edgeTarget`) |
+| graph observables `neighbors`/`degree` read | `BuiltGraph` | `Core.hs:47-57` (`gEdges :: Map (NodeId,NodeId) Edge`) |
+| dangling drop | `validEdge`, `validEdges` | `Core.hs:100-103` |
+| `buildGraph` at those observables | `buildGraph` | `Core.hs:96-122` |
+| `neighbors` membership | `BuiltGraph.neighbors` (= `supportAdj` when undirected) | `Query.hs:37-41` |
+| simplicity precondition | `NoSelfLoops` | implicit in Phase 1's `SupportGraph.irrefl` |
+| `G_s` as Phase 1's object | `buildGraph_toSupportGraph` | `Community.hs:92-107,151` |
+
+Named results:
+
+* `buildGraph_supportAdj_eq_true_iff` — `G_s`'s support relation is exactly
+  "some valid edge joins `u` and `v` in either orientation"; the statement names
+  no `EdgeId`, relation, weight or confidence, so none of them can reach `Q`.
+* `buildGraph_supportAdj_merge_swap` — **the seam theorem**: if two views agree
+  on edge endpoints at every shared key (guaranteed by the `EdgeId` encoding,
+  `Convert.hs:165`), then `G_s(A ⊕ B) = G_s(B ⊕ A)` even though
+  `A ⊕ B ≠ B ⊕ A`. Phase 2's first/old-wins precedence cannot leak into `Q`.
+* `ac4_seam_modularity_eq` — the same claim instantiated on the AC-4
+  conflicting-`EdgeId` fixture and closed against `modularity`: the two merges
+  are different extractions, yet `Q` agrees on **every** partition.
+* `buildGraph_supportAdj_merge_left` — per-view containment:
+  `G_s(Eᵢ) ⊆ G_s(M)` on the same key enumeration.
+* `buildGraph_supportAdj_symm`, `buildGraph_supportAdj_irrefl` — `G_s` is
+  undirected and (under `NoSelfLoops`) simple, so Phase 1's `SupportGraph`
+  axioms are discharged, not assumed.
+* `buildGraph_foldMerge_eq_buildFold` — `M` is literally
+  `foldr mergeExtractions emptyExtraction`, the fold `Build.hs:11-13` runs.
+* `dangling_resurrection` (fixture) — the dangling drop happens **once, after**
+  the colimit: an edge dangling inside its own view survives in `G_s(M)` when
+  its endpoint arrives from another view. Hence `G_s(M) ≠ ⋃ᵢ G_s(Eᵢ)`; `G_s` is
+  a function of `M`, not of the family's per-view graphs.
+* `modularity_congr_adj` — `Q` is a function of `(V, A)` alone, so the four
+  `SupportGraph` proof fields are irrelevant to any modularity claim.
+
+> **Citation note (AVI-1308).** AVI-616 §1.1 cites `Graph` as
+> `(LabeledGraph, Types/Graph.hs:83)`. That line lands in the `Extraction`
+> accessor block (`extNodes`, `Types/Graph.hs:89`); the `LabeledGraph` record is
+> `Types/Graph.hs:106-110` and keys `gEdges` by `EdgeId`. The pipeline uses
+> `Domain/Graph/Core.hs:47-57`, whose `gEdges` is keyed by `(NodeId, NodeId)` —
+> that endpoint key is what makes the multi-edge collapse immediate, and it is
+> the record this seam is pinned against.
+>
+> **Precondition note (AVI-1308).** `buildGraph` does not drop self-edges, while
+> Phase 1's `SupportGraph` is simple (`irrefl`). The seam therefore carries
+> `NoSelfLoops` explicitly. Nothing in the extraction lane forbids a self-edge,
+> so if the shipped pipeline can emit one, that is a Haskell-side guard
+> question, not a Lean gap.
