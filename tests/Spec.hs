@@ -86,7 +86,7 @@ import qualified Graphos.CLI.ParserSpec
 import qualified Graphos.Regression.ContextNoiseRegressionSpec
 import qualified Graphos.Infrastructure.Export.HTMLSpec
 import qualified Graphos.Infrastructure.Export.JGFSpec
-import qualified Graphos.Infrastructure.Export.NeojSpec
+import qualified Graphos.Infrastructure.Export.Neo4jSpec
 import qualified Graphos.Infrastructure.Export.PersistMutationSpec
 import qualified Graphos.Infrastructure.Export.ResearchHTMLSpec
 import qualified Graphos.UseCase.SubgraphSpec
@@ -189,7 +189,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Regression.ContextNoiseRegressionSpec.spec
   Graphos.Infrastructure.Export.HTMLSpec.spec
   Graphos.Infrastructure.Export.JGFSpec.spec
-  Graphos.Infrastructure.Export.NeojSpec.spec
+  Graphos.Infrastructure.Export.Neo4jSpec.spec
   Graphos.Infrastructure.Export.PersistMutationSpec.spec
   Graphos.Infrastructure.Export.ResearchHTMLSpec.spec
   Graphos.UseCase.SubgraphSpec.spec
