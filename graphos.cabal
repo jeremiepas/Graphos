@@ -365,6 +365,7 @@ test-suite graphos-test
   build-tool-depends:
       hspec-discover:hspec-discover >= 2.10
   other-modules:
+    Paths_graphos
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
     Graphos.Domain.IntentGraphVerificationSpec
