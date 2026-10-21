@@ -132,6 +132,8 @@ spec = do
       (degree g "a") `shouldBe` 0
       Set.member "a" (Map.findWithDefault Set.empty "a" (gAdjFwd g)) `shouldBe` False
       Set.member "a" (Map.findWithDefault Set.empty "a" (gAdjBack g)) `shouldBe` False
+      -- Node is preserved even though its only edge (the self-loop) was dropped.
+      Map.member "a" (gNodes g) `shouldBe` True
 
     it "keeps real edges but drops the self-edge on the same node" $ do
       let ext = extractionFromLists [testNode "a", testNode "b"]
@@ -140,6 +142,12 @@ spec = do
       Set.member "a" (neighbors g "a") `shouldBe` False
       Set.member "b" (neighbors g "a") `shouldBe` True
       (degree g "a") `shouldBe` 1
+
+    it "drops the self-edge even in directed mode (buildGraph True)" $ do
+      let ext = extractionFromLists [testNode "a"] [testEdge "a" "a"]
+          g = buildGraph True ext
+      Set.member "a" (neighbors g "a") `shouldBe` False
+      (degree g "a") `shouldBe` 0
 
   describe "mergeExtractions" $ do
     it "deduplicates nodes by id" $ do
