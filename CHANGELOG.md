@@ -110,4 +110,3 @@
   hash no longer silently lose one node — `shortestPath`/`articulationPoints`/
   `biconnectedComponents`/`dominators` now find paths/bridges through
   collision-prone node pairs.
-
