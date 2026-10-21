@@ -35,8 +35,8 @@ spec = describe "update-run confluence (wire-incremental-update 4.4)" $ do
           outFresh  = root </> "out-fresh"
           outWarmed = root </> "out-warmed"
       createFixture srcdir
-      let exe = "dist-newstyle/build/x86_64-linux/ghc-9.10.3" <>
-                "/graphos-" ++ showVersion version
+      let exe = "dist-newstyle/build/x86_64-linux/ghc-9.10.3" ++
+                "/graphos-" ++ showVersion version ++
                 "/x/graphos/build/graphos/graphos"
       _ <- runGraphos exe [srcdir, "--fresh", "--no-viz", "--output", outFresh]
       _ <- runGraphos exe [srcdir, "--no-viz", "--output", outWarmed]
