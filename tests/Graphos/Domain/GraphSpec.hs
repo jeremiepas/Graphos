@@ -124,6 +124,23 @@ spec = do
           g = buildGraph False ext
       Map.size (gNodes g) `shouldBe` 2
 
+    -- Regression: buildGraph drops self-edges so G_s is irreflexive (AVI-1324).
+    it "drops a lone self-edge (node is not its own neighbour, degree 0)" $ do
+      let ext = extractionFromLists [testNode "a"] [testEdge "a" "a"]
+          g = buildGraph False ext
+      Set.member "a" (neighbors g "a") `shouldBe` False
+      (degree g "a") `shouldBe` 0
+      Set.member "a" (Map.findWithDefault Set.empty "a" (gAdjFwd g)) `shouldBe` False
+      Set.member "a" (Map.findWithDefault Set.empty "a" (gAdjBack g)) `shouldBe` False
+
+    it "keeps real edges but drops the self-edge on the same node" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"]
+                [testEdge "a" "a", testEdge "a" "b"]
+          g = buildGraph False ext
+      Set.member "a" (neighbors g "a") `shouldBe` False
+      Set.member "b" (neighbors g "a") `shouldBe` True
+      (degree g "a") `shouldBe` 1
+
   describe "mergeExtractions" $ do
     it "deduplicates nodes by id" $ do
       let a = extractionFromLists [testNode "x"] []

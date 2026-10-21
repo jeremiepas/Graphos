@@ -93,12 +93,16 @@ instance FromJSON Graph where
 -- ───────────────────────────────────────────────
 
 -- | Build a graph from an Extraction result
--- Dangling edges (referencing nodes not in extractionNodes) are silently dropped.
+-- Dangling edges (referencing nodes not in extractionNodes) are silently dropped,
+-- and self-edges (edgeSource e == edgeTarget e) are dropped as well. This keeps the
+-- support graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract
+-- (adj v v == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction =
   let nodes = extNodes extraction
       edgeList = Map.elems (extEdges extraction)
       validEdges = [e | e <- edgeList
+                      , edgeSource e /= edgeTarget e
                       , Map.member (edgeSource e) nodes
                       , Map.member (edgeTarget e) nodes]
       edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
