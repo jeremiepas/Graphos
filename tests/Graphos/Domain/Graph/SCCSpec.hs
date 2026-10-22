@@ -250,6 +250,40 @@ spec = do
             noSelfLoop   = all (\(u, v) -> u /= v) (Map.keys (gEdges g))
         in isAcyclicDirected g == (allSingleton && noSelfLoop)
 
+  describe "undirected cycle detection (§2.3, Thm 2.3, INV-C2, hasCycleUndirected)" $ do
+    it "hasCycleUndirected: directed triangle F1 -> True" $
+      hasCycleUndirected triF1 `shouldBe` True
+
+    it "hasCycleUndirected: directed DAG F2 -> True while isAcyclicDirected == True" $ do
+      hasCycleUndirected dagF2 `shouldBe` True
+      isAcyclicDirected dagF2 `shouldBe` True
+
+    it "hasCycleUndirected: self-loop F3 -> True (INV-C4)" $
+      hasCycleUndirected selfLoop `shouldBe` True
+
+    it "hasCycleUndirected: reciprocal pair a->b, b->a -> False (AF-3)" $
+      hasCycleUndirected reciprocalF `shouldBe` False
+
+    it "hasCycleUndirected: directed path F7 -> False (a tree)" $
+      hasCycleUndirected dagPath `shouldBe` False
+
+    it "hasCycleUndirected (property): INV-C2 soundness — self-loop or q >= 1" $
+      property $ \(SmallGraph g) ->
+        let arcs    = Map.keys (gEdges g)
+            selfLoops = any (\(u, v) -> u == v) arcs
+            simpleA   = nub [ (min u v, max u v) | (u, v) <- arcs, u /= v ]
+            n         = Map.size (gNodes g)
+            c         = length (connectedComponents g)
+            q         = length simpleA - n + c
+        in hasCycleUndirected g == (selfLoops || q >= 1)
+
+    it "hasCycleUndirected (property): adding an arc to a cyclic graph keeps it cyclic (monotonic)" $
+      property $ \(SmallGraph g) (NodePair (u, v)) ->
+        let srcOk = Map.member u (gNodes g)
+            tgtOk = Map.member v (gNodes g)
+            g' = if srcOk && tgtOk then addEdges g [sccTestEdge u v] else g
+        in hasCycleUndirected g ==> hasCycleUndirected g'
+
   describe "isolated nodes (§2.5, INV-C3, isolatedNodes)" $ do
     it "isolatedNodes: {a,b} connected, {c} isolated" $ do
       let g = buildGraph True $ extractionFromLists
@@ -305,6 +339,36 @@ selfLoop =
   buildGraph True $ extractionFromLists
     (map sccTestNode ["a"])
     [ sccTestEdge "a" "a" ]
+
+-- Fixture F1 — single directed triangle.
+triF1 :: Graph
+triF1 =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b", "c"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "b" "c"
+    , sccTestEdge "c" "a"
+    ]
+
+-- Fixture F2 — directed DAG whose undirected support has a cycle.
+dagF2 :: Graph
+dagF2 =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b", "c", "d"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "a" "c"
+    , sccTestEdge "b" "d"
+    , sccTestEdge "c" "d"
+    ]
+
+-- Two nodes with reciprocal arcs: collapses to one undirected edge (AF-3).
+reciprocalF :: Graph
+reciprocalF =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "b" "a"
+    ]
 
 -- Kahn's algorithm over a successor map: repeatedly drop nodes with zero
 -- in-degree over the induced remaining subgraph; all nodes removable => acyclic.
