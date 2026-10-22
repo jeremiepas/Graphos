@@ -368,8 +368,6 @@ test-suite graphos-test
   type:           exitcode-stdio-1.0
   main-is:        Spec.hs
   hs-source-dirs: tests
-  build-tool-depends:
-      hspec-discover:hspec-discover >= 2.10
   other-modules:
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
@@ -477,7 +475,6 @@ test-suite graphos-test
      , graphos
      , openspec-view
      , hspec                >= 2.10
-    , hspec-discover       >= 2.10
     , QuickCheck           >= 2.14
     , aeson
     , bytestring           >= 0.11
