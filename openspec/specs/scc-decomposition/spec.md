@@ -62,6 +62,30 @@ The system SHALL provide `isAcyclicDirected :: Graph -> Bool` deciding DAG-hood 
 - **WHEN** fixture `F2` (`a→b, a→c, b→d, c→d`, no back arcs) is checked
 - **THEN** `isAcyclicDirected == True` even though the undirected support graph has a cycle
 
+### Requirement: Undirected cycle detection predicate (Thm 2.3, INV-C2, INV-C4)
+
+The system SHALL provide `hasCycleUndirected :: Graph -> Bool` (and the `hasCycleUndirectedWithCached :: CachedFGL -> Bool` variant) deciding whether the undirected support graph `G_s` contains an undirected cycle: every arc is read as an undirected edge, and the support has a cycle iff some connected class holds a closed walk (Thm 2.3). A self-loop `(u,u)` is a length-1 undirected cycle (`INV-C4`); a reciprocal arc pair `u→v, v→u` collapses to a single undirected edge and so does **not** itself form a cycle (simple-undirected-graph semantics, AF-3); a lone arc between two distinct nodes is a tree edge (no cycle); any longer closed walk is a cycle. The boolean is order-independent even though the certifying edge is not (§9). The answer is consistent with the cyclomatic number: for the self-loop-free support, `hasCycleUndirected g == True ⟺ q ≥ 1 ⟺ |A| > N − C_c`, where `|A|` is the number of simple undirected support edges, `N = |V|`, and `C_c` the connected-component count (`INV-C2`; §2.4 cross-check, the self-loop being the Thm 2.3 exception). Runs in `O(N + |A|)` via union-find with union-by-rank. (Source: AVI-523 §1.2, Thm 2.3, §4, §8 fixtures F1–F7; INV-C2/INV-C4; new-feature surface of the G5 register.)
+
+#### Scenario: Directed DAG whose support has a cycle (F2)
+- **WHEN** fixture `F2` (`a→b, a→c, b→d, c→d`, a directed DAG, no back arcs) is checked
+- **THEN** `isAcyclicDirected == True` **and** `hasCycleUndirected == True` — the undirected support has a cycle (a-b-d-c-a) even though no directed cycle exists
+
+#### Scenario: Self-loop is an undirected cycle (F3, INV-C4)
+- **WHEN** fixture `F3` (`{u}`, arc `(u,u)`) is checked
+- **THEN** `hasCycleUndirected == True` (a length-1 undirected cycle; `INV-C4`)
+
+#### Scenario: Reciprocal arcs do not form an undirected cycle (AF-3)
+- **WHEN** two nodes `{a,b}` carry reciprocal arcs `a→b, b→a`
+- **THEN** `hasCycleUndirected == False` (the pair collapses to a single undirected edge; a lone edge between two nodes is a tree edge, not a cycle)
+
+#### Scenario: A directed tree is undirected-acyclic (F7)
+- **WHEN** the directed path `a→b, b→c` (F7) is checked
+- **THEN** `hasCycleUndirected == False` (a tree) even though `connectedComponents` yields a single class `{a,b,c}` (INV-C6), consistent with `q = 0`
+
+#### Scenario: Cycle-detection soundness (INV-C2, property)
+- **WHEN** any `Graph` is checked
+- **THEN** `hasCycleUndirected == (hasSelfLoop ∨ q ≥ 1)` where `q = |A| − N + C_c` over the self-loop-free support (INV-C2; the self-loop is the Thm 2.3 exception)
+
 ### Requirement: SCC is not biconnected components (§1.4 disambiguation)
 
 SCC decomposition SHALL NOT be implemented by or aliased to `articulationPoints` / `biconnectedComponents`: those operate on the undirected support graph `G_s` and decompose edges/cut-vertices, while SCC operates on the directed relation `E` and partitions **nodes** into mutual-reachability classes. The `Domain.Graph.Analysis` undirected decompositions SHALL remain untouched and undocumented as SCC synonyms. (Source: AVI-518 §1.4, §6.3; AVI-523 §6.3.)
