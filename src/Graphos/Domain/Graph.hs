@@ -22,6 +22,12 @@ module Graphos.Domain.Graph
   , breadthFirstSearch
   , depthFirstSearch
   , stronglyConnectedComponents
+  , cond
+  , isAcyclicDirected
+  , connectedComponents
+  , weaklyConnectedComponents
+  , isolatedNodes
+  , hasCycleUndirected
   , subgraph
   
     -- * Advanced queries (fgl-powered)
@@ -43,6 +49,6 @@ module Graphos.Domain.Graph
   ) where
 
 import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, makeStubNode)
-import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, subgraph)
+import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, cond, isAcyclicDirected, connectedComponents, weaklyConnectedComponents, isolatedNodes, hasCycleUndirected, subgraph)
 import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness, edgeBetweennessWith, defaultMaxSampledSources, defaultExactBetweennessNodeCap)
 import Graphos.Domain.Graph.Diff (graphDiff)
