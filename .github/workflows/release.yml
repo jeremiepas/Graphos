@@ -73,4 +73,6 @@ jobs:
           dist/release/graphos-linux-x86_64
           dist/release/graphos-linux-x86_64.sha256
         draft: false
-        prerelease: false
+        # Tags carrying "-rc." (e.g. v0.1.2-rc.1) publish as pre-releases;
+        # stable tags (v0.1.2) keep publishing as full releases.
+        prerelease: ${{ contains(github.ref_name, '-rc.') }}
