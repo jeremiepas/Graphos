@@ -347,6 +347,7 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
       , nodeLabel        = fromText "unknown"
       , nodeFileType     = CodeFile
       , nodeSourceFile   = fromText ""
+      , nodeSource       = Nothing
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -355,7 +356,6 @@ getNodeData nid g = Map.findWithDefault unknownNode nid (gNodes g)
       , nodeLineEnd      = Nothing
       , nodeKind         = Nothing
       , nodeSignature    = Nothing
-      , nodeBodyHash = Nothing
       , nodePresentBits  = 0
       }
 

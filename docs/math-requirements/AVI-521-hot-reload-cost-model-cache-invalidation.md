@@ -269,7 +269,7 @@ The pipeline promises deterministic output (stable `gHash`, stable report, stabl
 ranking). The watch loop adds decision points that can break confluence (§4 THEOREM 3); each
 MUST be constrained:
 
-1. **Merge precedence on overlapping nodes.** `mergeGraphs` uses new-wins (`Map.union`). The
+1. **Merge precedence on overlapping nodes.** `mergeGraphs` uses **old-wins** (`Data.Map.union` is left-biased; corrected per [AVI-536](/AVI/issues/AVI-536) / [AVI-620](/AVI/issues/AVI-620) M-5). The
    winning payload must be pinned by config/PRD, not left to map iteration — else two batches
    in different orders yield different retained nodes.
 2. **Debounce coalescing must be lossless.** Events within a window are coalesced into one

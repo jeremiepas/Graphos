@@ -36,6 +36,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
 import Data.Word (Word32)
+import qualified Data.Vector.Unboxed as VU
 
 import Graphos.Domain.Types
 
@@ -52,7 +53,7 @@ data Graph = Graph
   , gDirected      :: Bool
   , gCompositions  :: Maybe Value               -- per-community composition metadata
   , gHash          :: !Text                     -- deterministic hash over graph structure
-  , gEmbeddings    :: Maybe (Map NodeId [Double])  -- node embeddings (transient; loaded from sidecar)
+  , gEmbeddings    :: Maybe (Map NodeId (VU.Vector Double))  -- node embeddings (transient; loaded from sidecar)
   , gEmbeddingsPath :: Maybe FilePath          -- pointer to embeddings.json sidecar
   } deriving (Eq, Show)
 
@@ -84,7 +85,7 @@ instance FromJSON Graph where
     <*> v .: "directed"
     <*> v .: "compositions"
     <*> v .: "hash"
-    <*> pure (Nothing :: Maybe (Map NodeId [Double]))
+    <*> pure (Nothing :: Maybe (Map NodeId (VU.Vector Double)))
      <*> v .:? "embeddings_path"
 
 -- ───────────────────────────────────────────────
@@ -160,9 +161,8 @@ mergeGraphs old new =
                       (gEdges old <> gEdges new)
       -- Rebuild adjacency from the merged edges using the exact buildGraph
       -- construction, so a folded incremental merge is structurally identical
-      -- to a full build over the same edges (AVI-559 / G2 confluence). Note:
-      -- <> is Data.Map.union (left-wins), matching buildGraph, NOT
-      -- unionWith Set.union, which would over-merge backward adjacency.
+      -- to a full build over the same edges (AVI-559 / G2 confluence) while
+      -- staying order-independent (AVI-658 / M1 content-confluence).
       fwdAdj        = Map.fromListWith Set.union
           [(edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems mergedEdges]
       reverseParts  = Map.fromListWith Set.union
@@ -170,7 +170,7 @@ mergeGraphs old new =
       mergedFwd     = fwdAdj
       mergedBwd     = if directed then reverseParts else reverseParts <> fwdAdj
       mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
-                      (Just a, Just b) -> Just (a <> b)
+                      (Just a, Just b) -> Just (Map.union a b)
                       (Just a, Nothing) -> Just a
                       (Nothing, Just b) -> Just b
                       (Nothing, Nothing) -> Nothing
@@ -210,12 +210,17 @@ addEdges graph edges =
       bwdUpdates = Map.fromListWith Set.union
         [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
       -- For undirected graphs, also add reverse adjacency
+      -- Merge per-node neighbour sets ('Map.unionWith'), never 'Map.union':
+      -- the left-biased union kept a node's existing set and silently dropped
+      -- every added edge incident to a node that already had neighbours, so
+      -- inferred edges were invisible to clustering and traversal.
+      merge = Map.unionWith Set.union
       (fwdAdj, bwdAdj) = if directed
-        then (Map.union (gAdjFwd graph) fwdUpdates, Map.union (gAdjBack graph) bwdUpdates)
+        then (merge (gAdjFwd graph) fwdUpdates, merge (gAdjBack graph) bwdUpdates)
         else let revFwd = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
                  revBwd = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
-             in (Map.union (gAdjFwd graph) (fwdUpdates `Map.union` revFwd)
-                , Map.union (gAdjBack graph) (bwdUpdates `Map.union` revBwd))
+             in (merge (gAdjFwd graph) (fwdUpdates `merge` revFwd)
+                , merge (gAdjBack graph) (bwdUpdates `merge` revBwd))
       newHash = computeGraphHash nodes newEdgeMap
   in graph
     { gEdges    = newEdgeMap
@@ -242,6 +247,7 @@ makeStubNode filePath =
      , nodeLabel        = fromText name
      , nodeFileType     = CodeFile
       , nodeSourceFile   = fromText (T.pack filePath)
+      , nodeSource       = Nothing
      , nodeLineStart    = Nothing
      , nodeCommunityId  = Nothing
      , nodeDegree       = Nothing
@@ -250,7 +256,6 @@ makeStubNode filePath =
      , nodeLineEnd      = Nothing
      , nodeKind         = Nothing
      , nodeSignature    = Nothing
-     , nodeBodyHash = Nothing
      , nodePresentBits  = 0
      }
 

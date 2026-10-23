@@ -108,18 +108,18 @@ spec = do
           Nothing -> error ("missing change in parsed list: " ++ k)
           Just c  -> c
         view = lookup' "openspec-view"
-        hg = lookup' "honor-graphosignore"
-        ci = lookup' "fix-ci-missing-hackage-package-list"
         ex = lookup' "extract-haskell-libs"
+        mg = lookup' "multi-source-graphs"
+        ug = lookup' "usable-graph-for-code-review"
     (changeTotal view) `shouldBe` 13
     (changeCompleted view) `shouldBe` 0
     (changeStatus view) `shouldBe` "in-progress"
-    (changeTotal hg) `shouldBe` 13
-    (changeCompleted hg) `shouldBe` 13
-    (changeStatus hg) `shouldBe` "complete"
-    (changeTotal ci) `shouldBe` 12
-    (changeCompleted ci) `shouldBe` 12
-    (changeStatus ci) `shouldBe` "complete"
     (changeTotal ex) `shouldBe` 60
     (changeCompleted ex) `shouldBe` 2
     (changeStatus ex) `shouldBe` "in-progress"
+    (changeTotal mg) `shouldBe` 19
+    (changeCompleted mg) `shouldBe` 5
+    (changeStatus mg) `shouldBe` "in-progress"
+    (changeTotal ug) `shouldBe` 25
+    (changeCompleted ug) `shouldBe` 5
+    (changeStatus ug) `shouldBe` "in-progress"

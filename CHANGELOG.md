@@ -3,6 +3,29 @@
 ## Unreleased
 
 ### Changed
+- **`graph.json` is now a JSON Graph Format (JGF) document** (media type
+  `application/vnd.jgf+json`, spec at jsongraphformat.info): the graph lives
+  under a top-level `graph` object with `directed: true`,
+  `type: "graphos.code-knowledge-graph"`, `nodes` (object keyed by id),
+  `edges` (array), and `metadata`.
+  - Node `id`/`label` stay top-level; `file_type`, `source_file`,
+    `community_id`, `line_start`/`line_end`, `signature`, `kind`, `degree`,
+    `is_bridge` and `extra` moved under node `metadata`.
+  - Edge `source`/`relation`/`target` stay top-level; `id`, `weight`,
+    `confidence` and `extra` moved under edge `metadata`.
+  - Graph-level `communities`, `cohesion`, `god_nodes`, `community_labels`,
+    `community_aggregates`, `compositions`, `embeddings_path`, `null_model`,
+    `graph_hash` and a new `schemaVersion` ("1.0") live under
+    `graph.metadata.graphos`.
+  - **Compatibility**: the reader still loads legacy top-level `nodes`/`edges`
+    files during a deprecation window (detected by the absence of the
+    top-level `graph` key). JGF documents whose major `schemaVersion` is
+    unsupported are rejected with a clear error.
+  - **Migration**: `graphos migrate-graph <file>` rewrites a legacy graph to
+    the JGF envelope (in place, or via `--output`); the next full run also
+    rewrites files automatically.
+  - The checkpoint file (`graph.checkpoint.json`) carries the same envelope.
+  - Files are now readable by any standard JGF tooling.
 - **Tree-sitter extraction granularity is now configurable and defaults to `function` level.**
   Statement-level nodes (assignments, returns, conditionals, parameters, local
   variables, JSON key-value pairs) are no longer extracted by default. This
@@ -14,6 +37,17 @@
   - `.json` files default to `file` granularity (one node per file; lock files
     no longer inflate the graph).
   - **Rollback**: add `granularity: fine` to `graphos.yaml` to restore the previous output.
+- **`--embed` peak memory is now bounded to a single live copy of the vector set**
+  instead of scaling as a multiple of it (drops ~15-20 GB → under ~2 GB at
+  100k nodes × 768 dims): embedding vectors switched from boxed `[Double]` to
+  compact unboxed `Vector Double` (~8 B/dim vs ~40-48 B), the node-to-vector
+  assignment is folded incrementally per batch via the streaming sidecar path
+  (no full fresh-table/union-table copy), and `gEmbeddings` is released after
+  semantic-edge inference so clustering, analysis, and export never hold the
+  table live (vectors remain in the `embeddings.json` sidecar and are re-loaded
+  on demand). Semantic code↔doc inference streams doc vectors one at a time.
+  Wire formats (sidecar, cache files, `graph.json`) are unchanged; the legacy
+  `embedding.streaming` config key is ignored (streaming is now the only mode).
 - Leiden community detection now scales to 100k+ node graphs (16x faster at
   100k nodes: 169s → 10.5s, compiled): in-place assignment updates, batched
   refinement, incremental merge indexing.
@@ -26,6 +60,22 @@
   `suggestions`. `traverse` field kept as `mode` echo for one release.
 
 ### Fixed
+- **Go, Rust and Ruby emit `imports` edges in tree-sitter mode** (#83). Each
+  edge has the TypeScript shape: it goes from the file's module node to a
+  placeholder whose `source_file` is the imported repo file, or
+  `external:<name>`. A Go internal package import becomes one edge per
+  non-test file of the package, with weight `1/n` and the alias kept in
+  `extra.alias`. Rust resolves `crate::`/`self::`/`super::`, workspace crates,
+  groups and globs over the module files. Ruby resolves `require_relative` and
+  in-repo `require`. Each Rust `use` now gets its own `Import` node per
+  occurrence (the id gains `#L<line>`), and a `use` inside a function body is
+  no longer dropped.
+- **`--embed` no longer sends arbitrary-length documents to `/v1/embeddings`.**
+  Each input is now truncated to `embedding.maxTokens` (default 512) before the
+  request, so a long document can no longer overflow a small encoder's context
+  window and be rejected (e.g. a 512-token model served by llama-server
+  answering HTTP 500 on oversized inputs). Set `embedding.maxTokens: 0` to
+  restore the previous unbounded behavior.
 - `mergeSmallCommunities` no longer silently drops nodes when a community that
   received members from an earlier merge is itself merged.
 - Haskell stub extraction: cross-file `imports` edges now resolve via canonical

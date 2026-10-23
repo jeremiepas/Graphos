@@ -20,6 +20,7 @@ testNode nid = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -29,7 +30,6 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -40,6 +40,7 @@ testNodeWithLabel nid label = Node
   , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -49,7 +50,6 @@ testNodeWithLabel nid label = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -99,6 +99,7 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = ft
   , nodeSourceFile   = fromText srcFile
+,   nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -108,7 +109,6 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -169,6 +169,7 @@ spec = do
             , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = fromText "test.hs"
+,             nodeSource = Nothing
 
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -178,7 +179,6 @@ spec = do
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
             , nodeSignature = Nothing
-            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           ext = extractionFromLists [fileNode, testNode "func"] [testEdge "test.hs" "func"]
@@ -405,6 +405,7 @@ spec = do
             , nodeLabel = fromText "test.hs"
             , nodeFileType = CodeFile
             , nodeSourceFile = fromText "test.hs"
+,             nodeSource = Nothing
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -413,7 +414,6 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
-            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
@@ -426,6 +426,7 @@ spec = do
             , nodeLabel = fromText ".foo()"
             , nodeFileType = CodeFile
             , nodeSourceFile = fromText "test.hs"
+,             nodeSource = Nothing
             , nodeLineStart    = Just 1
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -434,7 +435,6 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
-            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
@@ -468,6 +468,15 @@ spec = do
       Map.size (gEdges g') `shouldBe` 2
       Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
       Set.member "b" (Map.findWithDefault Set.empty "c" (gAdjBack g')) `shouldBe` True
+
+    it "keeps existing neighbours and adds the new ones for a node that already has adjacency" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph True ext
+          g' = addEdges g [testEdge "a" "c"]
+      Map.findWithDefault Set.empty "a" (gAdjFwd g') `shouldBe` Set.fromList ["b", "c"]
+      let gu = addEdges (buildGraph False ext) [testEdge "a" "c"]
+      Map.findWithDefault Set.empty "a" (gAdjFwd gu) `shouldBe` Set.fromList ["b", "c"]
+      Map.findWithDefault Set.empty "a" (gAdjBack gu) `shouldBe` Set.fromList ["b", "c"]
 
     it "adds multiple edges to the graph" $ do
       let ext = extractionFromLists [testNode "a", testNode "b", testNode "c", testNode "d"] [testEdge "a" "b"]

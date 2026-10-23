@@ -113,6 +113,7 @@ pdfStubNode filePath =
         , nodeLabel        = fromText name
         , nodeFileType     = PaperFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
         , nodeLineStart    = Just 1
         , nodeLineEnd      = Nothing
         , nodeSignature    = Nothing
@@ -121,6 +122,5 @@ pdfStubNode filePath =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText "File")
-        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
         }

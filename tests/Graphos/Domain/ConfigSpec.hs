@@ -2,7 +2,8 @@
 module Graphos.Domain.ConfigSpec where
 
 import Test.Hspec
-import Data.Aeson (decode, encode, eitherDecode)
+import Data.Aeson (decode, encode, eitherDecode, Value(..))
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config
@@ -18,6 +19,21 @@ spec = do
       let cfg = defaultEmbeddingConfig { embBatchSize = 128, embConcurrency = 4 }
       decode "{\"batchSize\": 128, \"concurrency\": 4}" `shouldBe` Just cfg
 
+    it "defaults maxTokens to 512 when the key is absent" $
+      decode "{\"enabled\": true}" `shouldBe` Just
+        (defaultEmbeddingConfig { embEnabled = True })
+
+    it "reflects the maxTokens default value" $
+      embMaxTokens defaultEmbeddingConfig `shouldBe` 512
+
+    it "parses an explicit maxTokens value" $ do
+      let cfg = defaultEmbeddingConfig { embMaxTokens = 256 }
+      decode "{\"maxTokens\": 256}" `shouldBe` Just cfg
+
+    it "parses maxTokens 0 (truncation disabled)" $ do
+      let cfg = defaultEmbeddingConfig { embMaxTokens = 0 }
+      decode "{\"maxTokens\": 0}" `shouldBe` Just cfg
+
     it "validation accepts the defaults" $
       validateEmbeddingConfig defaultEmbeddingConfig `shouldBe` Right ()
 
@@ -32,6 +48,50 @@ spec = do
     it "validation rejects concurrency below 1, naming the key" $
       validateEmbeddingConfig defaultEmbeddingConfig { embConcurrency = 0 }
         `shouldBe` Left ("embedding.concurrency", 0)
+
+  describe "EmbeddingConfig prefixes (lfm-embedding-optimization 1.2)" $ do
+    it "defaults docPrefix/queryPrefix to empty when keys are absent" $
+      decode "{\"enabled\": true}" `shouldBe` Just
+        (defaultEmbeddingConfig { embEnabled = True })
+
+    it "parses explicit docPrefix and queryPrefix values" $ do
+      let cfg = defaultEmbeddingConfig
+                  { embDocPrefix = "document: ", embQueryPrefix = "query: " }
+      decode "{\"docPrefix\": \"document: \", \"queryPrefix\": \"query: \"}"
+        `shouldBe` Just cfg
+
+    it "parses maxTokens 0 with model-default limit semantics" $ do
+      let cfg = defaultEmbeddingConfig { embMaxTokens = 0 }
+      decode "{\"maxTokens\": 0}" `shouldBe` Just cfg
+
+    it "validation rejects maxTokens below 0, naming the key" $
+      validateEmbeddingConfig defaultEmbeddingConfig { embMaxTokens = -1 }
+        `shouldBe` Left ("embedding.maxTokens", -1)
+
+  describe "EmbeddingConfig streaming (lfm-embedding-optimization 3.3)" $ do
+    it "defaults streaming to true when the key is absent" $
+      decode "{\"enabled\": true}" `shouldBe` Just
+        (defaultEmbeddingConfig { embEnabled = True })
+
+    it "parses an explicit streaming: false" $ do
+      let cfg = defaultEmbeddingConfig { embStreaming = False }
+      decode "{\"streaming\": false}" `shouldBe` Just cfg
+
+    it "parses an explicit streaming: true" $ do
+      let cfg = defaultEmbeddingConfig { embStreaming = True }
+      decode "{\"streaming\": true}" `shouldBe` Just cfg
+
+  describe "EmbeddingConfig defaults (lfm-embedding-optimization 6.1)" $ do
+    it "defaults the model to the LFM2.5 GGUF reference" $
+      embModel defaultEmbeddingConfig
+        `shouldBe` "hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M"
+
+    it "defaults concurrency to the benchmark-pinned 1" $
+      embConcurrency defaultEmbeddingConfig `shouldBe` 1
+
+    it "explicit nomic config still parses unchanged (AC: explicit nomic unchanged)" $ do
+      let cfg = defaultEmbeddingConfig { embModel = "nomic-embed-text" }
+      decode "{\"model\": \"nomic-embed-text\"}" `shouldBe` Just cfg
 
   describe "Granularity JSON round-trip" $ do
     it "round-trips fine" $
@@ -80,19 +140,24 @@ spec = do
       decode (encode defaultSemanticEdgesConfig) `shouldBe` Just defaultSemanticEdgesConfig
 
     it "round-trips a custom config" $ do
-      let cfg = SemanticEdgesConfig False 10 0.7
+      let cfg = SemanticEdgesConfig False 10 0.7 6 [".hs", ".rs"]
       decode (encode cfg) `shouldBe` Just cfg
 
     it "serializes to snake_case keys" $ do
-      encode defaultSemanticEdgesConfig `shouldBe`
-        "{\"enabled\":true,\"max_fan_out\":50,\"threshold\":0.5}"
+      -- Key order in the encoded object is HashMap-accidental (aeson's KeyMap);
+      -- assert the shape through a decoded map instead of raw bytes.
+      case decode (encode defaultSemanticEdgesConfig) of
+        Just (Object km) -> do
+          KeyMap.keys km `shouldMatchList`
+            [ "enabled", "max_fan_out", "threshold", "min_ident_length", "path_extensions" ]
+        _ -> expectationFailure "expected a decodable object"
 
     it "parses explicit values" $ do
       decode "{\"enabled\":false,\"max_fan_out\":10,\"threshold\":0.7}" `shouldBe`
-        Just (SemanticEdgesConfig False 10 0.7)
+        Just (SemanticEdgesConfig False 10 0.7 4 defaultPathExtensions)
 
     it "defaults a missing section to enabled/50/0.5" $ do
       decode "{}" `shouldBe` Just defaultSemanticEdgesConfig
 
     it "fills partial keys with defaults" $ do
-      decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5)
+      decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5 4 defaultPathExtensions)

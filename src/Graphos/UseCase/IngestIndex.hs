@@ -17,6 +17,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Ord (Down(..))
+import qualified Data.Vector.Unboxed as VU
 import System.Directory (doesFileExist)
 
 import Graphos.Domain.Types
@@ -48,23 +49,23 @@ mergeIndices :: IngestIndex -> IngestIndex -> IngestIndex
 mergeIndices a b = IngestIndex
   { iiVersion = max (iiVersion a) (iiVersion b)
   , iiFiles   = iiFiles b <> iiFiles a
-  , iiNodes   = iiNodes b <> iiNodes a
+  , iiNodes   = Map.union (iiNodes b) (iiNodes a)
   }
 
 -- | Search for nodes similar to a query vector by cosine similarity.
 -- Returns results sorted by similarity (highest first), limited to top N.
 -- Only considers entries that have non-empty embedding vectors.
-searchSimilar :: [Double] -> IngestIndex -> Int -> [(NodeId, Double)]
+searchSimilar :: VU.Vector Double -> IngestIndex -> Int -> [(NodeId, Double)]
 searchSimilar queryVec idx topN =
   let scored = [ (nid, cosineSimilarity queryVec vec)
                | (nid, vec) <- Map.toList (iiNodes idx)
-               , not (null vec)
+               , not (VU.null vec)
                ]
       sorted = sortBy (\(_, a) (_, b) -> compare (Down a) (Down b)) scored
   in take topN sorted
 
 -- | Search for nodes similar to a query vector, filtered by minimum similarity.
 -- Only returns results above the given threshold (0.0 - 1.0).
-searchSimilarThreshold :: [Double] -> IngestIndex -> Double -> Int -> [(NodeId, Double)]
+searchSimilarThreshold :: VU.Vector Double -> IngestIndex -> Double -> Int -> [(NodeId, Double)]
 searchSimilarThreshold queryVec idx threshold topN =
   filter (\(_, score) -> score >= threshold) (searchSimilar queryVec idx topN)
