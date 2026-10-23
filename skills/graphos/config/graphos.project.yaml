@@ -1,0 +1,32 @@
+# Graphos project configuration (example)
+# Copy to <repo>/graphos.yaml (keep it untracked or commit it, your choice).
+# Overrides ~/.config/graphos/graphos.yaml; CLI flags override this.
+
+# function = functions/types/classes + module constants (best for analysis)
+# file     = one node per file (small graphs, no symbols)
+granularity: function
+
+# tree-sitter everywhere: fast, no language server required.
+# Switch an entry to `mode: lsp` for richer semantics (see `graphos lservers`).
+extractors:
+  ".ts":   { mode: tree-sitter, grammar: typescript, language_id: typescript }
+  ".tsx":  { mode: tree-sitter, grammar: tsx,        language_id: typescriptreact }
+  ".js":   { mode: tree-sitter, grammar: javascript, language_id: javascript }
+  ".jsx":  { mode: tree-sitter, grammar: javascript, language_id: javascriptreact }
+  ".py":   { mode: tree-sitter, grammar: python,     language_id: python }
+  ".go":   { mode: tree-sitter, grammar: go,         language_id: go }
+  ".rs":   { mode: tree-sitter, grammar: rust,       language_id: rust }
+  ".hs":   { mode: tree-sitter, grammar: haskell,    language_id: haskell }
+  ".java": { mode: tree-sitter, grammar: java,       language_id: java }
+  ".rb":   { mode: tree-sitter, grammar: ruby,       language_id: ruby }
+  ".nix":  { mode: tree-sitter, grammar: nix,        language_id: nix }
+  # data files: one node per file so they don't inflate the graph
+  ".json": { mode: tree-sitter, grammar: json,       language_id: json, granularity: file }
+  ".md":   { mode: tree-sitter, grammar: markdown,   language_id: markdown }
+
+# Generated / vendored / minified files are excluded by default.
+detection:
+  mode: exclude
+
+memory:
+  budget: auto
