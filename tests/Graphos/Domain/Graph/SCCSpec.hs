@@ -213,6 +213,175 @@ spec = do
       property $ \(SmallGraph g) (NodePair (u, v)) ->
         shortestPathReachable g u v == (shortestPath g u v /= Nothing)
 
+  describe "condensation (§2.3, cond)" $ do
+    it "cond is the chain {a,b,c}->0 -> {d,e}->1 -> {f}->2 (golden)" $ do
+      cond goldenGraph `shouldBe` Map.fromList [(0, [1]), (1, [2]), (2, [])]
+
+    it "cond (golden): no self-arc and the sink maps to []" $ do
+      let arcs = Map.toList (cond goldenGraph)
+      all (\(c, cs) -> c `notElem` cs) arcs `shouldBe` True
+      Map.lookup 2 (cond goldenGraph) `shouldBe` Just []
+
+    it "cond (property): every SCC is a vertex of the condensation" $ do
+      property $ \(SmallGraph g) ->
+        length (Map.elems (stronglyConnectedComponents g))
+          == length (Map.keys (cond g))
+
+    it "cond (property): no component id points to itself" $ do
+      property $ \(SmallGraph g) ->
+        all (\(c, cs) -> c `notElem` cs) (Map.toList (cond g))
+
+    it "cond (property): the condensation is acyclic (Thm 2.3)" $ do
+      property $ \(SmallGraph g) -> condAcyclic (cond g)
+
+  describe "directed acyclicity (§2.5, INV-C5, isAcyclicDirected)" $ do
+    it "isAcyclicDirected: golden graph has cycles -> False" $ do
+      isAcyclicDirected goldenGraph `shouldBe` False
+
+    it "isAcyclicDirected: a pure path DAG -> True" $ do
+      isAcyclicDirected dagPath `shouldBe` True
+
+    it "isAcyclicDirected: a self-loop is a cycle in a one-node SCC -> False" $ do
+      isAcyclicDirected selfLoop `shouldBe` False
+
+    it "isAcyclicDirected (property): True iff every SCC is a singleton and no self-loop" $ do
+      property $ \(SmallGraph g) ->
+        let allSingleton = all ((<= 1) . length) (Map.elems (stronglyConnectedComponents g))
+            noSelfLoop   = all (\(u, v) -> u /= v) (Map.keys (gEdges g))
+        in isAcyclicDirected g == (allSingleton && noSelfLoop)
+
+  describe "undirected cycle detection (§2.3, Thm 2.3, INV-C2, hasCycleUndirected)" $ do
+    it "hasCycleUndirected: directed triangle F1 -> True" $
+      hasCycleUndirected triF1 `shouldBe` True
+
+    it "hasCycleUndirected: directed DAG F2 -> True while isAcyclicDirected == True" $ do
+      hasCycleUndirected dagF2 `shouldBe` True
+      isAcyclicDirected dagF2 `shouldBe` True
+
+    it "hasCycleUndirected: self-loop F3 -> True (INV-C4)" $
+      hasCycleUndirected selfLoop `shouldBe` True
+
+    it "hasCycleUndirected: reciprocal pair a->b, b->a -> False (AF-3)" $
+      hasCycleUndirected reciprocalF `shouldBe` False
+
+    it "hasCycleUndirected: directed path F7 -> False (a tree)" $
+      hasCycleUndirected dagPath `shouldBe` False
+
+    it "hasCycleUndirected (property): INV-C2 soundness — self-loop or q >= 1" $
+      property $ \(SmallGraph g) ->
+        let arcs    = Map.keys (gEdges g)
+            selfLoops = any (\(u, v) -> u == v) arcs
+            simpleA   = nub [ (min u v, max u v) | (u, v) <- arcs, u /= v ]
+            n         = Map.size (gNodes g)
+            c         = length (connectedComponents g)
+            q         = length simpleA - n + c
+        in hasCycleUndirected g == (selfLoops || q >= 1)
+
+    it "hasCycleUndirected (property): adding an arc to a cyclic graph keeps it cyclic (monotonic)" $
+      property $ \(SmallGraph g) (NodePair (u, v)) ->
+        let srcOk = Map.member u (gNodes g)
+            tgtOk = Map.member v (gNodes g)
+            g' = if srcOk && tgtOk then addEdges g [sccTestEdge u v] else g
+        in hasCycleUndirected g ==> hasCycleUndirected g'
+
+  describe "isolated nodes (§2.5, INV-C3, isolatedNodes)" $ do
+    it "isolatedNodes: {a,b} connected, {c} isolated" $ do
+      let g = buildGraph True $ extractionFromLists
+                   (map sccTestNode ["a", "b", "c"])
+                   [ sccTestEdge "a" "b" ]
+      isolatedNodes g `shouldBe` ["c"]
+
+    it "isolatedNodes (property): each isolated node forms a singleton component" $ do
+      property $ \(SmallGraph g) ->
+        let comps = Map.elems (connectedComponents g)
+        in all (\n -> any (== [n]) comps) (isolatedNodes g)
+
+  describe "connectivity decomposition (§2.6, connectedComponents / weaklyConnectedComponents)" $ do
+    it "connectedComponents: golden graph weakly connected -> one class of all six" $ do
+      connectedComponents goldenGraph `shouldBe` Map.fromList [(0, ["a", "b", "c", "d", "e", "f"])]
+
+    it "weaklyConnectedComponents equals connectedComponents (undirected support)" $ do
+      property $ \(SmallGraph g) -> weaklyConnectedComponents g == connectedComponents g
+
+    it "connectedComponents (property): partitions V (INV-C1)" $ do
+      property $ \(SmallGraph g) -> isPartition g (connectedComponents g)
+
+    it "INV-C6 (golden): {a},{b},{c} SCCs inside one WCC {a,b,c} (C_w < C_s)" $ do
+      let g = buildGraph True $ extractionFromLists
+                 (map sccTestNode ["a", "b", "c"])
+                 [ sccTestEdge "a" "b"
+                 , sccTestEdge "b" "c" ]
+          scc = Map.elems (stronglyConnectedComponents g)
+          wcc = Map.elems (connectedComponents g)
+      length scc `shouldBe` 3
+      length wcc `shouldBe` 1
+
+    it "INV-C6 (property): each SCC lies in exactly one connectedComponent (coarsening)" $ do
+      property $ \(SmallGraph g) ->
+        let sccs   = Map.elems (stronglyConnectedComponents g)
+            comps  = Map.elems (connectedComponents g)
+            subset a b = all (`elem` b) a
+            inExactlyOne s = length (filter (\c -> subset s c) comps) == 1
+        in all inExactlyOne sccs
+
+-- A directed path DAG: a -> b -> c.
+dagPath :: Graph
+dagPath =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b", "c"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "b" "c"
+    ]
+
+-- A single node with a self-loop: one SCC, but a directed cycle.
+selfLoop :: Graph
+selfLoop =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a"])
+    [ sccTestEdge "a" "a" ]
+
+-- Fixture F1 — single directed triangle.
+triF1 :: Graph
+triF1 =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b", "c"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "b" "c"
+    , sccTestEdge "c" "a"
+    ]
+
+-- Fixture F2 — directed DAG whose undirected support has a cycle.
+dagF2 :: Graph
+dagF2 =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b", "c", "d"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "a" "c"
+    , sccTestEdge "b" "d"
+    , sccTestEdge "c" "d"
+    ]
+
+-- Two nodes with reciprocal arcs: collapses to one undirected edge (AF-3).
+reciprocalF :: Graph
+reciprocalF =
+  buildGraph True $ extractionFromLists
+    (map sccTestNode ["a", "b"])
+    [ sccTestEdge "a" "b"
+    , sccTestEdge "b" "a"
+    ]
+
+-- Kahn's algorithm over a successor map: repeatedly drop nodes with zero
+-- in-degree over the induced remaining subgraph; all nodes removable => acyclic.
+condAcyclic :: Map.Map Int [Int] -> Bool
+condAcyclic m
+  | Map.null m = True
+  | otherwise =
+      let indeg r v = length [ () | u <- r, v `elem` Map.findWithDefault [] u m ]
+          zeros r   = [ u | u <- r, indeg r u == 0 ]
+      in case zeros (Map.keys m) of
+           []  -> False
+           zs  -> condAcyclic (Map.filterWithKey (\k _ -> k `notElem` zs) m)
+
 -- ───────────────────────────────────────────────
 -- Arbitrary instances for small random directed graphs
 -- ───────────────────────────────────────────────

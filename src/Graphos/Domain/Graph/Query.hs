@@ -4,6 +4,7 @@
 -- Memory optimization: Uses CachedFGL to share a single FGL conversion
 -- across all algorithm calls, saving ~600MB on 100k-node graphs.
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns #-}
 module Graphos.Domain.Graph.Query
   ( neighbors
   , degree
@@ -17,21 +18,33 @@ module Graphos.Domain.Graph.Query
   , depthFirstSearchWithCached
   , stronglyConnectedComponents
   , stronglyConnectedComponentsWithCached
+  , cond
+  , condWithCached
+  , isAcyclicDirected
+  , isAcyclicDirectedWithCached
+  , connectedComponents
+  , connectedComponentsWithCached
+  , weaklyConnectedComponents
+  , weaklyConnectedComponentsWithCached
+  , isolatedNodes
+  , isolatedNodesWithCached
+  , hasCycleUndirected
+  , hasCycleUndirectedWithCached
   , subgraph
   ) where
 
 import Control.DeepSeq (deepseq)
-import Control.Monad (forM_)
+import Control.Monad (forM_, unless)
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, readSTRef, writeSTRef)
-import Data.List (sort, sortOn)
+import Data.List (sort, sortOn, nub)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import qualified Data.Graph.Inductive.Graph as FGL (Edge)
-import Data.Graph.Inductive.Graph (edges)
+import Data.Graph.Inductive.Graph (edges, labEdges)
 import Data.Graph.Inductive.Query.BFS (bfs, esp)
 import Data.Graph.Inductive.Query.DFS (dfs)
 
@@ -264,3 +277,261 @@ subgraph g nodeSet =
                 Nothing -> Nothing
                 Just m  -> Just (Map.filterWithKey (\k _ -> k `Set.member` nodeSet) m)
     in Graph { gNodes = nodes', gEdges = edges', gAdjFwd = fwd', gAdjBack = bwd', gDirected = gDirected g, gCompositions = Nothing, gHash = computeGraphHash nodes' edges', gEmbeddings = embs', gEmbeddingsPath = gEmbeddingsPath g }
+
+-- ───────────────────────────────────────────────
+-- Condensation (Thm 2.3)
+-- ───────────────────────────────────────────────
+
+-- | Condensation of the SCC partition.
+--
+-- `cond(G)` is the DAG whose vertices are the SCC classes and whose arc
+-- `A → B` (`A ≠ B`) exists iff some `a ∈ A` and `b ∈ B` are adjacent in the
+-- directed relation `E`. The arc map is keyed by component id and stores the
+-- sorted, deduplicated successor component ids (self-arcs omitted); every
+-- component id appears as a key, so sinks map to `[]`.
+--
+-- By Thm 2.3 the condensation of any graph's SCC partition is acyclic, so this
+-- is always a well-defined DAG. Runs in O(N + E): one SCC pass to label nodes
+-- plus a single edge scan of the condensation; O(C) auxiliary buckets.
+cond :: Graph -> Map.Map Int [Int]
+cond g = condWithCached (toCachedFGL g)
+
+-- | Condensation over a pre-built CachedFGL.
+condWithCached :: CachedFGL -> Map.Map Int [Int]
+condWithCached cfg =
+  let comps = stronglyConnectedComponentsWithCached cfg
+      nidMap = cfgNidMap cfg
+      -- NodeId → its SCC component id. labEdges yields numeric indices (see
+      -- toCachedFGL); convert each arc endpoint to its NodeId via nidMap before
+      -- the component lookup, so nodeComp is keyed by NodeId.
+      nodeComp = Map.fromList [(n, cid) | (cid, ns) <- Map.toList comps, n <- ns]
+      -- Condensation arcs: collapse each source→target arc to its component pair,
+      -- dropping self-arcs (within-component arcs never appear in condensation).
+      arcMap = Map.fromListWith (Set.union)
+          [ (nodeComp Map.! (nidMap V.! u), Set.singleton (nodeComp Map.! (nidMap V.! v)))
+          | (u, v, _) <- labEdges (cfgGraph cfg)
+          , nodeComp Map.! (nidMap V.! u) /= nodeComp Map.! (nidMap V.! v) ]
+  in arcMap `deepseq` Map.fromList
+          [ (cid, sort $ Set.toList (Map.findWithDefault Set.empty cid arcMap))
+          | cid <- Map.keys comps ]
+
+-- ───────────────────────────────────────────────
+-- Directed acyclicity (Thm 2.5, INV-C5)
+-- ───────────────────────────────────────────────
+
+-- | Directed DAG predicate.
+--
+-- A graph is a directed acyclic graph exactly when every SCC is a singleton
+-- (no mutual-reachability cluster of size ≥ 2, Thm 2.5) **and** no self-loop
+-- exists (`ℓ = 0`): a single node with a self-loop is still a one-node SCC yet
+-- constitutes a directed cycle (INV-C5).
+isAcyclicDirected :: Graph -> Bool
+isAcyclicDirected g = isAcyclicDirectedWithCached (toCachedFGL g)
+
+-- | Directed DAG predicate over a pre-built CachedFGL.
+isAcyclicDirectedWithCached :: CachedFGL -> Bool
+isAcyclicDirectedWithCached cfg =
+  let comps = stronglyConnectedComponentsWithCached cfg
+      noMultiNodeScc = all (\ns -> length ns <= 1) (Map.elems comps)
+      -- Self-loop present ⟹ a length-1 directed cycle (Thm 2.5, INV-C5).
+      hasSelfLoop = any (\(u, v, _) -> u == v) (labEdges (cfgGraph cfg))
+  in noMultiNodeScc && not hasSelfLoop
+
+-- ───────────────────────────────────────────────
+-- Isolated nodes (INV-C3)
+-- ───────────────────────────────────────────────
+
+-- | Isolated nodes: those of degree 0 (no arc in either direction).
+--
+-- Output is sorted by NodeId (INV-C3). Every isolated node is a singleton
+-- component in both connectivity decompositions below.
+isolatedNodes :: Graph -> [NodeId]
+isolatedNodes g =
+  let allIds = Map.keys (gNodes g)
+      seen = Set.fromList
+           (concatMap (Set.toList . snd) (Map.toList (gAdjFwd g))
+            ++ concatMap (Set.toList . snd) (Map.toList (gAdjBack g)))
+  in sort [nid | nid <- allIds, not (nid `Set.member` seen)]
+
+-- | Isolated nodes over a pre-built CachedFGL (see 'isolatedNodes').
+--
+-- A node is isolated iff its sequential index is never an arc endpoint, read in
+-- either direction; the surviving indices map back to 'NodeId' and are emitted
+-- in ascending order (indices are assigned in ascending NodeId key order at
+-- 'toCachedFGL', so index order already equals NodeId order). O(N + E).
+isolatedNodesWithCached :: CachedFGL -> [NodeId]
+isolatedNodesWithCached cfg =
+  let nidMap = cfgNidMap cfg
+      n = V.length nidMap
+      arcs = labEdges (cfgGraph cfg)
+      involved = Set.fromList ([ u | (u, _, _) <- arcs ] ++ [ v | (v, _, _) <- arcs ])
+      isolatedIdx = [ i | i <- [0 .. n - 1], not (i `Set.member` involved) ]
+  in sort [nidMap V.! i | i <- isolatedIdx]
+
+-- ───────────────────────────────────────────────
+-- Undirected cycle (Thm 2.6 contrapositive)
+-- ───────────────────────────────────────────────
+
+-- | Undirected cycle predicate.
+--
+-- Decides whether the undirected support of `g` contains a cycle. Every arc is
+-- read as an undirected edge; the support has a cycle iff some connected class
+-- holds a closed walk. A lone arc between two nodes is a tree edge (no cycle);
+-- a self-loop (`u == v`, a length-1 cycle) and any longer closed walk both
+-- count. Reciprocal arc pairs collapse to one undirected edge, so they do not
+-- themselves form a cycle (simple-undirected-graph semantics). Runs in
+-- O(N + E) via union-find with union-by-rank (tree height O(log N)).
+hasCycleUndirected :: Graph -> Bool
+hasCycleUndirected g = hasCycleUndirectedWithCached (toCachedFGL g)
+
+-- | Undirected cycle predicate over a pre-built CachedFGL.
+hasCycleUndirectedWithCached :: CachedFGL -> Bool
+hasCycleUndirectedWithCached cfg =
+  let n = V.length (cfgNidMap cfg)
+      arcs = labEdges (cfgGraph cfg)
+      -- A self-loop is a length-1 undirected cycle.
+      hasSelfLoop = any (\(u, v, _) -> u == v) arcs
+      -- Simple undirected edge set: canonical `(min,max)` pair, deduped, with
+      -- self-loops dropped. Deduping collapses both the AF-3 reverse embedding
+      -- of an undirected graph and any reciprocal arc pair to a single edge, so a
+      -- lone edge is never mistaken for a cycle.
+      simpleEdges = nub [ (min u v, max u v) | (u, v, _) <- arcs, u /= v ]
+  in runST $ do
+       root <- MV.replicate n (0 :: Int)
+       rank <- MV.replicate n (0 :: Int)
+       hasCyc <- newSTRef hasSelfLoop
+       let find' !i = do
+             r <- MV.read root i
+             if r == i then pure i else find' r
+           addEdge !a !b = do
+             ra <- find' a
+             rb <- find' b
+             if ra == rb
+               then writeSTRef hasCyc True
+               else do
+                 ar <- MV.read rank ra
+                 br <- MV.read rank rb
+                 case compare ar br of
+                   GT  -> do MV.write root rb ra
+                             pure ()
+                   LT  -> do MV.write root ra rb
+                             pure ()
+                   EQ  -> do MV.write root rb ra
+                             MV.write rank ra (ar + 1)
+       forM_ [0 .. n - 1] $ \i -> do
+         MV.write root i i
+         MV.write rank i 0
+       forM_ simpleEdges $ \(a, b) -> addEdge a b
+       readSTRef hasCyc
+
+-- ───────────────────────────────────────────────
+-- Connectivity decompositions (Thm 2.6, INV-C1 / INV-C3 / INV-C6)
+-- ───────────────────────────────────────────────
+
+-- | Connected components on the undirected support graph `G_s`.
+--
+-- Partitions `V` into connected classes of `G_s` (INV-C1); each SCC lies in
+-- exactly one component, so the component map coarsens the SCC partition
+-- (`C ≤ C_s`, INV-C6). Deterministic: component ids assigned by ascending
+-- minimum NodeId. Runs in O(N + E) (one undirected DFS pass); O(C) buckets.
+connectedComponents :: Graph -> Map.Map Int [NodeId]
+connectedComponents g = undirectedComponentsWithCached (toCachedFGL g)
+
+-- | Weakly connected components (the directed relation `E` read undirected).
+--
+-- For any graph this equals `connectedComponents` (both decompose the undirected
+-- support graph), but the two names carry distinct contracts: this one reads
+-- `E` undirected; the predecessor reads `G_s`. Partitions `V` (INV-C1) and
+-- coarsens the SCC partition (INV-C6). Deterministic.
+weaklyConnectedComponents :: Graph -> Map.Map Int [NodeId]
+weaklyConnectedComponents g = undirectedComponentsWithCached (toCachedFGL g)
+
+-- | Connected components over a pre-built CachedFGL (see 'connectedComponents').
+connectedComponentsWithCached :: CachedFGL -> Map.Map Int [NodeId]
+connectedComponentsWithCached cfg = undirectedComponentsWithCached cfg
+
+-- | Weakly connected components over a pre-built CachedFGL (see 'weaklyConnectedComponents').
+weaklyConnectedComponentsWithCached :: CachedFGL -> Map.Map Int [NodeId]
+weaklyConnectedComponentsWithCached cfg = undirectedComponentsWithCached cfg
+
+-- | Connectivity decomposition over a pre-built CachedFGL, shared by both
+-- `connectedComponentsWithCached` and `weaklyConnectedComponentsWithCached`.
+--
+-- Iterative DFS over the undirected support of the FGL graph (every arc treated
+-- bidirectional): seeds are visited in ascending sequential-index order, which
+-- equals ascending NodeId (indices are assigned in key order at
+-- 'toCachedFGL'). The first seed discovered for each component is that
+-- component's minimum index, so components come out in ascending-min order;
+-- component ids are then assigned by ascending minimum NodeId via 'sortOn'.
+undirectedComponentsWithCached :: CachedFGL -> Map.Map Int [NodeId]
+undirectedComponentsWithCached cfg =
+  let nidMap = cfgNidMap cfg
+      n = V.length nidMap
+      -- Record each arc in BOTH directions so the adjacency is symmetric: an
+      -- undirected connectivity DFS must traverse u→v AND v→u. Recording only
+      -- `min u v → {max u v}` (the prior, buggy form) left the adjacency
+      -- asymmetric, so the DFS could not walk back from the higher index to the
+      -- lower one and split a single SCC across multiple "components".
+      directedArcs = [ (u, Set.singleton v) | (u, v, _) <- labEdges (cfgGraph cfg) ]
+                   ++ [ (v, Set.singleton u) | (u, v, _) <- labEdges (cfgGraph cfg) ]
+      undirected   = Map.fromListWith Set.union directedArcs
+      undirectedAdj = V.generate n
+          $ \i -> V.fromList (sort (Set.toList (Map.findWithDefault Set.empty i undirected)))
+      comps = undirectedComponentIndices n undirectedAdj
+      ordered = sortOn minimum comps
+      mapped = Map.fromList (zip [0 ..] [sort [nidMap V.! x | x <- c] | c <- ordered])
+  in comps `deepseq` mapped `deepseq` mapped
+
+-- | Undirected connectivity of an index-keyed CSR-like adjacency list.
+--
+-- Returns the components as lists of node indices, ordered by ascending
+-- minimum index. Iterative (explicit stack) so it does not recurse per node
+-- and scales to large graphs. O(N + E) time, O(N) state vectors.
+undirectedComponentIndices :: Int -> V.Vector (V.Vector Int) -> [[Int]]
+undirectedComponentIndices n adj = runST $ do
+  vis    <- MV.replicate n False
+  comps  <- newSTRef ([] :: [[Int]])
+  stk    <- MV.new n
+  cTop   <- newSTRef (0 :: Int)
+  mem    <- newSTRef ([] :: [Int])
+
+  let
+    pushNeighbors xs = forM_ xs $ \w -> do
+      wv <- MV.read vis w
+      unless wv $ do
+        MV.write vis w True
+        t <- readSTRef cTop
+        MV.write stk t w
+        writeSTRef cTop (t + 1)
+
+    loopStk = do
+      t <- readSTRef cTop
+      if t <= 0
+        then pure ()
+        else do
+          writeSTRef cTop (t - 1)
+          x <- MV.read stk (t - 1)
+          ms <- readSTRef mem
+          writeSTRef mem (x : ms)
+          pushNeighbors (adj V.! x)
+          loopStk
+
+    start !s = do
+      writeSTRef cTop 0
+      writeSTRef mem []
+      MV.write vis s True
+      -- Push the seed directly (pushNeighbors would skip it as already visited).
+      writeSTRef cTop 1
+      MV.write stk 0 s
+      loopStk
+      cs <- readSTRef mem
+      c <- readSTRef comps
+      writeSTRef comps (cs : c)
+
+    seedLoop = forM_ [0 .. n - 1] $ \s -> do
+      vs <- MV.read vis s
+      unless vs $ start s
+
+  seedLoop
+  result <- readSTRef comps
+  pure result
