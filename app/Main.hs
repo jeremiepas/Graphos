@@ -24,6 +24,14 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
+import OpenSpecView.ChangeList (readAllChangeInfos, ChangeInfo(..))
+import OpenSpecView.ArtifactView (displayChangeArtifacts)
+import OpenSpecView.SpecDiff (diffPaths, renderSpecDiff)
+import OpenSpecView.StateDashboard (showDashboard)
+import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
+import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
+import Graphos.Domain.Impact (Discharge(..), stableSignature)
+import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
@@ -817,6 +825,79 @@ main = do
             else TIO.putStrLn (renderSpecReport (filterReport checks report))
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
 
+    IntentcheckCmd specsFile graphPath probePaths asJson -> do
+      specsBytes <- BL.readFile specsFile
+      case parseSpecDocument specsBytes of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] intentcheck: failed to parse specs JSON: " ++ err
+          exitWith (ExitFailure 1)
+        Right doc -> do
+          mainLoad <- loadGraphFromFile graphPath
+          case mainLoad of
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] intentcheck: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right mainResult -> do
+              let g = lrGraph mainResult
+                  report = runIntentCheck g doc (T.pack graphPath)
+              forM_ probePaths $ \p -> do
+                rl <- loadGraphFromFile (T.unpack p)
+                case rl of
+                  Left err -> hPutStrLn stderr ("[graphos] intentcheck: probe " ++ T.unpack p ++ ": " ++ T.unpack err)
+                  Right pg -> do
+                    let summ = case runProbes g doc p (irRows report) [lrGraph pg] of
+                               (s:_) -> s
+                               []    -> ProbeSummary T.empty [] True
+                    when (not (prMatches summ)) $
+                      hPutStrLn stderr ("[graphos] intentcheck [non-triviality]: probe " ++ T.unpack p ++ " differs from main graph")
+              if asJson
+                then BL.putStr (encode report) >> putStrLn ""
+                else TIO.putStrLn (renderIntentReport report)
+              if reportVerdict report
+                then exitSuccess
+                else do
+                  hPutStrLn stderr "[graphos] intentcheck: violated specs:"
+                  let msgs =
+                        [ "  " ++ maybe "(unnamed)" (("'" ++) . T.unpack) nm
+                            ++ if null (witnesses v) then ""
+                               else " — violating nodes: " ++ T.unpack (T.intercalate ", " (witnesses v))
+                        | (nm, v) <- violatedSpecs report ]
+                  mapM_ (hPutStrLn stderr) msgs
+                  exitWith (ExitFailure 1)
+
+    ImpactCmd beforePath afterPath ackIds mSpecsFile mNewSpec asJson asGate -> do
+      bLoad <- loadGraphFromFile beforePath
+      case bLoad of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] impact: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right bResult -> do
+          aLoad <- loadGraphFromFile afterPath
+          case aLoad of
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] impact: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right aResult -> do
+              let d = Discharge ackIds [stableSignature]
+                  rep = runImpact (lrGraph bResult) (lrGraph aResult) d
+              (admissible, failures, gateReport) <-
+                case mSpecsFile of
+                  Nothing -> pure (reportAdmissible rep, [], rep)
+                  Just sf -> do
+                    sb <- BL.readFile (T.unpack sf)
+                    case parseSpecDocument sb of
+                      Left err -> do
+                        hPutStrLn stderr ("[graphos] impact: failed to parse specs JSON: " ++ err)
+                        exitWith (ExitFailure 1)
+                      Right doc -> pure (runImpactGate (lrGraph bResult) (lrGraph aResult) d (Just doc) mNewSpec)
+              if asJson
+                then BL.putStr (encode gateReport) >> putStrLn ""
+                else TIO.putStrLn (renderImpactReport gateReport)
+              mapM_ (\f -> hPutStrLn stderr ("[graphos] impact: " ++ show f)) failures
+              if asGate && not admissible
+                then exitWith (ExitFailure 1)
+                else exitSuccess
+
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
       case mConfigPath of
         Nothing -> do
@@ -908,6 +989,24 @@ main = do
       let ref = CommandReference renderCommandReference
       runInstallSkill "0.1.0.0" target ref
 
+    ViewCmd sub -> do
+      case sub of
+        ViewChanges root -> do
+          infos <- readAllChangeInfos root
+          putStrLn (renderChangesList infos)
+        ViewArtifacts dir -> displayChangeArtifacts dir
+        ViewDiff delta basePath -> do
+          result <- diffPaths delta basePath
+          case result of
+            Left err -> do
+              hPutStrLn stderr ("diff: " ++ err)
+              exitWith (ExitFailure 1)
+            Right changes -> putStrLn (renderSpecDiff specName changes)
+              where specName = reverse (takeWhile (/= '/') (reverse delta))
+        ViewDashboard root -> do
+          out <- showDashboard root
+          putStrLn out
+
   where
     opts = info (commandOpts <**> helper)
       ( fullDesc
@@ -928,6 +1027,28 @@ toLabeledGraph gr = LG.LabeledGraph
   , LG.gAdjFwd  = gAdjFwd gr
   , LG.gAdjBack = gAdjBack gr
   }
+
+
+-- ───────────────────────────────────────────────
+-- openspec view changes — compact change listing
+-- ───────────────────────────────────────────────
+
+renderChangesList :: [ChangeInfo] -> String
+renderChangesList infos =
+  unlines $
+    [ "OpenSpec Changes"
+    , "----------------"
+    , ""
+    ]
+    ++ map renderRow infos
+    ++ [""]
+  where
+    rpad :: Int -> String -> String
+    rpad n s = let l = length s in if l >= n then s else replicate (n - l) ' ' ++ s
+    renderRow ci =
+      changeName ci ++ "  "
+      ++ rpad 12 (changeStatus ci) ++ "  "
+      ++ rpad 6 (show (changeCompleted ci) ++ "/" ++ show (changeTotal ci))
 
 
 -- ───────────────────────────────────────────────

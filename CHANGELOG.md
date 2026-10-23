@@ -95,6 +95,22 @@
   `suggestions`. `traverse` field kept as `mode` echo for one release.
 
 ### Fixed
+- **Go, Rust and Ruby emit `imports` edges in tree-sitter mode** (#83). Each
+  edge has the TypeScript shape: it goes from the file's module node to a
+  placeholder whose `source_file` is the imported repo file, or
+  `external:<name>`. A Go internal package import becomes one edge per
+  non-test file of the package, with weight `1/n` and the alias kept in
+  `extra.alias`. Rust resolves `crate::`/`self::`/`super::`, workspace crates,
+  groups and globs over the module files. Ruby resolves `require_relative` and
+  in-repo `require`. Each Rust `use` now gets its own `Import` node per
+  occurrence (the id gains `#L<line>`), and a `use` inside a function body is
+  no longer dropped.
+- **`--embed` no longer sends arbitrary-length documents to `/v1/embeddings`.**
+  Each input is now truncated to `embedding.maxTokens` (default 512) before the
+  request, so a long document can no longer overflow a small encoder's context
+  window and be rejected (e.g. a 512-token model served by llama-server
+  answering HTTP 500 on oversized inputs). Set `embedding.maxTokens: 0` to
+  restore the previous unbounded behavior.
 - `mergeSmallCommunities` no longer silently drops nodes when a community that
   received members from an earlier merge is itself merged.
 - Haskell stub extraction: cross-file `imports` edges now resolve via canonical

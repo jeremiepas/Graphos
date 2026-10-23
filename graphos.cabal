@@ -78,6 +78,8 @@ library
                     Graphos.UseCase.SpecCheck
                     Graphos.UseCase.SpecExtract
                     Graphos.UseCase.SpecAdjudicate
+                    Graphos.UseCase.IntentCheck
+                    Graphos.UseCase.Impact
                     Graphos.Infrastructure.SpecParse
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
@@ -91,8 +93,10 @@ library
                      Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
                    Graphos.Domain.Analysis
-                   Graphos.Domain.Extraction
-                    Graphos.Domain.Labeling
+                    Graphos.Domain.Extraction
+                     Graphos.Domain.Intent.Classifier
+                     Graphos.Domain.Intent.Projection
+                     Graphos.Domain.Labeling
                     Graphos.Domain.Logging
                     -- Use Cases
                      Graphos.UseCase.Pipeline
@@ -162,6 +166,7 @@ library
                            Graphos.Infrastructure.Extract.TreeSitter.Grammar
                            Graphos.Infrastructure.Extract.TreeSitter.Convert
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
+                           Graphos.Infrastructure.Extract.TreeSitter.Imports
                            Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
@@ -342,6 +347,7 @@ executable graphos
   build-depends:
       base
     , graphos
+    , openspec-view
     , optparse-applicative >= 0.17
     , text
     , containers
@@ -362,8 +368,6 @@ test-suite graphos-test
   type:           exitcode-stdio-1.0
   main-is:        Spec.hs
   hs-source-dirs: tests
-  build-tool-depends:
-      hspec-discover:hspec-discover >= 2.10
   other-modules:
     Paths_graphos
     Graphos.Domain.TypesSpec
@@ -422,6 +426,7 @@ test-suite graphos-test
     Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
     Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
+    Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
@@ -460,7 +465,10 @@ test-suite graphos-test
       OpenSpecView.SpecDiffSpec
       OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
+    Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
+    Graphos.Domain.Intent.ClassifierSpec
+    Graphos.Domain.Intent.ProjectionSpec
     Graphos.Domain.Config.OutputSpec
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec
   build-depends:
@@ -468,7 +476,6 @@ test-suite graphos-test
      , graphos
      , openspec-view
      , hspec                >= 2.10
-    , hspec-discover       >= 2.10
     , QuickCheck           >= 2.14
     , aeson
     , bytestring           >= 0.11
