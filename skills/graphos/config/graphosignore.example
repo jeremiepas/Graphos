@@ -1,0 +1,26 @@
+# Graphos ingest scope (gitignore syntax). Copy to <repo>/.graphosignore.
+# Highest-priority ignore layer: overrides .gitignore and built-in defaults.
+
+# Build output
+dist/
+build/
+out/
+coverage/
+
+# Graphos's own output (avoid self-ingestion on re-runs)
+graphos-out/
+graphos-run.log
+
+# Nested worktrees / full repo copies: each one duplicates the codebase
+**/worktrees/
+
+# AI-assistant tooling definitions (not project code); remove these lines if you want them in the graph
+.claude/
+.opencode/
+
+# Generated spec artifacts / API client collections (adapt to your repo)
+# specs/
+# bruno/
+
+# Docs website assets
+site/

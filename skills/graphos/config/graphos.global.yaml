@@ -1,0 +1,42 @@
+# Graphos global (user-level) configuration
+# Install as: ~/.config/graphos/graphos.yaml
+# Project graphos.yaml files override this; CLI flags override both.
+# NOTE: neo4j / labeling / embedding / observability keys are camelCase.
+# Unknown keys (e.g. push_mode, base_url) are silently ignored.
+
+# ──── Observability (off: needs the OTEL stack from docker-compose.otel.yaml)
+observability:
+  enabled: false
+  endpoint: "http://localhost:14319"
+  metricsPort: 9190
+  serviceName: graphos
+  exportInterval: 15
+  debugTraceDir: "./traces"
+  debug: false
+
+# ──── Neo4j (local stack from the Graphos repo's docker-compose.yml)
+# password is used literally (no ${VAR} expansion); graphos_dev = local default.
+neo4j:
+  uri: "http://localhost:7474"
+  user: "neo4j"
+  password: "graphos_dev"
+  pushMode: "full"          # config file: full|subgraph|community (CLI flags use FullPush/SubgraphPush/...)
+  subgraphSize: 7
+
+# ──── LLM community labeling (only used with --label)
+# apiKey expands ${VAR} from the environment.
+labeling:
+  provider: openai
+  model: gpt-4o-mini
+  apiKey: "${OPENAI_API_KEY}"
+  baseUrl: "https://api.openai.com/v1"
+  batchSize: 10
+
+# ──── Embeddings (off by default; --embed forces on)
+# Needs an OpenAI-compatible /v1/embeddings server at baseUrl,
+# e.g. llama-server --embeddings with LFM2.5-Embedding-350M GGUF.
+embedding:
+  enabled: false
+  model: "hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF:Q4_K_M"
+  baseUrl: "http://localhost:8080/v1"
+  dimension: 0
