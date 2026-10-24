@@ -27,15 +27,19 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
     , SourceFile(..)
     , mkSourceFile
     , nodeKeyId
-   ) where
+    ) where
 
 
 import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Aeson (toJSON)
+import qualified Data.Set as Set
+import qualified Data.Map.Strict as Map
+import Data.Map (Map)
+import Data.Set (Set)
 
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
@@ -118,8 +122,158 @@ functionBoundaryTypes =
   , "function_item"       -- Rust
   ]
 
--- | All node types that can represent definitions (fine level).
--- Kept for backward compatibility and as the fine-level whitelist.
+-- ---------------------------------------------------------------------------
+-- Group 4 call edges (AVI-1447)
+--
+-- A file-wide context threaded through 'tsNodeToGraphEdges' that carries the
+-- file's import bindings and local definition names, used for best-effort,
+-- name-based callee resolution. The threaded "inside a call" flag suppresses
+-- calls nested inside a call's arguments (only the top-level call of an
+-- enclosing function is emitted).
+-- ---------------------------------------------------------------------------
+
+-- | File-wide context for `calls` edge emission.
+data CallsCtx = CallsCtx
+  { callsCtxImports  :: !(Map Text NodeId)     -- ^ import binding name -> External node id
+  , callsCtxLocal    :: !(Set Text)            -- ^ local definition names
+  , callsCtxInside   :: !Bool                  -- ^ threaded: inside a call subtree
+  }
+
+emptyCallsCtx :: CallsCtx
+emptyCallsCtx = CallsCtx Map.empty Set.empty False
+
+-- | Build a file-wide 'CallsCtx' from a root node: collect the file's import
+-- bindings and local definition names. `callsCtxInside` starts `False`; it is
+-- threaded down the recursion by 'tsNodeToGraphEdges'.
+collectCallsCtx :: FilePath -> TSNodeInfo -> CallsCtx
+collectCallsCtx filePath node =
+  emptyCallsCtx
+    { callsCtxImports  = Map.fromList (concatMap importBindings (tsnChildren node))
+    , callsCtxLocal    = Set.fromList (mapMaybe firstIdentOrTypeName (tsnChildren node))
+    }
+  where
+    -- | Identifier characters, hoisted for reuse by 'bindingNames'.
+    identChars :: String
+    identChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$"
+
+    -- | Import binding name(s) -> External node id. Returns one pair per
+    -- binding in the import (fixes multi-binding destructured imports such as
+    -- `import { a, b }`, where the old single-binding version registered only
+    -- the first). Every binding collapses onto the same resolved External node.
+    importBindings :: TSNodeInfo -> [(Text, NodeId)]
+    importBindings n = case extractSpecifier filePath n of
+          Just (targetPath, targetName) ->
+            let targetId = if "external:" `isPrefixOf` targetPath
+                            then makeNodeId "external" targetName
+                            else makeNodeId targetPath targetName
+            in map (\b -> (b, targetId)) (bindingNames n)
+          Nothing -> []
+
+    -- | Local binding name(s) of an import node: every identifier used in this
+    -- file to refer to an imported symbol (best-effort, name-based).
+    --
+    -- For `import Foo` this returns `[Foo]`; for `{ a, b }` destructured
+    -- imports it returns both bindings. Best-effort: extract every identifier
+    -- run in the import text preceding the `from <specifier>` (the specifier is
+    -- a string literal, so it never contributes identifiers).
+    bindingNames :: TSNodeInfo -> [Text]
+    bindingNames n =
+      let txt      = normalizeText (tsnText n)
+          afterImp = T.drop (T.length "import") txt
+          body     = T.strip (fst (T.breakOnEnd "from" afterImp))
+      in identifierRuns body
+
+    -- | All maximal identifier runs in a text (e.g. the bindings of an import).
+    identifierRuns :: Text -> [Text]
+    identifierRuns t =
+      let t' = T.dropWhile (`notElem` identChars) t
+      in case T.uncons t' of
+           Just (c, rest)
+             | c `elem` identChars ->
+                 let run = T.cons c (T.takeWhile (`elem` identChars) rest)
+                 in run : identifierRuns rest
+           _ -> []
+
+    -- | Local definition name (skips imports, which carry a long specifier
+    -- text). Returns the binding name of a definition node when it is named
+    -- and is not itself an import/export specifier.
+    firstIdentOrTypeName :: TSNodeInfo -> Maybe Text
+    firstIdentOrTypeName n =
+      let t = tsnType n
+      in if t `elem` typesFor GranularityFine
+             && tsnIsNamed n
+             && t `notElem` importExportTypes
+           then Just (tsNodeLabel n)
+           else Nothing
+
+-- | Build a single `calls` edge from an enclosing-definition source id to a
+-- resolved callee target id, matching the LSP `parseIncomingCall` shape.
+callsRelation :: NodeId -> NodeId -> Edge
+callsRelation srcId tgtId =
+  Edge
+    { edgeId        = EdgeId (srcId <> "->call:" <> tgtId)
+    , edgeSource    = srcId
+    , edgeTarget    = tgtId
+    , edgeRelation  = Calls
+    , edgeConfidence = Confidence 0.9
+    , edgeWeight    = 0.9
+    , edgeExtra     = Nothing
+    }
+
+-- | Resolve the callee of a `call_expression`/`new_expression` to a `calls`
+-- edge, or drop the edge (best-effort, name-based resolution).
+--
+--   * same-file callee that is a local definition -> in-file node
+--   * imported callee -> matching `External` node id
+--   * anything else (e.g. a global such as `Date`) -> drop
+resolveCalls :: FilePath -> CallsCtx -> Text -> TSNodeInfo -> Maybe Edge
+resolveCalls filePath ctx enclosingDef node =
+  case calleeName node of
+    Nothing -> Nothing
+    Just calleeText ->
+      let srcId = makeNodeId filePath enclosingDef
+          tgtId = resolveCalleeTarget filePath ctx calleeText
+      in case tgtId of
+           Just calleeId -> Just (callsRelation srcId calleeId)
+           Nothing -> Nothing
+
+-- | Resolve a callee name to a target node id.
+resolveCalleeTarget :: FilePath -> CallsCtx -> Text -> Maybe NodeId
+resolveCalleeTarget filePath ctx callee
+  -- imported callee -> the External node produced by resolveImport/extractSpecifier
+  | callee `Map.member` imports = case Map.lookup callee imports of
+                                       Just calleeId -> Just calleeId
+                                       Nothing -> Nothing
+  -- same-file callee that is a local definition -> in-file node
+  | callee `Set.member` local = Just (makeNodeId filePath callee)
+  -- unresolvable global (e.g. Date) -> drop
+  | otherwise = Nothing
+  where
+    imports = callsCtxImports ctx
+    local   = callsCtxLocal ctx
+
+-- | The callee name of a call/new node: the first `identifier` in its subtree
+-- (the class name for `new Foo()`, the receiver for `receiver.method()`).
+calleeName :: TSNodeInfo -> Maybe Text
+calleeName node = firstIdentifierInList (tsnChildren node)
+
+-- | First `identifier` node text in a preorder DFS of a single node's subtree.
+firstIdentifierIn :: TSNodeInfo -> Maybe Text
+firstIdentifierIn n = case tsnType n of
+  "identifier" | not (T.null (tsnText n)) -> Just (tsnText n)
+  _ -> case tsnChildren n of
+         (k : rest) -> case firstIdentifierIn k of
+                          Just r -> Just r
+                          Nothing -> firstIdentifierInList rest
+         [] -> Nothing
+
+-- | First `identifier` node text across a list of nodes (preorder).
+firstIdentifierInList :: [TSNodeInfo] -> Maybe Text
+firstIdentifierInList xs = case xs of
+  (k : rest) -> case firstIdentifierIn k of
+                  Just r -> Just r
+                  Nothing -> firstIdentifierInList rest
+  [] -> Nothing
 definitionTypes :: [String]
 definitionTypes = structureTypes ++ apiSurfaceTypes ++ implementationDetailTypes
 
@@ -140,7 +294,8 @@ descendInto GranularityFunction isDef node =
 -- | Convert a tree of TSNodeInfo into an Extraction at a given granularity.
 tsNodesToExtraction :: Granularity -> FilePath -> [TSNodeInfo] -> Extraction
 tsNodesToExtraction gran filePath nodes =
-  let results = map (\node -> (tsNodeToGraphNodes gran filePath node, tsNodeToGraphEdges gran filePath Nothing node)) nodes
+  let results = map (\node ->
+        (tsNodeToGraphNodes gran filePath node, tsNodeToGraphEdges gran filePath Nothing node)) nodes
       graphNodes = concatMap fst results
       extraNodes = concatMap (snd . snd) results
       graphEdges = concatMap (fst . snd) results
@@ -157,12 +312,32 @@ tsNodeToGraphNodes gran filePath node =
   in self ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
+--
+-- Public entry point: build the file-wide 'CallsCtx' from the given root node
+-- and thread it through the internal recursion ('tsNodeToGraphEdges''). The
+-- public signature is intentionally unchanged from the pre-call-edge version so
+-- that callers (including the Hspec suite) need no `ctx` argument.
 tsNodeToGraphEdges :: Granularity -> FilePath -> Maybe Text -> TSNodeInfo -> ([Edge], [Node])
 tsNodeToGraphEdges gran filePath parentLabel node =
+  tsNodeToGraphEdges' gran filePath (collectCallsCtx filePath node) parentLabel (tsNodeLabel node) node
+
+-- | Internal recursion: threads the file-wide 'CallsCtx' down the tree. The
+-- @callsCtxInside@ flag flips to 'True' whenever the current node is a call
+-- (or we are already inside one), suppressing calls nested inside a call's
+-- arguments.
+tsNodeToGraphEdges' :: Granularity -> FilePath -> CallsCtx -> Maybe Text -> Text -> TSNodeInfo -> ([Edge], [Node])
+tsNodeToGraphEdges' gran filePath ctx parentLabel enclosingDef node =
   let myLabel = tsNodeLabel node
       isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
       tType = tsnType node
-      
+      isCall = tType == "call_expression" || tType == "new_expression"
+      insideCall = callsCtxInside ctx
+      -- The enclosing definition label threads through statement-level (non
+      -- boundary) nodes unchanged; it only updates when we descend into a
+      -- function/method/constructor boundary. This is the source of `calls`
+      -- edges (spec: enclosing function name, or `module` for module-level).
+      childDef = if tType `elem` functionBoundaryTypes then myLabel else enclosingDef
+
       -- Parent → child edge (Contains)
       myEdges = case (parentLabel, isDef) of
         (Just p, True) ->
@@ -178,9 +353,17 @@ tsNodeToGraphEdges gran filePath parentLabel node =
           ]
         _ -> []
 
+      -- Calls edge (top-level call of an enclosing function only).
+      callsEdges =
+        if isCall && not insideCall
+           then case resolveCalls filePath ctx enclosingDef node of
+                  Just e -> [e]
+                  Nothing -> []
+           else []
+
       -- Imports/Exports edges
       (importEdges, importNodes) = if tType `elem` importExportTypes
-        then case extractSpecifier node of
+        then case extractSpecifier filePath node of
                 Just (targetPath, targetName) ->
                   let targetId = if "external:" `isPrefixOf` targetPath
                                  then makeNodeId "external" targetName
@@ -216,32 +399,37 @@ tsNodeToGraphEdges gran filePath parentLabel node =
                 Nothing -> ([], [])
         else ([], [])
 
-      -- Recurse into children
-      (childEdges, childNodes) = 
+      -- Recurse into children with a threaded call context. The child context
+      -- flips `callsCtxInside` on whenever the current node is a call (or we are
+      -- already inside one), so calls nested inside a call's arguments are
+      -- suppressed by the `callsEdges` guard above.
+      childCtx = ctx { callsCtxInside = insideCall || isCall }
+
+      (childEdges, childNodes) =
         if not (descendInto gran isDef node)
         then ([], [])
         else if isDef
-             then foldr (\child (es, ns) -> 
-                    let (e, n) = tsNodeToGraphEdges gran filePath (Just myLabel) child
-                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
-             else foldr (\child (es, ns) -> 
-                    let (e, n) = tsNodeToGraphEdges gran filePath parentLabel child
-                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+             then foldr (\child (es, ns) ->
+                       let (e, n) = tsNodeToGraphEdges' gran filePath childCtx (Just myLabel) childDef child
+                       in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+             else foldr (\child (es, ns) ->
+                       let (e, n) = tsNodeToGraphEdges' gran filePath childCtx parentLabel childDef child
+                       in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
 
-  in (myEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
+  in (myEdges ++ callsEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
 
-      where
-        extractSpecifier :: TSNodeInfo -> Maybe (FilePath, Text)
-        extractSpecifier n =
-          let tailText = extractTail (tsnText n)
-          in if T.null tailText
+-- | Resolve a `from <specifier>` import to its canonical target path and name.
+extractSpecifier :: FilePath -> TSNodeInfo -> Maybe (FilePath, Text)
+extractSpecifier filePath n =
+  let tailText = extractTail (tsnText n)
+  in if T.null tailText
+     then Nothing
+     else let raw = T.strip (T.drop (T.length "from ") tailText)
+              rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
+              specifier = stripQuotes (T.stripEnd rawNoSemi)
+          in if T.null specifier
              then Nothing
-             else let raw = T.strip (T.drop (T.length "from ") tailText)
-                      rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
-                      specifier = stripQuotes (T.stripEnd rawNoSemi)
-                  in if T.null specifier
-                     then Nothing
-                     else resolveImport filePath (T.unpack specifier)
+             else resolveImport filePath (T.unpack specifier)
 
 -- | Strip surrounding single/double quotes/backticks from a specifier.
 stripQuotes :: Text -> Text
