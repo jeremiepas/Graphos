@@ -10,19 +10,17 @@ spec = do
   describe "ScaffoldTarget" $ do
     describe "renderTarget" $ do
       it "renders all targets" $ do
-        renderTarget Opencode `shouldBe` "opencode"
         renderTarget Claude   `shouldBe` "claude"
         renderTarget Generic  `shouldBe` "generic"
 
     describe "parseTarget" $ do
       it "parses valid targets" $ do
-        parseTarget "opencode" `shouldBe` Right Opencode
         parseTarget "claude"   `shouldBe` Right Claude
         parseTarget "generic"  `shouldBe` Right Generic
 
       it "is case-insensitive and strips whitespace" $ do
-        parseTarget " Opencode " `shouldBe` Right Opencode
         parseTarget "CLAUDE"     `shouldBe` Right Claude
+        parseTarget "GENERIC"    `shouldBe` Right Generic
 
       it "rejects invalid targets with helpful message" $ do
         case parseTarget "foo" of
@@ -32,9 +30,9 @@ spec = do
           Right _ -> expectationFailure "expected Left for invalid target"
 
     describe "allTargets" $ do
-      it "lists all three targets" $ do
-        length allTargets `shouldBe` (3 :: Int)
-        allTargets `shouldBe` [Opencode, Claude, Generic]
+      it "lists all targets" $ do
+        length allTargets `shouldBe` (2 :: Int)
+        allTargets `shouldBe` [Claude, Generic]
 
   describe "substitutePlaceholders" $ do
     it "replaces all placeholders in a template" $ do

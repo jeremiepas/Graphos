@@ -85,7 +85,7 @@ import qualified Graphos.UseCase.Export as Export
 import Graphos.UseCase.Port.ExportPort (ExportResult(..))
 import Graphos.Domain.Scaffold (parseTarget, ScaffoldRequest(..))
 import Graphos.UseCase.Scaffold (selectTargets, planScaffold, CommandReference(..))
-import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFacts, runInstallSkill)
+import Graphos.Infrastructure.Scaffold.Writer (writeScaffold, gatherDetectionFacts)
 
 
 -- ───────────────────────────────────────────────
@@ -980,10 +980,6 @@ main = do
                   files = planScaffold req ref
               _ <- writeScaffold files
               pure ()
-
-    InstallSkill target -> do
-      let ref = CommandReference renderCommandReference
-      runInstallSkill "0.1.0.0" target ref
 
   where
     opts = info (commandOpts <**> helper)

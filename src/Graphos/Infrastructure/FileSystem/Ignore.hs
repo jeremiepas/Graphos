@@ -259,7 +259,7 @@ hardcodedIgnorePatterns = map (annotatePattern 0) hardcodedDirs
       -- Nix
       , ".direnv"
       -- Graphos
-      , "graphos-out", ".opencode", ".tmp", ".obsidian"
+      , "graphos-out", ".tmp", ".obsidian"
       -- Other
       , ".github", ".DS_Store", ".pdm-build"
       ]

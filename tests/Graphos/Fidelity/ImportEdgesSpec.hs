@@ -59,7 +59,7 @@ depthIndependentIgnoreDirs =
   , ".cargo"
   , ".idea", ".vscode", ".lsp", ".elixir_ls", ".clj-kondo"
   , ".direnv"
-  , "graphos-out", ".opencode", ".tmp", ".obsidian"
+  , "graphos-out", ".tmp", ".obsidian"
   , ".github", ".DS_Store", ".pdm-build"
   ]
 
