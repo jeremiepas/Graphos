@@ -70,13 +70,6 @@ jobs:
           path: dist/release/graphos-linux-x86_64
           retention-days: 14
 
-      - name: Install OpenSpec CLI
-        run: npm install -g openspec
-
-      - name: Validate OpenSpec changes
-        continue-on-error: true
-        run: openspec validate --changes --json
-
   test:
     if: github.actor == 'jeremiepas'
     needs: build

@@ -24,10 +24,6 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
-import OpenSpecView.ChangeList (readAllChangeInfos, ChangeInfo(..))
-import OpenSpecView.ArtifactView (displayChangeArtifacts)
-import OpenSpecView.SpecDiff (diffPaths, renderSpecDiff)
-import OpenSpecView.StateDashboard (showDashboard)
 import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
 import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
 import Graphos.Domain.Impact (Discharge(..), stableSignature)
@@ -989,24 +985,6 @@ main = do
       let ref = CommandReference renderCommandReference
       runInstallSkill "0.1.0.0" target ref
 
-    ViewCmd sub -> do
-      case sub of
-        ViewChanges root -> do
-          infos <- readAllChangeInfos root
-          putStrLn (renderChangesList infos)
-        ViewArtifacts dir -> displayChangeArtifacts dir
-        ViewDiff delta basePath -> do
-          result <- diffPaths delta basePath
-          case result of
-            Left err -> do
-              hPutStrLn stderr ("diff: " ++ err)
-              exitWith (ExitFailure 1)
-            Right changes -> putStrLn (renderSpecDiff specName changes)
-              where specName = reverse (takeWhile (/= '/') (reverse delta))
-        ViewDashboard root -> do
-          out <- showDashboard root
-          putStrLn out
-
   where
     opts = info (commandOpts <**> helper)
       ( fullDesc
@@ -1027,28 +1005,6 @@ toLabeledGraph gr = LG.LabeledGraph
   , LG.gAdjFwd  = gAdjFwd gr
   , LG.gAdjBack = gAdjBack gr
   }
-
-
--- ───────────────────────────────────────────────
--- openspec view changes — compact change listing
--- ───────────────────────────────────────────────
-
-renderChangesList :: [ChangeInfo] -> String
-renderChangesList infos =
-  unlines $
-    [ "OpenSpec Changes"
-    , "----------------"
-    , ""
-    ]
-    ++ map renderRow infos
-    ++ [""]
-  where
-    rpad :: Int -> String -> String
-    rpad n s = let l = length s in if l >= n then s else replicate (n - l) ' ' ++ s
-    renderRow ci =
-      changeName ci ++ "  "
-      ++ rpad 12 (changeStatus ci) ++ "  "
-      ++ rpad 6 (show (changeCompleted ci) ++ "/" ++ show (changeTotal ci))
 
 
 -- ───────────────────────────────────────────────

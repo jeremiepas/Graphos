@@ -406,7 +406,6 @@ Graph {
 | uv | Python package manager |
 | nixd | Nix language server |
 | vscode-langservers-extracted | Language servers |
-| openspec | Specification tooling |
 | llama-cpp | Local LLM inference |
 
 ### 7.4 Local LLM Server
@@ -453,5 +452,4 @@ Graph {
 | `ci:haddock` | `cabal haddock all` | `ci:build@succeeded` |
 | `ci:release-build` | Release build | — |
 | `ci:release-test` | Release tests | `ci:release-build` |
-| `openspec:apply` | Auto-apply pending OpenSpec changes | — |
 | `llama:server` | Start llama.cpp server | `LLAMA_MODEL` env |

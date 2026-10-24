@@ -75,25 +75,12 @@ AVI-1072: add SECURITY.md and community files
 If a change has no tracking issue, use a short conventional-commit style
 subject instead (e.g. `fix(ci): make build offline-first`).
 
-## Spec-affecting changes
-
-Behavioural changes go through [OpenSpec](openspec/):
-
-1. Create a change folder under `openspec/changes/<change-name>/` with
-   `proposal.md`, design notes, and delta specs.
-2. Track implementation progress in `tasks.md`.
-3. Spec conformance is enforced in review — a PR that changes behaviour without
-   a corresponding spec change will be asked to add one.
-
-Pure docs, CI, and tooling changes don't need an OpenSpec change.
-
 ## Pull requests
 
 - Keep PRs **small and focused** — one logical change each.
 - Add or update **tests** for any behaviour change; pure refactorings should
    keep the existing suite green.
 - Add a `CHANGELOG.md` entry for user-visible changes.
-- For behavioural changes, include or reference the OpenSpec change (see above).
 - Describe **what** and **why** in the PR description; the template has a
   checklist.
 

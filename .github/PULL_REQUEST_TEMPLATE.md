@@ -18,7 +18,6 @@ Closes #
 - [ ] Description explains **what** changed and **why**
 - [ ] Tests added or updated for the behaviour change (pure refactorings keep the suite green)
 - [ ] `CHANGELOG.md` entry added for user-visible changes
-- [ ] OpenSpec change included / referenced for behavioural changes (`openspec/changes/<name>/`)
 - [ ] `cabal build` and `cabal test` pass locally
 
 ## Notes for reviewers

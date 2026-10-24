@@ -1,5 +1,0 @@
-name = "EmbedPipeline"
-defaultTargets = ["EmbedPipeline"]
-
-[[lean_lib]]
-name = "EmbedPipeline"
