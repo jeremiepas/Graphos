@@ -21,8 +21,6 @@ module Graphos.CLI.Parser
   , migrateGraphOpts
   , commandOpts
   , granularityReader
-    -- * Install-skill target
-  , InstallSkillTarget(..)
     -- * Command reference rendering
   , renderCommandReference
   ) where
@@ -35,7 +33,6 @@ import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
-import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Domain.Config.Detection (DetectionMode(..))
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
@@ -64,7 +61,6 @@ data Command
   | MigrateGraphCmd FilePath (Maybe FilePath)
 
   | Init (Maybe String)
-  | InstallSkill InstallSkillTarget
   deriving (Show, Eq)
 
 pipelineOpts :: Parser PipelineConfig
@@ -354,34 +350,12 @@ commandOpts = subparser
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
-    <> command "install-skill" (info installSkillOpts (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
     <> command "research" (info (researchOpts <**> helper) (progDesc "Multi-query knowledge research with subgraph extraction"))
     )
   <|> Run <$> pipelineOpts
 
 initOpts :: Parser Command
-initOpts = Init <$> optional (strOption (long "agents" <> metavar "TARGETS" <> help "Scaffold agent integration files. Comma-separated targets: opencode,claude,generic. Use 'auto' to auto-detect from .opencode/ and .claude/ dirs."))
-
-installSkillOpts :: Parser Command
-installSkillOpts = InstallSkill
-  <$> option (eitherReader parseInstallSkillTarget)
-       ( long "target"
-      <> metavar "TARGET"
-      <> help "Assistant target to install skills for. Supported: opencode."
-       )
-
-parseInstallSkillTarget :: String -> Either String InstallSkillTarget
-parseInstallSkillTarget s = case map lowerChar s of
-  "opencode" -> Right OpencodeTarget
-  other      -> Left $ "Unknown install-skill target: " ++ other
-                         ++ ". Supported targets: " ++ showInstallSkillTargets
-  where
-    lowerChar c
-      | 'A' <= c && c <= 'Z' = toEnum (fromEnum c + 32)
-      | otherwise = c
-
-showInstallSkillTargets :: String
-showInstallSkillTargets = "opencode"
+initOpts = Init <$> optional (strOption (long "agents" <> metavar "TARGETS" <> help "Scaffold agent integration files. Comma-separated targets: claude,generic. Use 'auto' to auto-detect from .claude/ dirs."))
 
 -- | Render a compact command/flag reference from the parser.
 -- Produces a fenced code block suitable for embedding in generated docs.

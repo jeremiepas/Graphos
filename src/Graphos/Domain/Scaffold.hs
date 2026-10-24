@@ -22,8 +22,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 data ScaffoldTarget
-  = Opencode
-  | Claude
+  = Claude
   | Generic
   deriving (Eq, Show, Read, Enum, Bounded)
 
@@ -31,17 +30,15 @@ allTargets :: [ScaffoldTarget]
 allTargets = [minBound .. maxBound]
 
 renderTarget :: ScaffoldTarget -> Text
-renderTarget Opencode = "opencode"
 renderTarget Claude   = "claude"
 renderTarget Generic  = "generic"
 
 parseTarget :: Text -> Either Text ScaffoldTarget
 parseTarget t = case T.toLower (T.strip t) of
-  "opencode" -> Right Opencode
   "claude"   -> Right Claude
   "generic"  -> Right Generic
   other      -> Left $ "Unknown agent target: " <> other
-                     <> ". Valid targets: opencode, claude, generic"
+                     <> ". Valid targets: claude, generic"
 
 data ScaffoldFile = ScaffoldFile
   { sfRelativePath :: FilePath
