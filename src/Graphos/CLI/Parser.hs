@@ -2,7 +2,6 @@
 module Graphos.CLI.Parser
   ( -- * Command type
     Command(..)
-  , ViewSubcommand(..)
     -- * Parsers
   , pipelineOpts
   , queryOpts
@@ -59,7 +58,6 @@ data Command
   | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
   | IntentcheckCmd FilePath FilePath [Text] Bool
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
-  | ViewCmd ViewSubcommand
   | LServers
  | Serve FilePath FilePath Int Bool Bool
 
@@ -67,14 +65,6 @@ data Command
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
-  deriving (Show, Eq)
-
--- | Subcommands for the OpenSpec artifact viewer.
-data ViewSubcommand
-  = ViewChanges FilePath
-  | ViewArtifacts FilePath
-  | ViewDiff FilePath FilePath
-  | ViewDashboard FilePath
   deriving (Show, Eq)
 
 pipelineOpts :: Parser PipelineConfig
@@ -339,31 +329,6 @@ impactOpts = ImpactCmd
   <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
   <*> switch (long "gate" <> help "Exit non-zero unless the change is admissible and all specs hold")
 
-viewOpts :: Parser Command
-viewOpts = subparser
-  ( command "changes" (info (fmap ViewCmd viewChangesOpts) (progDesc "List changes and their task status"))
-  <> command "artifacts" (info (fmap ViewCmd viewArtifactsOpts) (progDesc "Show artifacts for a single change"))
-  <> command "diff" (info (fmap ViewCmd viewDiffOpts) (progDesc "Diff two spec files (delta and main)"))
-  <> command "dashboard" (info (fmap ViewCmd viewDashboardOpts) (progDesc "Show aggregate state dashboard"))
-  )
-
-viewChangesOpts :: Parser ViewSubcommand
-viewChangesOpts = ViewChanges
-  <$> strOption (long "root" <> value "openspec/changes" <> metavar "ROOT" <> help "Directory containing change folders (default: openspec/changes)")
-
-viewArtifactsOpts :: Parser ViewSubcommand
-viewArtifactsOpts = ViewArtifacts
-  <$> argument str (metavar "CHANGE_DIR" <> help "Path to a single change directory")
-
-viewDiffOpts :: Parser ViewSubcommand
-viewDiffOpts = ViewDiff
-  <$> argument str (metavar "DELTA" <> help "Delta spec file (newer)")
-  <*> argument str (metavar "MAIN" <> help "Main spec file (baseline)")
-
-viewDashboardOpts :: Parser ViewSubcommand
-viewDashboardOpts = ViewDashboard
-  <$> strOption (long "root" <> value "openspec/changes" <> metavar "ROOT" <> help "Directory containing change folders (default: openspec/changes)")
-
 migrateGraphOpts :: Parser Command
 migrateGraphOpts = MigrateGraphCmd
   <$> strArgument (metavar "GRAPH" <> help "Path to a graph.json in the legacy top-level format")
@@ -386,7 +351,6 @@ commandOpts = subparser
   <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
   <> command "intentcheck" (info (intentcheckOpts <**> helper) (progDesc "Verify intent specs against a graph: violated spec -> non-zero exit, all pass -> zero" <> footer "Example: graphos intentcheck --specs specs.json --graph graphos-out/graph.json"))
   <> command "impact" (info (impactOpts <**> helper) (progDesc "Analyze change impact obligations: per-node discharge status, --gate exits non-zero unless admissible" <> footer "Example: graphos impact --before before.json --after after.json --gate"))
-  <> command "view" (info (viewOpts <**> helper) (progDesc "View OpenSpec changes, artifacts, diffs, and dashboard"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))

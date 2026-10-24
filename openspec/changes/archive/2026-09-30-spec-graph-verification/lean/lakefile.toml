@@ -1,5 +1,0 @@
-name = "SpecCheck"
-defaultTargets = ["SpecCheck"]
-
-[[lean_lib]]
-name = "SpecCheck"

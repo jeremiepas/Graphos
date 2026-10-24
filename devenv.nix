@@ -16,7 +16,6 @@ let
     uv
     nixd
     vscode-langservers-extracted
-    openspec
     llama-cpp
     # Graphos Studio toolchain (studio/, Elm SPA — openspec/changes/elm-graph-studio)
     elmPackages.elm
@@ -175,75 +174,6 @@ in
       '';
     };
 
-
-
-    # Apply OpenSpec changes headlessly — never stops, runs all pending changes.
-    # One opencode run per task (keeps context small, avoids overflow).
-    # Run:  devenv tasks run openspec:apply
-    # Stop: Ctrl-C or kill the process.
-    "openspec:apply" = {
-      exec = ''
-        LOGFILE="/tmp/opencode-openspec-apply.log"
-        echo "=== openspec:apply started at $(date) ===" > "$LOGFILE"
-
-        # Find next change with undone tasks
-        find_next_change() {
-          for dir in ~/Documents/Graphos/openspec/changes/*/; do
-            [ -f "$dir/tasks.md" ] || continue
-            if grep -q '^\- \[ \]' "$dir/tasks.md" 2>/dev/null; then
-              basename "$dir"
-              return 0
-            fi
-          done
-          return 1
-        }
-
-        while true; do
-          CHANGE=$(find_next_change)
-          if [ -z "$CHANGE" ]; then
-            echo "=== No more changes with pending tasks. All done! ===" | tee -a "$LOGFILE"
-            break
-          fi
-
-          echo "=== Starting change: $CHANGE ===" | tee -a "$LOGFILE"
-          TASKNUM=0
-
-          while true; do
-            # Check if change still has undone tasks
-            if ! grep -q '^\- \[ \]' ~/Documents/Graphos/openspec/changes/"$CHANGE"/tasks.md 2>/dev/null; then
-              echo "=== Change $CHANGE: all tasks complete! ===" | tee -a "$LOGFILE"
-              break
-            fi
-
-            TASKNUM=$((TASKNUM + 1))
-            echo "--- $CHANGE task #$TASKNUM ---" | tee -a "$LOGFILE"
-
-            # One opencode run: find first unchecked task, implement it, mark done
-            opencode run \
-              --model "executor/qwen3.8-executor" \
-              --auto \
-              "Read the file openspec/changes/$CHANGE/tasks.md. Find the first line that starts with '- [ ]' (unchecked task). Read its description. Implement that task using the edit, bash, read, and grep tools. Then edit tasks.md to change that '- [ ]' to '- [x]'. Stop after marking it done. Do NOT read any openspec context files — just tasks.md and the source files you need." \
-              >> "$LOGFILE" 2>&1
-
-            EXIT_CODE=$?
-            echo "opencode exit=$EXIT_CODE" >> "$LOGFILE"
-
-            # Never stop on errors — sleep and retry
-            if [ $EXIT_CODE -ne 0 ]; then
-              echo "opencode error (code $EXIT_CODE), retrying in 10s..." | tee -a "$LOGFILE"
-              sleep 10
-            else
-              sleep 2
-            fi
-          done
-
-          echo "=== Moving to next change ===" | tee -a "$LOGFILE"
-        done
-
-        echo "=== openspec:apply finished at $(date) ===" | tee -a "$LOGFILE"
-      '';
-    };
-
     # Start the local llama.cpp server hosting Qwen 3.6 (long-running).
     # Run:  devenv tasks run llama:server
     # Requires LLAMA_MODEL=/path/to/qwen3.6.gguf.
@@ -339,7 +269,6 @@ in
 
   # Environment variables
   env.EXTRA_LIBRARY_PATH = lib.makeLibraryPath systemDeps;
-  env.OPENCODE_EXPERIMENTAL_LSP_TOOL = "true";
   env.LLAMA_BASEURL = "http://localhost:8080/v1";
   env.ORCHESTRATOR_POLL_INTERVAL = "300";
 

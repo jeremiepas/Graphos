@@ -20,12 +20,6 @@ tmp/
 graphos-out.staging-*/
 .worktrees/
 .paperclip/worktrees/
-# .opencode local dev config (agent + skills tracked, rest ignored)
-.opencode/*
-!.opencode/agent/
-!.opencode/agent/**
-!.opencode/skills/
-!.opencode/skills/**
 node_modules/
 traces/
 monitoring/prometheus/data/
@@ -35,9 +29,6 @@ monitoring/grafana/data/
 .aider*
 .env
 
-# Personal machine config (contains private IPs / local LLM endpoints)
-opencode.json
-opencode.jsonc
 *.heapsnapshot
 __pycache__/
 .lake/

@@ -321,22 +321,6 @@ library
      , unix                  >= 2.8
 
 -- ───────────────────────────────────────────────
--- openspec-view: workspace metadata viewer (base-only)
--- ───────────────────────────────────────────────
-library openspec-view
-  import:          shared
-  hs-source-dirs:  openspec-view
-  exposed-modules:
-                    OpenSpecView
-                    OpenSpecView.ChangeList
-                    OpenSpecView.ArtifactView
-                    OpenSpecView.SpecDiff
-                     OpenSpecView.StateDashboard
-  build-depends:   base
-                  , directory
-                  , time
-
--- ───────────────────────────────────────────────
 -- Executable
 -- ───────────────────────────────────────────────
 executable graphos
@@ -347,7 +331,6 @@ executable graphos
   build-depends:
       base
     , graphos
-    , openspec-view
     , optparse-applicative >= 0.17
     , text
     , containers
@@ -460,10 +443,6 @@ test-suite graphos-test
     Graphos.UseCase.InferBetweennessWiringSpec
     Graphos.UseCase.IngestSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
-      OpenSpecView.ChangeListSpec
-      OpenSpecView.ArtifactViewSpec
-      OpenSpecView.SpecDiffSpec
-      OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
@@ -474,7 +453,6 @@ test-suite graphos-test
   build-depends:
        base
      , graphos
-     , openspec-view
      , hspec                >= 2.10
     , QuickCheck           >= 2.14
     , aeson
