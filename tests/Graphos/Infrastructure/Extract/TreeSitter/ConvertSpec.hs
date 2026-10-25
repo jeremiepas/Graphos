@@ -5,7 +5,7 @@ import Test.Hspec
 import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (ShortText, fromText, toText)
 
 import Graphos.Domain.Types
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
@@ -112,6 +112,58 @@ nestedCallsFixture =
                 , tsNode "arguments" "()" [] ] ] ] ]
         ]
     ]
+
+-- | A bare type reference with no enclosing type declaration. Every node here
+-- is either a `type_identifier` reference or an unrelated statement/parameter
+-- node; none of them may emit a `Type` node after AVI-1471.
+refOnlyFixture :: TSNodeInfo
+refOnlyFixture =
+  tsNode "program" "module"
+    [ tsNode "expression_statement" "const x: SomeType = 1"
+        [ tsNode "typed_parameter" "SomeType" []
+        , tsNode "type_identifier" "SomeType" []
+        ]
+    , tsNode "expression_statement" "const y: OtherType = 2"
+        [ tsNode "typed_parameter" "OtherType" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    ]
+
+-- | A real type-alias declaration whose declared name and referenced type are
+-- themselves bare `type_identifier` reference nodes. The declaration must emit
+-- exactly one `Type` node; its inner `type_identifier`s must not.
+typeDeclFixture :: TSNodeInfo
+typeDeclFixture =
+  tsNode "program" "module"
+    [ tsNode "type_alias" "MyType"
+        [ tsNode "type_identifier" "MyType" []
+        , tsNode "equals_sign" "=" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    ]
+
+-- | A declaration mix: a type alias plus an interface and an enum, each carrying
+-- bare `type_identifier` reference nodes. Pins that AVI-1471 removes only the
+-- spurious `Type` from references while Interface/Enum still emit.
+typeRefsFixture :: TSNodeInfo
+typeRefsFixture =
+  tsNode "program" "module"
+    [ tsNode "type_alias" "MyType"
+        [ tsNode "type_identifier" "MyType" []
+        , tsNode "equals_sign" "=" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    , tsNode "interface_declaration" "MyInterface"
+        [ tsNode "type_identifier" "SomeMixin" [] ]
+    , tsNode "enum_declaration" "MyEnum"
+        [ tsNode "type_identifier" "SomeBase" [] ]
+    ]
+
+-- | Whether a node's kind is the generic `Type` (the kind produced by
+-- 'tsTypeToKind' from a type *declaration*). After AVI-1471 only real
+-- declarations emit it, never bare `type_identifier` references.
+isTypeKind :: Maybe ShortText -> Bool
+isTypeKind = (== Just (fromText "Type"))
 
 -- | Only the `calls` edges, in document order.
 callEdges :: Granularity -> FilePath -> TSNodeInfo -> [Edge]
@@ -222,3 +274,21 @@ spec = do
         containsCount `shouldBe` 3
         importsCount  `shouldBe` 1
         dependsCount  `shouldBe` 0
+
+  describe "type node emission (AVI-1471)" $ do
+    it "emits exactly one Type node for a real type declaration" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/types.ts" [typeDeclFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      filter isTypeKind kinds `shouldBe` [Just (fromText "Type")]
+
+    it "emits no Type node for bare type_identifier references" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/references.ts" [refOnlyFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      all (not . isTypeKind) kinds `shouldBe` True
+
+    it "still emits Interface and Enum alongside the Type declaration" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/mix.ts" [typeRefsFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      kinds `shouldSatisfy` (elem (Just (fromText "Type")))
+      kinds `shouldSatisfy` (elem (Just (fromText "Interface")))
+      kinds `shouldSatisfy` (elem (Just (fromText "Enum")))

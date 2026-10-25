@@ -69,7 +69,7 @@ apiSurfaceTypes =
   , "class_declaration", "class_definition", "class"
   , "interface_declaration", "interface_definition", "interface"
   , "type_declaration", "type_alias_declaration", "type_definition"
-  , "type_alias", "type_item", "type_identifier"
+  , "type_alias", "type_item"
   , "enum_declaration", "enum_definition", "enum"
   , "enum_item"
   , "variable_declaration", "lexical_declaration", "variable_declarator"
@@ -568,7 +568,6 @@ tsTypeToKind t = case t of
   "except_clause" -> "Except"
   -- Go-specific
   "package_clause" -> "Module"
-  "type_identifier" -> "Type"
   -- Rust-specific
   "extern_item" -> "Extern"
   "attribute_item" -> "Attribute"
