@@ -3,8 +3,11 @@ module Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec where
 
 import Test.Hspec
 import Data.Maybe (fromMaybe, listToMaybe)
+import Data.List (sort)
+import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Short (fromText, toText)
 
 import Graphos.Domain.Types
@@ -117,12 +120,12 @@ nestedCallsFixture =
 -- | Only the `calls` edges, in document order.
 callEdges :: Granularity -> FilePath -> TSNodeInfo -> [Edge]
 callEdges gran filePath fixture =
-  filter ((== Calls) . edgeRelation) (fst (tsNodeToGraphEdges gran filePath Nothing fixture))
+  filter ((== Calls) . edgeRelation) (fst (tsNodeToGraphEdges gran filePath Nothing Nothing fixture))
 
 -- | All edges (document order) for a given extraction.
 allEdges :: Granularity -> FilePath -> TSNodeInfo -> [Edge]
 allEdges gran filePath fixture =
-  fst (tsNodeToGraphEdges gran filePath Nothing fixture)
+  fst (tsNodeToGraphEdges gran filePath Nothing Nothing fixture)
 
 -- | Count edges of a given relation in an extraction.
 countRel :: Relation -> Granularity -> FilePath -> TSNodeInfo -> Int
@@ -176,6 +179,7 @@ spec = do
       let ex = tsNodesToExtraction GranularityFile "src/service.ts" [tsFixture]
       Map.size (extractionNodes ex) `shouldBe` 1
       map nodeKind (Map.elems (extractionNodes ex)) `shouldBe` [Just (fromText "Module")]
+
 
   describe "calls edge emission (AVI-1447)" $ do
 
@@ -249,3 +253,75 @@ spec = do
           importTargets =
             [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
       importTargets `shouldSatisfy` (not . null)
+
+  describe "bounded node identity (AVI-1452)" $ do
+    -- | The `src` directory hashes to 48612 under the bounded-identity scheme;
+    -- see the id-layout test. Hard-coded so the layout assertion is precise.
+    let srcHash = "48612"
+        -- The fixtures below emit exactly one node, so a single extraction is
+        -- safe. Avoid 'head' (partial, flagged -Wx-partial under -Werror): the
+        -- empty case is unreachable for these fixtures and fails loudly.
+        oneNode = \m -> case Map.elems m of
+                          (n : _) -> n
+                          []      -> error "oneNode: empty extraction"
+
+    it "(a) emits `<dirHash>_<stem>_<kind>:<ident>` ids" $ do
+      let ex = tsNodesToExtraction GranularityFunction "src/service.ts"
+             [tsNode "function_declaration" "getUser" []]
+          node = oneNode (extractionNodes ex)
+      T.unpack (toText (nodeLabel node)) `shouldBe` "getUser"
+      T.unpack (nodeId node) `shouldBe` srcHash <> "_service_Function:getUser"
+
+    it "(b) appends `#L<line>` only to colliding ids" $ do
+      let a = tsNode "function_declaration" "helper" []
+          b = a { tsnStartRow = 10 }
+          c = a { tsnStartRow = 20 }
+          ids = sort (map (T.unpack . nodeId)
+                (Map.elems (extractionNodes
+                  (tsNodesToExtraction GranularityFunction
+                     "src/service.ts" [a, b, c]))))
+      ids `shouldBe`
+        [ srcHash <> "_service_Function:helper"
+        , srcHash <> "_service_Function:helper#L11"
+        , srcHash <> "_service_Function:helper#L21"
+        ]
+
+    it "(c) produces the same id set regardless of input order" $ do
+      let mk = \r -> (tsNode "function_declaration" "helper" []) { tsnStartRow = r }
+          ids1 = sort (map (T.unpack . nodeId)
+                (Map.elems (extractionNodes
+                  (tsNodesToExtraction GranularityFunction
+                     "src/service.ts" [mk 0, mk 10, mk 20]))))
+          ids2 = sort (map (T.unpack . nodeId)
+                (Map.elems (extractionNodes
+                  (tsNodesToExtraction GranularityFunction
+                     "src/service.ts" [mk 20, mk 0, mk 10]))))
+      ids1 `shouldBe` ids2
+
+    it "(d) strips raw source formatting (whitespace/newlines) from ids" $ do
+      let raw = "const\n\nuser = dbGet(id)"
+          ex = tsNodesToExtraction GranularityFunction "src/service.ts"
+               [tsNode "lexical_declaration" raw []]
+          node = oneNode (extractionNodes ex)
+          idStr = T.unpack (nodeId node)
+      -- Irregular whitespace and newlines must not leak into the id ...
+      "const\n\nuser" `T.isInfixOf` (T.pack idStr) `shouldBe` False
+      "\n" `T.isInfixOf` (T.pack idStr) `shouldBe` False
+      -- ... while the collapsed identifier form does.
+      "const user = dbGet" `T.isInfixOf` (T.pack idStr) `shouldBe` True
+
+    it "(e) bounds every node's identity fields under 512 bytes on a 5000-node fixture" $ do
+      let mk = \i -> (tsNode "function_declaration"
+                           (T.pack (show i ++ replicate 1000 'c')) []) { tsnStartRow = i }
+          nodes = [mk i | i <- [0..4999]]
+          ex = tsNodesToExtraction GranularityFunction "src/big.ts" nodes
+          sigBytes n = case nodeSignature n of
+            Just s -> BS.length (encodeUtf8 (toText s))
+            Nothing -> 0
+          fieldBytes n = BS.length (encodeUtf8 (nodeId n))
+                       + BS.length (encodeUtf8 (toText (nodeLabel n)))
+                       + sigBytes n
+          violators = [n | n <- Map.elems (extractionNodes ex), fieldBytes n >= 512]
+      Map.size (extractionNodes ex) `shouldBe` 5000
+      length violators `shouldBe` 0
+
