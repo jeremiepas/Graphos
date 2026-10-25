@@ -99,7 +99,7 @@ spec = do
     describe "Convert - Imports/Exports" $ do
       it "produces an imports edge for an import declaration" $ do
         let node = tsNode "import_declaration" "import { db } from './db.js'" []
-            (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" (Just "module") node
+            (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" Nothing (Just "module") node
             imports = filter ((Imports ==) . edgeRelation) edges
         length imports `shouldBe` 1
         case imports of
@@ -111,7 +111,7 @@ spec = do
 
       it "produces an imports edge with re-export marker for export-from" $ do
         let node = tsNode "export_statement" "export { x } from './y.js'" []
-            (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" (Just "module") node
+            (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" Nothing (Just "module") node
             imports = filter ((Imports ==) . edgeRelation) edges
         length imports `shouldBe` 1
         case imports of
@@ -123,7 +123,7 @@ spec = do
       it "produces exactly one external node for a package imported by N files, with N edges" $ do
         let mkImport = tsNode "import_declaration" "import { z } from 'zod'" []
             files = ["src/a.ts", "src/b.ts", "src/c.ts"]
-            results = map (\fp -> tsNodeToGraphEdges GranularityFine fp (Just "module") mkImport) files
+            results = map (\fp -> tsNodeToGraphEdges GranularityFine fp Nothing (Just "module") mkImport) files
             allEdges = concatMap fst results
             allNodes = concatMap snd results
             importEdges = filter ((Imports ==) . edgeRelation) allEdges
@@ -141,7 +141,7 @@ spec = do
       it "integration: imports edge endpoints have different source_file values" $ do
         let node = tsNode "import_declaration" "import { cfg } from './config.js'" []
             filePath = "src/service.ts"
-            (edges, targetNodes) = tsNodeToGraphEdges GranularityFine filePath (Just "module") node
+            (edges, targetNodes) = tsNodeToGraphEdges GranularityFine filePath Nothing (Just "module") node
             importEdges = filter ((Imports ==) . edgeRelation) edges
         length importEdges `shouldBe` 1
         case (importEdges, targetNodes) of
@@ -168,8 +168,12 @@ spec = do
             allEdges = Map.elems (extractionEdges ex)
             importNodes = filter (\n -> nodeKind n == Just (fromText "Import")) allNodes
             importEdges = filter ((Imports ==) . edgeRelation) allEdges
+            -- The module node is emitted by 'makeNode' with a bounded
+            -- `<dirHash>_<stem>_<kind>:<ident>` seed id (AVI-1452), so we
+            -- compare the edge source against that node's id as it actually
+            -- appears in the graph, not the legacy 'makeNodeId' path value.
+            moduleNodeIds = map nodeId (filter (\n -> nodeKind n == Just (fromText "Module")) allNodes)
         length importNodes `shouldBe` 1
         length importEdges `shouldSatisfy` (>= 1)
-        -- The importing file's module node is the source; verify an imports edge exists
-        any (\e -> edgeSource e == makeNodeId "src/file.ts" "module") importEdges `shouldBe` True
+        any (\e -> edgeSource e `elem` moduleNodeIds) importEdges `shouldBe` True
 
