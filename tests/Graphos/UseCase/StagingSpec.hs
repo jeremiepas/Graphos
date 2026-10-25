@@ -120,6 +120,85 @@ spec = do
         oldKept `shouldBe` True
         newKept `shouldBe` True
 
+    it "survives a rebuild: a foreign file placed in the output is preserved" $ do
+      -- Regression (AVI-1443): a staged rebuild used to delete any foreign
+      -- entry in the output directory. A user file must survive, while the
+      -- owned artifact is refreshed to the new version.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> "notes.txt") "user notes"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        foreignKept <- doesFileExist (out </> "notes.txt")
+        foreignKept `shouldBe` True
+        foreignContent <- TIO.readFile (out </> "notes.txt")
+        foreignContent `shouldBe` "user notes"
+        graphV2 <- TIO.readFile (out </> "graph.json")
+        graphV2 `shouldBe` "v2"
+
+    it "survives a rebuild: a nested foreign directory is carried verbatim" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        createDir (out </> "user-dataset")
+        writeFile (out </> "user-dataset" </> "rows.csv") "a,b,c"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        dirKept <- doesDirectoryExist (out </> "user-dataset")
+        dirKept `shouldBe` True
+        rows <- TIO.readFile (out </> "user-dataset" </> "rows.csv")
+        rows `shouldBe` "a,b,c"
+        -- The owned artifact was refreshed, not merged with stale content.
+        graphV2 <- TIO.readFile (out </> "graph.json")
+        graphV2 `shouldBe` "v2"
+
+    it "refreshes an owned directory (obsidian/) instead of merging stale content" $ do
+      -- Owned directories are excluded from carry-over (design D2): the fresh
+      -- build's obsidian/ must replace the previous run's, not merge with it.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "obsidian")
+          writeFile (staging </> "obsidian" </> "old.md") "stale"
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "obsidian")
+          writeFile (staging </> "obsidian" </> "new.md") "fresh"
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        staleGone <- doesFileExist (out </> "obsidian" </> "old.md")
+        staleGone `shouldBe` False
+        freshThere <- doesFileExist (out </> "obsidian" </> "new.md")
+        freshThere `shouldBe` True
+        content <- TIO.readFile (out </> "obsidian" </> "new.md")
+        content `shouldBe` "fresh"
+        graphV2 <- TIO.readFile (out </> "graph.json")
+        graphV2 `shouldBe` "v2"
+
+    it "preserves unknown / hidden entries regardless of name" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> ".hidden-config") "keep me"
+        writeFile (out </> "weird-name-123.dat") "123"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        hidden <- TIO.readFile (out </> ".hidden-config")
+        hidden `shouldBe` "keep me"
+        weird <- TIO.readFile (out </> "weird-name-123.dat")
+        weird `shouldBe` "123"
+
     it "runs on a missing output directory (first build)" $ do
       withSystemTempDirectory "graphos-staging" $ \root -> do
         let out = root </> "nested" </> "graphos-out"
