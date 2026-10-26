@@ -31,7 +31,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
    ) where
 
 
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, find)
 import System.FilePath (takeExtension)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -258,17 +258,28 @@ tsNodeToGraphEdges gran filePath parentLabel node =
   in (myEdges ++ bodyUseEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
 
       where
+        -- | First direct child of the given type, if any.
+        firstChildOfType :: String -> [TSNodeInfo] -> Maybe TSNodeInfo
+        firstChildOfType t = find (\c -> tsnType c == t)
+
+        -- | Extract the import/export specifier: the direct @string@ child of
+        -- the declaration node — i.e. the import path (the token after @from@).
+        --
+        -- Sourcing the specifier from the AST rather than scanning the whole
+        -- node text is what keeps template literals and prose that merely
+        -- contain the word @from@ (issue #77) from producing bogus @imports@
+        -- edges. A template literal's text lives under a nested
+        -- @template_string@ node, so it is never a direct @string@ child of an
+        -- import/export declaration and can never be mistaken for a specifier.
         extractSpecifier :: TSNodeInfo -> Maybe (FilePath, Text)
         extractSpecifier n =
-          let tailText = extractTail (tsnText n)
-          in if T.null tailText
-             then Nothing
-             else let raw = T.strip (T.drop (T.length "from ") tailText)
-                      rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
-                      specifier = stripQuotes (T.stripEnd rawNoSemi)
-                  in if T.null specifier
-                     then Nothing
-                     else resolveImport filePath (T.unpack specifier)
+          case firstChildOfType "string" (tsnChildren n) of
+            Just child ->
+              let specifier = stripQuotes (T.strip (tsnText child))
+              in if T.null specifier
+                   then Nothing
+                   else resolveImport filePath (T.unpack specifier)
+            Nothing -> Nothing
 
 -- | Strip surrounding single/double quotes/backticks from a specifier.
 stripQuotes :: Text -> Text
