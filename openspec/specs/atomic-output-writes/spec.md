@@ -27,6 +27,28 @@ output directory only after all artifacts are written successfully.
 - **WHEN** a full rebuild fails partway through
 - **THEN** the existing `graphos-out/` contents are unchanged
 
+### Requirement: Preserve non-regenerated files across staged rebuilds
+
+The system SHALL preserve, across a staged full rebuild, every entry in the
+output directory that Graphos does not regenerate. Graphos-owned artifacts —
+`graph.json`, `graph.checkpoint.json`, `GRAPH_REPORT.md`, `graph.html`,
+`community_graph.json`, `embeddings.json`, and any other name listed in
+`ownedArtifacts` — are refreshed by the atomic swap; every other entry,
+including user files, hidden files, and unknown directories, is carried into
+staging before the rename and survives the rebuild unchanged. Owned directories
+(such as `obsidian/`) are fully replaced by the fresh build rather than merged
+with the previous run's contents.
+
+#### Scenario: foreign file survives a rebuild
+- **WHEN** a full rebuild runs against an output directory that already contains a file Graphos does not own
+- **THEN** that file is preserved with its original content after the rebuild
+- **AND** the owned artifacts are refreshed to the new build's content
+
+#### Scenario: owned directory is replaced, not merged
+- **WHEN** a full rebuild regenerates an owned directory such as `obsidian/`
+- **THEN** the new build's contents fully replace the previous directory
+- **AND** stale entries left by the prior run are not present in the output
+
 ### Requirement: Startup graph validation
 
 The system SHALL validate an existing `graph.json` before use and fail with a

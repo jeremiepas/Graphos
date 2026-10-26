@@ -19,7 +19,7 @@ module Graphos.UseCase.Pipeline.Staging
   , stagingDirPrefix
   , prevDirPrefix
   , relocateStagedPath
-  , carryOverEntries
+  , ownedArtifacts
   ) where
 
 import Control.Exception
@@ -37,9 +37,11 @@ import Data.Time.Format (defaultTimeLocale, formatTime)
 import System.Directory
   ( createDirectoryIfMissing
   , doesDirectoryExist
+  , doesPathExist
   , listDirectory
   , removeDirectoryRecursive
   , renameDirectory
+  , renameFile
   )
 import System.FilePath
   ( isPathSeparator
@@ -127,22 +129,54 @@ moveCacheIntoStaging oldOut staging = do
       pure isThere
     else pure False
 
--- | Move persistent state (cache, memory, ...) from the old output directory
--- into the staging directory before the swap, so a rebuild does not lose it.
--- Best-effort: entries that cannot be moved are left in place.
+-- | Carry over, from the old output directory into the staging directory, every
+-- entry Graphos does not regenerate before the swap, so a rebuild never
+-- discards a file the user (or a plugin) placed in the output directory.
+--
+-- Best-effort: entries that cannot be moved are left in place. Graphos-owned
+-- regenerated artifacts (see 'ownedArtifacts') are intentionally left in the
+-- old output and replaced by the fresh build on the swap; owned directories
+-- such as `obsidian/` are excluded so the swap does not merge a fresh build
+-- with stale files from the previous run.
 carryOverState :: FilePath -> FilePath -> IO ()
-carryOverState oldOut staging =
-  mapM_ moveOne carryOverEntries
+carryOverState oldOut staging = do
+  entries <- listDirectorySafe oldOut
+  mapM_ (\name -> moveIfPresent name oldOut staging)
+        (filter notOwned entries)
   where
-    moveOne name = do
-      let src = oldOut </> name
-          dst = staging </> name
-      srcExists <- doesDirectoryExist src
-      when srcExists $
-        renameDirectory src dst `catch` ignoreErr
+    moveIfPresent name src dst =
+      let p = src </> name in
+        doesDirectoryExist p >>= \isDir ->
+          case isDir of
+            True  -> renameDirectory p (dst </> name)  `catch` ignoreErr
+            _     -> doesPathExist p >>= \exists ->
+                      when exists (renameFile p (dst </> name) `catch` ignoreErr)
+    notOwned name = name `notElem` ownedArtifacts
+    listDirectorySafe dir =
+      listDirectory dir `catch` \(_ :: SomeException) -> pure []
 
-carryOverEntries :: [FilePath]
-carryOverEntries = ["cache", "memory", "debug", "traces"]
+-- | Graphos-owned artifacts regenerated inside the staging directory during a
+-- build. These are left in the old output and replaced on the swap; every
+-- other entry in the output directory is treated as foreign and preserved.
+--
+-- Mirrors the file paths the rest of the code base writes into the output
+-- directory (Export.hs, Incremental.hs, the pipeline config, and the cypher /
+-- obsidian export ports). It is intentionally a short allowlist of Graphos
+-- names: any future Graphos artifact is owned simply by adding its name here,
+-- and any future foreign entry survives without a code change.
+ownedArtifacts :: [FilePath]
+ownedArtifacts =
+  [ "graph.json"
+  , "graph.checkpoint.json"
+  , "GRAPH_REPORT.md"
+  , "graph.html"
+  , "community_graph.json"
+  , "embeddings.json"
+  , "index.json"
+  , "obsidian"
+  , "graph.cypher"
+  , "memgraph.cypher"
+  ]
 
 newStagingPath :: FilePath -> IO FilePath
 newStagingPath final = do
@@ -205,15 +239,6 @@ sweepStaleDirs final = do
   mapM_ (\d -> removeDirectoryRecursive (takeDirectory final </> d) `catch` ignoreErr) stale
   where
     hasDirPrefix p s = take (length p) s == p
-
--- | Persistent state entries inside the output directory that a rebuild does
--- not regenerate: the extraction cache, the conversation memory, debug trace
--- files and directories. These are moved from the old output into the staging
--- directory right before the swap so they survive the rebuild.
---
--- This list must mirror the persistent state the rest of the code base writes
--- into the output directory; it is intentionally free of generated artifacts
--- (reports, graphs, HTML) that a rebuild regenerates anyway.
 
 -- | Rewrite a path that pointed into the staging directory to point into the
 -- final output directory (used to fix up result paths after the swap).
