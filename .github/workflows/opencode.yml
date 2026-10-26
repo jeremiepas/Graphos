@@ -17,6 +17,11 @@ jobs:
       )
     runs-on: ubuntu-latest
     permissions:
+      # AVI-1488: required — the action defaults to `use_github_token: false`
+      # and exchanges this OIDC token for an OpenCode App token, which is what
+      # lets it reply to the triggering comment without a write-scoped
+      # GITHUB_TOKEN. Do not drop unless `use_github_token: true` is set and
+      # issues/pull-requests are widened to write.
       id-token: write
       contents: read
       pull-requests: read
@@ -27,8 +32,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # AVI-1488 (SEC-2): pin to an immutable commit, not the mutable `@latest`
+      # tag (which resolved to stale March-2026 code at scan time). Review the
+      # `github/` action tree at this SHA before bumping the pin.
       - name: Run opencode
-        uses: anomalyco/opencode/github@latest
+        uses: anomalyco/opencode/github@148842ef7cb1bc34192b3fff57d0f9721ab9c801 # v1.19.4
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
         with:

@@ -36,11 +36,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install elan
+      # AVI-1488 (SEC-2): bootstrap elan from an immutable release asset with a
+      # pinned SHA-256 instead of piping a moving-branch script into a shell.
+      # `ubuntu-latest` is x86_64; adjust the asset name if the runner changes.
+      # Bump ELAN_VERSION and ELAN_SHA256 together when upgrading elan.
+      - name: Install elan (pinned release + checksum)
         working-directory: .
+        env:
+          ELAN_VERSION: v4.2.4
+          ELAN_SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
         run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain none
+          curl -sSfL -o elan-init.tar.gz \
+            "https://github.com/leanprover/elan/releases/download/${ELAN_VERSION}/elan-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ELAN_SHA256}  elan-init.tar.gz" | sha256sum -c -
+          tar xzf elan-init.tar.gz elan-init
+          ./elan-init -y --default-toolchain none
+          rm -rf elan-init elan-init.tar.gz
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Cache toolchain and lake build
