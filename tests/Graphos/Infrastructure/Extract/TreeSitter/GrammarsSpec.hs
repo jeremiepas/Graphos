@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | End-to-end grammar checks: real tree-sitter parse through the FFI binding,
 -- then conversion at the default 'GranularityFunction'. Guards the vendored
 -- grammars' ABI (an incompatible parser.c makes 'parseWithGrammar' fail) and
@@ -6,11 +7,13 @@
 module Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec (spec) where
 
 import Test.Hspec
+import Control.Exception (catch, IOException)
 import Data.ByteString (ByteString)
 import Data.Maybe (isJust, mapMaybe)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Text.Short (toText)
 
 import Graphos.Domain.Config (Granularity(..), ExtractorConfig(..), defaultExtractors)
@@ -40,6 +43,26 @@ hasNode nodes kind needle =
 
 kinds :: [(Text, Text)] -> [Text]
 kinds = map fst
+
+-- | Count nodes with a given node kind.
+countKind :: Text -> [(Text, Text)] -> Int
+countKind k = length . filter ((== k) . fst)
+
+-- | Read a source file as bytes, turning a missing file into a clear test
+-- failure (the fixture lives at a repo-relative path; we run from the repo
+-- root). Guards against silently passing when run from the wrong working dir.
+readFixture :: String -> IO ByteString
+readFixture path =
+  (TE.encodeUtf8 . T.pack <$> readFile path)
+    `catch` \(_ :: IOException) ->
+      expectationFailure ("could not read fixture " ++ path) >> pure ""
+
+-- | Assert that no node carries the given exact label (substring-insensitive
+-- on purpose: a declaration's full text may embed a reference name). This is
+-- how we verify a bare @type_identifier@ reference has been dropped.
+noNodeWithLabel :: [(Text, Text)] -> Text -> Expectation
+noNodeWithLabel nodes needle =
+  nodes `shouldNotSatisfy` any (\(_, l) -> l == needle)
 
 spec :: Spec
 spec = describe "tree-sitter grammars" $ do
@@ -105,3 +128,20 @@ spec = describe "tree-sitter grammars" $ do
   it "JSON: one document node per file at file granularity" $ do
     ns <- extract "json" GranularityFile "a.json" "{\"name\": \"shop\", \"items\": [1, 2]}"
     kinds ns `shouldBe` ["Document"]
+
+  it "TypeScript: only declared types/enum/interface kept; bare references dropped (AVI-1440)" $ do
+    src <- readFixture "example/ts-lsp-test/src/types.ts"
+    ns <- extract "typescript" GranularityFunction "types.ts" src
+    -- Declared declarations survive with their real kinds
+    hasNode ns "Interface" "interface User"
+    hasNode ns "Interface" "interface CreateUserRequest"
+    hasNode ns "Enum" "enum UserRole"
+    hasNode ns "Type" "type UserId"
+    -- Only the `type UserId = number` alias yields kind "Type"; every bare type
+    -- reference (the dropped `type_identifier`) would previously have too, so
+    -- exactly one Type node must remain.
+    countKind "Type" ns `shouldBe` 1
+    -- The referenced names never appear as their own node labels.
+    noNodeWithLabel ns "Date"
+    noNodeWithLabel ns "number"
+    noNodeWithLabel ns "string"
