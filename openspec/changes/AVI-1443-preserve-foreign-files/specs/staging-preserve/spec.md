@@ -51,9 +51,10 @@ lost.
 ### Requirement: Replace owned regenerated artifacts on the swap
 
 Graphos SHALL replace, on the swap, the artifacts it regenerates (`graph.json`,
-`graph.checkpoint.json`, `GRAPH_REPORT.md`, `graph.html`, `community_graph.json`,
-`embeddings.json`, `index.json`, `graph.cypher`, `memgraph.cypher`, `obsidian/`);
-these owned entries are left in the old output and overwritten by the fresh build.
+`graph.checkpoint.json`, `pipeline.checkpoint.json`, `GRAPH_REPORT.md`,
+`graph.html`, `community_graph.json`, `embeddings.json`, `index.json`,
+`graph.cypher`, `memgraph.cypher`, `obsidian/`); these owned entries are left in
+the old output and overwritten by the fresh build.
 
 - **Plan**: the owned allowlist (`ownedArtifacts`) names these regenerable
   artifacts; `carryOverState` skips them so the swap replaces them.
@@ -66,6 +67,31 @@ these owned entries are left in the old output and overwritten by the fresh buil
 - **WHEN** the output is rebuilt with `--fresh -o <out>`
 - **THEN** `graph.json`, `GRAPH_REPORT.md` and `community_graph.json` are present
   and contain the fresh run's contents (not the previous run's).
+
+#### Scenario: a stale pipeline checkpoint is not resurrected
+
+- **WHEN** a previous run left `pipeline.checkpoint.json` in `<out>` and the
+  output is rebuilt successfully
+- **THEN** `pipeline.checkpoint.json` is not present afterwards, because the
+  fresh build clears resume state and the old file must not be carried over.
+
+### Requirement: Never overwrite a fresh staged artifact with a carried-over copy
+
+`carryOverState` SHALL skip any entry whose name already exists in the staging
+directory, so a stale entry in the old output can never replace the artifact the
+fresh build just wrote.
+
+- **Plan**: guard the move with an existence check on the staging destination.
+- **Do**: in `UseCase/Pipeline/Staging.hs`, test `doesPathExist (staging </> name)`
+  before renaming and leave both copies alone when it is true.
+- **Check**: a name present in both the old output and staging keeps the staged
+  content.
+
+#### Scenario: the staged copy wins on a name collision
+
+- **WHEN** the old `<out>` holds `artifact.json` with the previous content and the
+  staged build writes `artifact.json` with new content
+- **THEN** the promoted `<out>/artifact.json` contains the new content.
 
 ### Requirement: Refresh owned directories instead of merging stale content
 

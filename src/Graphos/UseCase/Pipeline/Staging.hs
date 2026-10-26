@@ -144,13 +144,20 @@ carryOverState oldOut staging = do
   mapM_ (\name -> moveIfPresent name oldOut staging)
         (filter notOwned entries)
   where
-    moveIfPresent name src dst =
-      let p = src </> name in
+    moveIfPresent name src dst = do
+      -- Never clobber an entry the fresh build already wrote into staging:
+      -- renameFile would silently replace it with the previous run's copy
+      -- (AVI-1443 review). If 'ownedArtifacts' ever falls behind the set of
+      -- artifacts Graphos writes, the staged (new) copy still wins.
+      let p = src </> name
+          q = dst </> name
+      alreadyStaged <- doesPathExist q
+      unless alreadyStaged $
         doesDirectoryExist p >>= \isDir ->
           case isDir of
-            True  -> renameDirectory p (dst </> name)  `catch` ignoreErr
+            True  -> renameDirectory p q `catch` ignoreErr
             _     -> doesPathExist p >>= \exists ->
-                      when exists (renameFile p (dst </> name) `catch` ignoreErr)
+                      when exists (renameFile p q `catch` ignoreErr)
     notOwned name = name `notElem` ownedArtifacts
     listDirectorySafe dir =
       listDirectory dir `catch` \(_ :: SomeException) -> pure []
@@ -168,6 +175,10 @@ ownedArtifacts :: [FilePath]
 ownedArtifacts =
   [ "graph.json"
   , "graph.checkpoint.json"
+  -- Pipeline resume state (Cache.checkpointPath). Cleared on a successful
+  -- build, so a copy left in the old output is stale by definition and must
+  -- not be resurrected into the fresh output.
+  , "pipeline.checkpoint.json"
   , "GRAPH_REPORT.md"
   , "graph.html"
   , "community_graph.json"
