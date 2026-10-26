@@ -53,10 +53,11 @@ spec = do
 
     it "tsNodeLabel handles multi-line imports with elision" $ do
       let longImport = T.replicate 50 "import { a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t } " <> "from './long-path/module.js';"
-      let node = tsNode "import_declaration" longImport []
+      let node = tsNode "import_declaration" longImport
+              [ tsNode "string" "'./long-path/module.js'" [] ]
       let label = tsNodeLabel node
       label `shouldSatisfy` T.isInfixOf "..."
-      label `shouldSatisfy` T.isSuffixOf "from './long-path/module.js';"
+      label `shouldSatisfy` T.isSuffixOf "from './long-path/module.js'"
 
     it "tsNodeLabel leaves short declarations unchanged" $ do
       let shortImport = "import { a } from './b'"
@@ -65,7 +66,8 @@ spec = do
 
     it "makeNodeId is stable and ellipsis-free" $ do
       let longImport = T.replicate 50 "import { a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t } " <> "from './long-path/module.js';"
-      let node = tsNode "import_declaration" longImport []
+      let node = tsNode "import_declaration" longImport
+              [ tsNode "string" "'./long-path/module.js'" [] ]
       let id1 = makeNodeId "src/file.ts" (tsNodeUntruncatedLabel node)
       let id2 = makeNodeId "src/file.ts" (tsNodeUntruncatedLabel node)
       id1 `shouldBe` id2
@@ -98,7 +100,8 @@ spec = do
 
     describe "Convert - Imports/Exports" $ do
       it "produces an imports edge for an import declaration" $ do
-        let node = tsNode "import_declaration" "import { db } from './db.js'" []
+        let node = tsNode "import_declaration" "import { db } from './db.js'"
+              [ tsNode "string" "'./db.js'" [] ]
             (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" (Just "module") node
             imports = filter ((Imports ==) . edgeRelation) edges
         length imports `shouldBe` 1
@@ -110,7 +113,8 @@ spec = do
           _ -> fail "expected exactly one imports edge"
 
       it "produces an imports edge with re-export marker for export-from" $ do
-        let node = tsNode "export_statement" "export { x } from './y.js'" []
+        let node = tsNode "export_statement" "export { x } from './y.js'"
+              [ tsNode "string" "'./y.js'" [] ]
             (edges, _) = tsNodeToGraphEdges GranularityFine "src/file.ts" (Just "module") node
             imports = filter ((Imports ==) . edgeRelation) edges
         length imports `shouldBe` 1
@@ -121,7 +125,8 @@ spec = do
           _ -> fail "expected exactly one imports edge"
 
       it "produces exactly one external node for a package imported by N files, with N edges" $ do
-        let mkImport = tsNode "import_declaration" "import { z } from 'zod'" []
+        let mkImport = tsNode "import_declaration" "import { z } from 'zod'"
+              [ tsNode "string" "'zod'" [] ]
             files = ["src/a.ts", "src/b.ts", "src/c.ts"]
             results = map (\fp -> tsNodeToGraphEdges GranularityFine fp (Just "module") mkImport) files
             allEdges = concatMap fst results
@@ -139,7 +144,8 @@ spec = do
           _ -> pure ()
 
       it "integration: imports edge endpoints have different source_file values" $ do
-        let node = tsNode "import_declaration" "import { cfg } from './config.js'" []
+        let node = tsNode "import_declaration" "import { cfg } from './config.js'"
+              [ tsNode "string" "'./config.js'" [] ]
             filePath = "src/service.ts"
             (edges, targetNodes) = tsNodeToGraphEdges GranularityFine filePath (Just "module") node
             importEdges = filter ((Imports ==) . edgeRelation) edges
@@ -161,7 +167,8 @@ spec = do
           (_:_, _:_) -> pure ()
 
       it "no Import-kind node exists without an outgoing imports edge" $ do
-        let node = tsNode "import_declaration" "import { db } from './db.js'" []
+        let node = tsNode "import_declaration" "import { db } from './db.js'"
+              [ tsNode "string" "'./db.js'" [] ]
             ex = tsNodesToExtraction GranularityFine "src/file.ts"
                    [ tsNode "program" "module" [node] ]
             allNodes = Map.elems (extractionNodes ex)

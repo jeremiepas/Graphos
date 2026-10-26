@@ -17,6 +17,9 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , structureTypes
   , apiSurfaceTypes
   , importExportTypes
+  , specifierStringTypes
+  , extractSpecifier
+  , rawSpecifier
   , implementationDetailTypes
   , functionBoundaryTypes
     , makeNodeId
@@ -34,7 +37,7 @@ import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Aeson (toJSON)
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
@@ -97,6 +100,14 @@ importExportTypes =
   [ "import_declaration", "import_statement", "import_from_statement"
   , "export_statement", "export_default_declaration"
   ]
+
+-- | AST node types that carry a module specifier as their direct string child
+-- ('string' / 'string_fragment'). 'rawSpecifier' gates specifier extraction on
+-- the presence of one of these as a DIRECT child, so a node whose text merely
+-- contains the substring `from ` (for example a template literal inside an
+-- export statement) never yields a specifier.
+specifierStringTypes :: [String]
+specifierStringTypes = [ "string", "string_fragment" ]
 
 -- | Tier 3 — implementation detail: statements, parameters, locals, JSON
 -- values. Emitted only at 'GranularityFine'.
@@ -419,17 +430,28 @@ tsNodeToGraphEdges' gran filePath ctx parentLabel enclosingDef node =
   in (myEdges ++ callsEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
 
 -- | Resolve a `from <specifier>` import to its canonical target path and name.
+--
+-- The specifier is read from the declaration's DIRECT string-literal child
+-- ('string' / 'string_fragment') and retained verbatim, independently of any
+-- label truncation applied for display. A node whose text merely contains the
+-- substring `from ` (for example a template literal inside an export statement)
+-- yields 'Nothing', because no string child is a direct child of such a node.
 extractSpecifier :: FilePath -> TSNodeInfo -> Maybe (FilePath, Text)
 extractSpecifier filePath n =
-  let tailText = extractTail (tsnText n)
-  in if T.null tailText
-     then Nothing
-     else let raw = T.strip (T.drop (T.length "from ") tailText)
-              rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
-              specifier = stripQuotes (T.stripEnd rawNoSemi)
-          in if T.null specifier
-             then Nothing
-             else resolveImport filePath (T.unpack specifier)
+  rawSpecifier n >>= \spec -> resolveImport filePath (T.unpack spec)
+
+-- | The module specifier carried by a declaration's DIRECT string child, if any.
+-- Returns 'Nothing' for an empty / whitespace-only specifier (enforcing that a
+-- bare string literal never resolves to a target, and that scanning node text
+-- for `from ` can never produce a specifier).
+rawSpecifier :: TSNodeInfo -> Maybe Text
+rawSpecifier n =
+  listToMaybe
+    [ stripQuotes (T.strip body)
+    | child <- tsnChildren n
+    , tsnType child `elem` specifierStringTypes
+    , let body = tsnText child ] >>= \spec ->
+    if T.null (T.strip spec) then Nothing else Just spec
 
 -- | Strip surrounding single/double quotes/backticks from a specifier.
 stripQuotes :: Text -> Text
@@ -479,16 +501,10 @@ tsNodeLabel :: TSNodeInfo -> Text
 tsNodeLabel node =
   let untruncated = tsNodeUntruncatedLabel node
       tType = tsnType node
+      specTail = maybe "" (\s -> "from '" <> s <> "'") (rawSpecifier node)
   in if tType `elem` importExportTypes && T.length untruncated > defaultTruncationBudget
-     then truncateWithElision defaultTruncationBudget untruncated (extractTail untruncated)
+     then truncateWithElision defaultTruncationBudget untruncated specTail
      else untruncated
-
--- | Extract the 'from <specifier>' part of a declaration.
-extractTail :: Text -> Text
-extractTail t =
-  case T.breakOnEnd "from " t of
-    (prefix, suffix) | not (T.null prefix) -> "from " <> suffix
-    _ -> ""
 
 -- | Convert tree-sitter type to human-readable kind.
 tsTypeToKind :: String -> String

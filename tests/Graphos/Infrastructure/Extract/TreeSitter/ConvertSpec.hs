@@ -37,7 +37,8 @@ tsNode ty txt children = TSNodeInfo
 tsFixture :: TSNodeInfo
 tsFixture =
   tsNode "program" "module"
-    [ tsNode "import_statement" "import { db } from './db'" []
+    [ tsNode "import_statement" "import { db } from './db'"
+         [ tsNode "string" "'./db'" [] ]
     , tsNode "lexical_declaration" "const API_URL = 'x'" []
     , tsNode "class_declaration" "Service"
         [ tsNode "property_definition" "role" []
@@ -85,7 +86,8 @@ sameFileCallFixture =
 newImportedFixture :: TSNodeInfo
 newImportedFixture =
   tsNode "program" "module"
-    [ tsNode "import_statement" "import Foo from './Foo'" []
+    [ tsNode "import_statement" "import Foo from './Foo'"
+        [ tsNode "string" "'./Foo'" [] ]
     , tsNode "function_declaration" "main"
         [ tsNode "expression_statement" "new Foo()"
           [ tsNode "new_expression" "new Foo()"
@@ -110,6 +112,45 @@ nestedCallsFixture =
                 [ tsNode "callee" "g"
                   [ tsNode "identifier" "g" [] ]
                 , tsNode "arguments" "()" [] ] ] ] ]
+        ]
+    ]
+
+-- | The AVI-1454 regression: an `export_statement` whose rendered text carries
+-- the substring `from ` inside a template literal. Its `string_fragment` is
+-- nested under a `template_string` (a grandchild), never a DIRECT
+-- `string`/`string_fragment` child of the declaration, so the fix must yield no
+-- specifier, no imports edge, and no bogus `External` node — even though the
+-- node's text contains `from `.
+templateFromFixture :: TSNodeInfo
+templateFromFixture =
+  tsNode "export_statement" "export const help = `..."
+    [ tsNode "lexical_declaration" "const help = `..."
+        [ tsNode "identifier" "help" []
+        , tsNode "template_string" "`...`"
+            [ tsNode "string_fragment" "## Examples by kind\npick one from the list below" [] ]
+        ]
+    ]
+
+-- | A template string carrying a `string_fragment` child but no enclosing import
+-- declaration — proves a nested `string_fragment` (even one whose text contains
+-- `from `) never counts as a module specifier.
+templateStringChildFixture :: TSNodeInfo
+templateStringChildFixture =
+  tsNode "export_statement" "export const help = `..."
+    [ tsNode "template_string" "`...`"
+        [ tsNode "string_fragment" "pick one from the list below" [] ]
+    ]
+
+-- | A real import plus a template-literal `from ` in the same file, so the fix
+-- can be shown to strip ONLY the bogus edge while leaving the real import intact.
+mixedFixture :: TSNodeInfo
+mixedFixture =
+  tsNode "program" "module"
+    [ tsNode "import_statement" "import { db } from './db'"
+         [ tsNode "string" "'./db'" [] ]
+    , tsNode "export_statement" "export const help = `..."
+        [ tsNode "template_string" "`...`"
+            [ tsNode "string_fragment" "pick one from the list below" [] ]
         ]
     ]
 
@@ -179,6 +220,12 @@ allEdges gran filePath fixture =
 countRel :: Relation -> Granularity -> FilePath -> TSNodeInfo -> Int
 countRel rel gran filePath fixture =
   length (filter ((== rel) . edgeRelation) (allEdges gran filePath fixture))
+
+-- | The `imports` edges only, from the edges of a single root node.
+importEdgesFrom :: FilePath -> TSNodeInfo -> [Edge]
+importEdgesFrom filePath fixture =
+  filter ((== Imports) . edgeRelation)
+         (fst (tsNodeToGraphEdges GranularityFine filePath Nothing fixture))
 
 spec :: Spec
 spec = do
@@ -274,6 +321,57 @@ spec = do
         containsCount `shouldBe` 3
         importsCount  `shouldBe` 1
         dependsCount  `shouldBe` 0
+
+  describe "import specifier extraction (AVI-1454)" $ do
+    -- A real import with a DIRECT string child './db'.
+    let directStringNode = tsNode "import_statement" "import './db'"
+                 [ tsNode "string" "'./db'" [] ]
+
+    describe "rawSpecifier (gate: presence of a direct string child)" $ do
+      it "returns the DIRECT string child with quotes stripped (\"./db\")" $ do
+        rawSpecifier directStringNode `shouldBe` Just "./db"
+
+      it "returns Nothing for an empty specifier (\"'\"'\"\")" $ do
+        rawSpecifier (tsNode "import_statement" "import ''" [ tsNode "string" "''" [] ]) `shouldBe` Nothing
+
+      it "returns Nothing for a whitespace-only specifier (\"' \"'\"\")" $ do
+        rawSpecifier (tsNode "import_statement" "import ' '" [ tsNode "string" "' '" [] ]) `shouldBe` Nothing
+
+      it "returns Nothing when there is no DIRECT string child" $ do
+        rawSpecifier templateStringChildFixture `shouldBe` Nothing
+
+      it "ignores a nested string_fragment inside a template_string" $ do
+        -- A template_string is a grandchild of the declaration, not a direct
+        -- string child, so its string_fragment must never count as a specifier.
+        rawSpecifier templateFromFixture `shouldBe` Nothing
+
+    describe "extractSpecifier" $ do
+      it "resolves a bare ./db relative import to (\"src/db\", \"db\")" $ do
+        extractSpecifier "src/service.ts" directStringNode `shouldBe` Just ("src/db", "db")
+
+      it "yields Nothing for a template-literal node (no direct string child)" $ do
+        extractSpecifier "src/service.ts" templateFromFixture `shouldBe` Nothing
+
+    describe "tsNodeToGraphEdges edge emission" $ do
+      it "emits exactly one imports edge for a direct string literal import" $ do
+        let (edges, _) = tsNodeToGraphEdges GranularityFine "src/service.ts" (Just "module") directStringNode
+        length (filter ((Imports ==) . edgeRelation) edges) `shouldBe` 1
+
+      it "emits no imports edge for a whitespace-only specifier (no bogus node)" $ do
+        let whitespaceNode = tsNode "import_statement" "import ' '"
+                   [ tsNode "string" "' '" [] ]
+            (edges, nodes) = tsNodeToGraphEdges GranularityFine "src/service.ts" (Just "module") whitespaceNode
+            bogus = filter (\n -> "external:" `T.isPrefixOf` toText (nodeSourceFile n)) nodes
+        length (filter ((Imports ==) . edgeRelation) edges) `shouldBe` 0
+        bogus `shouldBe` []
+
+      it "keeps the real import edge and drops only the bogus edge (mixed file)" $ do
+        let (edges, nodes) = tsNodeToGraphEdges GranularityFine "src/service.ts" (Just "module") mixedFixture
+            imports = filter ((Imports ==) . edgeRelation) edges
+            bogus = filter (\n -> "external:" `T.isPrefixOf` toText (nodeSourceFile n)) nodes
+        length imports `shouldBe` 1
+        (map edgeTarget imports) `shouldBe` [makeNodeId "src/db" "db"]
+        bogus `shouldBe` []
 
   describe "type node emission (AVI-1471)" $ do
     it "emits exactly one Type node for a real type declaration" $ do
