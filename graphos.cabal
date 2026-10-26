@@ -509,6 +509,7 @@ test-suite graphos-test-focus
     Graphos.UseCase.DocLinkParitySpec
     Graphos.UseCase.FormatContextSpec
     Graphos.UseCase.InferDocumentSpec
+    Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
   build-depends:
       base
     , graphos
