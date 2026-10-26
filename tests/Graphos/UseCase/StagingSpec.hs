@@ -199,6 +199,56 @@ spec = do
         weird <- TIO.readFile (out </> "weird-name-123.dat")
         weird `shouldBe` "123"
 
+    it "does not resurrect a stale pipeline checkpoint into the fresh output" $ do
+      -- Review follow-up (AVI-1443): the pipeline resume state
+      -- (<out>/pipeline.checkpoint.json) is cleared on a successful build, so
+      -- a copy left in the old output is stale by definition. Carrying every
+      -- non-owned entry over must not bring it back.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> "pipeline.checkpoint.json") "{\"stale\":true}"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        resurrected <- doesFileExist (out </> "pipeline.checkpoint.json")
+        resurrected `shouldBe` False
+
+    it "keeps the fresh staged copy when a previous entry has the same name" $ do
+      -- Defensive: if a Graphos artifact is ever added without updating
+      -- 'ownedArtifacts', the carry-over must not overwrite the staged (new)
+      -- file with the previous run's copy.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> "future-artifact.json") "stale"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          writeFile (staging </> "future-artifact.json") "fresh"
+          pure (Right ())
+        content <- TIO.readFile (out </> "future-artifact.json")
+        content `shouldBe` "fresh"
+
+    it "carries memory/, debug/ and traces/ across the rebuild" $ do
+      -- The spec promises the four persistent-state directories survive; only
+      -- cache/ was covered before.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        mapM_ (\d -> createDir (out </> d) >> writeFile (out </> d </> "keep.txt") d)
+              ["memory", "debug", "traces"]
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        mapM_ (\d -> TIO.readFile (out </> d </> "keep.txt") >>= (`shouldBe` T.pack d))
+              ["memory", "debug", "traces"]
+
     it "runs on a missing output directory (first build)" $ do
       withSystemTempDirectory "graphos-staging" $ \root -> do
         let out = root </> "nested" </> "graphos-out"
