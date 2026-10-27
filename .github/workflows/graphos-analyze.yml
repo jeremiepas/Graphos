@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: Graphos Repo Analyzer
 
 on:
@@ -70,18 +72,23 @@ jobs:
       GRAPHOS_TAG: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout Graphos (for source build fallback)
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
       - name: Setup Cachix
-        uses: cachix/cachix-action@v16
+        uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: devenv
 
-      - name: Install devenv.sh
-        run: nix profile add nixpkgs#devenv
+      - name: Install devenv.sh (nixpkgs rev from devenv.lock)
+        # AVI-1521: bootstrap from the nixpkgs rev recorded in devenv.lock
+        # instead of the floating `nixpkgs` channel.
+        run: |
+          rev=$(jq -r '.nodes.nixpkgs.locked.rev' devenv.lock)
+          echo "Bootstrapping devenv from nixpkgs@${rev}"
+          nix profile add "github:NixOS/nixpkgs/${rev}#devenv"
 
       - name: Get graphos binary
         run: |
@@ -127,7 +134,7 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: graphos-results-${{ github.run_number }}-${{ env.REPO_NAME }}
           path: graphos-out-*/
