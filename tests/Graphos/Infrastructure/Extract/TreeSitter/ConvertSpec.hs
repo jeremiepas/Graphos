@@ -85,7 +85,8 @@ sameFileCallFixture =
 newImportedFixture :: TSNodeInfo
 newImportedFixture =
   tsNode "program" "module"
-    [ tsNode "import_statement" "import Foo from './Foo'" []
+    [ tsNode "import_statement" "import Foo from './Foo'"
+        [ tsNode "string" "'./Foo'" [] ]
     , tsNode "function_declaration" "main"
         [ tsNode "expression_statement" "new Foo()"
           [ tsNode "new_expression" "new Foo()"
@@ -222,3 +223,29 @@ spec = do
         containsCount `shouldBe` 3
         importsCount  `shouldBe` 1
         dependsCount  `shouldBe` 0
+
+  describe "issue #77 — no bogus imports edge from prose in a template literal" $ do
+    -- Real tree-sitter shape for:  export const help = `...pick one from the
+    -- list below`;  is export_statement -> lexical_declaration -> template_string.
+    -- The prose 'from' nests under template_string, so it is never a direct
+    -- `string` child of the export declaration.
+    it "emits no imports edge when the only 'from ' is inside a template literal" $ do
+      let node = tsNode "export_statement"
+              "export const help = `## Examples by kind\npick one from the list below`;"
+              [ tsNode "lexical_declaration"
+                  "const help = `## Examples by kind\npick one from the list below`;"
+                  [ tsNode "template_string" "## Examples by kind\npick one from the list below" [] ]
+              ]
+          ex = tsNodesToExtraction GranularityFine "src/helpers.ts" [node]
+          bogusImportTargets =
+            [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
+      any ("the list below" `T.isInfixOf`) bogusImportTargets `shouldBe` False
+
+    it "still resolves a real specifier from a direct string child" $ do
+      let node = tsNode "import_declaration"
+              "import { db } from './db'"
+              [ tsNode "string" "'./db'" [] ]
+          ex = tsNodesToExtraction GranularityFine "src/service.ts" [node]
+          importTargets =
+            [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
+      importTargets `shouldSatisfy` (not . null)

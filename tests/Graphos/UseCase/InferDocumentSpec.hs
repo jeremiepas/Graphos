@@ -4,12 +4,15 @@ module Graphos.UseCase.InferDocumentSpec where
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Text.Short (fromText)
 import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, Graph)
 import Graphos.UseCase.Infer.Document
+import Graphos.UseCase.Infer (inferNonSemanticEdgesWith)
+import Graphos.Domain.Config (defaultSemanticEdgesConfig)
 
 -- | A (id, label, file-type, source-file) node specification.
 type NSpec = (NodeId, Text, FileType, Text)
@@ -21,6 +24,11 @@ mkNode (nid, lbl, ft, sf) =
 
 mkGraph :: [NSpec] -> Graph
 mkGraph specs = buildGraph False $ extractionFromLists (map mkNode specs) []
+
+-- | Node specification with an explicit kind.
+mkGraphK :: [(NodeId, Text, FileType, Text, Maybe Text)] -> Graph
+mkGraphK specs = buildGraph False $ extractionFromLists
+  [ (mkNode (nid, lbl, ft, sf)) { nodeKind = fromText <$> k } | (nid, lbl, ft, sf, k) <- specs ] []
 
 -- | Convenience: endpoint pairs of the produced edges.
 endpoints :: [Edge] -> [(NodeId, NodeId)]
@@ -73,6 +81,56 @@ spec = do
           edges = coEdges specs
       edges `shouldBe` coEdges specs
       length (nub edges) `shouldBe` length edges
+
+  describe "inferFileCoLocationEdges (pipeline co-location)" $ do
+    it "links one node per doc file to one node per code file, not every symbol" $ do
+      let es = inferFileCoLocationEdges maxCoLocationFiles $ mkGraphK
+            [ ("readme", "README", DocFile, "src/README.md", Just "File")
+            , ("h1", "Overview", DocFile, "src/README.md", Just "Header")
+            , ("h2", "Layout", DocFile, "src/README.md", Just "Header")
+            , ("modA", "a.ts", CodeFile, "src/a.ts", Just "Module")
+            , ("fA1", "f1", CodeFile, "src/a.ts", Just "Function")
+            , ("fA2", "f2", CodeFile, "src/a.ts", Just "Function")
+            , ("modB", "b.ts", CodeFile, "src/lib/b.ts", Just "Module")
+            , ("fB1", "g1", CodeFile, "src/lib/b.ts", Just "Function")
+            ]
+      endpoints es `shouldBe` [("readme", "modA"), ("readme", "modB")]
+
+    it "skips a doc whose subtree holds more code files than the cap" $ do
+      let codeFiles = [ (T.pack ("m" ++ show i), "f", CodeFile, T.pack ("src/m" ++ show i ++ ".ts"), Just "Module")
+                      | i <- [1 .. maxCoLocationFiles + 1] ]
+          es = inferFileCoLocationEdges maxCoLocationFiles $ mkGraphK
+                 (("readme", "README", DocFile, "src/README.md", Just "File") : codeFiles)
+      es `shouldBe` []
+
+    it "agrees with inferCoLocationEdges when every file has a single node" $ do
+      let specs = [ ("readme", "README", DocFile, "pkg/README.md")
+                  , ("c1", "c1", CodeFile, "pkg/src/lib.rs")
+                  , ("c2", "c2", CodeFile, "pkg/app/Main.hs")
+                  , ("c3", "c3", CodeFile, "other/x.rs")
+                  ]
+      endpoints (inferFileCoLocationEdges maxCoLocationFiles (mkGraph specs))
+        `shouldBe` endpoints (coEdges specs)
+
+  describe "documents edges in the pipeline inference (inferNonSemanticEdgesWith)" $ do
+    let codeOnly = mkGraphK
+          [ ("modA", "a.ts", CodeFile, "src/a.ts", Just "Module")
+          , ("fA1", "parseConfig", CodeFile, "src/a.ts", Just "Function")
+          , ("modB", "b.ts", CodeFile, "src/lib/b.ts", Just "Module")
+          ]
+        withDoc = mkGraphK
+          [ ("readme", "README", DocFile, "src/README.md", Just "File")
+          , ("modA", "a.ts", CodeFile, "src/a.ts", Just "Module")
+          , ("modB", "b.ts", CodeFile, "src/lib/b.ts", Just "Module")
+          ]
+        docsOf es = [ e | e <- es, edgeRelation e == Documents ]
+        infer d g = inferNonSemanticEdgesWith d defaultSemanticEdgesConfig Map.empty g Map.empty
+    it "a code-only graph yields no documents edge at any density" $
+      mapM_ (\d -> docsOf (infer d codeOnly) `shouldBe` []) [Sparse, Normal, Dense, Maximum]
+    it "Sparse drops the co-location heuristic" $
+      docsOf (infer Sparse withDoc) `shouldBe` []
+    it "Normal keeps file-level co-location" $
+      endpoints (docsOf (infer Normal withDoc)) `shouldBe` [("readme", "modA"), ("readme", "modB")]
 
   describe "inferSymbolMentionEdges" $ do
     it "links a doc to the unique definition of a mentioned symbol" $ do

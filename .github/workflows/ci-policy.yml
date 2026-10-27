@@ -1,0 +1,27 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
+name: CI supply-chain policy
+
+# Cheap, always-on guard for the repo-wide policy: every remote action is
+# pinned to a commit SHA and every workflow declares a least-privilege
+# `permissions:` block. Unlike the actor-gated build jobs, this runs for every
+# contributor, so a regression fails the PR instead of ageing into the next
+# security scan.
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-pinning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Check action pins and permissions
+        run: scripts/check-workflow-pinning.sh

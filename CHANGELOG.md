@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+- `--cluster-only` now persists its output: `graph.json` (with communities
+  filled, written atomically), the report exports and `community_graph.json`
+  under `--community-graph`, plus the checkpoint, instead of dropping them.
+- Leiden no longer collapses code graphs: doc↔code co-location links are
+  capped (one node per doc file to one node per code file; docs spanning more
+  than 25 code files are skipped), `--edge-density Sparse` drops the
+  co-location heuristic, community detection and cohesion run on the
+  undirected projection, and `addEdges` merges adjacency sets instead of
+  keeping only the old set.
+
+## 0.1.1 - 2026-10-20
+
 ### Changed
 - **`graph.json` is now a JSON Graph Format (JGF) document** (media type
   `application/vnd.jgf+json`, spec at jsongraphformat.info): the graph lives
@@ -26,17 +39,6 @@
     rewrites files automatically.
   - The checkpoint file (`graph.checkpoint.json`) carries the same envelope.
   - Files are now readable by any standard JGF tooling.
-- **Tree-sitter extraction granularity is now configurable and defaults to `function` level.**
-  Statement-level nodes (assignments, returns, conditionals, parameters, local
-  variables, JSON key-value pairs) are no longer extracted by default. This
-  reduces node counts ~5-10x on statement-dense codebases and proportionally
-  speeds up clustering, export, and queries.
-  - New levels: `fine` (previous behavior), `function` (default), `file` (one node per file).
-  - Resolution order: CLI `--granularity` flag → per-extension `granularity:` in
-    `extractors:` config → global `granularity:` in `graphos.yaml` → built-in default.
-  - `.json` files default to `file` granularity (one node per file; lock files
-    no longer inflate the graph).
-  - **Rollback**: add `granularity: fine` to `graphos.yaml` to restore the previous output.
 - **`--embed` peak memory is now bounded to a single live copy of the vector set**
   instead of scaling as a multiple of it (drops ~15-20 GB → under ~2 GB at
   100k nodes × 768 dims): embedding vectors switched from boxed `[Double]` to
@@ -48,6 +50,39 @@
   on demand). Semantic code↔doc inference streams doc vectors one at a time.
   Wire formats (sidecar, cache files, `graph.json`) are unchanged; the legacy
   `embedding.streaming` config key is ignored (streaming is now the only mode).
+
+### Fixed
+- **`--embed` no longer sends arbitrary-length documents to `/v1/embeddings`.**
+  Each input is now truncated to `embedding.maxTokens` (default 512) before the
+  request, so a long document can no longer overflow a small encoder's context
+  window and be rejected (e.g. a 512-token model served by llama-server
+  answering HTTP 500 on oversized inputs). Set `embedding.maxTokens: 0` to
+  restore the previous unbounded behavior.
+
+## 0.1.0.0
+
+### Initial release
+- LSP-based code extraction (universal language support)
+- Knowledge graph construction
+- Leiden community detection
+- God nodes, surprising connections, suggested questions
+- Export: JSON, HTML, Obsidian, Neo4j Cypher, GraphML, SVG
+- MCP server (placeholder)
+- File watching (placeholder)
+- Incremental updates
+
+### Changed
+- **Tree-sitter extraction granularity is now configurable and defaults to `function` level.**
+  Statement-level nodes (assignments, returns, conditionals, parameters, local
+  variables, JSON key-value pairs) are no longer extracted by default. This
+  reduces node counts ~5-10x on statement-dense codebases and proportionally
+  speeds up clustering, export, and queries.
+  - New levels: `fine` (previous behavior), `function` (default), `file` (one node per file).
+  - Resolution order: CLI `--granularity` flag → per-extension `granularity:` in
+    `extractors:` config → global `granularity:` in `graphos.yaml` → built-in default.
+  - `.json` files default to `file` granularity (one node per file; lock files
+    no longer inflate the graph).
+  - **Rollback**: add `granularity: fine` to `graphos.yaml` to restore the previous output.
 - Leiden community detection now scales to 100k+ node graphs (16x faster at
   100k nodes: 169s → 10.5s, compiled): in-place assignment updates, batched
   refinement, incremental merge indexing.
@@ -60,6 +95,16 @@
   `suggestions`. `traverse` field kept as `mode` echo for one release.
 
 ### Fixed
+- **Go, Rust and Ruby emit `imports` edges in tree-sitter mode** (#83). Each
+  edge has the TypeScript shape: it goes from the file's module node to a
+  placeholder whose `source_file` is the imported repo file, or
+  `external:<name>`. A Go internal package import becomes one edge per
+  non-test file of the package, with weight `1/n` and the alias kept in
+  `extra.alias`. Rust resolves `crate::`/`self::`/`super::`, workspace crates,
+  groups and globs over the module files. Ruby resolves `require_relative` and
+  in-repo `require`. Each Rust `use` now gets its own `Import` node per
+  occurrence (the id gains `#L<line>`), and a `use` inside a function body is
+  no longer dropped.
 - **`--embed` no longer sends arbitrary-length documents to `/v1/embeddings`.**
   Each input is now truncated to `embedding.maxTokens` (default 512) before the
   request, so a long document can no longer overflow a small encoder's context
@@ -81,15 +126,3 @@
   hash no longer silently lose one node — `shortestPath`/`articulationPoints`/
   `biconnectedComponents`/`dominators` now find paths/bridges through
   collision-prone node pairs.
-
-## 0.1.0.0
-
-- Initial release
-- LSP-based code extraction (universal language support)
-- Knowledge graph construction
-- Leiden community detection
-- God nodes, surprising connections, suggested questions
-- Export: JSON, HTML, Obsidian, Neo4j Cypher, GraphML, SVG
-- MCP server (placeholder)
-- File watching (placeholder)
-- Incremental updates

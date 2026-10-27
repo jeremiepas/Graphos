@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: CI
 
 on:
@@ -6,15 +8,22 @@ on:
   pull_request:
     branches: [main, master]
 
+# AVI-1521: this workflow only reads the repo — never inherit the repo default
+# token scope on a self-hosted runner.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: [self-hosted, kubernetes]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # AVI-1521: `devenv shell --command` does not exist in devenv 2.x; pass
+      # the command after `--` instead.
       - name: Build and test
         run: |
-          devenv shell --command cabal build all
-          devenv shell --command cabal test
+          devenv shell -- cabal build all
+          devenv shell -- cabal test

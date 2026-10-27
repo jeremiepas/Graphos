@@ -23,7 +23,7 @@ import Data.Ord (comparing)
 import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
-import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion)
+import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView)
 import qualified Data.Set as Set
 
 -- | Run community detection with default resolution and compute cohesion scores
@@ -37,8 +37,11 @@ clusterGraphWithResolution g res
   | Map.null (gNodes g) = (Map.empty, Map.empty)
   | Map.size (gNodes g) == 1 = (Map.singleton 0 [fst (Map.findMin (gNodes g))], Map.singleton 0 1.0)
   | otherwise =
+      -- Cohesion is scored on the same undirected projection the partition
+      -- was computed on, so a directed graph does not under-count the
+      -- internal edges of its communities.
       let commMap = detectCommunitiesWithResolution g res
-          cohesion = scoreAllCohesion g commMap
+          cohesion = scoreAllCohesion (undirectedView g) commMap
       in (commMap, cohesion)
 
 -- | Fast clustering for a single ingested node.
