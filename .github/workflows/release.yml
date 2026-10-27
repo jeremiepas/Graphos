@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: Release
 
 on:
@@ -14,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
     # AVI-1488: third-party action in a `contents: write` job — pin to SHA.
     - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
@@ -23,11 +25,16 @@ jobs:
       with:
         name: devenv
 
-    - name: Install devenv.sh
-      run: nix profile add nixpkgs#devenv
+    # AVI-1521: bootstrap from the nixpkgs rev recorded in devenv.lock instead
+    # of the floating `nixpkgs` channel.
+    - name: Install devenv.sh (nixpkgs rev from devenv.lock)
+      run: |
+        rev=$(jq -r '.nodes.nixpkgs.locked.rev' devenv.lock)
+        echo "Bootstrapping devenv from nixpkgs@${rev}"
+        nix profile add "github:NixOS/nixpkgs/${rev}#devenv"
 
     - name: Restore cabal store cache
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: |
           ~/.local/state/cabal/store
