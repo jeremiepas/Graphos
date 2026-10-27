@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: Lean formalization (report-only)
 
 # Report-only verification companion: `formalization/lean/` is a separate lake
@@ -34,7 +36,7 @@ jobs:
       run:
         working-directory: formalization/lean
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # AVI-1488 (SEC-2): bootstrap elan from an immutable release asset with a
       # pinned SHA-256 instead of piping a moving-branch script into a shell.
@@ -55,7 +57,7 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Cache toolchain and lake build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.elan/toolchains
