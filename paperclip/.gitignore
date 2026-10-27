@@ -1,0 +1,6 @@
+# Ephemeral working notes / local artifacts — do not commit.
+# Scratch is a throwaway area; put durable per-issue notes in ../task-logs/ instead.
+/scratch/
+paperclip/scratch/**
+*.tmp
+*.log

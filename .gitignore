@@ -17,6 +17,11 @@ result
 result-*
 .tmp/
 tmp/
+# Build/test logs and pipeline sidecar outputs at repo root
+*.log
+/embeddings.json
+# Stray worktrees created outside .worktrees/
+/worktrees/
 graphos-out.staging-*/
 .worktrees/
 .paperclip/worktrees/
