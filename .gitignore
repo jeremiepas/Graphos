@@ -39,6 +39,10 @@ monitoring/grafana/data/
 opencode.json
 opencode.jsonc
 *.heapsnapshot
+# GHC profiling / heap artifacts (may carry live heap strings incl. secrets)
+*.hp
+*.prof
+*.eventlog
 __pycache__/
 .lake/
 elm-stuff/
