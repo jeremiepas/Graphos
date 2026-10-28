@@ -27,6 +27,9 @@ module Graphos.Domain.Query.Cypher.Eval
     -- * Evaluation
   , evaluate
   , evaluateStatement
+
+    -- * Internal helpers (exported for tests)
+  , idAnchor
   ) where
 
 import Data.Aeson (Value(..), ToJSON(..))
@@ -99,17 +102,20 @@ type Binding = Map Text Bound
 -- | Evaluate a query against a graph, bounded by @budget@ rows.
 evaluate :: Int -> CypherQuery -> Graph -> GraphIndex -> CypherResult
 evaluate budget q g _idx =
-  let (bindings, truncated) = takeCap budget (enumerateBindings g (cqPatterns q))
+  let enumerated = case idAnchor q g of
+        Just b  -> [b]
+        Nothing -> enumerateBindings g (cqPatterns q)
       filtered = case cqWhere q of
-        Nothing -> bindings
-        Just p  -> [ b | b <- bindings, evalPredicate b g p ]
+        Nothing -> enumerated
+        Just p  -> [ b | b <- enumerated, evalPredicate b g p ]
+      (bounded, truncated) = takeCap budget filtered
       rc = cqReturn q
       allCounts = all isCountItem (rcItems rc)
       pairs = if allCounts
         then case filtered of
           []      -> []
           (b:_)   -> [ (b, projectRow g rc filtered b) ]
-        else [ (b, projectRow g rc filtered b) | b <- filtered ]
+        else [ (b, projectRow g rc filtered b) | b <- bounded ]
       distinctPairs = if rcDistinct rc then dedupPairs pairs else pairs
       ordered = orderByBindings g (rcOrderBy rc) distinctPairs
       skipped = case rcSkip rc of
@@ -155,10 +161,10 @@ evaluateMutation budget m g0 idx =
   let baseBindings = case mMatch m of
         Nothing -> [Map.empty]
         Just q  ->
-          let (bs, _) = takeCap budget (enumerateBindings g0 (cqPatterns q))
+          let enumerated = enumerateBindings g0 (cqPatterns q)
               filtered = case cqWhere q of
-                Nothing -> bs
-                Just p  -> [ b | b <- bs, evalPredicate b g0 p ]
+                Nothing -> enumerated
+                Just p  -> [ b | b <- enumerated, evalPredicate b g0 p ]
           in if null filtered then [Map.empty] else filtered
   in case foldOps g0 baseBindings (mOps m) of
        Left err -> Left err
@@ -688,6 +694,42 @@ mergeBinding a b =
 -- | Cap a list to @n@ elements, reporting whether it was truncated.
 takeCap :: Int -> [a] -> ([a], Bool)
 takeCap n xs = (take n xs, case drop n xs of [] -> False; _ -> True)
+
+-- | Conservative id anchor for the read path.
+--
+-- A single-node @MATCH (@v@)@ whose only anchor is an @id@ equality —
+-- either a @WHERE v.id = 'lit'@ guard or an @{id: 'lit'}@ pattern
+-- property constraint — resolves @v@ directly via 'Map.lookup' instead
+-- of enumerating the whole node table. Returns 'Just' the single
+-- candidate binding when it fires, 'Nothing' to fall back to ordinary
+-- enumeration.
+--
+-- Safe by construction: it only fires on a shape enumeration would also
+-- reduce to one binding, and it re-checks the pattern's labels and
+-- properties ('nodeMatches') so the emitted binding is identical to what
+-- enumeration would have produced. Mirrors the id resolution used by
+-- 'createNode'/'mergeNode'.
+idAnchor :: CypherQuery -> Graph -> Maybe Binding
+idAnchor q g =
+  case cqPatterns q of
+    [NodePatE np] ->
+      let v = npVar np
+      in case anchorId np v (cqWhere q) of
+           Just nid | nodeMatches g np nid -> Just (Map.singleton v (BNode nid))
+           _                               -> Nothing
+    _ -> Nothing
+
+-- | Resolve the single @id@ that anchors a lone node pattern: an @id@
+-- property constraint in the pattern, or a bare @WHERE v.id = 'lit'@
+-- guard referencing that node's variable. 'Nothing' otherwise (so the
+-- caller falls back to enumeration).
+anchorId :: NodePat -> Text -> Maybe Predicate -> Maybe NodeId
+anchorId np v w =
+  case Map.lookup "id" (npProps np) of
+    Just (EStr s) -> Just s
+    _ -> case w of
+      Just (PCompare (PropRef v' "id") OpEq (EStr s)) | v' == v -> Just s
+      _ -> Nothing
 
 -- ───────────────────────────────────────────────
 -- WHERE
