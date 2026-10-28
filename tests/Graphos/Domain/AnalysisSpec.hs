@@ -13,12 +13,77 @@ import Test.QuickCheck hiding (Confidence)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
-import Graphos.Domain.Graph.Analysis (biconnectedComponents, biconnectedComponentCount)
+import Graphos.Domain.Graph.Analysis (biconnectedComponents, biconnectedComponentCount, articulationPoints, godNodes)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion)
 import Graphos.Domain.Analysis (analyze, selectTopNOn, suggestQuestions, surprisingConnections)
 
 spec :: Spec
 spec = do
+  describe "godNodes excludes generated/vendored nodes" $ do
+    it "ignores a high-degree 'Collapsed' node in favor of real code" $ do
+      -- A synthetic 'Collapsed' node outranks every real node by degree, yet
+      -- it must never surface as a god node.
+      let collLeaves = map (T.pack . ("l" ++) . show) [1 .. 6 :: Int]
+          realLeaves = map (T.pack . ("r" ++) . show) [1 .. 3 :: Int]
+          coll = Node
+            { nodeId = "coll"
+            , nodeLabel = fromText "coll"
+            , nodeFileType = CodeFile
+            , nodeSourceFile = fromText "test.hs"
+            , nodeSource = Nothing
+            , nodeLineStart = Just 1
+            , nodeLineEnd = Nothing
+            , nodeSignature = Nothing
+            , nodeCommunityId = Nothing
+            , nodeKind = Just (fromText "Collapsed")
+            , nodeDegree = Nothing
+            , nodeIsBridge = Nothing
+            , nodeExtra = Nothing
+            , nodePresentBits = 0
+            }
+          nodes = [coll, testNode "hub"] ++ map testNode (collLeaves ++ realLeaves)
+          edges = [ testEdge "coll" leaf | leaf <- collLeaves ]
+              ++ [ testEdge "hub" leaf | leaf <- realLeaves ]
+              ++ [ testEdge "hub" "coll" ]
+          g = buildGraph False (extractionFromLists nodes edges)
+          gods = map gnId (godNodes g 10)
+      ("coll" `notElem` gods) `shouldSatisfy` id
+      ("hub" `elem` gods) `shouldSatisfy` id
+
+    it "still ranks a real hub among the god nodes" $ do
+      let realLeaves = map (T.pack . ("r" ++) . show) [1 .. 4 :: Int]
+          nodes = testNode "hub" : map testNode realLeaves
+          edges = [ testEdge "hub" leaf | leaf <- realLeaves ]
+          g = buildGraph False (extractionFromLists nodes edges)
+      ("hub" `elem` (map gnId (godNodes g 10))) `shouldSatisfy` id
+
+    it "excludes a 'Collapsed' articulation point from bridges" $ do
+      let cNode = Node
+            { nodeId = "C"
+            , nodeLabel = fromText "C"
+            , nodeFileType = CodeFile
+            , nodeSourceFile = fromText "test.hs"
+            , nodeSource = Nothing
+            , nodeLineStart = Just 1
+            , nodeLineEnd = Nothing
+            , nodeSignature = Nothing
+            , nodeCommunityId = Nothing
+            , nodeKind = Just (fromText "Collapsed")
+            , nodeDegree = Nothing
+            , nodeIsBridge = Nothing
+            , nodeExtra = Nothing
+            , nodePresentBits = 0
+            }
+          nodes = [ testNode "a1", testNode "a2", cNode, testNode "b1", testNode "b2" ]
+          edges = [ testEdge "a1" "a2", testEdge "a2" "C",
+                    testEdge "C" "b1", testEdge "b1" "b2" ]
+          g = buildGraph False (extractionFromLists nodes edges)
+          aps :: [Text]
+          aps = articulationPoints g
+      (T.pack "C" `notElem` aps) `shouldSatisfy` id
+      (T.pack "a2" `elem` aps) `shouldSatisfy` id
+      (T.pack "b1" `elem` aps) `shouldSatisfy` id
+
   describe "analyze" $ do
     it "produces analysis with god nodes" $ do
       let ext = extractionFromLists [testNode "hub", testNode "leaf1", testNode "leaf2"] [testEdge "hub" "leaf1", testEdge "hub" "leaf2"]

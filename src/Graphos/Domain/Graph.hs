@@ -32,6 +32,7 @@ module Graphos.Domain.Graph
     -- * Analysis helpers
   , isFileNode
   , isConceptNode
+  , isGeneratedOrVendoredNode
   , makeStubNode
   , edgeBetweenness
   , edgeBetweennessWith
@@ -42,7 +43,7 @@ module Graphos.Domain.Graph
   , graphDiff
   ) where
 
-import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, makeStubNode)
+import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, isGeneratedOrVendoredNode, makeStubNode)
 import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, subgraph)
 import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness, edgeBetweennessWith, defaultMaxSampledSources, defaultExactBetweennessNodeCap)
 import Graphos.Domain.Graph.Diff (graphDiff)
