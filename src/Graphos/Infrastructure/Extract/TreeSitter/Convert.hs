@@ -16,6 +16,7 @@
 module Graphos.Infrastructure.Extract.TreeSitter.Convert
   ( tsNodesToExtraction
   , makeNodeId
+  , mkSourceFile
   , tsNodeLabel
   , tsNodeSignature
   , nodeIdentifier
@@ -47,7 +48,7 @@ import Data.Bits ((.|.))
 import Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..), SourceFile(..), mkSourceFile
   , normalizeText, sourceDirHash, sourceStem, sourceFilePathStr
-  , extractIdentifier, defaultTruncationBudget, truncateWithElision )
+  , extractIdentifier, truncateWithElision )
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- ───────────────────────────────────────────────
@@ -186,8 +187,8 @@ tsNodeLabel sf gran node =
 --                           middle only when it exceeds the budget
 --   * everything else     — the normalized declaration, elided in the middle
 --                           only when it exceeds the budget
-tsNodeSignature :: SourceFile -> Granularity -> Int -> TSNodeInfo -> Maybe Text
-tsNodeSignature sf gran budget node =
+tsNodeSignature :: Int -> TSNodeInfo -> Maybe Text
+tsNodeSignature budget node =
   case tsnType node of
     t | t `elem` moduleTypes -> Nothing
       | t `elem` importExportTypes ->
@@ -209,8 +210,8 @@ tsNodeSignature sf gran budget node =
 extractImportTail :: Text -> Text
 extractImportTail t =
   let norm = normalizeText t
-      (_, tail) = T.breakOn "from " norm
-  in if T.null tail then "" else tail
+      (_, tailText) = T.breakOn "from " norm
+  in if T.null tailText then "" else tailText
 
 -- | Resolve the module specifier carried by an import-like declaration.
 --
@@ -250,7 +251,7 @@ lastQuoted t0
     scan i
       | i < 0     = Nothing
       | otherwise = case T.unpack t0 !! i of
-          '\'' -> Just (quoteToken "'" t0)
+          '\'' -> Just (quoteToken '\'' t0)
           '"'  -> Just (quoteToken '"' t0)
           _    -> scan (i - 1)
     quoteToken q t = T.reverse (T.drop 1 (T.takeWhile (/= q) (T.reverse t)))
@@ -320,24 +321,24 @@ tsNodesToExtraction sf gran budget nodes =
           in (r ++ ns, c ++ ces, i ++ ies)) ([], [], []) nodes
 
       -- Phase 2: resolve per-file collisions → (RawNode, finalId)
-      resolved = resolveCollisions sf raws
+      resolved = resolveCollisions raws
       idAt     = Map.fromList [ (rnBaseId r, fid) | (r, fid) <- resolved ]
       remap x  = case Map.lookup x idAt of Just f -> f; Nothing -> x
       graphNodes = [ rnFinalNode r fid | (r, fid) <- resolved ]
-                 ++ importTargetNodes sf [ t | (_src, t) <- imports ]
+                 ++ importTargetNodes [ t | (_src, t) <- imports ]
       edges = [ mkContainEdge (remap (ceSource e)) (remap (ceTarget e))
               | e <- contains ]
-            ++ [ mkImportEdge sf (remap src) tgt | (src, tgt) <- imports ]
+            ++ [ mkImportEdge (remap src) tgt | (src, tgt) <- imports ]
   in extractionFromLists graphNodes edges
 
 -- | Given a file's raw nodes, assign each a final id: the first occurrence
 -- (by ascending start line) of a base id keeps the plain base id; every
 -- subsequent occurrence carries `#L<line>`. Deterministic and independent of
 -- display labels.
-resolveCollisions :: SourceFile -> [RawNode] -> [(RawNode, NodeId)]
-resolveCollisions sf raws =
+resolveCollisions :: [RawNode] -> [(RawNode, NodeId)]
+resolveCollisions raws =
   concatMap resolveGroup
-    (groupBy (comparing rnBaseId) (sortBy (comparing rnBaseId) raws))
+    (groupBy (\a b -> rnBaseId a == rnBaseId b) (sortBy (comparing rnBaseId) raws))
   where
     resolveGroup rs =
       let sorted = sortBy (comparing rnLine) rs
@@ -366,9 +367,9 @@ traverseNode sf gran budget parentEmitted isExported node =
   let tType   = tsnType node
       isDef   = tType `elem` typesFor gran && tsnIsNamed node
       ident   = nodeIdentifier sf gran node
-      kind    = fromText (T.pack (tsTypeToKind tType))
+      kind    = T.pack (tsTypeToKind tType)
       baseId  = maybe "" (\i -> makeNodeId sf kind i) ident
-      sig     = tsNodeSignature sf gran budget node
+      sig     = tsNodeSignature budget node
       marker  = if isExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
       parentBase = fromMaybe "" parentEmitted
       containEdge = if T.null baseId then [] else [ContainEdge parentBase baseId]
@@ -386,16 +387,16 @@ traverseNode sf gran budget parentEmitted isExported node =
                 { nodeId           = baseId
                 , nodeLabel        = fromText (fromMaybe "" ident)
                 , nodeFileType     = CodeFile
-                , nodeSourceFile   = fromText (sourceFilePathStr sf)
+                , nodeSourceFile   = fromText (T.pack (sourceFilePathStr sf))
                 , nodeSource       = Nothing
                 , nodeLineStart    = Just (tsnStartRow node + 1)
                 , nodeLineEnd      = Just (tsnEndRow node + 1)
-                , nodeSignature    = sig
+                , nodeSignature    = fmap fromText sig
                 , nodeCommunityId  = Nothing
                 , nodeDegree       = Nothing
                 , nodeIsBridge     = Nothing
                 , nodeExtra        = marker
-                , nodeKind         = Just kind
+                , nodeKind         = Just (fromText kind)
                 , nodePresentBits  = presentBits sig isExported
                 }
               rawNode = RawNode { rnNode = emitNode, rnBaseId = baseId, rnLine = tsnStartRow node }
@@ -408,12 +409,12 @@ importPartsFor :: SourceFile -> Text -> String -> TSNodeInfo -> [(NodeId, Import
 importPartsFor sf parentBase tType node =
   case extractSpecifier sf node of
     Just spec ->
-      let impPath = case resolveImport (sourceFilePathStr sf) spec of
+      let impPath = case resolveImport (sourceFilePathStr sf) (T.unpack spec) of
                       Just (p, _) -> p
                       Nothing -> "external:" ++ T.unpack spec
-          impName = case resolveImport (sourceFilePathStr sf) spec of
-                      Just (_, n) -> T.pack n
-                      Nothing -> fromText spec
+          impName = case resolveImport (sourceFilePathStr sf) (T.unpack spec) of
+                      Just (_, n) -> Just n
+                      Nothing -> Just spec
       in [ (parentBase, ImportTarget
             { itPath = impPath
             , itName = fromMaybe spec impName
@@ -447,8 +448,8 @@ mkContainEdge src tgt =
     , edgeExtra     = Nothing
     }
 
-mkImportEdge :: SourceFile -> NodeId -> ImportTarget -> Edge
-mkImportEdge sf src tgt =
+mkImportEdge :: NodeId -> ImportTarget -> Edge
+mkImportEdge src tgt =
   Edge
     { edgeId        = EdgeId (src <> "->" <> targetId <> ":imports")
     , edgeSource    = src
@@ -466,8 +467,8 @@ mkImportEdge sf src tgt =
 -- | Materialize import-target endpoint nodes so edges have valid endpoints.
 -- Relative imports resolve to the target file's module node; package / builtin
 -- specifiers resolve to a single canonical external node identity.
-importTargetNodes :: SourceFile -> [ImportTarget] -> [Node]
-importTargetNodes sf targets =
+importTargetNodes :: [ImportTarget] -> [Node]
+importTargetNodes targets =
   [ let p = itPath t
         knd = fromText (if "external:" `T.isPrefixOf` T.pack p
                          then "External" else "Module")
@@ -499,8 +500,8 @@ importTargetNodes sf targets =
 presentBits :: Maybe Text -> Bool -> Word64
 presentBits sig isExported =
   bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
-  .| maybe 0 bitNodeSignature sig
-  .| (if isExported then bitNodeExtra else 0)
+  .|. maybe 0 (\_ -> bitNodeSignature) sig
+  .|. (if isExported then bitNodeExtra else 0)
 
 -- | Convert tree-sitter type to human-readable kind.
 tsTypeToKind :: String -> String

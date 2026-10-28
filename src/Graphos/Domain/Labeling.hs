@@ -169,6 +169,12 @@ containmentRatio :: Int -> Int -> Double
 containmentRatio _ 0 = 0.0
 containmentRatio n d = fromIntegral n / fromIntegral d
 
+-- | Size of the intersection between the new community and a cached entry's
+-- members.
+intersectionSizeOf :: Set NodeId -> LabelCacheEntry -> Int
+intersectionSizeOf newMembers e =
+  Set.size (Set.intersection newMembers (Set.fromList (lceMembers e)))
+
 -- | Resolve a cached label for a new community.
 --
 -- The pipeline consults only entries recorded under the current model. An exact
