@@ -227,6 +227,7 @@ library
                       Graphos.Domain.Types.JGF
                       -- Domain - Config
                       Graphos.Domain.Config
+                      Graphos.Domain.Config.Clustering
                        Graphos.Domain.Config.Core
                        Graphos.Domain.Config.Detection
                        Graphos.Domain.Config.Extraction

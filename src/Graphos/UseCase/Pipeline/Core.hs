@@ -23,7 +23,7 @@ import Control.Concurrent.STM
 import Control.Concurrent.Async (mapConcurrently)
 import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate, bracket, AsyncException(..), fromException, throwIO)
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import System.Exit (exitWith, ExitCode(..))
 import Data.Maybe (isJust, fromJust)
 import qualified Data.Set as Set
@@ -56,7 +56,7 @@ import Graphos.Domain.Config.Memory
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Domain.Embedding (prepare)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
-import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
+import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..), capCommunitySizes, oversizedCommunities)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -816,8 +816,15 @@ clusterGraph appEnv graph config _embeddingsPath = do
 
       lpLogInfo lp "Step 5: Re-clustering and analyzing..."
       step5Start <- getCurrentTime
-      let (finalComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
+      let (rawComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
+          frac = cfgMaxCommunityFraction config
+          finalComm = if cfgCommunityCapEnabled config
+                      then capCommunitySizes enrichedGraph' rawComm frac
+                      else rawComm
           anal = analyzeGraph enrichedGraph' finalComm finalCohes
+      when (cfgCommunityCapEnabled config) $
+        forM_ (oversizedCommunities enrichedGraph' rawComm frac) $ \(cid, cnt) ->
+          lpLogWarn lp $ T.pack $ "Oversized community " ++ show cid ++ " (" ++ show cnt ++ " nodes) exceeds cap " ++ show frac ++ " of graph; splitting into sub-communities"
       withHeapGuard lp mBudget "analyze" $ do
         _ <- evaluate (Map.size finalComm + sum (map length (Map.elems finalComm)))
         -- Full evaluation of the analysis record — god nodes, surprises,

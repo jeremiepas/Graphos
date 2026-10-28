@@ -195,3 +195,31 @@ spec = do
       parsePipeline ["--no-cluster"] `shouldSatisfy` \case
         Right cfg -> cfgNoCluster cfg == True
         Left _    -> False
+
+  describe "pipelineOpts community-cap flags" $ do
+    it "defaults the fraction, enabled switch and overrides" $ do
+      parsePipeline [] `shouldSatisfy` \case
+        Right cfg -> cfgMaxCommunityFraction cfg == 0.05
+               && cfgCommunityCapEnabled cfg == True
+               && cfgMaxCommunityFractionOverride cfg == Nothing
+               && cfgCommunityCapDisabled cfg == False
+        Left _    -> False
+
+    it "--max-community-fraction records the override" $ do
+      parsePipeline ["--max-community-fraction", "0.1"] `shouldSatisfy` \case
+        Right cfg -> cfgMaxCommunityFractionOverride cfg == Just 0.1
+        Left _    -> False
+
+    it "--no-community-cap disables the cap" $ do
+      parsePipeline ["--no-community-cap"] `shouldSatisfy` \case
+        Right cfg -> cfgCommunityCapDisabled cfg == True
+        Left _    -> False
+
+    it "accepts the closed-open boundary (0,1]" $ do
+      parsePipeline ["--max-community-fraction", "1"] `shouldSatisfy` isRight
+      parsePipeline ["--max-community-fraction", "0.05"] `shouldSatisfy` isRight
+
+    it "rejects a fraction outside (0,1]" $ do
+      parsePipeline ["--max-community-fraction", "0"]   `shouldSatisfy` isLeft
+      parsePipeline ["--max-community-fraction", "1.5"] `shouldSatisfy` isLeft
+      parsePipeline ["--max-community-fraction", "-0.1"] `shouldSatisfy` isLeft

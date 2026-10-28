@@ -9,7 +9,7 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
-import Data.List (sort)
+import Data.List (sort, nub)
 import Data.Maybe (isNothing, listToMaybe, fromMaybe)
 import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
 
@@ -17,9 +17,46 @@ import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), degree)
-import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution, capCommunitySizes, oversizedCommunities)
 spec :: Spec
 spec = do
+  describe "capCommunitySizes" $ do
+    let twelve = map (\i -> T.pack ("n" ++ show i)) [0 .. 11 :: Int]
+        pathEdges = [ testEdge (twelve !! i) (twelve !! (i + 1)) | i <- [0 .. 10 :: Int]]
+        buildTwelve = buildGraph False (extractionFromLists (map testNode twelve) pathEdges)
+        singleAll g = Map.singleton 1 (map fst (Map.toList (gNodes g)))
+
+    it "leaves communities already within the cap untouched" $ do
+      let g = buildTwelve
+          ids = map fst (Map.toList (gNodes g))
+          -- Two communities of six, each at (not above) the cap for frac = 0.5.
+          input = Map.fromList [ (1, take 6 ids), (2, drop 6 ids) ]
+      capCommunitySizes g input 0.5 `shouldBe` input
+
+    it "splits an oversized community so every piece respects the cap" $ do
+      let g = buildTwelve
+          capped = capCommunitySizes g (singleAll g) 0.3
+          capCount = max 1 (floor (0.3 * 12 :: Double))
+      -- No resulting community may exceed the cap.
+      forM_ (Map.elems capped) (\m -> length m `shouldSatisfy` (<= capCount))
+      -- Determinism: running it again yields an identical partition.
+      capCommunitySizes g (singleAll g) 0.3 `shouldBe` capped
+
+    it "preserves coverage: every node lands in exactly one community" $ do
+      let g = buildTwelve
+          ids = map fst (Map.toList (gNodes g))
+          capped = capCommunitySizes g (singleAll g) 0.3
+          flat = concat (Map.elems capped)
+      -- Every original node appears exactly once.
+      sort flat `shouldBe` sort ids
+      length (nub flat) `shouldBe` length flat
+
+    it "reports oversized communities as (id, count) pairs" $ do
+      let g = buildTwelve
+          ids = map fst (Map.toList (gNodes g))
+      oversizedCommunities g (Map.singleton 1 ids) 0.3
+        `shouldBe` [(1, 12)]
+
   describe "detectCommunities" $ do
     it "assigns all nodes to communities" $ do
       -- Build a simple graph and detect communities
