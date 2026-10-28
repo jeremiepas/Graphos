@@ -7,7 +7,7 @@ import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
@@ -74,6 +74,7 @@ import Graphos.Infrastructure.Observability.SDK
   , defaultOtelConfig
   )
 import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ccMaxCommunityFraction, ccCommunityCapEnabled, validClusteringConfig)
 import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
@@ -310,12 +311,18 @@ main = do
                        Nothing -> if null (obsDebugTraceDir obsCfg)
                                     then outputDir ++ "/traces"
                                     else obsDebugTraceDir obsCfg
+          baseCc       = gcClustering graphosCfg
+          effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
+          effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
+          effCc        = ClusteringConfig effFraction effEnabled
           config' = config { cfgOutputDir    = outputDir
                            , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
                             , cfgActiveBudgetBytes = activeBudget
+                            , cfgMaxCommunityFraction = ccMaxCommunityFraction effCc
+                            , cfgCommunityCapEnabled  = ccCommunityCapEnabled effCc
                             }
       -- Fail-fast on a corrupt existing graph.json before doing any work.
       -- Strict by default; pass --no-strict-graph for tolerant loading.
@@ -335,6 +342,13 @@ main = do
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
           appEnv = productionAppEnv env obsEnv
+
+      -- Validate the effective community-size-cap config; fail fast if mis-set.
+      case validClusteringConfig effCc of
+        Left err -> do
+          logError env $ "[graphos] Invalid community-size-cap config: " <> T.pack err
+          exitWith (ExitFailure 1)
+        Right _ -> pure ()
       when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
@@ -769,6 +783,7 @@ main = do
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
       let appEnv = productionAppEnv env obsEnv
+
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of
