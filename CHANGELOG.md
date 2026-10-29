@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-29
+
 ### Fixed
 - `--cluster-only` now persists its output: `graph.json` (with communities
   filled, written atomically), the report exports and `community_graph.json`
