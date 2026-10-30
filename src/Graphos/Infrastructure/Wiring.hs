@@ -52,6 +52,7 @@ import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint
   , loadCachedFingerprinted, saveCachedFingerprinted
+  , loadLabelCache, saveLabelCache
   )
 import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, ignoreMatches)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
@@ -135,6 +136,8 @@ productionFileSystemPort = FileSystemPort
   , fspShouldIgnore = ignoreMatches
   , fspLoadCachedExtraction = loadCachedFingerprinted
   , fspSaveCachedExtraction = saveCachedFingerprinted
+  , fspLoadLabelCache  = loadLabelCache
+  , fspSaveLabelCache  = saveLabelCache
   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.

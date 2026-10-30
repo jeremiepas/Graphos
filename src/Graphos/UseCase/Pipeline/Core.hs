@@ -850,7 +850,7 @@ clusterGraph appEnv graph config _embeddingsPath = do
                                  ++ " baseUrl=" ++ labelingBaseUrl lblCfg
                                  ++ " batchSize=" ++ show (labelingBatchSize lblCfg)
           labelingStart <- getCurrentTime
-          result <- labelCommunities appEnv enrichedGraph' finalComm finalCohes lblCfg
+          result <- labelCommunities appEnv enrichedGraph' finalComm finalCohes lblCfg (cfgOutputDir config)
           labelingEnd <- getCurrentTime
           lpLogInfo lp $ T.pack $ "  Labeled " ++ show (Map.size (lrLabels result)) ++ " communities in "
                                  ++ show (diffUTCTime labelingEnd labelingStart) ++ "s"
