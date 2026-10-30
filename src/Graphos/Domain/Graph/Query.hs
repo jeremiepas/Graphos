@@ -326,7 +326,9 @@ condWithCached cfg =
 -- exists (`ℓ = 0`): a single node with a self-loop is still a one-node SCC yet
 -- constitutes a directed cycle (INV-C5).
 isAcyclicDirected :: Graph -> Bool
-isAcyclicDirected g = isAcyclicDirectedWithCached (toCachedFGL g)
+isAcyclicDirected g =
+  let selfLoop = any (\e -> edgeSource e == edgeTarget e) (Map.elems (gEdges g))
+  in not selfLoop && isAcyclicDirectedWithCached (toCachedFGL g)
 
 -- | Directed DAG predicate over a pre-built CachedFGL.
 isAcyclicDirectedWithCached :: CachedFGL -> Bool
@@ -382,7 +384,9 @@ isolatedNodesWithCached cfg =
 -- themselves form a cycle (simple-undirected-graph semantics). Runs in
 -- O(N + E) via union-find with union-by-rank (tree height O(log N)).
 hasCycleUndirected :: Graph -> Bool
-hasCycleUndirected g = hasCycleUndirectedWithCached (toCachedFGL g)
+hasCycleUndirected g =
+  let selfLoop = any (\e -> edgeSource e == edgeTarget e) (Map.elems (gEdges g))
+  in selfLoop || hasCycleUndirectedWithCached (toCachedFGL g)
 
 -- | Undirected cycle predicate over a pre-built CachedFGL.
 hasCycleUndirectedWithCached :: CachedFGL -> Bool
