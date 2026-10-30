@@ -8,27 +8,24 @@ module Graphos.UseCase.LabelCacheSpec where
 
 import Data.IORef
 import Control.Exception (SomeException, catch)
-import Data.Map.Strict as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Set as Set
 import Data.Maybe (fromJust)
 import Data.Char (isDigit)
 import Text.Read (readMaybe)
-import Data.List
 import Test.Hspec
 import qualified System.Directory as Dir
-import System.IO (writeFile)
 import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>))
 
-import Graphos.Domain.Types (NodeId, CommunityId)
+import Graphos.Domain.Types (CommunityId)
 import Graphos.Domain.Config (LabelingConfig(..), defaultLabelingConfig)
 import Graphos.Domain.Graph (Graph(..))
 import Graphos.Domain.Labeling
   ( LabelCacheFile(..)
   , LabelCacheEntry(..)
-  , MatchKind(..)
   , fingerprintOf
   , LabelingResult(lrLabels, lrExactHits, lrFuzzyHits, lrLlmLabeled)
   )
@@ -75,6 +72,10 @@ mkEnv llm = AppEnv
       , fspSaveCachedExtraction = \_ _ _ _ -> pure ()
       , fspLoadLabelCache = loadLabelCache
       , fspSaveLabelCache = saveLabelCache
+      , fspLoadCheckpoint = \_ -> pure Nothing
+      , fspSaveCheckpoint = \_ _ -> pure ()
+      , fspClearCheckpoint = \_ -> pure ()
+      , fspLoadIgnorePatterns = \_ -> pure []
       }
   , loggingPort = LoggingPort
       { lpLogTrace = const (pure ())
@@ -93,7 +94,7 @@ mkEnv llm = AppEnv
 -- labels always correspond to those cids.
 fakeLLM :: IORef [[CommunityId]] -> LLMPort
 fakeLLM callsRef = LLMPort
-  { lpCallLLM = \cfg prompt ->
+  { lpCallLLM = \_ prompt ->
         let cids = parseCids prompt
         in modifyIORef' callsRef (cids :)
              >> pure (Right (encodeLabels (Map.fromList [ (cid, "Label " <> T.pack (show cid)) | cid <- cids ])))
@@ -118,7 +119,7 @@ parseCids txt =
 -- | Encode a labels map as newline-separated @<cid>\t<label>@ rows.
 -- | Internal fake-LLM bridge helper; only round-trip fidelity is required, so
 -- | we own the format rather than routing through aeson's @Key@ machinery.
-encodeLabels :: Map CommunityId Text -> Text
+encodeLabels :: Map.Map CommunityId Text -> Text
 encodeLabels m =
   T.intercalate "\n"
     [ T.pack (show cid) <> "\t" <> label
@@ -126,14 +127,14 @@ encodeLabels m =
     ]
 
 -- | Decode the row format produced by 'encodeLabels' (round-trips exactly).
-decodeLabels :: Text -> Map CommunityId Text
+decodeLabels :: Text -> Map.Map CommunityId Text
 decodeLabels t =
   Map.fromList
     [ (cid, label)
       | line <- T.lines t
       , let parts = T.split (== '\t') line :: [Text]
       , cidTxt:_ <- [parts]
-      , let label = T.intercalate "\t" (tail parts)
+      , let label = T.intercalate "\t" (drop 1 parts)
       , T.all isDigit cidTxt
       , Just cid <- [readMaybe (T.unpack cidTxt)]
     ]
@@ -148,7 +149,7 @@ removeDir p = removeDirectoryRecursive p `catch` \(_ :: SomeException) -> pure (
 
 -- | Locate a cache entry by its member set.
 findEntry :: [Member] -> LabelCacheFile -> Maybe LabelCacheEntry
-findEntry mems (LabelCacheFile es) = Data.List.lookup mems [(lceMembers e, e) | e <- es]
+findEntry mems (LabelCacheFile es) = lookup mems [(lceMembers e, e) | e <- es]
 
 -- | Default labeling config keyed to a fixed model so cache entries are scoped.
 labelCfg :: LabelingConfig
