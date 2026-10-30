@@ -22,6 +22,11 @@ so Stage 1 (OSS bootstrap) and Stage 3 (Lean implementation) have a stable targe
   v0 and may be replaced by a reason mask in v0.1.
 - `AVI-1677-D6`: `fileCategory` / graph traversal / community mapping /
   top-N selection remain in Haskell; Lean owns only crisp numeric predicates.
+- `AVI-1677-D7` (accepted, AVI-1681): no new Graphos repository is created. Graphos stays in
+  its existing repository. A separate repository is created only for the Lean-Haskell bridge
+  (`graphos-lean-critique`), and only because the bridge needs an independently buildable
+  Lean 4 project. Graphos consumes it as an external build dependency (Cabal linkage), not as
+  a second copy of Graphos.
 
 ## Haskell source references
 
