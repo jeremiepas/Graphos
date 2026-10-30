@@ -37,7 +37,7 @@ import Control.DeepSeq (deepseq)
 import Control.Monad (forM_, unless)
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, readSTRef, writeSTRef)
-import Data.List (sort, sortOn, nub)
+import Data.List (sort, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -399,7 +399,7 @@ hasCycleUndirectedWithCached cfg =
       -- self-loops dropped. Deduping collapses both the AF-3 reverse embedding
       -- of an undirected graph and any reciprocal arc pair to a single edge, so a
       -- lone edge is never mistaken for a cycle.
-      simpleEdges = nub [ (min u v, max u v) | (u, v, _) <- arcs, u /= v ]
+      simpleEdges = Set.fromList [ (min u v, max u v) | (u, v, _) <- arcs, u /= v ]
   in runST $ do
        root <- MV.replicate n (0 :: Int)
        rank <- MV.replicate n (0 :: Int)
