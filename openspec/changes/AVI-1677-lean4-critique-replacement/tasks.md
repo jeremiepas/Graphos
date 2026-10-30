@@ -1,10 +1,10 @@
 # Tasks: AVI-1677 lean4 critique replacement
 
 ## 0. Feasibility spike
-- [ ] 0.1 Pick one critique function (e.g. surpriseScore) and reduce it to a crisp predicate in Lean
-- [ ] 0.2 Compile it to C with `@[export]` in a standalone Lean project
-- [ ] 0.3 Link it into a minimal Haskell consumer (Cabal extra-libraries)
-- [ ] 0.4 Invoke via `foreign import ccall` and match the Haskell result on a fixture
+- [x] 0.1 Pick one critique function (e.g. surpriseScore) and reduce it to a crisp predicate in Lean
+- [x] 0.2 Compile it to C with `@[export]` in a standalone Lean project
+- [x] 0.3 Link it into a minimal Haskell consumer (Cabal extra-libraries)
+- [x] 0.4 Invoke via `foreign import ccall` and match the Haskell result on a fixture
 
 ## 1. Public OSS project bootstrap
 - [ ] 1.1 Create the public repository (name, org, license decided)
