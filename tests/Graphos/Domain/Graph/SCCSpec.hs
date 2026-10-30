@@ -271,10 +271,10 @@ spec = do
       property $ \(SmallGraph g) ->
         let arcs    = Map.keys (gEdges g)
             selfLoops = any (\(u, v) -> u == v) arcs
-            simpleA   = nub [ (min u v, max u v) | (u, v) <- arcs, u /= v ]
+            simpleA   = Set.fromList [ (min u v, max u v) | (u, v) <- arcs, u /= v ]
             n         = Map.size (gNodes g)
             c         = length (connectedComponents g)
-            q         = length simpleA - n + c
+            q         = Set.size simpleA - n + c
         in hasCycleUndirected g == (selfLoops || q >= 1)
 
     it "hasCycleUndirected (property): adding an arc to a cyclic graph keeps it cyclic (monotonic)" $
