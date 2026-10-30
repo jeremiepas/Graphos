@@ -124,6 +124,31 @@ spec = do
           g = buildGraph False ext
       Map.size (gNodes g) `shouldBe` 2
 
+    -- Regression: buildGraph drops self-edges so G_s is irreflexive (AVI-1324).
+    it "drops a lone self-edge (node is not its own neighbour, degree 0)" $ do
+      let ext = extractionFromLists [testNode "a"] [testEdge "a" "a"]
+          g = buildGraph False ext
+      Set.member "a" (neighbors g "a") `shouldBe` False
+      (degree g "a") `shouldBe` 0
+      Set.member "a" (Map.findWithDefault Set.empty "a" (gAdjFwd g)) `shouldBe` False
+      Set.member "a" (Map.findWithDefault Set.empty "a" (gAdjBack g)) `shouldBe` False
+      -- Node is preserved even though its only edge (the self-loop) was dropped.
+      Map.member "a" (gNodes g) `shouldBe` True
+
+    it "keeps real edges but drops the self-edge on the same node" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b"]
+                [testEdge "a" "a", testEdge "a" "b"]
+          g = buildGraph False ext
+      Set.member "a" (neighbors g "a") `shouldBe` False
+      Set.member "b" (neighbors g "a") `shouldBe` True
+      (degree g "a") `shouldBe` 1
+
+    it "drops the self-edge even in directed mode (buildGraph True)" $ do
+      let ext = extractionFromLists [testNode "a"] [testEdge "a" "a"]
+          g = buildGraph True ext
+      Set.member "a" (neighbors g "a") `shouldBe` False
+      (degree g "a") `shouldBe` 0
+
   describe "mergeExtractions" $ do
     it "deduplicates nodes by id" $ do
       let a = extractionFromLists [testNode "x"] []
@@ -468,6 +493,15 @@ spec = do
       Map.size (gEdges g') `shouldBe` 2
       Set.member "c" (Map.findWithDefault Set.empty "b" (gAdjFwd g')) `shouldBe` True
       Set.member "b" (Map.findWithDefault Set.empty "c" (gAdjBack g')) `shouldBe` True
+
+    it "keeps existing neighbours and adds the new ones for a node that already has adjacency" $ do
+      let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
+          g = buildGraph True ext
+          g' = addEdges g [testEdge "a" "c"]
+      Map.findWithDefault Set.empty "a" (gAdjFwd g') `shouldBe` Set.fromList ["b", "c"]
+      let gu = addEdges (buildGraph False ext) [testEdge "a" "c"]
+      Map.findWithDefault Set.empty "a" (gAdjFwd gu) `shouldBe` Set.fromList ["b", "c"]
+      Map.findWithDefault Set.empty "a" (gAdjBack gu) `shouldBe` Set.fromList ["b", "c"]
 
     it "adds multiple edges to the graph" $ do
       let ext = extractionFromLists [testNode "a", testNode "b", testNode "c", testNode "d"] [testEdge "a" "b"]

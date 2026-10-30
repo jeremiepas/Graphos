@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: Studio CI
 
 # Graphos Studio (studio/, Elm SPA — openspec/changes/elm-graph-studio).
@@ -27,12 +29,12 @@ jobs:
     if: github.actor == 'jeremiepas'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
       - name: Restore elm package cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.elm
           key: elm-${{ runner.os }}-${{ hashFiles('studio/elm.json') }}

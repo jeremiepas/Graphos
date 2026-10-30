@@ -82,16 +82,21 @@ theorem lookup_table (f : α → β) {keys : List α} {t : α} (ht : t ∈ keys)
   | cons x xs ih =>
     rcases List.mem_cons.mp ht with h0 | ht'
     · subst h0
-      rw [table, List.map_cons, List.lookup]
-      split
-      · rfl
-      · next hbeq => exact absurd rfl (not_eq_of_beq_eq_false hbeq)
-    · rw [table, List.map_cons, List.lookup]
-      split
-      · next hbeq =>
-        have hxe : x = t := (eq_of_beq hbeq).symm
-        rw [hxe]
-      · next hbeq => exact ih ht'
+      rcases hbeq : (t == t) with _ | _
+      · exact absurd rfl (not_eq_of_beq_eq_false hbeq)
+      · have h' : (table f (t :: xs)).lookup t = some (f t) := by
+          rw [table, List.map_cons, List.lookup, hbeq]
+        exact h'
+    · rcases hbeq : (t == x) with _ | _
+      · have h' : (table f (x :: xs)).lookup t = some (f t) := by
+          rw [table, List.map_cons, List.lookup, hbeq]
+          exact ih ht'
+        exact h'
+      · have hxe : x = t := (eq_of_beq hbeq).symm
+        have h' : (table f (x :: xs)).lookup t = some (f t) := by
+          rw [table, List.map_cons, List.lookup, hbeq]
+          rw [hxe]
+        exact h'
 
 /-! ## 3. Déduplication -/
 
@@ -196,14 +201,14 @@ theorem mem_of_lookup_eq_some {l : List (α × β)} {a : α} {b : β}
   | nil => cases h
   | cons p ps ih =>
     obtain ⟨k, v⟩ := p
-    rcases beq : (a == k) with _ | _
+    rcases hbeq : (a == k) with _ | _
     · have h' : ps.lookup a = some b := by
-        rw [List.lookup, beq] at h; exact h
+        rw [List.lookup, hbeq] at h; exact h
       exact List.mem_cons_of_mem _ (ih h')
     · have h' : some v = some b := by
-        rw [List.lookup, beq] at h; exact h
+        rw [List.lookup, hbeq] at h; exact h
       have hv : v = b := by simpa using h'
-      have hka : k = a := (eq_of_beq beq).symm
+      have hka : k = a := (eq_of_beq hbeq).symm
       simp only [List.mem_cons]
       exact Or.inl (by simp [hka, hv])
 
@@ -213,14 +218,14 @@ theorem lookup_append_of_none {l₁ l₂ : List (α × β)} {a : α}
   | nil => rfl
   | cons p ps ih =>
     obtain ⟨k, v⟩ := p
-    rcases beq : (a == k) with _ | _
+    rcases hbeq : (a == k) with _ | _
     · have h' : ps.lookup a = none := by
-        rw [List.lookup, beq] at h; exact h
+        rw [List.lookup, hbeq] at h; exact h
       have ih' : (ps ++ l₂).lookup a = l₂.lookup a := ih h'
-      simp only [List.cons_append, List.lookup, beq]
+      simp only [List.cons_append, List.lookup, hbeq]
       exact ih'
     · have h' : some v = none := by
-        rw [List.lookup, beq] at h; exact h
+        rw [List.lookup, hbeq] at h; exact h
       simp at h'
 
 theorem lookup_append_of_some {l₁ l₂ : List (α × β)} {a : α} {b : β}
@@ -229,15 +234,15 @@ theorem lookup_append_of_some {l₁ l₂ : List (α × β)} {a : α} {b : β}
   | nil => cases h
   | cons p ps ih =>
     obtain ⟨k, v⟩ := p
-    rcases beq : (a == k) with _ | _
+    rcases hbeq : (a == k) with _ | _
     · have h' : ps.lookup a = some b := by
-        rw [List.lookup, beq] at h; exact h
+        rw [List.lookup, hbeq] at h; exact h
       have ih' : (ps ++ l₂).lookup a = some b := ih h'
-      simp only [List.cons_append, List.lookup, beq]
+      simp only [List.cons_append, List.lookup, hbeq]
       exact ih'
     · have h' : some v = some b := by
-        rw [List.lookup, beq] at h; exact h
-      simp only [List.cons_append, List.lookup, beq]
+        rw [List.lookup, hbeq] at h; exact h
+      simp only [List.cons_append, List.lookup, hbeq]
       exact h'
 
 /-- Le run avec cache : seules les clés absentes du cache sont calculées

@@ -90,7 +90,7 @@ import Data.Graph.Inductive.Query.BCC (bcc)
 import Data.Graph.Inductive.Query.Dominators (dom)
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph.Core (Graph(..), isFileNode, isConceptNode)
+import Graphos.Domain.Graph.Core (Graph(..), isFileNode, isConceptNode, isGeneratedOrVendoredNode)
 import Data.Text.Short (toText)
 import Graphos.Domain.Graph.FGL (FGLGraph, FGLNodeLabel, FGLEdgeLabel)
 
@@ -168,7 +168,7 @@ defaultExactBetweennessNodeCap = 10000
 godNodes :: Graph -> Int -> [GodNode]
 godNodes g topN =
   let degrees = [(nid, Set.size (neighbors' g nid), n) | (nid, n) <- Map.toList (gNodes g)]
-      filtered = filter (\(_, deg, n) -> not (isFileNode g n) && not (isConceptNode n) && deg > 0) degrees
+      filtered = filter (\(_, deg, n) -> not (isFileNode g n) && not (isConceptNode n) && not (isGeneratedOrVendoredNode n) && deg > 0) degrees
       sorted = sortOn (\(_, deg, _) -> negate deg) filtered
   in take topN [GodNode { gnId = nid, gnLabel = toText (nodeLabel n), gnEdges = deg }
                 | (nid, deg, n) <- sorted]
@@ -178,9 +178,14 @@ godNodes g topN =
           bwd = Map.findWithDefault Set.empty nid (gAdjBack g')
       in if gDirected g' then fwd else fwd `Set.union` bwd
 
--- | Find articulation points (bridge nodes) whose removal would disconnect the graph.
+-- | Find articulation points (bridge nodes) whose removal would disconnect the
+-- graph. Generated/vendored nodes are excluded from the result, matching the
+-- exclusion applied to god-node computation.
 articulationPoints :: Graph -> [NodeId]
-articulationPoints g = articulationPointsWithCached (toCachedFGL g)
+articulationPoints g =
+  let generated = [ nid | (nid, n) <- Map.toList (gNodes g), isGeneratedOrVendoredNode n ]
+  in filter (\nid -> not (nid `elem` generated))
+             (articulationPointsWithCached (toCachedFGL g))
 
 -- | Find articulation points using a pre-built CachedFGL.
 --

@@ -8,6 +8,9 @@
 - [ ] 2.1 Correct the `--resolution` help text to match measured behavior
 - [ ] 2.2 Update README/workflow clustering section accordingly
 - [ ] 2.3 Add the dense-subgraph caveat referencing the community-size cap
+- [ ] 2.4 Reconcile with the accepted `community-detection` spec: its unimplemented
+      auto-tune table (`100k+ → γ 0.3–0.5`) contradicts docs-matching-behavior; record
+      the conflict and open a follow-up change for that spec (do not silently edit it here)
 
 ## 3. Runtime echo
 

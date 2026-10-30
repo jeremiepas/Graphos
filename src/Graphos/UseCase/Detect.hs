@@ -57,7 +57,8 @@ allSupportedExtensions = Map.fromList
     codeExts = [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp"
                ,".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua", ".zig", ".hs", ".lhs"
                ,".ex", ".exs", ".m", ".mm", ".jl", ".vue", ".svelte", ".dart", ".ps1"
-               ,".nix", ".json"]  -- NEW: Nix and JSON
+               ,".nix", ".json"  -- NEW: Nix and JSON
+               ,".cc", ".cxx", ".hh", ".hxx", ".yaml", ".yml", ".sql"]
     docExts = [".md", ".txt", ".rst", ".adoc", ".org"
               ,".text", ".raml"]  -- NEW: plain text and RAML
     paperExts = [".pdf"]

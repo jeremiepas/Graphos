@@ -25,6 +25,7 @@ module Graphos.Domain.Types.Node
   , bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   , bitNodeCommunityId, bitNodeKind, bitNodeDegree
   , bitNodeIsBridge, bitNodeExtra, bitNodeSource
+  , nodeBodyHash, bitNodeBodyHash
   , computePresentBits
   , isFieldPresent, setFieldPresent, clearFieldPresent
   ) where
@@ -113,6 +114,20 @@ bitNodeExtra = 1 `shiftL` 7
 {-# NOINLINE bitNodeSource #-}
 bitNodeSource :: Word64
 bitNodeSource = 1 `shiftL` 8
+
+-- | Body identity carried under @body_hash@ in 'nodeExtra' (the
+-- body/signature split of the intent-graph model). Absent ⇒ Nothing.
+nodeBodyHash :: Node -> Maybe ShortText
+nodeBodyHash n = case nodeExtra n of
+  Just (Object km) -> case KM.lookup (Key.fromText "body_hash") km of
+    Just (String t) -> Just (fromText t)
+    _               -> Nothing
+  _                 -> Nothing
+
+-- | Presence bit for the body hash carried in 'nodeExtra'.
+{-# NOINLINE bitNodeBodyHash #-}
+bitNodeBodyHash :: Word64
+bitNodeBodyHash = bitNodeExtra
 
 -- | A node in the knowledge graph
 --

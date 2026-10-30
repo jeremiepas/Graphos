@@ -1,3 +1,4 @@
+import Control.Monad (sequence)
 {-# LANGUAGE OverloadedStrings #-}
 
 module Graphos.Domain.Community.UQICommunitySpec where
@@ -7,6 +8,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
+import Test.QuickCheck (generate)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph(..), buildGraph, gNodes, gDirected, mergeGraphs, neighbors, degree)
 import Graphos.Domain.Community
@@ -56,12 +58,19 @@ spec = do
       all (\n -> nodeCommunityId n == Nothing) (Map.elems (gNodes m)) `shouldBe` True
 
   describe "UQI-5 monotonicity boundary" $ do
-    it "cross-merge modularity decrease is recorded as an allowed outcome" $ property $
-      \(SmallGraph a, SmallGraph b) ->
-        let qa = modularity a (detectCommunitiesWithResolution a defaultResolution)
-            m = mergeGraphs a b
-            qab = modularity m (detectCommunitiesWithResolution m defaultResolution)
-        in classify (qab < qa) "cross-merge decrease allowed" True
+    it "a cross-merge modularity decrease is measured in at least one boundary case" $ do
+      gs <- sequence [ generate (fmap (\(SmallGraph g) -> g) (arbitrary :: Gen SmallGraph)) | _ <- [1..50 :: Int] ]
+      let found =
+            take 1
+              [ ()
+              | a <- gs, b <- gs
+              , let qa = modularity a (detectCommunitiesWithResolution a defaultResolution)
+                    m = mergeGraphs a b
+                    qab = modularity m (detectCommunitiesWithResolution m defaultResolution)
+              , qab < qa - 1e-12
+              ]
+      putStrLn ("SEARCH_DECREASES=" <> show (length found))
+      found `shouldSatisfy` (not . null)
     it "detected modularity is at least singleton modularity" $ property $
       \(SmallGraph g) ->
         let detected = detectCommunitiesWithResolution g defaultResolution

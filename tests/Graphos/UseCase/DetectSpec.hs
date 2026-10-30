@@ -32,6 +32,7 @@ import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Config.Source (SourceConfig(..))
 import Graphos.Domain.Config.Detection (defaultDetectionConfig)
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
+import Graphos.Domain.Labeling (LabelCacheFile(..))
 import qualified Data.Map.Strict as Map
 import Data.List (sort)
 import Data.Text.Short (toText)
@@ -330,6 +331,8 @@ testFSP = FileSystemPort
   , fspShouldIgnore         = \_ ps path -> shouldIgnore ps path
   , fspLoadCachedExtraction = \_ _ _ -> pure Nothing
   , fspSaveCachedExtraction = \_ _ _ _ -> pure ()
+  , fspLoadLabelCache     = \_ -> pure (LabelCacheFile [])
+  , fspSaveLabelCache     = \_ _ -> pure ()
   }
 
 mkEdge :: NodeId -> NodeId -> Edge

@@ -21,8 +21,8 @@ spec = do
       toJSON (Confidence 1.0) `shouldBe` toJSON (1.0 :: Double)
 
   describe "Relation" $ do
-    it "has exactly 14 constructors (8 code + 5 spec-artifact + Documents per deterministic doc-code edges)" $ do
-      length [minBound .. maxBound :: Relation] `shouldBe` 14
+    it "has exactly 16 constructors (8 code + 5 spec-artifact + Documents + 2 intent)" $ do
+      length [minBound .. maxBound :: Relation] `shouldBe` 16
 
     it "round-trips through text representation" $ do
       property $ \rel -> textToRelation (relationToText rel) == Just rel
@@ -38,6 +38,10 @@ spec = do
     it "serializes the documents relation (deterministic doc-code edges)" $ do
       relationToText Documents `shouldBe` "documents"
       textToRelation "documents" `shouldBe` Just Documents
+
+    it "includes the intent relations (tests exercises; maps parallel structure)" $ do
+      map relationToText [Tests, Maps] `shouldBe` ["tests", "maps"]
+      map textToRelation ["tests", "maps"] `shouldBe` [Just Tests, Just Maps]
 
     it "round-trips the documents relation through JSON" $ do
       let edge = Edge (EdgeId "d->c:documents") "d" "c" Documents 0.9 (Confidence 0.9) Nothing
