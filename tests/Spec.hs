@@ -100,6 +100,7 @@ import qualified Graphos.UseCase.PipelineIncrementalSpec
 import qualified Graphos.UseCase.InferBetweennessWiringSpec
 import qualified Graphos.UseCase.IngestSpec
 import qualified Graphos.Infrastructure.FileSystem.CacheSpec
+import qualified Graphos.UseCase.LabelCacheSpec
 import qualified OpenSpecView.ChangeListSpec
 import qualified OpenSpecView.ArtifactViewSpec
 import qualified OpenSpecView.SpecDiffSpec
@@ -203,6 +204,7 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.InferBetweennessWiringSpec.spec
   Graphos.UseCase.IngestSpec.spec
   Graphos.Infrastructure.FileSystem.CacheSpec.spec
+  Graphos.UseCase.LabelCacheSpec.spec
   OpenSpecView.ChangeListSpec.spec
   OpenSpecView.ArtifactViewSpec.spec
   OpenSpecView.SpecDiffSpec.spec
