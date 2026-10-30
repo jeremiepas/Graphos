@@ -39,6 +39,7 @@ module Graphos.Domain.Graph.Mutation
   , removeEdgeProp
   , deleteEdge
   , deleteEdgesTouching
+  , deleteNodeIncident
 
     -- * Rebuild
   , rebuildAdjacency
@@ -132,6 +133,36 @@ deleteEdgesTouching :: NodeId -> Graph -> (Graph, Int)
 deleteEdgesTouching nid g =
   let (kept, removed) = Map.partitionWithKey (\(s, t) _ -> s /= nid && t /= nid) (gEdges g)
   in (g { gEdges = kept }, Map.size removed)
+
+-- | Remove a node and every incident edge using reverse/forward adjacency.
+--
+-- Runs in O(deg(n)) rather than O(|E|): only incident edge keys are looked up
+-- through gAdjFwd/gAdjBack, and removal touches at most deg(n) neighbours.
+deleteNodeIncident :: NodeId -> Graph -> (Graph, Int)
+deleteNodeIncident nid g =
+  let fwdNs = Map.findWithDefault Set.empty nid (gAdjFwd g)
+      bwdNs = Map.findWithDefault Set.empty nid (gAdjBack g)
+      neighs = Set.union fwdNs bwdNs
+      candidates =
+        Set.fromList ([(nid, v) | v <- Set.toList fwdNs]
+                      ++ [(u, nid) | u <- Set.toList bwdNs])
+      deletedKeys = Set.filter (`Map.member` gEdges g) candidates
+      deletedCount = Set.size deletedKeys
+      nodes' = Map.delete nid (gNodes g)
+      edges' = foldl' (flip Map.delete) (gEdges g) (Set.toList deletedKeys)
+      -- Remove the node from every neighbour's reverse/forward adjacency sets.
+      clearNeighbour n m = Map.adjust (Set.delete nid) n m
+      fwdWithout = Map.delete nid (gAdjFwd g)
+      bwdWithout = Map.delete nid (gAdjBack g)
+      fwd' = foldl' (flip clearNeighbour) fwdWithout (Set.toList neighs)
+      bwd' = foldl' (flip clearNeighbour) bwdWithout (Set.toList neighs)
+  in ( g { gNodes = nodes'
+        , gEdges = edges'
+        , gAdjFwd = fwd'
+        , gAdjBack = bwd'
+        , gHash = computeGraphHash nodes' edges'
+        }
+     , deletedCount )
 
 -- | Add a label: primary @nodeKind@ if unset, else the extra-labels list.
 addNodeLabel :: Text -> Node -> Node
