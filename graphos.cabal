@@ -464,6 +464,7 @@ test-suite graphos-test
     Graphos.UseCase.IngestSpec
     Graphos.Infrastructure.FileSystem.CacheSpec
     Graphos.UseCase.LabelCacheSpec
+    Graphos.Infrastructure.FileSystem.WatcherSpec
       OpenSpecView.ChangeListSpec
       OpenSpecView.ArtifactViewSpec
       OpenSpecView.SpecDiffSpec

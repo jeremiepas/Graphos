@@ -79,7 +79,7 @@ import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefa
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
-import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
+import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig, SourcePath)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
@@ -372,14 +372,26 @@ main = do
                    logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
                    -- Start watcher
                    shutdownVar <- newMVar ()
-                   watchDirectory (cfgInputPath config') (\changedFiles -> do
-                     let filesList = T.splitOn ", " (T.pack changedFiles)
-                     logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
-                     incResult <- runIncrementalPipeline appEnv config' (map T.unpack filesList)
-                     case incResult of
-                       Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
-                       Right _ -> logInfo env "[watch] Incremental update complete"
-                     ) defaultGraphosWatchConfig shutdownVar
+                   let sourceConfigs = gcSources graphosCfg
+                   if null sourceConfigs
+                     then do
+                       let onChange sp = do
+                             let filePaths = map snd sp
+                             logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
+                             incResult <- runIncrementalPipeline appEnv config' filePaths
+                             case incResult of
+                               Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                               Right _ -> logInfo env "[watch] Incremental update complete"
+                       watchDirectory (cfgInputPath config') onChange defaultGraphosWatchConfig shutdownVar
+                     else do
+                       let onChange sp = do
+                             let filePaths = map snd sp
+                             logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
+                             incResult <- runIncrementalPipeline appEnv config' filePaths
+                             case incResult of
+                               Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                               Right _ -> logInfo env "[watch] Incremental update complete"
+                       watchSources sourceConfigs onChange defaultGraphosWatchConfig shutdownVar
               else do
                 -- Normal mode: run once and exit
                 logInfo env "Starting pipeline..."
