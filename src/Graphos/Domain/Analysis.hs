@@ -19,7 +19,7 @@ import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Relation(..), Confidenc
                             FileType(..), CommunityId, CommunityMap, CohesionMap,
                             SurprisingConnection(..), SuggestedQuestion(..),
                             Analysis(..), NullModel(..), relationToText)
-import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, gNodes, gEdges, degree)
+import Graphos.Domain.Graph (Graph, godNodes, isFileNode, isConceptNode, isGeneratedOrVendoredNode, gNodes, gEdges, degree)
 import Graphos.Domain.Graph.Analysis (toCachedFGL, connectivityWithCached)
 
 -- | Order-preserving, first-occurrence-wins deduplication by key.
@@ -185,7 +185,7 @@ bridgeNodeQuestions g _nodeComm _labels =
   let betweenness = nodeBetweenness g
       topBridges = take 3 (sortOn (Down . snd) [(nid, bScore) | (nid, bScore) <- Map.toList betweenness
                                                                 , bScore > 0
-                                                                , not (isFileNode g (nodeData g nid))])
+                                                                , not (isFileNode g (nodeData g nid)) && not (isGeneratedOrVendoredNode (nodeData g nid))])
   in [SuggestedQuestion
      { sqType = "bridge_node"
      , sqQuestion = Just $ "Why does `" <> nodeLabel' g nid <> "` connect across communities?"

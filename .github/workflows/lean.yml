@@ -1,0 +1,91 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
+name: Lean formalization (report-only)
+
+# Report-only verification companion: `formalization/lean/` is a separate lake
+# package, not a cabal component. This workflow NEVER blocks a merge —
+# `continue-on-error` keeps the job non-gating; a red result is a signal for the
+# R&D cell, not a release gate.
+# Requirements: docs/math-requirements/AVI-616-consolidated-lean-formalization-requirements.md
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "formalization/lean/**"
+      - ".github/workflows/lean.yml"
+  pull_request:
+    paths:
+      - "formalization/lean/**"
+      - ".github/workflows/lean.yml"
+
+concurrency:
+  group: lean-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lake-build:
+    name: lake build (report-only, non-blocking)
+    runs-on: ubuntu-latest
+    # Non-gating by design: the workflow run stays green even if this job fails.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: formalization/lean
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # AVI-1488 (SEC-2): bootstrap elan from an immutable release asset with a
+      # pinned SHA-256 instead of piping a moving-branch script into a shell.
+      # `ubuntu-latest` is x86_64; adjust the asset name if the runner changes.
+      # Bump ELAN_VERSION and ELAN_SHA256 together when upgrading elan.
+      - name: Install elan (pinned release + checksum)
+        working-directory: .
+        env:
+          ELAN_VERSION: v4.2.4
+          ELAN_SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
+        run: |
+          curl -sSfL -o elan-init.tar.gz \
+            "https://github.com/leanprover/elan/releases/download/${ELAN_VERSION}/elan-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ELAN_SHA256}  elan-init.tar.gz" | sha256sum -c -
+          tar xzf elan-init.tar.gz elan-init
+          ./elan-init -y --default-toolchain none
+          rm -rf elan-init elan-init.tar.gz
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache toolchain and lake build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.elan/toolchains
+            formalization/lean/.lake
+          key: lean-${{ runner.os }}-${{ hashFiles('formalization/lean/lean-toolchain', 'formalization/lean/lakefile.toml', 'formalization/lean/lake-manifest.json') }}
+          restore-keys: |
+            lean-${{ runner.os }}-
+
+      - name: lake build
+        run: lake build
+
+      # AVI-1307: the AC-3 timing harness is not a default target (a local
+      # `lake build` stays lib-only), so build it explicitly to keep it from
+      # rotting. Report-only, like the rest of this job.
+      - name: lake build ac3-cost (AVI-1307 harness)
+        run: lake build ac3-cost
+
+      # AVI-1301: Lean arm of the AVI-618 §6 modularity cross-check. The
+      # executable is not a default target, so build it explicitly, then diff
+      # its table against the checked-in `crosscheck/q-lean.tsv` the Haskell
+      # test (`Graphos.Domain.ModularityCrossCheckSpec`) reads. Drift means the
+      # Lean-side values moved away from the pinned §5 fixture table.
+      - name: lake build modularity-crosscheck (AVI-1301 harness)
+        run: lake build modularity-crosscheck
+
+      - name: check the pinned fixture table is current (AVI-1301)
+        run: lake exe modularity-crosscheck --check crosscheck/q-lean.tsv
+
+      - name: Report package identity
+        if: always()
+        run: lake env lean --version

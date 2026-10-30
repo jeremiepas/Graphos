@@ -538,6 +538,8 @@ extractionConfigFingerprint config = T.pack . unwords $
     [ [ "granularity=" ++ show (gcGranularity gcfg)
       , "cliGranularity=" ++ maybe "none" show (cfgGranularity config)
       , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
+        -- bump when tree-sitter extraction output changes for unchanged files
+      , "treesitter-imports=go,rust,ruby:1"
       ]
     , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
             ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)

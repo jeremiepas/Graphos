@@ -14,38 +14,102 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import qualified Data.Set as Set
 import System.Directory (removeFile)
 import Control.Exception (catch, SomeException)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
+import Data.Time.Clock (getCurrentTime)
 
 import Graphos.Domain.Types (CommunityId, CommunityMap, CohesionMap)
 import Graphos.Domain.Graph (Graph)
 import Graphos.Domain.Config (LabelingConfig(..), Neo4jConfig(..))
-import Graphos.Domain.Labeling (LabelingResult(..), labelPrompt, batchCommunities)
+import Graphos.Domain.Labeling
+  ( LabelingResult(..)
+  , labelPrompt
+  , batchCommunities
+  , LabelCacheEntry(..)
+  , LabelCacheFile(..)
+  , MatchKind(..)
+  , fingerprintOf
+  , matchCommunity
+  )
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
+import Graphos.UseCase.Port.FileSystemPort (fspLoadLabelCache, fspSaveLabelCache)
 
--- | Label communities using an LLM.
--- Batches communities, sends prompts, parses responses.
-labelCommunities :: AppEnv -> Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> IO LabelingResult
-labelCommunities appEnv g commMap cohesion cfg = do
+-- | Label communities using an LLM, consulting and updating the label cache.
+--
+-- Before any LLM call, consults the persisted label cache (scoped to the
+-- current model) via 'matchCommunity': exact + fuzzy hits are served from the
+-- cache, and only misses are batched and sent to the LLM. After the pass the
+-- cache is rewritten as a last-run snapshot containing exactly the current
+-- run's successfully-labeled communities (hit entries carried with their
+-- original 'lceLabeledAt', misses with a fresh timestamp). Logs a
+-- cost-accounting line so the token savings are visible.
+labelCommunities :: AppEnv -> Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> FilePath -> IO LabelingResult
+labelCommunities appEnv g commMap cohesion cfg outputDir = do
   let lp = llmPort appEnv
+      fsp = fileSystemPort appEnv
+      model = T.pack (labelingModel cfg)
       cids = Map.keys commMap
-      batchSize = labelingBatchSize cfg
-      batches = batchCommunities cids batchSize
+  cached <- fspLoadLabelCache fsp outputDir
+  let entries = lcfEntries cached
+      -- (community id, member set) pairs in ascending id order.
+      memberSets = [ (cid, Set.fromList mems) | (cid, mems) <- Map.toList commMap ]
+      decided = [ (cid, matchCommunity entries model members) | (cid, members) <- memberSets ]
+      hits = [ (cid, kind, entry) | (cid, Just (entry, kind)) <- decided ]
+      misses = [ cid | (cid, Nothing) <- decided ]
+      exactHits = length [ () | (_, ExactMatch, _) <- hits ]
+      fuzzyHits = length [ () | (_, FuzzyMatch, _) <- hits ]
+      decMap = Map.fromList [ (cid, (kind, entry)) | (cid, kind, entry) <- hits ]
 
-  TIO.putStrLn $ "[label] Labeling " <> T.pack (show (length cids)) <> " communities in "
-              <> T.pack (show (length batches)) <> " batch(es)"
+  TIO.putStrLn $ "[label] Labeling " <> T.pack (show (length cids))
+               <> " communities: " <> T.pack (show exactHits) <> " exact, "
+               <> T.pack (show fuzzyHits) <> " fuzzy, " <> T.pack (show (length misses))
+               <> " new (LLM)"
 
-  allLabels <- mapM (labelBatch lp g commMap cohesion cfg) batches
+  -- Only misses go to the LLM, batched.
+  let missBatches = batchCommunities misses (labelingBatchSize cfg)
+  freshLabels <- mapM (labelBatch lp g commMap cohesion cfg) missBatches
+  let unlabeled = Map.unions freshLabels
 
-  let mergedLabels = Map.unions allLabels
+  -- Labels map: hits carry the cached label, misses carry the fresh LLM label.
+  let mergedLabels = Map.union
+                         (Map.fromList [ (cid, lceLabel entry) | (cid, _, entry) <- hits ])
+                         unlabeled
+
+  -- Rewrite the cache as a last-run snapshot containing exactly the current
+  -- run's communities. Hits carry their original entry verbatim (preserving
+  -- lceLabeledAt). Misses that produced a label get a fresh entry; misses that
+  -- failed to produce one are omitted so they are retried next run (never a
+  -- crash, never a bogus cached label).
+  now <- getCurrentTime
+  let nowTxt = T.pack (show now)
+      freshEntry cid mems =
+        case unlabeled Map.!? cid of
+          Just lbl -> Just (LabelCacheEntry
+                { lceFingerprint = fingerprintOf (Set.fromList mems)
+                , lceMembers     = mems
+                , lceLabel       = lbl
+                , lceModel       = model
+                , lceLabeledAt   = nowTxt })
+          Nothing -> Nothing
+      snapshotEntries =
+        [ case Map.lookup cid decMap of
+            Just (_, entry) -> Just entry          -- hit: carried verbatim
+            Nothing         -> freshEntry cid (Set.toList mems) -- miss: fresh entry from member set
+          | (cid, mems) <- memberSets ]
+  fspSaveLabelCache fsp outputDir (LabelCacheFile [ e | Just e <- snapshotEntries ])
+
   pure LabelingResult
     { lrLabels = mergedLabels
     , lrTokensIn = 0
     , lrTokensOut = 0
     , llmRawResponses = []
+    , lrExactHits = exactHits
+    , lrFuzzyHits = fuzzyHits
+    , lrLlmLabeled = length misses
     }
 
 -- | Label a single batch of communities.
