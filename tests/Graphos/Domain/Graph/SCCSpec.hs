@@ -260,8 +260,8 @@ spec = do
     it "isAcyclicDirected: a pure path DAG -> True" $ do
       isAcyclicDirected dagPath `shouldBe` True
 
-    it "isAcyclicDirected: a self-loop is a cycle in a one-node SCC -> False" $ do
-      isAcyclicDirected selfLoop `shouldBe` False
+    it "isAcyclicDirected: a self-loop (dropped at build time) yields no retained self-loop -> True" $ do
+      isAcyclicDirected selfLoop `shouldBe` True
 
     it "isAcyclicDirected (property): True iff every SCC is a singleton and no self-loop" $ do
       property $ \(SmallGraph g) ->
@@ -277,8 +277,8 @@ spec = do
       hasCycleUndirected dagF2 `shouldBe` True
       isAcyclicDirected dagF2 `shouldBe` True
 
-    it "hasCycleUndirected: self-loop F3 -> True (INV-C4)" $
-      hasCycleUndirected selfLoop `shouldBe` True
+    it "hasCycleUndirected: self-loop F3 dropped at build time (AVI-1324) -> False" $
+      hasCycleUndirected selfLoop `shouldBe` False
 
     it "hasCycleUndirected: reciprocal pair a->b, b->a -> False (AF-3)" $
       hasCycleUndirected reciprocalF `shouldBe` False
