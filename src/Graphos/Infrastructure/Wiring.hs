@@ -188,7 +188,7 @@ productionExtractionPort logEnv = ExtractionPort
                 ) fileMap
             Left err -> pure $ Left err
         Nothing -> pure $ Left "wiring: extractWorkspaceSymbols type mismatch"
-  , epParseWithGrammar = \grammar filePath content ->
+  , epParseWithGrammar = \gran grammar filePath content ->
       case getGrammarPtr grammar of
         Nothing -> pure Nothing
         Just lang -> do
@@ -196,7 +196,7 @@ productionExtractionPort logEnv = ExtractionPort
           case result of
             Nothing -> pure Nothing
             Just nodes -> Just <$> withImportEdges grammar filePath nodes
-                                     (tsNodesToExtraction GranularityFunction filePath nodes)
+                                     (tsNodesToExtraction gran filePath nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
