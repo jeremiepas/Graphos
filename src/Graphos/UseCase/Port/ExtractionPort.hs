@@ -14,6 +14,7 @@ import Data.Dynamic (Dynamic)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Graphos.Domain.Types (Extraction, Node, Edge)
+import Graphos.Domain.Config.Extraction (Granularity)
 import Graphos.Domain.Types.Pipeline (PipelineConfig)
 
 -- | Opaque handle to an LSP server connection.
@@ -46,7 +47,7 @@ data ExtractionPort = ExtractionPort
   , epHasWorkspaceSymbols  :: LSPHandle -> IO Bool
   , epExtractWorkspaceSymbols :: LSPHandle -> IO (Either Text (Map FilePath SymbolResult))
     -- TreeSitter extraction
-  , epParseWithGrammar     :: String -> FilePath -> ByteString -> IO (Maybe Extraction)
+  , epParseWithGrammar     :: Granularity -> String -> FilePath -> ByteString -> IO (Maybe Extraction)
     -- File-level extraction (delegates to sub-modules)
   , epExtractDocFile       :: FilePath -> IO Extraction
   , epExtractOfficeFile    :: PipelineConfig -> FilePath -> IO Extraction
