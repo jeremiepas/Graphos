@@ -1,4 +1,3 @@
-import Control.Monad (sequence)
 {-# LANGUAGE OverloadedStrings #-}
 
 module Graphos.Domain.Community.UQICommunitySpec where
@@ -8,7 +7,6 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
-import Test.QuickCheck (generate)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph(..), buildGraph, gNodes, gDirected, mergeGraphs, neighbors, degree)
 import Graphos.Domain.Community
