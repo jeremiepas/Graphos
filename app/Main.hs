@@ -79,7 +79,7 @@ import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefa
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
-import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig)
+import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig, resolveWatchPaths)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
@@ -385,7 +385,7 @@ main = do
                        watchDirectory (cfgInputPath config') onChange defaultGraphosWatchConfig shutdownVar
                      else do
                        let onChange sp = do
-                             let filePaths = map snd sp
+                             let filePaths = resolveWatchPaths sourceConfigs sp
                              logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
                              incResult <- runIncrementalPipeline appEnv config' filePaths
                              case incResult of
