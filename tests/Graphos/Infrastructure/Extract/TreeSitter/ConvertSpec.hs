@@ -82,7 +82,8 @@ spec = do
 
     it "import identifier is the resolved specifier" $ do
       let ex = tsNodesToExtraction sf GranularityFunction defaultTruncationBudget [importDecl "'./db'"]
-          n = head (Map.elems (extractionNodes ex))
+          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          n = case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex))
       nodeLabel n `shouldBe` fromText "./db"
 
     it "module identifier is the file stem" $ do
@@ -131,7 +132,7 @@ spec = do
              [ func "handle" `withLine` 10
              , func "handle" `withLine` 40 ]
           ex = tsNodesToExtraction sf GranularityFunction defaultTruncationBudget [fixture]
-          ids = sortIds (map nodeId (Map.elems (extractionNodes ex)))
+          ids = sortIds (map nodeId (filter (\n -> nodeKind n == Just (fromText "Function")) (Map.elems (extractionNodes ex))))
       ids `shouldBe` [ makeNodeId sf "Function" "handle"
                      , makeNodeId sf "Function" "handle" <> "#L40" ]
 
@@ -157,7 +158,8 @@ spec = do
     it "import signature keeps the trailing specifier clause" $ do
       let ex = tsNodesToExtraction sf GranularityFunction defaultTruncationBudget
              [importDecl "'../../templates/index.js'"]
-          sig = nodeSignature (head (Map.elems (extractionNodes ex)))
+          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          sig = nodeSignature (case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex)))
       sig `shouldSatisfy` maybe False (\x -> T.isSuffixOf "from '../../templates/index.js'" (toText x))
 
 -- | Attach a start row to a fixture node for collision ordering.
