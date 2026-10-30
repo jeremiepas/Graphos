@@ -79,7 +79,7 @@ import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefa
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
-import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig, SourcePath)
+import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
