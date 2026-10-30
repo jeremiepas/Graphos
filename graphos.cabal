@@ -386,6 +386,7 @@ test-suite graphos-test
      Graphos.Domain.Graph.CollisionSpec
      Graphos.Domain.Graph.NaturTransformationSpec
      Graphos.Domain.Graph.SCCSpec
+    Graphos.Domain.Graph.MutationSpec
      Graphos.Domain.Graph.StructuralSpec
      Graphos.Domain.Graph.ColimitPropertySpec
      Graphos.Domain.Graph.UQIProjectionSpec

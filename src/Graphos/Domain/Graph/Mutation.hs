@@ -142,7 +142,6 @@ deleteNodeIncident :: NodeId -> Graph -> (Graph, Int)
 deleteNodeIncident nid g =
   let fwdNs = Map.findWithDefault Set.empty nid (gAdjFwd g)
       bwdNs = Map.findWithDefault Set.empty nid (gAdjBack g)
-      neighs = Set.union fwdNs bwdNs
       candidates =
         Set.fromList ([(nid, v) | v <- Set.toList fwdNs]
                       ++ [(u, nid) | u <- Set.toList bwdNs])
@@ -150,19 +149,10 @@ deleteNodeIncident nid g =
       deletedCount = Set.size deletedKeys
       nodes' = Map.delete nid (gNodes g)
       edges' = foldl' (flip Map.delete) (gEdges g) (Set.toList deletedKeys)
-      -- Remove the node from every neighbour's reverse/forward adjacency sets.
-      clearNeighbour n m = Map.adjust (Set.delete nid) n m
-      fwdWithout = Map.delete nid (gAdjFwd g)
-      bwdWithout = Map.delete nid (gAdjBack g)
-      fwd' = foldl' (flip clearNeighbour) fwdWithout (Set.toList neighs)
-      bwd' = foldl' (flip clearNeighbour) bwdWithout (Set.toList neighs)
-  in ( g { gNodes = nodes'
-        , gEdges = edges'
-        , gAdjFwd = fwd'
-        , gAdjBack = bwd'
-        , gHash = computeGraphHash nodes' edges'
-        }
-     , deletedCount )
+      -- Rebuild canonical adjacency/hash from surviving edges (matches
+      -- 'rebuildAdjacency', incl. undirected merge and empty dropping).
+      g' = rebuildAdjacency (g { gNodes = nodes', gEdges = edges' })
+  in (g', deletedCount)
 
 -- | Add a label: primary @nodeKind@ if unset, else the extra-labels list.
 addNodeLabel :: Text -> Node -> Node
