@@ -22,7 +22,6 @@ import Graphos.Infrastructure.FileSystem.Watcher
 import Graphos.Domain.Config.Source (SourceConfig(..))
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as T
 
 spec :: Spec
@@ -86,8 +85,8 @@ spec = do
       Set.size contents `shouldBe` 1
     it "keeps 10 distinct events across 2 sources as 10 pairs" $ do
       mv <- newMVar (Set.empty :: Set SourcePath)
-      let pairs = [ (Just "inner", "/worktrees/inner/f" ++ show i ++ ".hs") | i <- [0 .. 4] ]
-                  ++ [ (Just "outer", "/worktrees/outer/g" ++ show i ++ ".hs") | i <- [0 .. 4] ]
+      let pairs = [ (Just "inner", "/worktrees/inner/f" ++ show i ++ ".hs") | i <- [0 .. 4 :: Int] ]
+                  ++ [ (Just "outer", "/worktrees/outer/g" ++ show i ++ ".hs") | i <- [0 .. 4 :: Int] ]
       mapM_ (\p -> recordChangedForSource mv (fst p) (snd p)) pairs
       contents <- takeMVar mv
       Set.size contents `shouldBe` 10
