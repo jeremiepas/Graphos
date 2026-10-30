@@ -83,6 +83,7 @@ library
                     Graphos.UseCase.IntentCheck
                     Graphos.UseCase.Impact
                     Graphos.Infrastructure.SpecParse
+                    Graphos.Infrastructure.Http
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
                      Graphos.Domain.Graph.Mutation

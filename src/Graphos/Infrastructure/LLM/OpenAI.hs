@@ -20,11 +20,10 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
-import System.Exit (ExitCode(..))
-import System.Process (readProcessWithExitCode)
 import System.Environment (getEnv)
 import System.IO.Unsafe (unsafePerformIO)
 
+import Graphos.Infrastructure.Http (runCurl, CurlResult(..), withSecureTempFile)
 import Graphos.Domain.Config (LabelingConfig(..))
 import Graphos.Domain.Types (CommunityId)
 
@@ -52,40 +51,22 @@ callLLM cfg prompt = catch (do
         , "temperature" Aeson..= (0.3 :: Double)
         , "max_tokens" Aeson..= (2000 :: Int)
         ]
-      -- Use unique temp file per call to avoid file locking
-      payloadPath = "/tmp/graphos-llm-payload-" ++ show (hashPayload payload) ++ ".json"
-
-  BSL8.writeFile payloadPath payload
-
-  let authHeaders = if not (null apiKey) && labelingProvider cfg /= "ollama"
-                      then ["-H", "Authorization: Bearer " ++ apiKey]
-                      else []
-      customHeaders = Map.toList (labelingHeaders cfg) >>= \(k, v) -> ["-H", k ++ ": " ++ resolveEnvVars v]
-      -- Custom headers override Authorization on collision (applied after, so they win)
-      -- Env var expansion ${VAR} is resolved in header values
-      curlArgs = [ "-s", "--max-time", "60"
-                  , "-X", "POST"
-                  , "-H", "Content-Type: application/json"
-                  ]
-                  ++ authHeaders
-                  ++ customHeaders
-                  ++ [ "--data-binary", "@" ++ payloadPath
-                     , apiBase ++ "/chat/completions"
-                     ]
-
-  (exitCode, stdout, stderr) <- readProcessWithExitCode "curl" curlArgs ""
-
-  -- Cleanup temp file (best effort)
-  _ <- catch (BSL8.readFile payloadPath >> return ()) (\(_ :: SomeException) -> pure ())
-
-  case exitCode of
-    ExitSuccess -> pure $ parseResponse (T.pack stdout)
-    ExitFailure code -> pure $ Left $ T.pack $ "LLM API call failed (curl exit " ++ show code ++ "): " ++ take 200 stderr
+  withSecureTempFile "payload" payload $ \payloadPath -> do
+    let authOpts = [("--header", "Authorization: Bearer " ++ apiKey)
+                   | not (null apiKey) && labelingProvider cfg /= "ollama"]
+        customHeaderOpts = Map.toList (labelingHeaders cfg) >>= \(k, v) -> [("--header", k ++ ": " ++ resolveEnvVars v)]
+        -- All headers (including any that may carry secrets) go through the
+        -- curl config file, never the argv. Custom headers are applied after
+        -- auth so they win on collision; ${VAR} expansion happens in resolveEnvVars.
+        secretOpts = authOpts ++ customHeaderOpts
+        firstArgs = [ "-s", "--max-time", "60", "-X", "POST", "-H", "Content-Type: application/json" ]
+        lastArgs = [ "--data-binary", "@" ++ payloadPath, apiBase ++ "/chat/completions" ]
+    res <- runCurl firstArgs secretOpts lastArgs
+    case res of
+      CurlSuccess stdout -> pure $ parseResponse stdout
+      CurlFailed n err   -> pure $ Left (T.pack ("LLM API call failed (curl exit " ++ show n ++ "): " ++ T.unpack (T.take 200 err)))
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "LLM API call error: " ++ show e
 
--- | Simple hash for generating unique temp file names
-hashPayload :: BSL8.ByteString -> Int
-hashPayload = BSL8.foldl' (\acc c -> acc * 31 + fromEnum c) 0
 
 -- | Parse the OpenAI chat completion response to extract the assistant message content.
 parseResponse :: Text -> Either Text Text
