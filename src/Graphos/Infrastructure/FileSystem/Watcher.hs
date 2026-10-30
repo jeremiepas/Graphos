@@ -21,6 +21,11 @@ module Graphos.Infrastructure.FileSystem.Watcher
   , GraphosWatchConfig(..)
   , defaultGraphosWatchConfig
   , SourcePath
+  , recordChanged
+  , recordChangedForSource
+  , attributeEvent
+  , startsWithBase
+  , startsWith
   ) where
 
 
@@ -28,6 +33,8 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
 import Control.Monad (void, when)
+import Data.List (maximumBy, isPrefixOf)
+import Data.Ord (comparing)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -37,6 +44,42 @@ import System.FSNotify (Event(..), withManager, watchTree)
 -- | A source-qualified path: (sourceName, relativePath).
 -- sourceName is Nothing for single-root, Just name for multi-root.
 type SourcePath = (Maybe T.Text, FilePath)
+
+-- | Does @prefix@ occur at the very start of @path@?
+startsWith :: FilePath -> FilePath -> Bool
+startsWith path prefix = prefix `isPrefixOf` path
+
+-- | Is @path@ equal to, or contained within, the directory @base@?
+startsWithBase :: FilePath -> FilePath -> Bool
+startsWithBase path base =
+  path == base || (base `isPrefixOf` path && '/' == path !! length base)
+
+-- | Strip the @base@ prefix (and a following slash) from @path@.
+relativize :: FilePath -> FilePath -> FilePath
+relativize base path =
+  case drop (length base) path of
+    ('/') : rest -> rest
+    other        -> other
+
+-- | The source whose directory is the longest prefix of @path@, if any.
+longestMatch :: [SourceConfig] -> FilePath -> Maybe (FilePath, T.Text)
+longestMatch sources path =
+  let matches = [ (scPath s, scName s) | s <- sources, startsWithBase path (scPath s) ]
+  in if null matches
+       then Nothing
+       else Just (maximumBy (comparing (\(b, _) -> length b)) matches)
+
+-- | Attribute a filesystem event to exactly one source by longest-prefix.
+--
+-- Returns @(Just sourceName, relativePath)@ for the owning source, or
+-- @(Nothing, path)@ when no source owns it. The relative path is expressed
+-- relative to the owning source's directory.
+attributeEvent :: [SourceConfig] -> FilePath -> (Maybe T.Text, FilePath)
+attributeEvent sources path =
+  case longestMatch sources path of
+    Just (base, name) -> (Just name, relativize base path)
+    Nothing           -> (Nothing, path)
+
 
 -- | Watch configuration
 data GraphosWatchConfig = GraphosWatchConfig
@@ -108,9 +151,9 @@ watchSources sourceConfigs onChange config shutdownVar = do
       let sourceDir = scPath sourceConfig
       void $ watchTree mgr sourceDir (const True) $ \event -> do
         case event of
-          Added path _ _    -> recordChangedForSource changedFiles (Just (scName sourceConfig)) path
-          Modified path _ _  -> recordChangedForSource changedFiles (Just (scName sourceConfig)) path
-          Removed path _ _  -> recordChangedForSource changedFiles (Just (scName sourceConfig)) path
+          Added path _ _    -> emitForSource sourceConfigs changedFiles sourceConfig path
+          Modified path _ _  -> emitForSource sourceConfigs changedFiles sourceConfig path
+          Removed path _ _  -> emitForSource sourceConfigs changedFiles sourceConfig path
           _                 -> pure ()  -- Ignore other events
       ) sourceConfigs
     
@@ -133,3 +176,15 @@ recordChangedForSource changedFiles sourceName path = do
   let sourcePath = (sourceName, relativePath)
   current <- takeMVar changedFiles
   putMVar changedFiles (Set.insert sourcePath current)
+
+-- | Record a single event only under the source that owns it by longest-prefix.
+--
+-- Because fsnotify reports a change in a nested source directory to *every*
+-- enclosing watcher, we re-attribute each event globally and record it under
+-- exactly one source (the innermost). This keeps nested changes from being
+-- reported twice (once per enclosing source).
+emitForSource :: [SourceConfig] -> MVar (Set SourcePath) -> SourceConfig -> FilePath -> IO ()
+emitForSource sources changedFiles thisConfig path =
+  let (maybeName, relPath) = attributeEvent sources path
+  in when (maybeName == Just (scName thisConfig)) $
+       recordChangedForSource changedFiles maybeName relPath

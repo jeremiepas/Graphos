@@ -1,108 +1,93 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | Unit tests for the multi-source file watcher (AVI-975 groups 5.1/5.2).
+--
+-- These exercise the pure attribution/coalescing logic that backs
+-- `watchSources`, which is what can be tested deterministically without a live
+-- fsnotify loop:
+--   * longest-prefix source attribution (nested roots belong to the inner source)
+--   * debounce-set insertion and coalescing (dedupe identical events)
 module Graphos.Infrastructure.FileSystem.WatcherSpec where
 
 import Test.Hspec
+import Control.Concurrent.MVar (newMVar, takeMVar)
 import Graphos.Infrastructure.FileSystem.Watcher
-  ( watchDirectory
-  , watchSources
-  , GraphosWatchConfig(..)
-  , defaultGraphosWatchConfig
-  , SourcePath
+  ( attributeEvent
+  , startsWithBase
+  , startsWith
   , recordChanged
+  , recordChangedForSource
+  , SourcePath
   )
+import Graphos.Domain.Config.Source (SourceConfig(..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Maybe (fromMaybe)
 
--- | Helper to create a SourceConfig
-makeSourceConfig :: Text -> FilePath -> [Text] -> SourceConfig
-makeSourceConfig = mkSourceConfig
+spec :: Spec
+spec = do
+  describe "startsWithBase" $ do
+    it "is True when path equals base" $
+      startsWithBase "/project/src1" "/project/src1" `shouldBe` True
+    it "is True when path is under base" $
+      startsWithBase "/project/src1/sub/f.hs" "/project/src1" `shouldBe` True
+    it "is False when path is unrelated" $
+      startsWithBase "/other/f.hs" "/project/src1" `shouldBe` False
+    it "is False for a sibling directory (not a loose prefix)" $
+      startsWithBase "/project/src2/f.hs" "/project/src1" `shouldBe` False
 
--- | --- pickLongest tests (if exported) ---
--- For now we test the attributeEvent logic directly
+  describe "startsWith" $ do
+    it "reports a common leading prefix" $
+      "nested/file.hs" `startsWith` "nested" `shouldBe` True
+    it "is case sensitive and order sensitive" $
+      "abc" `startsWith` "abd" `shouldBe` False
 
--- | --- startsWithBase tests ---
-describe "startsWithBase" $ do
-  it "returns True when path equals base" $ do
-    startsWithBase "/project/src1" "/project/src1" `shouldBe` True
+  describe "attributeEvent (longest-prefix)" $ do
+    let src1 = SourceConfig (T.pack "src1") "/project/src1" []
+        src2 = SourceConfig (T.pack "src2") "/project/src2" []
+        configs = [src1, src2]
+    it "attributes a path under src1 to src1" $
+      fst (attributeEvent configs "/project/src1/sub/f.hs") `shouldBe` Just "src1"
+    it "attributes a path under src2 to src2" $
+      fst (attributeEvent configs "/project/src2/x") `shouldBe` Just "src2"
+    it "returns Nothing name for a path under neither source" $
+      fst (attributeEvent configs "/other/f.hs") `shouldBe` Nothing
+    it "prefers the longer prefix when two sources match" $ do
+      let cfg = [ SourceConfig (T.pack "short") "/project/s" []
+                , SourceConfig (T.pack "long") "/project/short" [] ]
+      fst (attributeEvent cfg "/project/short/deep/f.hs") `shouldBe` Just "long"
+    it "relativizes the path against the owning source" $
+      snd (attributeEvent [SourceConfig (T.pack "inner") "/worktrees/inner" []]
+                           "/worktrees/inner/nested/f.hs") `shouldBe` "nested/f.hs"
+    it "leaves the untouched path when nothing owns it" $
+      snd (attributeEvent configs "/other/f.hs") `shouldBe` "/other/f.hs"
 
-  it "returns True when path is under base" $ do
-    startsWithBase "/project/src1/sub/file.hs" "/project/src1" `shouldBe` True
+  describe "recordChanged (debounce-set insertion)" $ do
+    it "inserts a source path into the debounce set" $ do
+      mv <- newMVar (Set.empty :: Set SourcePath)
+      recordChanged mv (Just "src1", "/project/src1/f.hs")
+      contents <- takeMVar mv
+      Set.member (Just "src1", "/project/src1/f.hs") contents `shouldBe` True
 
-  it "returns False when path is unrelated" $ do
-    startsWithBase "/other/path/file.hs" "/project/src1" `shouldBe` False
+  describe "recordChangedForSource attributes a single change" $ do
+    it "stores the (sourceName, path) pair" $ do
+      mv <- newMVar (Set.empty :: Set SourcePath)
+      recordChangedForSource mv (Just "inner") "/worktrees/inner/f.hs"
+      contents <- takeMVar mv
+      Set.member (Just "inner", "/worktrees/inner/f.hs") contents `shouldBe` True
 
-  it "returns False when path is sibling" $ do
-    startsWithBase "/project/src2/sub/file.hs" "/project/src1" `shouldBe` False
-
--- | --- attributeEvent tests ---
-describe "attributeEvent" $ do
-  let config1 = makeSourceConfig "src1" "/project/src1" []
-  let config2 = makeSourceConfig "src2" "/project/src2" []
-  let configs = [config1, config2]
-
-  it "attributes path under src1 to src1" $ do
-    let result = attributeEvent configs "/project/src1/sub/file.hs"
-    result `shouldSatisfy` \(name, _) -> name == Just "src1"
-
-  it "attributes path under src2 to src2" $ do
-    let result = attributeEvent configs "/project/src2/sub/file.hs"
-    result `shouldSatisfy` \(name, _) -> name == Just "src2"
-
-  it "returns Nothing for path under neither source" $ do
-    let result = attributeEvent configs "/other/path/file.hs"
-    result `shouldSatisfy` \(name, _) -> isNothing name
-
-  it "prefers longer prefix when paths are equidistant" $ do
-    -- Create configs with different prefix lengths
-    let configShort = makeSourceConfig "short" "/project/s" []
-    let configLong = makeSourceConfig "long" "/project/short" []
-    let result = attributeEvent [configShort, configLong] "/project/short/deep/file.hs"
-    -- Should be attributed to "long" since its prefix is longer
-    result `shouldSatisfy` \(name, _) -> name == Just "long"
-
--- | --- recordChanged tests ---
-describe "recordChanged" $ do
-  it "records a change in the debounce set" $ do
-    changedFiles <- newMVar (Set.empty :: Set SourcePath)
-    recordChanged changedFiles (Just "src1", "/project/src1/file.hs")
-    contents <- takeMVar changedFiles
-    Set.member (Just "src1", "/project/src1/file.hs") contents `shouldBe` True
-
--- | --- watchDirectory produces correct callback format ---
-describe "watchDirectory callback format" $ do
-  it "callback receives a list of (Maybe Text, FilePath) pairs" $ do
-    -- watchDirectory callback type is [(Maybe Text, FilePath)] -> IO ()
-    -- Verify the type is correct by pattern matching
-    let callback :: [(Maybe Text, FilePath)] -> IO ()
-    callback [] `shouldBe` pure ()
-    callback [(Nothing, "/absolute/path")] `shouldBe` pure ()
-    callback [(Just "src1", "/relative/path")] `shouldBe` pure ()
-    callback [(Nothing, "/p1"), (Just "src2", "/p2")] `shouldBe` pure ()
-
--- | --- watchSources attribution test ---
-describe "watchSources attribution" $ do
-  let src1 = makeSourceConfig "inner" "/worktrees/inner" []
-  let src2 = makeSourceConfig "outer" "/worktrees/outer" []
-  let configs = [src1, src2]
-
-  it "nested worktree attributed to inner source once" $ do
-    -- When a change occurs in the inner worktree,
-    -- it should be attributed to the inner source only
-    let result = attributeEvent configs "/worktrees/inner/nested/file.hs"
-    result `shouldSatisfy` \(name, relPath) ->
-      fromMaybe False (name == Just "inner")
-      && relPath `startsWith` "nested/file.hs"
-
-  it "10 events across 2 sources coalesce to one callback with 10 pairs" $ do
-    -- When 10 changes happen across 2 sources within debounce,
-    -- the callback should receive exactly 10 (sourceName, path) pairs
-    let callbackReceived = ref :: [(Maybe Text, FilePath)] -> IO ()
-    -- The coalescing logic ensures duplicates are removed and
-    -- the callback receives the full list of unique (sourceName, path) pairs
-    -- This is verified by the test pattern below
-    let expectedPairs = replicate 10 (Just "inner", "/worktrees/inner/file.hs")
-    -- Verify the pair format is correct
-    length expectedPairs `shouldBe` 10
-    head expectedPairs `shouldSatisfy` \(name, _) -> name == Just "inner"
+  describe "coalescing through the debounce set" $ do
+    it "dedupes identical events" $ do
+      mv <- newMVar (Set.empty :: Set SourcePath)
+      recordChangedForSource mv (Just "inner") "/worktrees/inner/a.hs"
+      recordChangedForSource mv (Just "inner") "/worktrees/inner/a.hs"
+      contents <- takeMVar mv
+      Set.size contents `shouldBe` 1
+    it "keeps 10 distinct events across 2 sources as 10 pairs" $ do
+      mv <- newMVar (Set.empty :: Set SourcePath)
+      let pairs = [ (Just "inner", "/worktrees/inner/f" ++ show i ++ ".hs") | i <- [0 .. 4] ]
+                  ++ [ (Just "outer", "/worktrees/outer/g" ++ show i ++ ".hs") | i <- [0 .. 4] ]
+      mapM_ (\p -> recordChangedForSource mv (fst p) (snd p)) pairs
+      contents <- takeMVar mv
+      Set.size contents `shouldBe` 10
