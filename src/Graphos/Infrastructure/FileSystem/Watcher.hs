@@ -24,6 +24,7 @@ module Graphos.Infrastructure.FileSystem.Watcher
   , recordChanged
   , recordChangedForSource
   , attributeEvent
+  , resolveWatchPaths
   , startsWithBase
   , startsWith
   ) where
@@ -36,9 +37,11 @@ import Control.Monad (void, when)
 import Data.List (maximumBy, isPrefixOf)
 import Data.Ord (comparing)
 import Data.Set (Set)
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Graphos.Domain.Config.Source (SourceConfig(..))
+import System.FilePath ((</>))
 import System.FSNotify (Event(..), withManager, watchTree)
 
 -- | A source-qualified path: (sourceName, relativePath).
@@ -79,6 +82,29 @@ attributeEvent sources path =
   case longestMatch sources path of
     Just (base, name) -> (Just name, relativize base path)
     Nothing           -> (Nothing, path)
+
+-- | Re-assemble openable absolute paths from a batch of watcher pairs.
+--
+-- The multi-root watcher carries source-relative paths (see 'watchSources');
+-- the application layer joins each relative path back onto its owning
+-- source's configured root so the downstream reader — which opens the file
+-- with 'Data.ByteString.readFile' — receives an absolute, canonicalizable
+-- path rather than a bare relative component. This is the inverse of the
+-- attribution done in 'attributeEvent', and keeps the callback contract at
+-- [(Maybe sourceName, relativePath)] intact per the multi-root spec.
+--
+-- A pair with no owning source ('Nothing'), or whose source name is absent
+-- from @sources@, is returned unchanged: such a path arrives straight from
+-- fsnotify already absolute, so there is nothing to join.
+resolveWatchPaths :: [SourceConfig] -> [(Maybe T.Text, FilePath)] -> [FilePath]
+resolveWatchPaths sources = map resolveOne
+  where
+    rootMap = Map.fromList [(scName s, scPath s) | s <- sources]
+    resolveOne (Just name, rel) =
+      case Map.lookup name rootMap of
+        Just root -> root </> rel
+        Nothing   -> rel
+    resolveOne (_, rel) = rel
 
 
 -- | Watch configuration

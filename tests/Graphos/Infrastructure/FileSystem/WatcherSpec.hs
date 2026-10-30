@@ -11,18 +11,23 @@ module Graphos.Infrastructure.FileSystem.WatcherSpec where
 
 import Test.Hspec
 import Control.Concurrent.MVar (newMVar, takeMVar)
+import Control.Monad (void)
 import Graphos.Infrastructure.FileSystem.Watcher
   ( attributeEvent
   , startsWithBase
   , startsWith
   , recordChanged
   , recordChangedForSource
+  , resolveWatchPaths
   , SourcePath
   )
 import Graphos.Domain.Config.Source (SourceConfig(..))
 import Data.Set (Set)
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import System.Directory (canonicalizePath, getTemporaryDirectory)
+import System.IO.Temp (withTempDirectory)
 
 spec :: Spec
 spec = do
@@ -90,3 +95,36 @@ spec = do
       mapM_ (\p -> recordChangedForSource mv (fst p) (snd p)) pairs
       contents <- takeMVar mv
       Set.size contents `shouldBe` 10
+
+  describe "resolveWatchPaths (openable absolute paths)" $ do
+    let src1 = SourceConfig (T.pack "src1") "/project/src1" []
+        src2 = SourceConfig (T.pack "src2") "/project/src2" []
+        cfgs = [src1, src2]
+
+    it "joins a relative path onto its owning source's configured root" $
+      resolveWatchPaths cfgs [(Just "src1", "sub/f.hs")] `shouldBe` ["/project/src1/sub/f.hs"]
+
+    it "equals root </> rel for the owning source" $
+      resolveWatchPaths cfgs [(Just "src2", "g.hs")] `shouldBe` ["/project/src2/g.hs"]
+
+    it "preserves nested relative components" $
+      resolveWatchPaths cfgs [(Just "src1", "deep/nested/f.hs")] `shouldBe` ["/project/src1/deep/nested/f.hs"]
+
+    it "returns an untouched path unchanged when no source owns it" $
+      resolveWatchPaths cfgs [(Nothing, "/elsewhere/f.hs")] `shouldBe` ["/elsewhere/f.hs"]
+
+    it "delivers an openable, canonicalizable path for a real change" $
+      do
+        tmpRoot <- getTemporaryDirectory
+        withTempDirectory tmpRoot "graphos-watch-resolve" $ \dir -> do
+          let src    = SourceConfig (T.pack "src1") dir []
+              rel    = "changed.hs"
+              marker = "module WatchResolve where"
+              expect = dir ++ "/" ++ rel
+          -- resolveWatchPaths yields exactly [root </> rel]
+          resolveWatchPaths [src] [(Just "src1", rel)] `shouldBe` (expect : [])
+          -- the assembled path is openable and canonicalizes on disk
+          BS8.writeFile expect marker
+          content <- BS8.readFile expect
+          content `shouldBe` marker
+          void (canonicalizePath expect)
