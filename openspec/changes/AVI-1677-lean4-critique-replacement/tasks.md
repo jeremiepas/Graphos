@@ -13,9 +13,9 @@
 - [ ] 1.4 CI, docs, governance
 
 ## 2. Contract inventory
-- [ ] 2.1 Freeze decision IDs, Haskell source references, theorem obligations
-- [ ] 2.2 Freeze ABI input/output encodings, error codes, memory ownership
-- [ ] 2.3 Freeze determinism/ordering guarantees
+- [x] 2.1 Freeze decision IDs, Haskell source references, theorem obligations (contract-inventory.md)
+- [x] 2.2 Freeze ABI input/output encodings, error codes, memory ownership (contract-inventory.md)
+- [x] 2.3 Freeze determinism/ordering guarantees (contract-inventory.md)
 
 ## 3. Lean implementation
 - [ ] 3.1 Use Mathlib/external Lean where it improves proofs/algorithms
@@ -24,9 +24,9 @@
 - [ ] 3.4 Maintain theorem gates per lean-proof-methodology
 
 ## 4. Compilation bridge
-- [ ] 4.1 Expose `graphos_lean_critique.h`, symbol naming/version macros
-- [ ] 4.2 Provide `graphos_lean_critique_version`
-- [ ] 4.3 Document linker inputs and NixOS build notes
+- [x] 4.1 Expose `graphos_lean_critique.h`, symbol naming/version macros (header + contract inventory)
+- [x] 4.2 Provide `graphos_lean_critique_abi_version` (Lean exported; C header declares; full string via macro)
+- [x] 4.3 Document linker inputs and NixOS build notes (README + contract inventory)
 
 ## 5. Graphos consumption
 - [ ] 5.1 Add Infrastructure FFI adapter
