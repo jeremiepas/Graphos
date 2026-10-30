@@ -11,6 +11,12 @@ module Graphos.Domain.Graph.Core
 
     -- * Construction
   , buildGraph
+  , buildGraphWithStats
+  , buildGraphStats
+  , buildGraphCounts
+  , edgeDropCounts
+  , unknownEndpointDropCount
+  , duplicateKeyDropCount
   , mergeExtractions
   , mergeGraphs
   , addEdges
@@ -92,39 +98,87 @@ instance FromJSON Graph where
 -- Construction
 -- ───────────────────────────────────────────────
 
+-- | Count of edges dropped while building a graph:
+--   * @unknownEndpointDrops@ — edges whose source or target is not a node in the
+--     extraction (including the distinct dangling-endpoint count); self-edges are
+--     reported separately by their own drop path.
+--   * @duplicateKeyDrops@ — edges collapsed because they shared a @(source,target)@
+--     key in the @(source,target)@-keyed edge map.
+type EdgeDropCounts = (Int, Int)
+
+{-# INLINE unknownEndpointDropsOf #-}
+unknownEndpointDropsOf :: Extraction -> Int
+unknownEndpointDropsOf extraction =
+  let nodes = extNodes extraction
+  in length [ e | e <- Map.elems (extEdges extraction)
+               , not (Map.member (edgeSource e) nodes && Map.member (edgeTarget e) nodes) ]
+
+-- | Build a graph from an Extraction result, also reporting how many edges were
+-- dropped for unknown endpoints and collapsed for duplicate (source,target) keys.
+--
+-- Dangling edges (referencing nodes not in extractionNodes) are dropped,
+-- self-edges (edgeSource e == edgeTarget e) are dropped as well, and duplicate
+-- (source,target) edges are collapsed by 'Map.fromList'. This keeps the support
+-- graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract (adj v v
+-- == False) and the Lean seam NoSelfLoops (AVI-1324).
+buildGraphWithStats :: Bool -> Extraction -> (Graph, (Int, Int))
+buildGraphWithStats directed extraction =
+  let nodes = extNodes extraction
+      edgeList = Map.elems (extEdges extraction)
+      unknownDropCount = length [ e | e <- edgeList
+                                   , not (Map.member (edgeSource e) nodes
+                                         && Map.member (edgeTarget e) nodes) ]
+      validEdges = [ e | e <- edgeList
+                       , edgeSource e /= edgeTarget e
+                       , Map.member (edgeSource e) nodes
+                       , Map.member (edgeTarget e) nodes ]
+      candidateMap = Map.fromList [ ((edgeSource e, edgeTarget e), e) | e <- validEdges ]
+      duplicateDropCount = length validEdges - Map.size candidateMap
+      edgeMap = candidateMap
+      fwdAdj = Map.fromListWith Set.union
+          [ (edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems edgeMap ]
+      bwdAdj = if directed
+          then Map.fromListWith Set.union
+            [ (edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems edgeMap ]
+          else Map.fromListWith Set.union
+            [ (edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems edgeMap ]
+              <> fwdAdj
+  in ( Graph
+        { gNodes         = nodes
+        , gEdges         = edgeMap
+        , gAdjFwd        = fwdAdj
+        , gAdjBack       = bwdAdj
+        , gDirected      = directed
+        , gCompositions  = Nothing
+        , gHash          = computeGraphHash nodes edgeMap
+        , gEmbeddings    = Nothing
+        , gEmbeddingsPath = Nothing
+        }
+    , (unknownDropCount, duplicateDropCount) )
+
 -- | Build a graph from an Extraction result
 -- Dangling edges (referencing nodes not in extractionNodes) are silently dropped,
 -- and self-edges (edgeSource e == edgeTarget e) are dropped as well. This keeps the
 -- support graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract
 -- (adj v v == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraph :: Bool -> Extraction -> Graph
-buildGraph directed extraction =
-  let nodes = extNodes extraction
-      edgeList = Map.elems (extEdges extraction)
-      validEdges = [e | e <- edgeList
-                      , edgeSource e /= edgeTarget e
-                      , Map.member (edgeSource e) nodes
-                      , Map.member (edgeTarget e) nodes]
-      edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
-      fwdAdj = Map.fromListWith Set.union
-          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
-      bwdAdj = if directed
-          then Map.fromListWith Set.union
-            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
-          else Map.fromListWith Set.union
-            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
-              <> fwdAdj
-  in Graph
-    { gNodes         = nodes
-    , gEdges         = edgeMap
-    , gAdjFwd        = fwdAdj
-    , gAdjBack       = bwdAdj
-    , gDirected      = directed
-    , gCompositions  = Nothing
-    , gHash          = computeGraphHash nodes edgeMap
-    , gEmbeddings    = Nothing
-    , gEmbeddingsPath = Nothing
-    }
+buildGraph directed extraction = fst (buildGraphWithStats directed extraction)
+
+-- | Convenience accessors for the edge-drop counts.
+buildGraphStats :: Bool -> Extraction -> (Int, Int)
+buildGraphStats directed = snd . buildGraphWithStats directed
+
+buildGraphCounts :: Bool -> Extraction -> (Int, Int)
+buildGraphCounts = buildGraphStats
+
+edgeDropCounts :: Extraction -> (Int, Int)
+edgeDropCounts = buildGraphStats False
+
+unknownEndpointDropCount :: Extraction -> Int
+unknownEndpointDropCount = fst . edgeDropCounts
+
+duplicateKeyDropCount :: Extraction -> Int
+duplicateKeyDropCount = snd . edgeDropCounts
 
 -- | Merge two extractions (dedup nodes by id, combine edges)
 --

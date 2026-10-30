@@ -80,7 +80,7 @@ import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiSources)
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
-import Graphos.UseCase.Build (buildGraphFromExtractions)
+import Graphos.UseCase.Build (buildGraphFromExtractions, buildGraphFromExtractionsWithStats)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
@@ -640,10 +640,10 @@ runPipelineStages appEnv config = do
 
       lpLogInfo lp "Step 3: Building graph..."
       buildStart <- getCurrentTime
-      builtGraph <- withHeapGuard lp mBudget "build" $ do
-        let g = buildGraphFromExtractions (cfgDirected configWithStreaming) [collapsedExtraction]
+      (builtGraph, (unknownEndpointDrops, duplicateKeyDrops)) <- withHeapGuard lp mBudget "build" $ do
+        let (g, drops) = buildGraphFromExtractionsWithStats (cfgDirected configWithStreaming) [collapsedExtraction]
         _ <- evaluate (Map.size (gNodes g) + Map.size (gEdges g))
-        g `deepseq` pure g
+        g `deepseq` pure (g, drops)
       buildEnd <- getCurrentTime
       opRecordHistogram op "graphos_build_duration_seconds" (realToFrac (diffUTCTime buildEnd buildStart) :: Double)
       opIncCounter op "graphos_pipeline_steps_total" 1
@@ -651,6 +651,7 @@ runPipelineStages appEnv config = do
       opSetGauge op "graphos_graph_edges" (fromIntegral $ Map.size (gEdges builtGraph))
       opDebugTraceSpan op "build" (StartTime buildStart) (EndTime buildEnd) (Map.fromList [("nodes", T.pack $ show $ Map.size (gNodes builtGraph)), ("edges", T.pack $ show $ Map.size (gEdges builtGraph))])
       lpLogInfo lp $ T.pack $ "  Graph: " ++ show (Map.size (gNodes builtGraph)) ++ " nodes, " ++ show (Map.size (gEdges builtGraph)) ++ " edges"
+      lpLogInfo lp $ T.pack $ "  Build drops: " ++ show unknownEndpointDrops ++ " edges with unknown endpoints, " ++ show duplicateKeyDrops ++ " collapsed duplicate (source,target) keys"
 
       let codeFiles = length $ Map.findWithDefault [] CodeFiles (detectionFiles detection)
           nonCodeFiles = detectionTotalFiles detection - codeFiles
