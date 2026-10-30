@@ -7,8 +7,8 @@
 - [x] 0.4 Invoke via `foreign import ccall` and match the Haskell result on a fixture
 
 ## 1. Public OSS project bootstrap
-- [ ] 1.1 Create the public repository (name, org, license decided)
-- [ ] 1.2 Pin the Lean toolchain
+- [x] 1.1 Create the public repository (name, org, license decided): https://github.com/jeremiepas/graphos-lean-critique (MIT, personal org)
+- [x] 1.2 Pin the Lean toolchain (leanprover/lean4:v4.29.1)
 - [ ] 1.3 Build Lean + selected libraries, export a stable C ABI, publish versioned releases
 - [ ] 1.4 CI, docs, governance
 
