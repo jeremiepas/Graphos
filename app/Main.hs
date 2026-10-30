@@ -18,7 +18,7 @@ import System.Process (createProcess, proc, waitForProcess)
 import qualified System.Process as Process
 import System.Environment (getArgs, getExecutablePath, withArgs, lookupEnv, getEnvironment)
 import Text.Read (readMaybe)
-import System.FilePath ((</>))
+import System.FilePath ((</>), isAbsolute)
 import qualified Data.Time.Clock as TCC (getCurrentTime)
 import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
@@ -306,15 +306,16 @@ main = do
                            else case cfgMetricsPort config of
                                     Just p  -> Just p
                                     Nothing -> if obsMetricsPort obsCfg > 0 then Just (obsMetricsPort obsCfg) else Nothing
-          debugDir = case cfgDebugTraceDir config of
-                       Just d  -> d
-                       Nothing -> if null (obsDebugTraceDir obsCfg)
-                                    then outputDir ++ "/traces"
-                                    else obsDebugTraceDir obsCfg
-          baseCc       = gcClustering graphosCfg
-          effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
-          effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
-          effCc        = ClusteringConfig effFraction effEnabled
+          rawDebugDir = case cfgDebugTraceDir config of
+                          Just d  -> d
+                          Nothing -> if null (obsDebugTraceDir obsCfg)
+                                       then outputDir </> "debug"
+                                       else obsDebugTraceDir obsCfg
+          -- Relative debug trace directories resolve against the output dir so
+          -- `--no-observability` / config never drops `traces/` into cwd.
+          debugDir = if isAbsolute rawDebugDir
+                       then rawDebugDir
+                       else outputDir </> rawDebugDir
           config' = config { cfgOutputDir    = outputDir
                            , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg
@@ -337,7 +338,7 @@ main = do
       let logLevel = if cfgDebug config || obsDebug obsCfg then LogTrace
                       else if cfgVerbose config then LogDebug
                       else LogInfo
-      obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
+      obsEnv <- initObservability (if cfgNoObservability config then LogError else logLevel) otelCfg metricsPort debugDir
       let _tracer = otelTracer obsEnv
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
@@ -718,8 +719,8 @@ main = do
     MergeCmd pathA pathB outputDir density resolution minCommSize maxLeidenIterations noViz verbose -> do
       let logLevel = if verbose then LogDebug else LogInfo
       env <- defaultLogEnv logLevel
-      obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir ++ "/traces")
-      let appEnv = productionAppEnvWithConfig (otelLogEnv obsEnv) obsEnv defaultGraphosConfig
+      obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir </> "debug")
+      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv
       logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
       resultA <- loadGraphFromFile pathA
       case resultA of
@@ -793,9 +794,8 @@ main = do
                 , cfgLabel = labelFlag
                 }
       env <- defaultLogEnv logLevel
-      obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
-      let appEnv = productionAppEnvWithConfig env obsEnv graphosCfg
-
+      obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config </> "debug")
+      let appEnv = productionAppEnv env obsEnv
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of
