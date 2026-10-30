@@ -184,9 +184,28 @@ spec = do
             [ (u, v) | u <- Set.toList (Set.fromList (Map.keys (gNodes g)))
                      , v <- Set.toList (Set.fromList (Map.keys (gNodes g))) ]
 
-    it "INV-9 (property): deterministic under gNodes key-order permutation" $
+    it "INV-9 (property): SCC partition is invariant under a real key-order permutation" $
       property $ \(SmallGraph g) ->
-        stronglyConnectedComponents g == stronglyConnectedComponents g
+        forAll (genKeyPermutation (Map.keys (gNodes g))) $ \perm ->
+          let inv = Map.fromList [(v, u) | (u, v) <- Map.toList perm]
+              renamedNodes =
+                [ n { nodeId = perm Map.! (nodeId n) }
+                | (_, n) <- Map.toList (gNodes g)
+                ]
+              renamedEdges =
+                [ e { edgeId = EdgeId (perm Map.! (edgeSource e) <> "->" <> perm Map.! (edgeTarget e))
+                    , edgeSource = perm Map.! (edgeSource e)
+                    , edgeTarget = perm Map.! (edgeTarget e)
+                    }
+                | e <- Map.elems (gEdges g)
+                ]
+              gP = buildGraph (gDirected g) (extractionFromLists renamedNodes renamedEdges)
+              sccG = stronglyConnectedComponents g
+              sccP = stronglyConnectedComponents gP
+              canon c = sort (map sort (Map.elems c))
+              canonP = sort (map (sort . map (\v -> inv Map.! v)) (Map.elems sccP))
+          in canon sccG == canonP
+
 
     it "INV-10: adding an arc f->a merges all three golden SCCs into one" $ do
       let g' = addEdges goldenGraph [sccTestEdge "f" "a"]
@@ -429,3 +448,8 @@ instance Show SmallGraph where
   show (SmallGraph g) =
     "Graph { nodes = " ++ show (Map.keys (gNodes g))
     ++ ", edges = " ++ show (Map.keys (gEdges g)) ++ " }"
+
+genKeyPermutation :: [Text] -> Gen (Map.Map Text Text)
+genKeyPermutation ks = do
+  shuffled <- shuffle ks
+  pure (Map.fromList (zip ks shuffled))
