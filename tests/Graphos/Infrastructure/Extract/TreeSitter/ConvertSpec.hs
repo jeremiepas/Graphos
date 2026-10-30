@@ -126,7 +126,7 @@ spec = do
     it "(a) emits `<dirHash>_<stem>_<kind>:<ident>` ids" $ do
       let ex = tsNodesToExtraction GranularityFunction "src/service.ts"
              [tsNode "function_declaration" "getUser" []]
-          node = head (Map.elems (extractionNodes ex))
+          node = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty"
       T.unpack (toText (nodeLabel node)) `shouldBe` "getUser"
       T.unpack (nodeId node) `shouldBe` srcHash <> "_service_Function:getUser"
 
@@ -160,7 +160,7 @@ spec = do
       let raw = "const\n\nuser = dbGet(id)"
           ex = tsNodesToExtraction GranularityFunction "src/service.ts"
                [tsNode "lexical_declaration" raw []]
-          node = head (Map.elems (extractionNodes ex))
+          node = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty"
           idStr = T.unpack (nodeId node)
       -- Irregular whitespace and newlines must not leak into the id ...
       "const\n\nuser" `T.isInfixOf` (T.pack idStr) `shouldBe` False
