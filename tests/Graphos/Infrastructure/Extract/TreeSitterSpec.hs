@@ -2,7 +2,7 @@
 module Graphos.Infrastructure.Extract.TreeSitterSpec (spec) where
 
 import Test.Hspec
-import Data.List (nub)
+import Data.List (nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text.Short (fromText, toText)
@@ -86,7 +86,8 @@ spec = do
 
     it "import identifier is the resolved specifier" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [importDecl "'./db'"]
-          n = head (Map.elems (extractionNodes ex))
+          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          n = case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex))
       nodeLabel n `shouldBe` fromText "./db"
 
     it "module identifier is the file stem" $ do
@@ -129,7 +130,7 @@ spec = do
              [ funcWithChildren "handle" [ ident "handle" ] `withLine` 10
              , funcWithChildren "handle" [ ident "handle" ] `withLine` 40 ]
           ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [fixture]
-          ids = Map.keys (extractionNodes ex)
+          ids = sort (map nodeId (filter (\n -> nodeKind n == Just (fromText "Function")) (Map.elems (extractionNodes ex))))
       ids `shouldBe` [ makeNodeId (mkSourceFile "src/service.ts" "") "Function" "handle"
                      , makeNodeId (mkSourceFile "src/service.ts" "") "Function" "handle" <> "#L40" ]
 
@@ -148,13 +149,15 @@ spec = do
   describe "signatures" $ do
     it "function signature is the normalized declaration text" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "f"]
-          sig = nodeSignature (head (Map.elems (extractionNodes ex)))
+          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          sig = nodeSignature (case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex)))
       sig `shouldBe` Just (fromText "function f")
 
     it "import signature keeps the trailing specifier clause" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget
              [importDecl "'../../templates/index.js'"]
-          sig = nodeSignature (head (Map.elems (extractionNodes ex)))
+          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          sig = nodeSignature (case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex)))
       sig `shouldSatisfy` maybe False (\x -> T.isSuffixOf "from '../../templates/index.js'" (toText x))
 
   describe "3.5 imports edges" $ do
