@@ -19,6 +19,8 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , mkSourceFile
   , tsNodeLabel
   , tsNodeSignature
+  , extractSpecifier
+  , lastQuoted
   , nodeIdentifier
   , definitionTypes
   , structureTypes
@@ -34,8 +36,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
 import Data.Maybe (fromMaybe)
-import Data.Aeson (object, (.=))
+import Data.Aeson (object, (.=), toJSON)
 import Data.Word (Word64)
+
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config (Granularity(..))
@@ -197,13 +200,14 @@ tsNodeSignature budget node =
       | otherwise ->
           let norm = normalizeText (tsnText node)
           in if T.length norm <= budget then Just norm
-               else Just (truncateWithElision budget norm norm)
+               else Just (T.take budget norm)
   where
     sigWithTail :: Int -> Text -> Text -> Text
     sigWithTail b raw tailText
       | T.length raw <= b = raw
-      | T.null tailText   = truncateWithElision b raw raw
-      | otherwise         = truncateWithElision b raw tailText
+      | T.null tailText = T.take b raw
+      | T.length tailText > (b - 3) = T.take b raw
+      | otherwise = truncateWithElision b raw tailText
 
 -- | Extract the trailing `from '<specifier>'` clause of an import declaration
 -- for signature preservation. Returns "" when absent.
@@ -254,7 +258,7 @@ lastQuoted t0
           '\'' -> Just (quoteToken '\'' t0)
           '"'  -> Just (quoteToken '"' t0)
           _    -> scan (i - 1)
-    quoteToken q t = T.reverse (T.drop 1 (T.takeWhile (/= q) (T.reverse t)))
+    quoteToken q t = T.reverse (T.takeWhile (/= q) (T.drop 1 (T.reverse t)))
 
 -- | Strip matching surrounding single / double quotes from a specifier.
 stripQuotes :: Text -> Text
@@ -280,7 +284,7 @@ makeNodeId :: SourceFile -> Text -> Text -> NodeId
 makeNodeId sf kind ident =
   sourceDirHash sf <> "_" <> sourceStem sf <> "_" <> kind <> ":" <> safeIdent
   where
-    safeIdent = T.filter (\c -> not (c `elem` badChars)) ident
+    safeIdent = T.take 256 (T.filter (\c -> not (c `elem` badChars)) ident)
     badChars = [ '"', '\'', '`', '/', '\\', '\n', '\r' ]
 
 -- ───────────────────────────────────────────────
@@ -403,6 +407,15 @@ traverseNode sf gran budget parentEmitted isExported node =
               importParts = importPartsFor sf parentBase tType node
           in (rawNode : csns, containEdge ++ cces, importParts ++ cims)
 
+-- | Decide whether a (possibly export-from) import declaration carries the
+-- re-export marker.
+isReExport :: String -> Text -> Bool
+isReExport ty txt =
+  let norm = T.toLower (T.dropWhile (== ' ') (normalizeText txt))
+      isPlainImport = ty `elem` ["import_declaration", "import_statement", "import_from_statement"]
+                     && T.isPrefixOf "import" norm
+  in not isPlainImport
+
 -- | Build the (source id, ImportTarget) pair for an import/export node, using
 -- the enclosing emitted node's id as the edge source.
 importPartsFor :: SourceFile -> Text -> String -> TSNodeInfo -> [(NodeId, ImportTarget)]
@@ -418,7 +431,7 @@ importPartsFor sf parentBase tType node =
       in [ (parentBase, ImportTarget
             { itPath = impPath
             , itName = fromMaybe spec impName
-            , itIsReExport = not (tType `elem` ["import_declaration", "import_statement", "import_from_statement"]) }) ]
+            , itIsReExport = T.isInfixOf (T.pack "export") (T.toLower (normalizeText (tsnText node))) }) ]
     Nothing -> []
 
 -- | Fold over children, threading a parent base id and exported flag.
@@ -458,7 +471,7 @@ mkImportEdge src tgt =
     , edgeConfidence = Confidence 1.0
     , edgeWeight    = 1.0
     , edgeExtra     = if itIsReExport tgt
-                      then Just (object ["re-export" .= (True :: Bool)])
+                      then Just (toJSON (T.pack "re-export"))
                       else Nothing
     }
   where
@@ -485,7 +498,7 @@ importTargetNodes targets =
         , nodeDegree       = Nothing
         , nodeIsBridge     = Nothing
         , nodeExtra        = if itIsReExport t
-                             then Just (object ["re-export" .= (True :: Bool)])
+                             then Just (toJSON (T.pack "re-export"))
                              else Nothing
         , nodeKind         = Just knd
         , nodePresentBits  = bitNodeKind
