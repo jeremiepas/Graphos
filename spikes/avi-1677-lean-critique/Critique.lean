@@ -33,3 +33,8 @@ def semBonus (inferred : UInt8) (cb : UInt64) : UInt64 :=
 def surpriseScore (confX10 : UInt8) (crossFiletype : UInt8) (crossComm : UInt8) (inferred : UInt8) : UInt64 :=
   let cb := confBonus confX10
   cb + crossFiletypeBonus crossFiletype + crossCommunityBonus crossComm + semBonus inferred cb
+
+/-- ABI version reported by `graphos_lean_critique_abi_version`. Keep this in
+    sync with `GRAPHOS_LEAN_CRITIQUE_ABI_VERSION` in the C header. -/
+@[export graphos_lean_critique_abi_version]
+def abiVersion : UInt32 := 0
