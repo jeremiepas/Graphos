@@ -19,9 +19,9 @@
 
 ## 3. Lean implementation
 - [ ] 3.1 Use Mathlib/external Lean where it improves proofs/algorithms
-- [ ] 3.2 Keep the extracted ABI surface primitive and serializable
-- [ ] 3.3 Exclude proof-only definitions from extraction
-- [ ] 3.4 Maintain theorem gates per lean-proof-methodology
+- [x] 3.2 Keep the extracted ABI surface primitive and serializable (Lean module uses Nat scalars)
+- [x] 3.3 Exclude proof-only definitions from extraction (theorems are proof-only)
+- [x] 3.4 Maintain theorem gates per lean-proof-methodology (confBonus buckets, nonneg, fixtures, ABI version)
 
 ## 4. Compilation bridge
 - [x] 4.1 Expose `graphos_lean_critique.h`, symbol naming/version macros (header + contract inventory)
@@ -29,8 +29,8 @@
 - [x] 4.3 Document linker inputs and NixOS build notes (README + contract inventory)
 
 ## 5. Graphos consumption
-- [ ] 5.1 Add Infrastructure FFI adapter
-- [ ] 5.2 Keep Haskell implementation as reference/optional fallback
+- [x] 5.1 Add Infrastructure FFI adapter (`src/Graphos/Infrastructure/Critique/Lean.hs`, Cabal `lean-critique` flag)
+- [x] 5.2 Keep Haskell implementation as reference/optional fallback (flag defaults to False)
 - [ ] 5.3 Parity tests and version checks
 - [ ] 5.4 Rollout via configuration and build flags
 
