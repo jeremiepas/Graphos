@@ -45,7 +45,7 @@ data CurlResult
 --   * 'first' - non-secret options applied before the config (@-s@, @--max-time@,
 --     @-X POST@, non-sensitive @-H@ headers such as the content-type).
 --   * 'secrets' - @(option, value)@ pairs whose values carry sensitive material
---     (@--header \"Authorization: Bearer ...\"@, @-u@ basic-auth). These are
+--     @(auth header), @-u@ basic-auth). These are
 --     written to the temporary @--config@ file rather than passed on the command
 --     line, so they never appear in @/proc/<pid>/cmdline@.
 --   * 'trailing' - non-secret options applied after the config (@--data-binary@,

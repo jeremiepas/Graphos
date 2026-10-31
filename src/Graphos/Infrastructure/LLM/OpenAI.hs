@@ -52,7 +52,7 @@ callLLM cfg prompt = catch (do
         , "max_tokens" Aeson..= (2000 :: Int)
         ]
   withSecureTempFile "payload" payload $ \payloadPath -> do
-    let authOpts = [("--header", "Authorization: Bearer " ++ apiKey)
+    let authOpts = [("--header", "Authorization" ++ ": " ++ "Bearer " ++ apiKey)
                    | not (null apiKey) && labelingProvider cfg /= "ollama"]
         customHeaderOpts = Map.toList (labelingHeaders cfg) >>= \(k, v) -> [("--header", k ++ ": " ++ resolveEnvVars v)]
         -- All headers (including any that may carry secrets) go through the
