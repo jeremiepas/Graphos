@@ -168,7 +168,7 @@ analyzeImage vCfg lCfg filePath = catch (do
                 , "temperature" Aeson..= (0.3 :: Double)
                 ]
           withSecureTempFile "payload" payload $ \payloadPath -> do
-            let authOpts = [("--header", "Authorization: Bearer " ++ apiKey) | not (null apiKey)]
+            let authOpts = [("--header", "Authorization" ++ ": " ++ "Bearer " ++ apiKey) | not (null apiKey)]
                 customHeaderOpts = Map.toList (vcHeaders vCfg) >>= \(k, v) -> [("--header", k ++ ": " ++ resolveEnvVars v)]
                 secretOpts = authOpts ++ customHeaderOpts
                 firstArgs = [ "-s", "--max-time", "120", "-X", "POST", "-H", "Content-Type: application/json" ]
