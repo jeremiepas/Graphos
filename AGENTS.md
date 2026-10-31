@@ -27,3 +27,15 @@ Apply this gate when triaging a task's status:
 - A `cancelled` blocker or child counts as resolved. A task whose blockers are all terminal must not remain `blocked` — release it to backlog.
 - Keep the gate as `blocked` (never force-release) when any blocker is still active, even if that blocker is itself stuck awaiting a board-operator disposition. Escalate the stuck upstream task separately; do not override the gate on its account.
 - Express blockers with first-class `blockedByIssueIds`, never prose. Never move a task off `blocked` on the strength of a comment alone — confirm the blocker's terminal state via the issue object.
+
+## Definition of Done (before `status=done`)
+
+A run is **not** done until all of the following hold, and the verification result is recorded on the issue. Paperclip will not auto-resolve a prose-only `done` claim — a missing work product leaves the issue `in_progress`/`missing disposition` and requires a board decision.
+
+1. **Status PATCH persisted.** The PATCH carrying `status=done` is made with the `X-Paperclip-Run-Id` header; the returned JSON is read back and echoes `status=done`. A comment-only claim is never sufficient.
+2. **At least one work product registered for feature work** — one of:
+   - `pull_request` with the PR number (preferred), or
+   - `branch` work product naming the retained branch and why no PR exists yet, or
+   - an uploaded `artifact` / task document.
+3. **Evidence in a comment.** The final comment names the commit/branch/PR and the verification command(s) run (`build`/`test`), with the work-product ID or PR link.
+4. **No "done via comment only"** — an informal prose `done` with no registered PR/work product/artifact is not a disposition and blocks promotion to `done`.
