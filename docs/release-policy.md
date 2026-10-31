@@ -86,9 +86,25 @@ stable tag. Do not cut releases from any branch other than `main`.
 
 | Routine (Paperclip, project `graphos`) | Schedule | Run brief |
 |-----------------------------------------|----------|-----------|
-| Daily Graphos PR review intake | 09:00 Europe/Paris | Every open PR carries a live review lane; create missing lanes same day; force verdicts on PRs stale >7 days |
+| Daily Graphos PR review intake | 09:00 Europe/Paris | **Rebase-readiness gate first:** for every open PR read `mergeable_state`; if `dirty`/`behind`, do not open a review lane yet — create/repoint one rebase follow-up task owned by head-of-dev naming the PR number + base branch and record the conflict + PR link in the run issue. For mergeable PRs: every open PR carries a live review lane; create missing lanes same day; force verdicts on PRs stale >7 days |
 | Daily Graphos merge gate | 13:00 Europe/Paris | PRs that are reviewed **and** mergeable get a merge-gate lane to merge-gatekeeper; dated next action otherwise |
 | Weekly Graphos release run | Fri 14:00 Europe/Paris | Apply this policy §4–§5 |
+
+### Daily PR review intake checklist (rebase-readiness gate)
+
+Apply to every open PR, in this order, before creating any review lane:
+
+1. Read the PR's `mergeable_state` (and `mergeable`) via the GitHub API.
+2. If `mergeable_state` is `dirty` or `behind` (conflicting against the base branch, typically `main`):
+   - Do **not** create or update a review-lane issue for this PR yet.
+   - Create or repoint **one** rebase follow-up task owned by the dev cell (`head-of-dev`), naming the PR number and the base branch, and linked (blocked-by) from any dependent review lane.
+   - Record the conflict in the daily intake run issue together with the PR link (and the rebase task id, if created). No review capacity is spent until the conflict is cleared.
+   - An explicit override comment is the only way to bypass this step; record it on the run issue.
+3. Otherwise (`clean`/`has_hooks`/`unstable`-with-CI), proceed: ensure each open PR maps to one live review-lane issue (non-terminal child assigned to head-of-graphos naming the PR number, review acceptance criteria, and a dated next action); create missing lanes same day; force a verdict on lanes stale >7 days.
+4. Scan PR diffs for secrets and block + escalate to security-expert on any hit.
+5. Record the PR ↔ lane table (including each open PR's `mergeable_state` and any created rebase tasks) as a comment on the run issue, then close it.
+
+Do NOT merge anything in this run — merging belongs to the daily merge-gate routine.
 
 All three fire execution issues assigned to the CTO, who triages and delegates the deep
 work per the run brief — the CTO stays the router, not the reviewer.
