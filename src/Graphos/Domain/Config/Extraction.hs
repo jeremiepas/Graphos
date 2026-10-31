@@ -187,6 +187,17 @@ defaultExtractors = Map.fromList
   , (".rb",  ExtractorConfig ExtractTreeSitter (Just "ruby") (Just "ruby") Nothing)
     -- Java: tree-sitter (zero-dependency; uncomment for LSP)
   , (".java",ExtractorConfig ExtractTreeSitter (Just "java") (Just "java") Nothing)
+    -- PHP: tree-sitter
+  , (".php", ExtractorConfig ExtractTreeSitter (Just "php") (Just "php") Nothing)
+    -- Kotlin
+  , (".kt",  ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+  , (".kts", ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+    -- Perl
+  , (".pl",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , (".pm",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , (".psgi",ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+    -- C#
+  , (".cs",  ExtractorConfig ExtractTreeSitter (Just "csharp") (Just "csharp") Nothing)
     -- JSON: tree-sitter parser; data files collapse to one node per file
     -- so lock files and config JSON do not inflate the graph
   , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
