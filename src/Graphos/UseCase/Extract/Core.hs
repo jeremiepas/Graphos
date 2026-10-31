@@ -540,6 +540,8 @@ extractionConfigFingerprint config = T.pack . unwords $
       , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
         -- bump when tree-sitter extraction output changes for unchanged files
       , "treesitter-imports=go,rust,ruby:1"
+        -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
+      , "nodeIdentity=av1452-bounded-ids"
       ]
     , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
             ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)
