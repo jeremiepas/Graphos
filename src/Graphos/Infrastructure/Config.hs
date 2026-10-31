@@ -13,6 +13,8 @@ module Graphos.Infrastructure.Config
 
     -- * Resolution helpers
   , findLSPServerFromConfig
+  , resolveLSPServer
+  , effectiveLSPServerCommands
   , languageIdFromConfig
 
     -- * Init / writing
@@ -34,13 +36,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Yaml (FromJSON(..), withObject, (.:?))
-import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
+import System.Directory (doesFileExist, findExecutable, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
 import System.Exit (exitWith, ExitCode(..))
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import qualified Data.Yaml as Yaml
 
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
+import qualified Graphos.Infrastructure.LSP.ServerMap as ServerMap
 
 import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , GraphosConfig(..)
@@ -342,3 +345,30 @@ findLSPServerFromConfig config ext =
 languageIdFromConfig :: GraphosConfig -> String -> Text
 languageIdFromConfig config ext =
   Map.findWithDefault "plaintext" ext (gcLanguageIds config)
+
+-- | Resolve an LSP server for @ext@ honoring the merged config.
+--
+-- If @ext@ is present in 'gcLsp':
+--   * an empty 'lspCommand' means explicitly disabled -> 'Nothing';
+--   * otherwise resolve the command via 'findExecutable' (when possible,
+--     matching legacy 'ServerMap.findLSPServer') and return @('cmd', 'lspArgs')@.
+-- Otherwise fall back to 'ServerMap.findLSPServer'.
+resolveLSPServer :: GraphosConfig -> String -> IO (Maybe (String, [String]))
+resolveLSPServer config ext =
+  case Map.lookup ext (gcLsp config) of
+    Just server -> do
+      let cmd = lspCommand server
+      if null cmd
+        then pure Nothing
+        else do
+          found <- findExecutable cmd
+          pure $ Just (maybe cmd id found, lspArgs server)
+    Nothing -> ServerMap.findLSPServer ext
+
+-- | Effective (extension -> (command, args)) map merging config (winning)
+-- over the built-in 'ServerMap.languageServerCommands'.
+effectiveLSPServerCommands :: GraphosConfig -> Map String (String, [String])
+effectiveLSPServerCommands config =
+  Map.union
+    (Map.map (\s -> (lspCommand s, lspArgs s)) (gcLsp config))
+    ServerMap.languageServerCommands
