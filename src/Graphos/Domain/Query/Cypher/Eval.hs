@@ -39,6 +39,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Set as Set
 import Data.Text.Short (fromText)
 
 import Text.Regex.TDFA (makeRegexM, matchTest, Regex)
@@ -61,7 +62,8 @@ import Graphos.Domain.Graph.Mutation
   , deleteEdgesTouching
   , rebuildAdjacency
   )
-import Graphos.Domain.Graph.Index (GraphIndex)
+import Graphos.Domain.Graph.Index (GraphIndex, giLabelIndex)
+import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
 import Graphos.Domain.Query.Cypher.AST
 import Graphos.Domain.Query.Cypher.Mapping
 
@@ -95,16 +97,23 @@ data Bound
 -- | A variable-to-value binding.
 type Binding = Map Text Bound
 
+-- | Precomputed edge adjacency: outgoing (source->edges) and
+-- incoming (target->edges) indices built once per query.
+type EdgeAdj = (Map NodeId [Edge], Map NodeId [Edge])
+
 -- ───────────────────────────────────────────────
 -- Entry point
 -- ───────────────────────────────────────────────
 
 -- | Evaluate a query against a graph, bounded by @budget@ rows.
 evaluate :: Int -> CypherQuery -> Graph -> GraphIndex -> CypherResult
-evaluate budget q g _idx =
-  let enumerated = case idAnchor q g of
+evaluate budget q g idx =
+  let _cached :: CachedFGL
+      _cached = toCachedFGL g
+      adj = buildAdjacency _cached g
+      enumerated = case idAnchor q g of
         Just b  -> [b]
-        Nothing -> enumerateBindings g (cqPatterns q)
+        Nothing -> enumerateBindings g idx adj (cqPatterns q)
       filtered = case cqWhere q of
         Nothing -> enumerated
         Just p  -> [ b | b <- enumerated, evalPredicate b g p ]
@@ -158,10 +167,12 @@ evaluateStatement budget (MutStatement m) g idx = evaluateMutation budget m g id
 -- @nodes_deleted@, @rels_deleted@).
 evaluateMutation :: Int -> Mut -> Graph -> GraphIndex -> Either Text MutationResult
 evaluateMutation budget m g0 idx =
-  let baseBindings = case mMatch m of
+  let _cached = toCachedFGL g0
+      adj = buildAdjacency _cached g0
+      baseBindings = case mMatch m of
         Nothing -> [Map.empty]
         Just q  ->
-          let enumerated = enumerateBindings g0 (cqPatterns q)
+          let enumerated = enumerateBindings g0 idx adj (cqPatterns q)
               filtered = case cqWhere q of
                 Nothing -> enumerated
                 Just p  -> [ b | b <- enumerated, evalPredicate b g0 p ]
@@ -524,8 +535,8 @@ projectReturn budget rc g _idx summary bindings =
 
 -- | Enumerate all bindings for a list of pattern elements, combining
 -- the per-path bindings by Cartesian product.
-enumerateBindings :: Graph -> [PatternElem] -> [Binding]
-enumerateBindings g elems = combinePaths g (decomposePaths elems)
+enumerateBindings :: Graph -> GraphIndex -> EdgeAdj -> [PatternElem] -> [Binding]
+enumerateBindings g idx adj elems = combinePaths g idx adj (decomposePaths elems)
 
 -- | Split a flat pattern list into paths. A new path starts at a node
 -- pattern that is either first or preceded by another node pattern
@@ -551,8 +562,8 @@ decomposePaths elems = reverse (go Nothing [] elems)
 
 -- | Combine per-path bindings by Cartesian product, AND-ing shared
 -- variables.
-combinePaths :: Graph -> [[PatternElem]] -> [Binding]
-combinePaths g paths = foldr combineOne [Map.empty] (map (pathBindings g) paths)
+combinePaths :: Graph -> GraphIndex -> EdgeAdj -> [[PatternElem]] -> [Binding]
+combinePaths g idx adj paths = foldr combineOne [Map.empty] (map (pathBindings g idx adj) paths)
   where
     combineOne :: [Binding] -> [Binding] -> [Binding]
     combineOne pathBs acc =
@@ -560,41 +571,72 @@ combinePaths g paths = foldr combineOne [Map.empty] (map (pathBindings g) paths)
 
 -- | Compute the bindings for a single path (a sequence of node and
 -- relationship patterns).
-pathBindings :: Graph -> [PatternElem] -> [Binding]
-pathBindings g (NodePatE np0 : rest) =
+pathBindings :: Graph -> GraphIndex -> EdgeAdj -> [PatternElem] -> [Binding]
+pathBindings g idx adj (NodePatE np0 : rest) =
   [ b
-  | nid0 <- nodeCandidates g np0
-  , b <- walk g (Map.singleton (npVar np0) (BNode nid0)) nid0 rest
+  | nid0 <- nodeCandidates g idx np0
+  , b <- walk g idx adj (Map.singleton (npVar np0) (BNode nid0)) nid0 rest
   ]
-pathBindings _ _ = []
+pathBindings _ _ _ _ = []
 
 -- | Walk a well-formed path: (RelPatE, NodePatE)* after the first node.
-walk :: Graph -> Binding -> NodeId -> [PatternElem] -> [Binding]
-walk _g binding _cur [] = [binding]
-walk g binding cur (RelPatE rp : NodePatE np2 : xs) =
+walk :: Graph -> GraphIndex -> EdgeAdj -> Binding -> NodeId -> [PatternElem] -> [Binding]
+walk _g _idx _adj binding _cur [] = [binding]
+walk g idx adj binding cur (RelPatE rp : NodePatE np2 : xs) =
   [ b2
-  | (es, nid2) <- relPaths g rp cur
+  | (es, nid2) <- relPaths g adj rp cur
   , nodeMatches g np2 nid2
   , let b1 = case rpVar rp of
            Nothing -> binding
            Just v  -> Map.insert v (BPath es) binding
        , let b1' = Map.insert (npVar np2) (BNode nid2) b1
-       , b2 <- walk g b1' nid2 xs
+       , b2 <- walk g idx adj b1' nid2 xs
   ]
-walk _ _ _ _ = []
+walk _ _ _ _ _ _ = []
 
 -- ───────────────────────────────────────────────
 -- Node candidates
 -- ───────────────────────────────────────────────
 
 -- | All node ids matching a node pattern (label + property constraints).
-nodeCandidates :: Graph -> NodePat -> [NodeId]
-nodeCandidates g np =
-  [ nid
-  | (nid, n) <- Map.toList (gNodes g)
-  , nodeMatchesLabel np n
-  , nodeMatchesProps g np nid
-  ]
+-- Anchors on 'GraphIndex.giLabelIndex' when the pattern carries a label
+-- constraint; falls back to a full scan of 'gNodes' otherwise.
+nodeCandidates :: Graph -> GraphIndex -> NodePat -> [NodeId]
+nodeCandidates g idx np =
+  case npLabels np of
+    [] -> fullScan
+    ls ->
+      let lm = giLabelIndex idx
+          hasShortcut = all (\l -> Map.member (T.toLower l) lm) ls
+      in if not hasShortcut
+         then fullScan
+         else
+           let allowed = foldr Set.intersection (Set.fromList (Map.keys (gNodes g)))
+                            [ Set.fromList (Map.findWithDefault [] (T.toLower l) lm)
+                            | l <- ls
+                            ]
+           in [ nid
+              | (nid, n) <- Map.toList (gNodes g)
+              , Set.member nid allowed
+              , nodeMatchesLabel np n
+              , nodeMatchesProps g np nid
+              ]
+  where
+    fullScan =
+      [ nid
+      | (nid, n) <- Map.toList (gNodes g)
+      , nodeMatchesLabel np n
+      , nodeMatchesProps g np nid
+      ]
+
+-- | Build the per-query edge adjacency index: outgoing (edge source -> edges)
+-- and incoming (edge target -> edges) lists, in a single pass over 'gEdges'.
+buildAdjacency :: CachedFGL -> Graph -> EdgeAdj
+buildAdjacency cached g =
+  cached `seq`
+    ( Map.fromListWith (++) [ (edgeSource e, [e]) | e <- Map.elems (gEdges g) ]
+    , Map.fromListWith (++) [ (edgeTarget e, [e]) | e <- Map.elems (gEdges g) ]
+    )
 
 -- | Does a node match a node pattern (all labels + all property
 -- constraints)?
@@ -628,40 +670,43 @@ nodeMatchesProps g np nid =
 
 -- | Single-edge hops from @start@ matching the relationship pattern.
 -- Returns (edge, nextNodeId) pairs.
-hop :: Graph -> RelPat -> NodeId -> [(Edge, NodeId)]
-hop g rp start =
+hop :: Graph -> EdgeAdj -> RelPat -> NodeId -> [(Edge, NodeId)]
+hop g adj rp start =
   [ (e, next)
   | (e, next) <- incident
   , edgeMatchesType rp e
   , edgeMatchesProps g rp e
   ]
   where
+    (outgoing, incoming) = adj
+    outgoingHere = Map.findWithDefault [] start outgoing
+    incomingHere = Map.findWithDefault [] start incoming
     incident :: [(Edge, NodeId)]
     incident = case rpDir rp of
       DirRight ->
-        [ (e, edgeTarget e) | ((s, _), e) <- Map.toList (gEdges g), s == start ]
+        [ (e, edgeTarget e) | e <- outgoingHere ]
       DirLeft ->
-        [ (e, edgeSource e) | ((_, t), e) <- Map.toList (gEdges g), t == start ]
+        [ (e, edgeSource e) | e <- incomingHere ]
       DirUndirected ->
-        [ (e, edgeTarget e) | ((s, _), e) <- Map.toList (gEdges g), s == start ]
-        ++ [ (e, edgeSource e) | ((_, t), e) <- Map.toList (gEdges g), t == start ]
+        [ (e, edgeTarget e) | e <- outgoingHere ]
+        ++ [ (e, edgeSource e) | e <- incomingHere ]
 
 -- | Variable-length paths from @start@ following the relationship
 -- pattern for hrMin..hrMax hops. Returns (edgePath, endNodeId) pairs.
-relPaths :: Graph -> RelPat -> NodeId -> [([Edge], NodeId)]
-relPaths g rp start =
+relPaths :: Graph -> EdgeAdj -> RelPat -> NodeId -> [([Edge], NodeId)]
+relPaths g adj rp start =
   [ (es, nid)
   | d <- [hrMin (rpHops rp) .. hrMax (rpHops rp)]
-  , (es, nid) <- pathsOfLength g rp start d
+  , (es, nid) <- pathsOfLength g adj rp start d
   ]
 
 -- | All paths of exactly @d@ hops from @start@.
-pathsOfLength :: Graph -> RelPat -> NodeId -> Int -> [([Edge], NodeId)]
-pathsOfLength _g _rp start 0 = [([], start)]
-pathsOfLength g rp start d =
+pathsOfLength :: Graph -> EdgeAdj -> RelPat -> NodeId -> Int -> [([Edge], NodeId)]
+pathsOfLength _g _adj _rp start 0 = [([], start)]
+pathsOfLength g adj rp start d =
   [ (e : es, nid2)
-  | (e, nid1) <- hop g rp start
-  , (es, nid2) <- pathsOfLength g rp nid1 (d - 1)
+  | (e, nid1) <- hop g adj rp start
+  , (es, nid2) <- pathsOfLength g adj rp nid1 (d - 1)
   ]
 
 -- | Does an edge match the relationship type constraint?
