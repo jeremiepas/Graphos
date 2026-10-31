@@ -38,7 +38,7 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnv)
+import Graphos.Infrastructure.Wiring (productionAppEnv, productionAppEnvWithConfig)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
@@ -341,7 +341,7 @@ main = do
       let _tracer = otelTracer obsEnv
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
-          appEnv = productionAppEnv env obsEnv
+          appEnv = productionAppEnvWithConfig env obsEnv graphosCfg
 
       -- Validate the effective community-size-cap config; fail fast if mis-set.
       case validClusteringConfig effCc of
@@ -719,7 +719,7 @@ main = do
       let logLevel = if verbose then LogDebug else LogInfo
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir ++ "/traces")
-      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv
+      let appEnv = productionAppEnvWithConfig (otelLogEnv obsEnv) obsEnv defaultGraphosConfig
       logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
       resultA <- loadGraphFromFile pathA
       case resultA of
@@ -794,7 +794,7 @@ main = do
                 }
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
-      let appEnv = productionAppEnv env obsEnv
+      let appEnv = productionAppEnvWithConfig env obsEnv graphosCfg
 
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
