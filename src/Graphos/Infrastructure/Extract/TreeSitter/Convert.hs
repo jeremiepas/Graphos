@@ -407,19 +407,10 @@ traverseNode sf gran budget parentEmitted isExported node =
               importParts = importPartsFor sf parentBase tType node
           in (rawNode : csns, containEdge ++ cces, importParts ++ cims)
 
--- | Decide whether a (possibly export-from) import declaration carries the
--- re-export marker.
-isReExport :: String -> Text -> Bool
-isReExport ty txt =
-  let norm = T.toLower (T.dropWhile (== ' ') (normalizeText txt))
-      isPlainImport = ty `elem` ["import_declaration", "import_statement", "import_from_statement"]
-                     && T.isPrefixOf "import" norm
-  in not isPlainImport
-
 -- | Build the (source id, ImportTarget) pair for an import/export node, using
 -- the enclosing emitted node's id as the edge source.
 importPartsFor :: SourceFile -> Text -> String -> TSNodeInfo -> [(NodeId, ImportTarget)]
-importPartsFor sf parentBase tType node =
+importPartsFor sf parentBase _tType node =
   case extractSpecifier sf node of
     Just spec ->
       let impPath = case resolveImport (sourceFilePathStr sf) (T.unpack spec) of

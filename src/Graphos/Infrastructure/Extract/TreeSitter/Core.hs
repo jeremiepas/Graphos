@@ -201,7 +201,7 @@ sourceStem :: SourceFile -> Text
 sourceStem (SourceFile p _) =
   let rev = T.reverse p
       fname = T.takeWhile (/= '/') rev       -- last path component, reversed
-      nameRevNoExt = let (beforeDot, afterDot) = T.break (== '.') fname
+      nameRevNoExt = let (_, afterDot) = T.break (== '.') fname
                       in if T.null afterDot then fname else T.drop 1 afterDot   -- skip '.', drop extension
   in T.reverse nameRevNoExt
 
