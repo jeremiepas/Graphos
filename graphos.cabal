@@ -255,13 +255,20 @@ library
   -- Vendored tree-sitter grammars (no Hackage package; ABI 11, see vendor/README.md).
   -- All three ship an identical tree_sitter/parser.h, so one include dir serves them.
   include-dirs:     vendor/tree-sitter-cpp/src
+                    vendor/tree-sitter-perl/src
+                    vendor/tree-sitter-c-sharp/src
   c-sources:        vendor/tree-sitter-cpp/src/parser.c
                     vendor/tree-sitter-yaml/src/parser.c
                     vendor/tree-sitter-sql/src/parser.c
+                    vendor/tree-sitter-perl/src/parser.c
+                    vendor/tree-sitter-c-sharp/src/parser.c
+                    vendor/tree-sitter-c-sharp/src/scanner.c
   cxx-sources:      vendor/tree-sitter-cpp/src/scanner.cc
                     vendor/tree-sitter-yaml/src/scanner.cc
                     vendor/tree-sitter-sql/src/scanner.cc
+                    vendor/tree-sitter-perl/src/scanner.cc
   extra-libraries:  stdc++
+  cc-options:       -Wno-trigraphs
 
   build-depends:
       aeson                >= 2.0
@@ -300,6 +307,7 @@ library
     , tree-sitter-json      >= 0.7
     , tree-sitter-ruby      >= 0.5
     , tree-sitter-java      >= 0.7
+    , tree-sitter-php       >= 0.5
     , unordered-containers >= 0.2
     , vector               >= 0.12
     , yaml                 >= 0.11
