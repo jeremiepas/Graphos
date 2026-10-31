@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-x-partial -Wno-name-shadowing -Wno-unused-imports -Wno-unused-matches #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec (spec) where
 
