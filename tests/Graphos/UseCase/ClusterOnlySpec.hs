@@ -22,10 +22,10 @@ import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
-import Graphos.Domain.Config (defaultOtelConfig)
+import Graphos.Domain.Config (defaultOtelConfig, defaultGraphosConfig)
 import Graphos.Infrastructure.Logging (LogLevel(..))
 import Graphos.Infrastructure.Observability.SDK (initObservability, ObservabilityEnv(..))
-import Graphos.Infrastructure.Wiring (productionAppEnv)
+import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig)
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.UseCase.Pipeline (runClusterOnlyPipeline)
 
@@ -38,7 +38,7 @@ spec = describe "runClusterOnlyPipeline" $
           checkpointPath = out </> "graph.checkpoint.json"
       ExportJSON.saveCheckpoint graph checkpointPath (T.pack out)
       obsEnv <- initObservability LogError defaultOtelConfig Nothing (out </> "traces")
-      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv
+      let appEnv = productionAppEnvWithConfig (otelLogEnv obsEnv) obsEnv defaultGraphosConfig
           config = defaultConfig
             { cfgOutputDir = out
             , cfgInputPath = out

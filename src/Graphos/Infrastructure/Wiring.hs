@@ -8,6 +8,7 @@ module Graphos.Infrastructure.Wiring
   , productionObservabilityPort
   , productionFileSystemPort
   , productionExtractionPort
+  , productionAppEnvWithConfig
   , productionExportPort
   , productionLLMPort
     -- * Tree-sitter grammar bindings
@@ -25,6 +26,7 @@ import Foreign.Ptr (Ptr)
 import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
+import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
 import Graphos.Domain.Config.Extraction (Granularity(..))
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
@@ -36,6 +38,7 @@ import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(
 import Graphos.UseCase.Port.LLMPort (LLMPort(..), ImageAnalysis(..), ImageKind(..), Entity(..))
 
 -- Infrastructure imports (only Wiring imports Infrastructure directly)
+import qualified Graphos.Infrastructure.Config as Cfg
 import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
@@ -91,10 +94,14 @@ import qualified Graphos.UseCase.Export as UE
 import qualified Graphos.Infrastructure.Extract.Pdf as Pdf
 
 -- | Create a production AppEnv from a LogEnv and ObservabilityEnv.
--- Called once at startup in Main.hs.
+-- Called once at startup in Main.hs. Uses default config for extraction wiring.
 productionAppEnv :: LogEnv -> ObservabilityEnv -> AppEnv
-productionAppEnv logEnv obsEnv = AppEnv
-  { extractionPort      = productionExtractionPort logEnv
+productionAppEnv logEnv obsEnv = productionAppEnvWithConfig logEnv obsEnv defaultGraphosConfig
+
+-- | Create a production AppEnv threading a 'GraphosConfig' into extraction wiring.
+productionAppEnvWithConfig :: LogEnv -> ObservabilityEnv -> GraphosConfig -> AppEnv
+productionAppEnvWithConfig logEnv obsEnv graphosCfg = AppEnv
+  { extractionPort      = productionExtractionPort logEnv graphosCfg
   , exportPort          = productionExportPort logEnv obsEnv
   , fileSystemPort      = productionFileSystemPort
   , loggingPort         = productionLoggingPort logEnv
@@ -141,9 +148,9 @@ productionFileSystemPort = FileSystemPort
   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.
-productionExtractionPort :: LogEnv -> ExtractionPort
-productionExtractionPort logEnv = ExtractionPort
-  { epFindLSPServer = LSP.findLSPServer
+productionExtractionPort :: LogEnv -> GraphosConfig -> ExtractionPort
+productionExtractionPort logEnv graphosCfg = ExtractionPort
+  { epFindLSPServer = \ext -> Cfg.resolveLSPServer graphosCfg ext
   , epConnectLSP = \cmd args rootUri -> do
       let config = LSP.LSPClientConfig
             { LSP.lspCommand = cmd
@@ -219,7 +226,7 @@ productionExtractionPort logEnv = ExtractionPort
             (_msg, _stmts, _batches) <- Neo4j.pushFileExtraction extraction
               (neo4jsUri n4cfg) (neo4jsUser n4cfg) (neo4jsPassword n4cfg)
             pure ()
-  , epLanguageServerCommands = LSP.languageServerCommands
+  , epLanguageServerCommands = Cfg.effectiveLSPServerCommands graphosCfg
   , epHasTreeSitterGrammar = isJust . getGrammarPtr
   }
 
