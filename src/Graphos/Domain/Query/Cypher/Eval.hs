@@ -40,6 +40,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Set as Set
+import qualified Data.Vector as V
 import Data.Text.Short (fromText)
 
 import Text.Regex.TDFA (makeRegexM, matchTest, Regex)
@@ -63,7 +64,9 @@ import Graphos.Domain.Graph.Mutation
   , rebuildAdjacency
   )
 import Graphos.Domain.Graph.Index (GraphIndex, giLabelIndex)
-import Graphos.Domain.Graph.Analysis (CachedFGL, toCachedFGL)
+import Graphos.Domain.Graph.Analysis (CachedFGL(..), toCachedFGL)
+import Graphos.Domain.Graph.FGL (fglEdgeData)
+import qualified Data.Graph.Inductive.Graph as FGL
 import Graphos.Domain.Query.Cypher.AST
 import Graphos.Domain.Query.Cypher.Mapping
 
@@ -108,9 +111,9 @@ type EdgeAdj = (Map NodeId [Edge], Map NodeId [Edge])
 -- | Evaluate a query against a graph, bounded by @budget@ rows.
 evaluate :: Int -> CypherQuery -> Graph -> GraphIndex -> CypherResult
 evaluate budget q g idx =
-  let _cached :: CachedFGL
-      _cached = toCachedFGL g
-      adj = buildAdjacency _cached g
+  let adj = if queryHasVarLength q
+            then buildAdjacency (toCachedFGL g) g
+            else buildAdjacencyDirect g
       enumerated = case idAnchor q g of
         Just b  -> [b]
         Nothing -> enumerateBindings g idx adj (cqPatterns q)
@@ -167,8 +170,9 @@ evaluateStatement budget (MutStatement m) g idx = evaluateMutation budget m g id
 -- @nodes_deleted@, @rels_deleted@).
 evaluateMutation :: Int -> Mut -> Graph -> GraphIndex -> Either Text MutationResult
 evaluateMutation budget m g0 idx =
-  let _cached = toCachedFGL g0
-      adj = buildAdjacency _cached g0
+  let adj = case mMatch m of
+        Just q | queryHasVarLength q -> buildAdjacency (toCachedFGL g0) g0
+        _ -> buildAdjacencyDirect g0
       baseBindings = case mMatch m of
         Nothing -> [Map.empty]
         Just q  ->
@@ -629,14 +633,44 @@ nodeCandidates g idx np =
       , nodeMatchesProps g np nid
       ]
 
--- | Build the per-query edge adjacency index: outgoing (edge source -> edges)
--- and incoming (edge target -> edges) lists, in a single pass over 'gEdges'.
+-- | Build the per-query edge adjacency index from the 'CachedFGL' (FGL
+-- graph): outgoing (edge source -> edges) and incoming (edge target -> edges)
+-- lists, in a single pass over the original-direction FGL arcs. The reverse
+-- edges that 'toCachedFGL' embeds for undirected graphs are filtered out so
+-- each Graphos 'Edge' is inserted exactly once.
 buildAdjacency :: CachedFGL -> Graph -> EdgeAdj
-buildAdjacency cached g =
-  cached `seq`
-    ( Map.fromListWith (++) [ (edgeSource e, [e]) | e <- Map.elems (gEdges g) ]
-    , Map.fromListWith (++) [ (edgeTarget e, [e]) | e <- Map.elems (gEdges g) ]
-    )
+buildAdjacency cached _g =
+  let gr = cfgGraph cached
+      nidOf i = cfgNidMap cached V.! i
+      origEdges :: [Edge]
+      origEdges =
+        [ fglEdgeData lbl
+        | (u, v, lbl) <- FGL.labEdges gr
+        , let e = fglEdgeData lbl
+        , nidOf u == edgeSource e
+        , nidOf v == edgeTarget e
+        ]
+  in ( Map.fromListWith (++) [ (edgeSource e, [e]) | e <- origEdges ]
+     , Map.fromListWith (++) [ (edgeTarget e, [e]) | e <- origEdges ]
+     )
+
+-- | Direct (gEdges-based) adjacency index, used for single-hop queries where
+-- building the 'CachedFGL' is unnecessary.
+buildAdjacencyDirect :: Graph -> EdgeAdj
+buildAdjacencyDirect g =
+  ( Map.fromListWith (++) [ (edgeSource e, [e]) | e <- Map.elems (gEdges g) ]
+  , Map.fromListWith (++) [ (edgeTarget e, [e]) | e <- Map.elems (gEdges g) ]
+  )
+
+-- | Does a query contain a variable-length relationship pattern?
+-- CachedFGL is only needed (and only built) for such queries; single-hop
+-- and (semantically) non-variable queries skip it.
+queryHasVarLength :: CypherQuery -> Bool
+queryHasVarLength q =
+  any isVarRel (cqPatterns q)
+  where
+    isVarRel (RelPatE rp) = rpHops rp /= HopRange 1 1
+    isVarRel _            = False
 
 -- | Does a node match a node pattern (all labels + all property
 -- constraints)?
