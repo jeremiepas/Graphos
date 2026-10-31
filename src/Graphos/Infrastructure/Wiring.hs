@@ -80,6 +80,7 @@ import qualified TreeSitter.Rust as TSRust
 import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Ruby as TSRuby
 import qualified TreeSitter.Java as TSJava
+import qualified TreeSitter.PHP as TSPhp
 import qualified TreeSitter.Language as TS_LANG
 import qualified Graphos.Infrastructure.Extract.TreeSitter.Vendored as TSVendored
 
@@ -330,6 +331,12 @@ getGrammarPtr "rust"         = Just TSRust.tree_sitter_rust
 getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
 getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
 getGrammarPtr "java"         = Just TSJava.tree_sitter_java
+getGrammarPtr "php"          = Just TSPhp.tree_sitter_php
+getGrammarPtr "kotlin"       = Just TSJava.tree_sitter_java
+getGrammarPtr "perl"         = Just TSVendored.tree_sitter_perl
+getGrammarPtr "csharp"       = Just TSVendored.tree_sitter_c_sharp
+getGrammarPtr "c-sharp"      = Just TSVendored.tree_sitter_c_sharp
+getGrammarPtr "c_sharp"      = Just TSVendored.tree_sitter_c_sharp
 getGrammarPtr "cpp"          = Just TSVendored.tree_sitter_cpp
 getGrammarPtr "yaml"         = Just TSVendored.tree_sitter_yaml
 getGrammarPtr "sql"          = Just TSVendored.tree_sitter_sql
