@@ -49,6 +49,11 @@ flag dev
   description: Enable development mode (warnings as errors)
   default:     False
 
+flag lean-critique
+  description: Link the Lean 4 critique library (graphos-lean-critique) at build time
+  default:     False
+  manual:      True
+
 -- ───────────────────────────────────────────────
 -- Library
 -- ───────────────────────────────────────────────
@@ -248,6 +253,12 @@ library
                      Graphos.Domain.Scaffold
                      -- CLI
                      Graphos.CLI.Parser
+
+  if flag(lean-critique)
+    exposed-modules: Graphos.Infrastructure.Critique.Lean
+    include-dirs:  spikes/avi-1677-lean-critique/include
+    extra-lib-dirs: spikes/avi-1677-lean-critique
+    extra-libraries: graphoslean
 
   other-modules:
                     Graphos.Domain.HexColor
