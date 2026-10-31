@@ -15,10 +15,10 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
+import Data.Text.Short (fromText, toText)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 
@@ -33,6 +33,8 @@ import Graphos.Infrastructure.Export.IncrementalJSON
   , writeGodNodes, writeAnalysisTail, writeCommunityAggregates, writeCompositions
   , writeEmbeddingsPath
   )
+import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNode)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), nodeIdentityBudget)
 
 fixtureNodes :: [Node]
 fixtureNodes =
@@ -197,6 +199,47 @@ spec = do
             lrCommunityLabels lr `shouldBe` fixtureLabels
             gEmbeddingsPath (lrGraph lr) `shouldBe` Just "embeddings.json"
 
+  describe "bounded node identity (AVI-1452)" $ do
+    it "bounds a long node's id and signature under nodeIdentityBudget" $ do
+      let node = makeNode "src/long.ts"
+            TSNodeInfo
+              { tsnType = "function_declaration"
+              , tsnText = T.replicate 5000 "x"
+              , tsnStartRow = 0, tsnStartCol = 0
+              , tsnEndRow = 0, tsnEndCol = 0
+              , tsnIsNamed = True, tsnChildren = []
+              }
+          idStr  = T.unpack (nodeId node)
+          ident  = drop (length (takeWhile (/=':') idStr) + 1) idStr
+        -- 'ident' is a String (from T.unpack); plain 'length' counts chars.
+      length ident `shouldSatisfy` (<= nodeIdentityBudget)
+      case nodeSignature node of
+        Just sig -> T.length (toText sig) `shouldSatisfy` (<= nodeIdentityBudget)
+        Nothing  -> fail "expected a node signature under the bounded-identity scheme"
+
+    it "round-trips the bounded signature through JGF preserving the present bit" $
+      withSystemTempDirectory "graphos-bounded-sig" $ \dir -> do
+        let node = makeNode "src/long.ts"
+              TSNodeInfo
+                { tsnType = "function_declaration"
+                , tsnText = T.replicate 5000 "x"
+                , tsnStartRow = 0, tsnStartCol = 0
+                , tsnEndRow = 0, tsnEndCol = 0
+                , tsnIsNamed = True, tsnChildren = []
+                }
+            g' = buildGraph False (extractionFromLists [node] [])
+            path = dir </> "graph.json"
+        exportGraphWithLabels g' analysis Nothing path
+        bs <- BSL.readFile path
+        case eitherDecode bs of
+          Left e -> fail $ "not valid JSON: " ++ e
+          Right doc -> do
+            let sigs = catMaybes [sigOf kv | kv <- KM.toList (nodesOf doc)]
+            length sigs `shouldBe` 1
+            case sigs of
+              (s : _) -> T.length s `shouldSatisfy` (<= nodeIdentityBudget)
+              []      -> fail "no signature emitted under the bounded-identity scheme"
+
 -- ───────────────────────────────────────────────
 -- Fixtures
 -- ───────────────────────────────────────────────
@@ -270,6 +313,15 @@ lookupKV k = KM.lookup (Key.fromText k)
 metaOf :: Value -> Maybe Value
 metaOf (Object km) = lookupKV "metadata" km
 metaOf _ = Nothing
+
+sigOf :: (Key.Key, Value) -> Maybe Text
+sigOf (_k, v) = case v of
+  Object km -> case lookupKV "metadata" km of
+    Just (Object mm) -> case lookupKV "signature" mm of
+      Just (String t) -> Just t
+      _ -> Nothing
+    _ -> Nothing
+  _ -> Nothing
 
 graphosOf :: Value -> KM.KeyMap Value
 graphosOf doc =
