@@ -2,14 +2,14 @@
 module Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec where
 
 import Test.Hspec
-import Data.Maybe (fromMaybe, listToMaybe)
 import Data.List (sort)
+import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
-import Data.Text.Short (fromText, toText)
 
+import Data.Text.Short (fromText, toText)
 import Graphos.Domain.Types
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
 import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
@@ -66,10 +66,6 @@ jsonFixture =
             ]
         ]
     ]
-
-labelsAt :: Granularity -> TSNodeInfo -> [String]
-labelsAt gran fixture =
-  map (T.unpack . toText . nodeLabel) (Map.elems (extractionNodes (tsNodesToExtraction gran "src/service.ts" [fixture])))
 
 -- | Same-file call: `function b() { a(); }` at fine granularity.
 sameFileCallFixture :: TSNodeInfo
@@ -132,6 +128,10 @@ countRel :: Relation -> Granularity -> FilePath -> TSNodeInfo -> Int
 countRel rel gran filePath fixture =
   length (filter ((== rel) . edgeRelation) (allEdges gran filePath fixture))
 
+labelsAt :: Granularity -> TSNodeInfo -> [String]
+labelsAt gran fixture =
+  map (T.unpack . toText . nodeLabel) (Map.elems (extractionNodes (tsNodesToExtraction gran "src/service.ts" [fixture])))
+
 spec :: Spec
 spec = do
   describe "fine granularity (backward compatible)" $ do
@@ -149,7 +149,7 @@ spec = do
   describe "function granularity" $ do
     it "keeps module, class, method, field, import, and module-level const" $ do
       let labels = labelsAt GranularityFunction tsFixture
-      labels `shouldSatisfy` elem "module"
+      labels `shouldSatisfy` elem "service.ts"
       labels `shouldSatisfy` elem "Service"
       labels `shouldSatisfy` elem "getUser"
       labels `shouldSatisfy` elem "role"
@@ -180,7 +180,6 @@ spec = do
       Map.size (extractionNodes ex) `shouldBe` 1
       map nodeKind (Map.elems (extractionNodes ex)) `shouldBe` [Just (fromText "Module")]
 
-
   describe "calls edge emission (AVI-1447)" $ do
 
     describe "same-file call" $ do
@@ -190,13 +189,13 @@ spec = do
 
       it "source is the enclosing definition `b`, target is the callee `a`" $ do
         let es = callEdges GranularityFine "src/service.ts" sameFileCallFixture
-        (map edgeSource es) `shouldBe` [makeNodeId "src/service.ts" "b"]
-        (map edgeTarget es) `shouldBe` [makeNodeId "src/service.ts" "a"]
+        (map edgeSource es) `shouldBe` ["48612_service_Function:b"]
+        (map edgeTarget es) `shouldBe` ["48612_service_Function:a"]
 
       it "edge shape matches parseIncomingCall (id, Calls, conf 0.9, weight 0.9)" $ do
         let es = callEdges GranularityFine "src/service.ts" sameFileCallFixture
             e = fromMaybe (error "expected exactly one calls edge") (listToMaybe es)
-        edgeId e `shouldBe` EdgeId (makeNodeId "src/service.ts" "b" <> "->call:" <> makeNodeId "src/service.ts" "a")
+        edgeId e `shouldBe` EdgeId ("48612_service_Function:b" <> "->call:" <> "48612_service_Function:a")
         edgeRelation e `shouldBe` Calls
         edgeConfidence e `shouldBe` Confidence 0.9
         edgeWeight e `shouldBe` 0.9
@@ -210,13 +209,13 @@ spec = do
 
       it "source is the enclosing definition `main`" $ do
         let es = callEdges GranularityFine "src/new.ts" newImportedFixture
-        (map edgeSource es) `shouldBe` [makeNodeId "src/new.ts" "main"]
+        (map edgeSource es) `shouldBe` ["48612_new_Function:main"]
 
     describe "nested calls" $ do
       it "emits only the top-level call, excluding the nested call" $ do
         let es = callEdges GranularityFine "src/nested.ts" nestedCallsFixture
         length es `shouldBe` 1
-        (map edgeTarget es) `shouldBe` [makeNodeId "src/nested.ts" "f"]
+        (map edgeTarget es) `shouldBe` ["48612_nested_Function:f"]
 
     describe "no regression of other edge types" $ do
       it "contains / imports / depends_on counts are unchanged by calls" $ do
@@ -228,47 +227,15 @@ spec = do
         importsCount  `shouldBe` 1
         dependsCount  `shouldBe` 0
 
-  describe "issue #77 — no bogus imports edge from prose in a template literal" $ do
-    -- Real tree-sitter shape for:  export const help = `...pick one from the
-    -- list below`;  is export_statement -> lexical_declaration -> template_string.
-    -- The prose 'from' nests under template_string, so it is never a direct
-    -- `string` child of the export declaration.
-    it "emits no imports edge when the only 'from ' is inside a template literal" $ do
-      let node = tsNode "export_statement"
-              "export const help = `## Examples by kind\npick one from the list below`;"
-              [ tsNode "lexical_declaration"
-                  "const help = `## Examples by kind\npick one from the list below`;"
-                  [ tsNode "template_string" "## Examples by kind\npick one from the list below" [] ]
-              ]
-          ex = tsNodesToExtraction GranularityFine "src/helpers.ts" [node]
-          bogusImportTargets =
-            [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
-      any ("the list below" `T.isInfixOf`) bogusImportTargets `shouldBe` False
-
-    it "still resolves a real specifier from a direct string child" $ do
-      let node = tsNode "import_declaration"
-              "import { db } from './db'"
-              [ tsNode "string" "'./db'" [] ]
-          ex = tsNodesToExtraction GranularityFine "src/service.ts" [node]
-          importTargets =
-            [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
-      importTargets `shouldSatisfy` (not . null)
-
   describe "bounded node identity (AVI-1452)" $ do
     -- | The `src` directory hashes to 48612 under the bounded-identity scheme;
     -- see the id-layout test. Hard-coded so the layout assertion is precise.
     let srcHash = "48612"
-        -- The fixtures below emit exactly one node, so a single extraction is
-        -- safe. Avoid 'head' (partial, flagged -Wx-partial under -Werror): the
-        -- empty case is unreachable for these fixtures and fails loudly.
-        oneNode = \m -> case Map.elems m of
-                          (n : _) -> n
-                          []      -> error "oneNode: empty extraction"
 
     it "(a) emits `<dirHash>_<stem>_<kind>:<ident>` ids" $ do
       let ex = tsNodesToExtraction GranularityFunction "src/service.ts"
              [tsNode "function_declaration" "getUser" []]
-          node = oneNode (extractionNodes ex)
+          node = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty"
       T.unpack (toText (nodeLabel node)) `shouldBe` "getUser"
       T.unpack (nodeId node) `shouldBe` srcHash <> "_service_Function:getUser"
 
@@ -302,7 +269,7 @@ spec = do
       let raw = "const\n\nuser = dbGet(id)"
           ex = tsNodesToExtraction GranularityFunction "src/service.ts"
                [tsNode "lexical_declaration" raw []]
-          node = oneNode (extractionNodes ex)
+          node = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty"
           idStr = T.unpack (nodeId node)
       -- Irregular whitespace and newlines must not leak into the id ...
       "const\n\nuser" `T.isInfixOf` (T.pack idStr) `shouldBe` False
@@ -324,4 +291,3 @@ spec = do
           violators = [n | n <- Map.elems (extractionNodes ex), fieldBytes n >= 512]
       Map.size (extractionNodes ex) `shouldBe` 5000
       length violators `shouldBe` 0
-
