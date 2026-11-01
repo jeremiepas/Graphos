@@ -74,10 +74,10 @@ n1 = specNode "1" (Just "handler") "POST /orders" (Just "(Req) -> Res") Nothing
 
 n3, n4, n5, n6, n7 :: Node
 n3 = specNode "3" (Just "test") "orders.spec" Nothing Nothing
-n4 = specNode "4" (Just "schemaField") "orders.total" Nothing Nothing
-n5 = specNode "5" (Just "contractField") "Order.total" Nothing Nothing
-n6 = specNode "6" (Just "schemaField") "orders.currency" Nothing Nothing
-n7 = specNode "7" (Just "contractField") "Order.currency" Nothing Nothing
+n4 = specNode "4" (Just "schema-field") "orders.total" Nothing Nothing
+n5 = specNode "5" (Just "contract-field") "Order.total" Nothing Nothing
+n6 = specNode "6" (Just "schema-field") "orders.currency" Nothing Nothing
+n7 = specNode "7" (Just "contract-field") "Order.currency" Nothing Nothing
 
 n9Legacy :: Node
 n9Legacy = specNode "9" (Just "module") "legacy/old" Nothing Nothing
@@ -115,7 +115,7 @@ phi = IC.SpecDocument
   , IC.docSpecs =
       [ (Just "specHandlerValidates", IC.Reaches "handler" "POST /orders" Calls "validator")
       , (Just "specHandlersTested", IC.Covered "handler" Tests "test")
-      , (Just "specSchemaContract", IC.Parallel "schemaField" "contractField" Maps)
+      , (Just "specSchemaContract", IC.Parallel "schema-field" "contract-field" Maps)
       , (Just "specNoLegacy", IC.Absent "module" "legacy/" [])
       ]
   }
@@ -142,7 +142,7 @@ instance Arbitrary PGraph where
 genPGraph :: Int -> Gen PGraph
 genPGraph size = do
   n <- choose (1, 1 + max 0 (min size 8))
-  kinds <- vectorOf n (elements ["handler", "validator", "test", "schemaField"])
+  kinds <- vectorOf n (elements ["handler", "validator", "test", "schema-field"])
   let ids = [1 .. n]
       pairs = [(a, b) | a <- ids, b <- ids, a /= b]
   rels <- vectorOf (length pairs) (elements [Calls, Tests, References, Implements, Maps])
@@ -194,7 +194,7 @@ propCovered :: PGraph -> Bool
 propCovered pg = all parity
   [ ("validator", Tests, "handler")
   , ("handler", Calls, "validator")
-  , ("schemaField", Maps, "contractField")
+  , ("schema-field", Maps, "contract-field")
   ]
   where
     g = pgGraph pg
@@ -212,7 +212,7 @@ propReaches :: PGraph -> Bool
 propReaches pg = all parity
   [ (Calls, "validator")
   , (Tests, "test")
-  , (Implements, "schemaField")
+  , (Implements, "schema-field")
   ]
   where
     g = pgGraph pg
@@ -253,13 +253,13 @@ spec = describe "Graphos.Domain.IntentCheck / Impact (unit 4, Lean toy parity)" 
       IC.evaluateSpec g0 (IC.Absent "module" "legacy/" []) `shouldBe` IC.Satisfied []
 
     it "parallel: schema <-> contract on G0" $
-      IC.evaluateSpec g0 (IC.Parallel "schemaField" "contractField" Maps) `shouldBe` IC.Satisfied []
+      IC.evaluateSpec g0 (IC.Parallel "schema-field" "contract-field" Maps) `shouldBe` IC.Satisfied []
 
     it "sat G1 specSchemaContract is FALSE — the omission is detected, witness [\"6\"]" $
-      IC.evaluateSpec g1 (IC.Parallel "schemaField" "contractField" Maps) `shouldBe` IC.Violated ["6"]
+      IC.evaluateSpec g1 (IC.Parallel "schema-field" "contract-field" Maps) `shouldBe` IC.Violated ["6"]
 
     it "sat G2 specSchemaContract is TRUE — the fix is accepted" $
-      IC.evaluateSpec g2 (IC.Parallel "schemaField" "contractField" Maps) `shouldBe` IC.Satisfied []
+      IC.evaluateSpec g2 (IC.Parallel "schema-field" "contract-field" Maps) `shouldBe` IC.Satisfied []
 
     it "a reaches spec with no matching named node is violated (empty existential)" $
       IC.evaluateSpec g0 (IC.Reaches "handler" "GET /missing" Calls "validator")
@@ -273,14 +273,14 @@ spec = describe "Graphos.Domain.IntentCheck / Impact (unit 4, Lean toy parity)" 
       let conj = IC.And
             [ IC.Reaches "handler" "POST /orders" Calls "validator"
             , IC.Covered "handler" Tests "test"
-            , IC.Parallel "schemaField" "contractField" Maps
+            , IC.Parallel "schema-field" "contract-field" Maps
             , IC.Absent "module" "legacy/" []
             ]
       IC.evaluateSpec g0 conj `shouldBe` IC.Satisfied []
       IC.evaluateSpec g1 conj `shouldBe` IC.Violated ["6"]
 
     it "not is strict negation (Lean ¬ sat): false on G0, true on G1" $ do
-      let paranoia = IC.Parallel "schemaField" "contractField" Maps
+      let paranoia = IC.Parallel "schema-field" "contract-field" Maps
       IC.holds (IC.evaluateSpec g0 (IC.Not paranoia)) `shouldBe` False
       IC.holds (IC.evaluateSpec g1 (IC.Not paranoia)) `shouldBe` True
 
@@ -336,7 +336,7 @@ spec = describe "Graphos.Domain.IntentCheck / Impact (unit 4, Lean toy parity)" 
       IM.complete cSig dAck `shouldBe` True
 
     it "nontrivial [G0, G1, G2] for specSchemaContract = true" $ do
-      let s = IC.Parallel "schemaField" "contractField" Maps
+      let s = IC.Parallel "schema-field" "contract-field" Maps
           probes = [g0, g1, g2]
       any (\p -> IC.holds (IC.evaluateSpec p s)) probes `shouldBe` True
       any (\p -> not (IC.holds (IC.evaluateSpec p s))) probes `shouldBe` True

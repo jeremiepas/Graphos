@@ -51,7 +51,7 @@ import Data.Text (Text)
 import Data.Text.Short (toText)
 
 import Graphos.Domain.Types.Edge (Edge(..), relationToText)
-import Graphos.Domain.Types.Node (Node(..))
+import Graphos.Domain.Types.Node (Node(..), nodeBodyHash)
 
 -- | Media type of the canonical graph document.
 jgfMediaType :: Text
@@ -106,7 +106,8 @@ nodeMetadata n = object $
   [ "kind"         .= toText knd | Just knd <- [nodeKind n] ] ++
   [ "degree"       .= v | Just v <- [nodeDegree n] ] ++
   [ "is_bridge"    .= v | Just v <- [nodeIsBridge n] ] ++
-  [ "extra"        .= v | Just v <- [nodeExtra n] ]
+  [ "extra"        .= v | Just v <- [nodeExtra n] ] ++
+  [ "body_hash"    .= toText v | Just v <- [nodeBodyHash n] ]
 
 -- | Map a graphos edge to its JGF representation: @source@ / @relation@ /
 -- @target@ (plus the @directed@ override) top-level; @id@, @weight@,

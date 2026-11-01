@@ -11,6 +11,7 @@ module Graphos.UseCase.IntentCheck
   , IntentReport(..)
   , runIntentCheck
   , reportVerdict
+  , probeTrivialityWarnings
   , violatedSpecs
   , renderIntentReport
     -- * Probes (non-gating)
@@ -42,14 +43,16 @@ instance ToJSON VerdictRow where
 
 -- | The full intent-check report for one graph.
 data IntentReport = IntentReport
-  { irGraph :: !Text
-  , irRows  :: ![VerdictRow]
+  { irGraph    :: !Text
+  , irRows     :: ![VerdictRow]
+  , irWarnings :: ![Text]
   } deriving (Eq, Show)
 
 instance ToJSON IntentReport where
   toJSON r = object
-    [ "graph"   .= irGraph r
-    , "results" .= map rowToJSON (irRows r)
+    [ "graph"    .= irGraph r
+    , "results"  .= map rowToJSON (irRows r)
+    , "warnings" .= irWarnings r
     ]
 
 -- | The report passes iff every spec holds on the graph.
@@ -65,7 +68,7 @@ violatedSpecs r =
 runIntentCheck :: Graph -> SpecDocument -> Text -> IntentReport
 runIntentCheck g doc name =
   let rows = [ VerdictRow nm s (evaluateSpec g s) | (nm, s) <- docSpecs doc ]
-  in IntentReport { irGraph = name, irRows = rows }
+  in IntentReport { irGraph = name, irRows = rows, irWarnings = [] }
 
 -- | A verdict text for the report.
 verdictText :: Verdict -> Text
@@ -99,6 +102,10 @@ renderIntentReport r = T.unlines $
          then "No violations."
           else T.unlines ("**VIOLATIONS:**" : [ "- " <> violatedLine x | x <- irRows r, not (holds (vrVerdict x)) ])
      ]
+  ++ [ ""
+     , if null (irWarnings r) then ""
+       else T.unlines ("**NON-TRIVIALITY WARNINGS:**" : [ "- " <> w | w <- irWarnings r ])
+     ]
   where
     tshow = T.pack . show
 
@@ -112,6 +119,24 @@ renderIntentReport r = T.unlines $
       let wit = witnesses (vrVerdict x)
           ws  = if null wit then "(no witness)" else T.intercalate ", " wit
       in "- " <> name x <> ": " <> specText (vrSpec x) <> " — violating nodes: " <> ws
+
+-- | Non-triviality warnings for probe graphs.
+probeTrivialityWarnings :: SpecDocument -> [Graph] -> [Text]
+probeTrivialityWarnings doc probes
+  | null probes = []
+  | otherwise =
+      [ warning nm (all (\g -> holds (evaluateSpec g s)) probes)
+      | (nm, s) <- docSpecs doc
+      , let allPass = all (\g -> holds (evaluateSpec g s)) probes
+            allFail = all (\g -> not (holds (evaluateSpec g s))) probes
+      , allPass || allFail ]
+  where
+    warning nm allPass =
+      let nameTxt = maybe "(unnamed)" id nm
+          kind = if allPass
+                 then "vacuous (holds on every probe)"
+                 else "unsatisfiable (fails on every probe)"
+      in "non-triviality: spec '" <> nameTxt <> "' is " <> kind
 
 -- | A probe graph verdict, for non-triviality comparison against the main graph.
 data ProbeSummary = ProbeSummary

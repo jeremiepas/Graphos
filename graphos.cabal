@@ -79,8 +79,10 @@ library
                     Graphos.UseCase.SpecExtract
                     Graphos.UseCase.SpecAdjudicate
                     Graphos.UseCase.IntentCheck
+                    Graphos.UseCase.Projection
                     Graphos.UseCase.Impact
                     Graphos.Infrastructure.SpecParse
+                    Graphos.Infrastructure.Intent.Contract
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
                      Graphos.Domain.Graph.Mutation

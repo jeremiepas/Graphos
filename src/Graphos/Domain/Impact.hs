@@ -203,7 +203,9 @@ assess c d doc newSpecName = (null failures, failures)
       Nothing -> []
     regressions =
       [ Regression nm (headWitness v)
-      | (nm, v) <- results, nm /= newSpecName, not (holds v) ]
+      | (nm, v) <- results
+      , case newSpecName of Just target -> nm /= Just target; Nothing -> True
+      , not (holds v) ]
 
 -- | Convenience boolean form of 'assess'.
 admissible :: Change -> Discharge -> SpecDocument -> Maybe Text -> Bool

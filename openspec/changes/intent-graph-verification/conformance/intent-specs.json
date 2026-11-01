@@ -18,8 +18,8 @@
     },
     {
       "kind": "parallel",
-      "fromKind": "schemaField",
-      "toKind": "contractField",
+      "fromKind": "schema-field",
+      "toKind": "contract-field",
       "rel": "maps",
       "name": "schemaContract"
     },

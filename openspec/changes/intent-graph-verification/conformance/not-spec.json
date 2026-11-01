@@ -1,0 +1,15 @@
+{
+  "name": "not-spec",
+  "specs": [
+    {
+      "kind": "not",
+      "spec": {
+        "kind": "absent",
+        "nodeKind": "module",
+        "prefix": "zzz/",
+        "whitelist": []
+      },
+      "name": "noZzzModule"
+    }
+  ]
+}

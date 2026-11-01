@@ -13,7 +13,7 @@ module Graphos.Infrastructure.Intent.Contract
    ) where
 
 import qualified Data.Aeson as Aeson
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BS
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -29,10 +29,10 @@ exportIntentProjection = Aeson.encode
 -- dangling endpoint when an edge references a node that is not declared.
 importIntentProjection :: BS.ByteString -> Either Text IntentProjection
 importIntentProjection bs =
-  case Aeson.decode bs of
+  case Aeson.eitherDecode bs of
     Left err ->
       Left $ "intent projection: could not parse intent contract: "
-             <> T.pack (show err)
+             <> T.pack err
     Right p -> case checkWellFormed p of
       Right _ -> Right p
       Left msg -> Left msg

@@ -1,0 +1,30 @@
+{
+  "name": "intent-graph-verification",
+  "specs": [
+    {
+      "kind": "reaches",
+      "fromKind": "handler",
+      "fromName": "POST /orders",
+      "rel": "calls",
+      "toKind": "validator"
+    },
+    {
+      "kind": "covered",
+      "nodeKind": "handler",
+      "rel": "tests",
+      "toKind": "test"
+    },
+    {
+      "kind": "parallel",
+      "fromKind": "schema-field",
+      "toKind": "contract-field",
+      "rel": "maps"
+    },
+    {
+      "kind": "absent",
+      "nodeKind": "module",
+      "prefix": "legacy/",
+      "whitelist": []
+    }
+  ]
+}

@@ -403,8 +403,15 @@ parseNodeItem strict v =
       degree <- optionalInt "degree" km'
       isBridge <- optionalBool "is_bridge" km'
       extra <- optionalValue "extra" km'
+      bodyHashVal <- optionalText "body_hash" km'
+      let extra' = case bodyHashVal of
+            Just h ->
+              case extra of
+                Just (Object kmx) -> Just (Object (KM.insert (Key.fromText "body_hash") (String h) kmx))
+                _ -> Just (Object (KM.singleton (Key.fromText "body_hash") (String h)))
+            Nothing -> extra
       mSrc <- optionalText "source" km'
-      pure (Node nid (fromText label) ft (fromText src) (fromText <$> mSrc) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra 0, degraded)
+      pure (Node nid (fromText label) ft (fromText src) (fromText <$> mSrc) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra' 0, degraded)
     _ -> Left $ "graph.json: node entry must be an object"
 
 -- | Legacy field names hoisted from a JGF node's @metadata@ object.

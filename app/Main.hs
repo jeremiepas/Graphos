@@ -28,7 +28,7 @@ import OpenSpecView.ChangeList (readAllChangeInfos, ChangeInfo(..))
 import OpenSpecView.ArtifactView (displayChangeArtifacts)
 import OpenSpecView.SpecDiff (diffPaths, renderSpecDiff)
 import OpenSpecView.StateDashboard (showDashboard)
-import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
+import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, irWarnings, probeTrivialityWarnings, ProbeSummary(..))
 import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
 import Graphos.Domain.Impact (Discharge(..), stableSignature)
 import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
@@ -839,17 +839,15 @@ main = do
               exitWith (ExitFailure 1)
             Right mainResult -> do
               let g = lrGraph mainResult
-                  report = runIntentCheck g doc (T.pack graphPath)
-              forM_ probePaths $ \p -> do
+              probeGraphs <- concat <$> mapM (\p -> do
                 rl <- loadGraphFromFile (T.unpack p)
                 case rl of
-                  Left err -> hPutStrLn stderr ("[graphos] intentcheck: probe " ++ T.unpack p ++ ": " ++ T.unpack err)
-                  Right pg -> do
-                    let summ = case runProbes g doc p (irRows report) [lrGraph pg] of
-                               (s:_) -> s
-                               []    -> ProbeSummary T.empty [] True
-                    when (not (prMatches summ)) $
-                      hPutStrLn stderr ("[graphos] intentcheck [non-triviality]: probe " ++ T.unpack p ++ " differs from main graph")
+                  Left err -> do
+                    hPutStrLn stderr ("[graphos] intentcheck: probe " ++ T.unpack p ++ ": " ++ T.unpack err)
+                    pure []
+                  Right pg -> pure [lrGraph pg]) probePaths
+              let warns = probeTrivialityWarnings doc probeGraphs
+                  report = (runIntentCheck g doc (T.pack graphPath)) { irWarnings = warns }
               if asJson
                 then BL.putStr (encode report) >> putStrLn ""
                 else TIO.putStrLn (renderIntentReport report)

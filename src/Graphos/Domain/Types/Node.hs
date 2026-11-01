@@ -216,6 +216,7 @@ instance ToJSON Node where
     , "degree"       .= nodeDegree n
     , "is_bridge"    .= nodeIsBridge n
     , "extra"        .= nodeExtra n
+    , "body_hash"     .= fmap toText (nodeBodyHash n)
     ]
 
 instance FromJSON Node where
@@ -233,7 +234,15 @@ instance FromJSON Node where
     degreeVal      <- v .:? "degree"
     isBridgeVal    <- v .:? "is_bridge"
     extraVal       <- v .:? "extra"
+    bodyHashVal    <- v .:? "body_hash"
 
+    let extraVal' = case bodyHashVal of
+          Just (String h) ->
+            case extraVal of
+              Just (Object km) ->
+                Just (Object (KM.insert (Key.fromText "body_hash") (String h) km))
+              _ -> Just (Object (KM.singleton (Key.fromText "body_hash") (String h)))
+          _ -> extraVal
     let presentBits = foldr (.|.) 0
           [ if isJust lineStartVal   then bitNodeLineStart      else 0
           , if isJust lineEndVal     then bitNodeLineEnd        else 0
@@ -242,7 +251,7 @@ instance FromJSON Node where
           , if isJust kindVal        then bitNodeKind             else 0
           , if isJust degreeVal      then bitNodeDegree            else 0
           , if isJust isBridgeVal    then bitNodeIsBridge          else 0
-          , if isJust extraVal       then bitNodeExtra             else 0
+          , if isJust extraVal'       then bitNodeExtra             else 0
           -- The writer always emits the nullable "source" key; a JSON null is
           -- absence (cache-tolerant multi-source round-trip), not presence.
           , if sourceIsText then bitNodeSource else 0
@@ -267,7 +276,7 @@ instance FromJSON Node where
       , nodeKind         = fmap fromText kindVal
       , nodeDegree       = degreeVal
       , nodeIsBridge     = isBridgeVal
-      , nodeExtra        = extraVal
+      , nodeExtra        = extraVal'
       , nodePresentBits  = presentBits
       }
 
