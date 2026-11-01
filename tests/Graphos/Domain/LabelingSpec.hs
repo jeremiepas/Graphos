@@ -192,6 +192,14 @@ spec = do
           new = Set.difference old (Set.fromList ["m0"]) <> Set.fromList ["n0"]
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
+
+    it "drift hit inherits label for 100-member community (±5 in/out, ratios 0.95)" $ do
+      let old = Set.fromList [ "m" <> T.pack (show i) | i <- [0 .. 99 :: Int] ]
+          out = Set.fromList [ "m" <> T.pack (show i) | i <- [0 .. 4 :: Int] ]
+          ins = Set.fromList [ "n" <> T.pack (show i) | i <- [0 .. 4 :: Int] ]
+          new = Set.difference old out <> ins
+          cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
+      matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
   
     it "split miss re-labels when containment from old fails against each half" $ do
       let old  = Set.fromList ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9"]
