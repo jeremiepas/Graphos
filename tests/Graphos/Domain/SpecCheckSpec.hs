@@ -34,6 +34,7 @@ mkN nid kind ft active =
         , nodeIsBridge = Nothing
         , nodeExtra =
             if active then Nothing else Just (object [ "active" .= False ])
+        , nodeBodyHash = Nothing
         , nodePresentBits = 0
         }
   in n { nodePresentBits = computePresentBits n }

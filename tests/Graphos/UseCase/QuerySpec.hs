@@ -30,6 +30,7 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+   , nodeBodyHash = Nothing
    , nodePresentBits  = 0
    }
 

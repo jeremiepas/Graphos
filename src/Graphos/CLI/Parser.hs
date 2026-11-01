@@ -55,6 +55,8 @@ data Command
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
   | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
   | SpeccheckCmd FilePath Bool Bool
+  | IntentcheckCmd FilePath FilePath [Text] Bool
+  | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
   | LServers
    | Serve FilePath FilePath Int Bool Bool
 
@@ -298,6 +300,25 @@ speccheckOpts = SpeccheckCmd
   <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
   <*> switch (long "strict-coverage" <> help "Gate on unimplemented requirements too (default: warn only)")
 
+intentcheckOpts :: Parser Command
+intentcheckOpts = IntentcheckCmd
+  <$> strOption (long "specs" <> metavar "FILE" <> help "Intent-spec JSON document to verify")
+  <*> strOption (long "graph" <> value "graphos-out/graph.json" <> metavar "G"
+                 <> help "Graph to check (default: graphos-out/graph.json)")
+  <*> many (strOption (long "probe" <> metavar "G"
+                 <> help "Additional graph to run specs against (non-gating, non-triviality warning)"))
+  <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
+
+impactOpts :: Parser Command
+impactOpts = ImpactCmd
+  <$> strOption (long "before" <> metavar "G" <> help "Before projection graph.json")
+  <*> strOption (long "after" <> metavar "G" <> help "After projection graph.json")
+  <*> many (strOption (long "ack" <> metavar "ID" <> help "Acknowledge a frontier node id"))
+  <*> optional (strOption (long "specs" <> metavar "FILE" <> help "Intent-spec JSON document for the gate"))
+  <*> optional (strOption (long "new-spec" <> metavar "NAME" <> help "Designated new spec name to check first"))
+  <*> switch (long "json" <> help "Emit a single JSON report document on stdout")
+  <*> switch (long "gate" <> help "Exit non-zero unless the change is admissible and all specs hold")
+
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
@@ -312,6 +333,8 @@ commandOpts = subparser
   <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
   <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
   <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
+  <> command "intentcheck" (info (intentcheckOpts <**> helper) (progDesc "Verify intent specs against a graph" <> footer "Example: graphos intentcheck --specs specs.json --graph graphos-out/graph.json"))
+  <> command "impact" (info (impactOpts <**> helper) (progDesc "Analyze change impact obligations" <> footer "Example: graphos impact --before before.json --after after.json --gate"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))

@@ -29,6 +29,7 @@ testNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -48,6 +49,7 @@ testNodeWithLabel nid label = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -106,6 +108,7 @@ testNodeWithFile nid ft srcFile = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -175,6 +178,7 @@ spec = do
             , nodeLineEnd = Nothing
             , nodeKind = Nothing
             , nodeSignature = Nothing
+            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           ext = extractionFromLists [fileNode, testNode "func"] [testEdge "test.hs" "func"]
@@ -409,6 +413,7 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []
@@ -429,6 +434,7 @@ spec = do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
+            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           ext = extractionFromLists [n] []

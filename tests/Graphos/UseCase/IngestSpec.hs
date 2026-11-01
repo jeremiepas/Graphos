@@ -20,7 +20,7 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Ingest (generateEmbeddingsForNodes)
 
 testNode :: Text -> Text -> Text -> Node
-testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 -- | AppEnv whose only meaningful part is an LLMPort; every other port is
 -- unused by 'generateEmbeddingsForNodes'.

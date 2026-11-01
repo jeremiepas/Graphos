@@ -49,6 +49,7 @@ mkNode nid label srcFile mKind = Node
   , nodeDegree       = Just 2
   , nodeIsBridge     = Just False
   , nodeExtra        = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

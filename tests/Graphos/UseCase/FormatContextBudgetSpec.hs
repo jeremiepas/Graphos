@@ -24,6 +24,7 @@ mkNode i label = Node
   , nodeExtra        = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

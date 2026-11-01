@@ -207,6 +207,7 @@ foldQueryResponses entries =
           , nodeDegree = Nothing
           , nodeIsBridge = Nothing
           , nodeExtra = Nothing
+          , nodeBodyHash = Nothing
           , nodePresentBits = 0
           }
       mergeNode :: ResearchNode -> ResearchNode -> ResearchNode

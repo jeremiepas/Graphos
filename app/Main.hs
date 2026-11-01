@@ -684,14 +684,14 @@ main = do
           hPutStrLn stderr $ "[graphos] intentcheck: failed to parse specs JSON: " ++ err
           exitWith (ExitFailure 1)
         Right doc -> do
-          mainLoad <- loadGraphFromFile (T.unpack graphPath)
+          mainLoad <- loadGraphFromFile graphPath
           case mainLoad of
             Left err -> do
               hPutStrLn stderr $ "[graphos] intentcheck: " ++ T.unpack err
               exitWith (ExitFailure 1)
             Right mainResult -> do
               let g = lrGraph mainResult
-                  report = runIntentCheck g doc graphPath
+                  report = runIntentCheck g doc (T.pack graphPath)
               forM_ probePaths $ \p -> do
                 rl <- loadGraphFromFile (T.unpack p)
                 case rl of
@@ -699,7 +699,7 @@ main = do
                   Right pg -> do
                     let summ = case runProbes g doc p (irRows report) [lrGraph pg] of
                                (s:_) -> s
-                               []    -> ProbeSummary "" [] True
+                               []    -> ProbeSummary T.empty [] True
                     when (not (prMatches summ)) $
                       hPutStrLn stderr ("[graphos] intentcheck [non-triviality]: probe " ++ T.unpack p ++ " differs from main graph")
               if asJson

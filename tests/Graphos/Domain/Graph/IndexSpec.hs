@@ -31,6 +31,7 @@ pathNode nid src = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -187,6 +188,7 @@ mkNode nid lbl src = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

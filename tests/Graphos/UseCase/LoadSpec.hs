@@ -153,8 +153,8 @@ roundTripTest = withSystemTempDirectory "graphos-roundtrip" $ \dir -> do
   let path = dir </> "graph.json"
   iw <- Inc.openWriter path
   let nodes =
-        [ Node "a" (fromText "A") CodeFile (fromText "a.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
-        , Node "b" (fromText "B") CodeFile (fromText "b.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+        [ Node "a" (fromText "A") CodeFile (fromText "a.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+        , Node "b" (fromText "B") CodeFile (fromText "b.hs") Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
         ]
       edges = [ Edge (EdgeId "e1") "a" "b" Calls 1.0 (Confidence 0.9) Nothing ]
       commMap = Map.fromList [(1, ["a", "b"])] :: CommunityMap

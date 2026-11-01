@@ -63,5 +63,6 @@ officeStubNode fp = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits = bitNodeKind
   }

@@ -298,5 +298,6 @@ conversationNodeToNode conv =
       , nodeLineEnd      = Nothing
       , nodeKind         = Just (fromText "Conversation")
       , nodeSignature    = Nothing
+      , nodeBodyHash = Nothing
       , nodePresentBits  = bitNodeKind
       }

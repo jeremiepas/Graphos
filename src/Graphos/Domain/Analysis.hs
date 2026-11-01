@@ -189,6 +189,7 @@ nodeData g nid = Map.findWithDefault (Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
+  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }) nid (gNodes g)
 
