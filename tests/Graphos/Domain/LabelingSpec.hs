@@ -12,12 +12,15 @@ import qualified Data.Set as Set
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
+import Test.QuickCheck
+
 import Graphos.Domain.Labeling
   ( labelPrompt
   , batchCommunities
   , LabelCacheEntry(..)
   , MatchKind(..)
   , fingerprintOf
+  , containmentRatio
   , matchCommunity
   )
 import Graphos.Domain.Community (CommunityComposition(..))
@@ -174,8 +177,8 @@ spec = do
         `shouldNotBe` fingerprintOf (Set.fromList ["a", "b", "c"])
   
   describe "matchCommunity" $ do
-    let entry _cid model members label =
-          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model "2026-10-06T00:00:00Z"
+    let entry _cid model members lab =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) lab model "2026-10-06T00:00:00Z"
   
     it "exact hit reuses the cached label with no LLM call" $ do
       let cache = [entry (0 :: Int) "gpt-4o" (Set.fromList ["a", "b"]) "Auth"]
@@ -240,3 +243,14 @@ spec = do
           new = Set.fromList ["x0", "x1", "x2", "x3"]  -- 4 of 5 = 0.8 >= 0.8
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
+
+  describe "matchCommunity (QuickCheck)" $ do
+    it "returns Nothing whenever either containment ratio is below 0.8" $ property $ \oldL newL ->
+      let oldSet = Set.fromList (map (T.pack . show) (oldL :: [Int]))
+          newSet = Set.fromList (map (T.pack . show) (newL :: [Int]))
+          cacheEntry = LabelCacheEntry (fingerprintOf oldSet) (Set.toList oldSet) "Auth" "gpt-4o" "2026-10-06T00:00:00Z"
+          inter = Set.size (Set.intersection oldSet newSet)
+          ratioOld = containmentRatio inter (Set.size oldSet)
+          ratioNew = containmentRatio inter (Set.size newSet)
+      in (not (Set.null oldSet) && not (Set.null newSet) && (ratioOld < 0.8 || ratioNew < 0.8))
+         ==> matchCommunity [cacheEntry] "gpt-4o" newSet == Nothing
