@@ -6,13 +6,13 @@ import Test.Hspec
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
+import Test.QuickCheck (property, (==>), (===))
 import Data.Aeson (toJSON)
 import Data.Text.Short (fromText)
 import qualified Data.Set as Set
-
+import Data.Set (Set)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
-import Test.QuickCheck
 
 import Graphos.Domain.Labeling
   ( labelPrompt
@@ -20,7 +20,6 @@ import Graphos.Domain.Labeling
   , LabelCacheEntry(..)
   , MatchKind(..)
   , fingerprintOf
-  , containmentRatio
   , matchCommunity
   )
 import Graphos.Domain.Community (CommunityComposition(..))
@@ -190,6 +189,14 @@ spec = do
           new = Set.difference old (Set.fromList ["m0"]) <> Set.fromList ["n0"]
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
+
+    it "drift hit inherits label for 100-member community (±5 in/out, ratios 0.95)" $ do
+      let old = Set.fromList [ "m" <> T.pack (show i) | i <- [0 .. 99 :: Int] ]
+          out = Set.fromList [ "m" <> T.pack (show i) | i <- [0 .. 4 :: Int] ]
+          ins = Set.fromList [ "n" <> T.pack (show i) | i <- [0 .. 4 :: Int] ]
+          new = Set.difference old out <> ins
+          cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
+      matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
   
     it "split miss re-labels when containment from old fails against each half" $ do
       let old  = Set.fromList ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9"]
@@ -244,13 +251,15 @@ spec = do
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
 
-  describe "matchCommunity (QuickCheck)" $ do
-    it "returns Nothing whenever either containment ratio is below 0.8" $ property $ \oldL newL ->
-      let oldSet = Set.fromList (map (T.pack . show) (oldL :: [Int]))
-          newSet = Set.fromList (map (T.pack . show) (newL :: [Int]))
-          cacheEntry = LabelCacheEntry (fingerprintOf oldSet) (Set.toList oldSet) "Auth" "gpt-4o" "2026-10-06T00:00:00Z"
-          inter = Set.size (Set.intersection oldSet newSet)
-          ratioOld = containmentRatio inter (Set.size oldSet)
-          ratioNew = containmentRatio inter (Set.size newSet)
-      in (not (Set.null oldSet) && not (Set.null newSet) && (ratioOld < 0.8 || ratioNew < 0.8))
-         ==> matchCommunity [cacheEntry] "gpt-4o" newSet == Nothing
+  describe "matchCommunity (QuickCheck property)" $ do
+    let qce model members lab =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) lab model
+            "2026-10-06T00:00:00Z"
+    it "returns Nothing whenever either containment ratio < 0.8 (non-empty)" $ property $ \oldStr newStr ->
+      let old = Set.fromList (map T.pack oldStr) :: Set Text
+          new = Set.fromList (map T.pack newStr) :: Set Text
+          inter = Set.size (Set.intersection old new)
+          orl = fromIntegral inter / fromIntegral (Set.size old) :: Double
+          nrl = fromIntegral inter / fromIntegral (Set.size new) :: Double
+      in (not (Set.null old) && not (Set.null new)) ==>
+         ((orl < 0.8 || nrl < 0.8) ==> matchCommunity [qce "gpt-4o" old "Auth"] "gpt-4o" new === Nothing)

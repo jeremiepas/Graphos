@@ -404,6 +404,7 @@ test-suite graphos-test
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
      Graphos.UseCase.PipelineSpec
+     Graphos.UseCase.LabelSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
      Graphos.UseCase.InferSpec
