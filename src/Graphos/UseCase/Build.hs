@@ -9,7 +9,7 @@ module Graphos.UseCase.Build
   ) where
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, buildGraph, buildGraphWithStats, buildGraphStats, mergeExtractions)
+import Graphos.Domain.Graph (Graph, buildGraph, buildGraphWithStats, mergeExtractions)
 
 -- | Build a graph from one or more extractions
 buildGraphFromExtractions :: Bool -> [Extraction] -> Graph
