@@ -24,7 +24,7 @@
 
 ## 4. Import edges reach module nodes (depends on group 3)
 
-- [ ] 4.1 Take the specifier from the declaration's string-literal child in `extractSpecifier`; remove the `breakOnEnd "from "` scan; non-import nodes never yield a specifier. Check criteria first: a test with a template literal containing `## Examples by kind … from ` inside a function body asserts no import edge and no external node. Verify with `cabal test`.
+- [x] 4.1 Take the specifier from the declaration's string-literal child in `extractSpecifier`; remove the `breakOnEnd "from "` scan; non-import nodes never yield a specifier. Check criteria first: a test with a template literal containing `## Examples by kind … from ` inside a function body asserts no import edge and no external node. Verify with `cabal test`.
 - [ ] 4.2 Compute the import target id from the resolved path with the module-node layout; emit no placeholder for relative imports that resolve to an extracted file; keep one canonical external node per package/builtin specifier. Check criteria first: tests assert an `imports` edge from `config-loader.ts` to the `project-config.ts` module node, a single `zod` external node for twelve importers, and no `External` node sharing a `source_file` with a `Module` node. Verify with `cabal test`.
 - [ ] 4.3 Integration: run the pipeline on `example/ts-lsp-test` in a temporary output directory and assert `graphos path index.ts db.ts` (via the UseCase, not the binary) returns a path of `imports` hops from the `index.ts` module node to the `db.ts` module node. Verify with `cabal test`.
 

@@ -220,7 +220,9 @@ extractImportTail t =
 -- text for the `from ` keyword, so template literals inside a body yield
 -- nothing.
 extractSpecifier :: SourceFile -> TSNodeInfo -> Maybe Text
-extractSpecifier _ node =
+extractSpecifier _ node
+  | tsnType node `notElem` importExportTypes = Nothing
+  | otherwise =
   case findStringLiteral (tsnChildren node) of
     Just s -> Just (stripQuotes (T.strip s))
     Nothing ->
