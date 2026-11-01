@@ -32,12 +32,13 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
-import qualified Data.Text.IO as TIO
+import qualified Data.ByteString.Lazy.Char8 as BSL8
 import System.Exit (ExitCode(..))
-import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (hClose, hFlush, hPutStrLn, openTempFile)
+import System.IO (hFlush, hPutStrLn)
 import System.Process (readProcessWithExitCode)
 import Data.List (sortOn)
+
+import Graphos.Infrastructure.Http (withSecureTempFile)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
@@ -176,49 +177,53 @@ parseBoltUri uri =
                           [(p, "")] -> (T.unpack host, p)
                           _         -> (T.unpack host, 7687)
 
--- | Build mgconsole CLI arguments from a Bolt URI, user, and password.
-mgconsoleArgs :: Text -> Text -> Text -> [String]
-mgconsoleArgs uri user password =
+-- | Build mgconsole CLI arguments (non-secret part) from a Bolt URI.
+-- Credentials are never placed here; they are supplied through a private
+-- 0600 @--flagfile@ by 'runMgconsole'.
+mgconsoleBaseArgs :: Text -> [String]
+mgconsoleBaseArgs uri =
   let (host, port) = parseBoltUri uri
-      userArg = if T.null user then [] else ["-username", T.unpack user]
-      passArg = if T.null password then [] else ["-password", T.unpack password]
-  in userArg ++ passArg ++ ["-host", host, "-port", show port]
+  in ["-host", host, "-port", show port]
+
+-- | Render credentials as mgconsole flag-file lines so the values never
+-- appear in the process argument vector.
+mgconsoleCredentialsContent :: Text -> Text -> Text
+mgconsoleCredentialsContent user password =
+     (if T.null user then "" else "-username=" <> user <> "\n")
+  <> (if T.null password then "" else "-password=" <> password <> "\n")
+
+-- | Run mgconsole with credentials kept off the argument vector. When both
+-- user and password are empty, no flag file is created. Otherwise a mode-0600
+-- file under the per-process private directory carries the credentials and is
+-- removed afterwards (including on exceptions / non-zero exits).
+runMgconsole :: [String] -> Text -> Text -> String -> IO (ExitCode, String, String)
+runMgconsole baseArgs user password input
+  | T.null user && T.null password =
+      readProcessWithExitCode "mgconsole" baseArgs input
+  | otherwise =
+      withSecureTempFile "mgconsole-credentials" (BSL8.pack (T.unpack (mgconsoleCredentialsContent user password))) $ \cfgPath ->
+        readProcessWithExitCode "mgconsole" (baseArgs ++ ["-flagfile", cfgPath]) input
 
 -- | Execute a single Cypher statement via mgconsole.
 execMemgraphCypher :: Text -> Text -> Text -> Text -> IO (Either Text ())
 execMemgraphCypher uri user password cypher = catch (do
-  let args = mgconsoleArgs uri user password
+  let baseArgs = mgconsoleBaseArgs uri
+  (exitCode, _stdout, stderr) <- runMgconsole baseArgs user password (T.unpack cypher)
 
-  (exitCode, _stdout, stderr) <- readProcessWithExitCode "mgconsole"
-    args
-    (T.unpack cypher)
-
-  case exitCode of
-    ExitSuccess -> pure $ Right ()
-    ExitFailure code -> pure $ Left $ T.pack $ "mgconsole failed (exit " ++ show code ++ "): " ++ take 200 stderr
+  pure $ case exitCode of
+    ExitSuccess -> Right ()
+    ExitFailure code -> Left $ T.pack $ "mgconsole failed (exit " ++ show code ++ "): " ++ take 200 stderr
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "mgconsole exception: " ++ show e
 
--- | Push a batch of Cypher statements to Memgraph via mgconsole using a temp file.
--- Writes Cypher to a temp file and pipes it to mgconsole to avoid
--- Haskell/shell string escaping issues with special characters in node IDs.
+-- | Push a batch of Cypher statements to Memgraph via mgconsole.
+-- Statements are piped through stdin; no temporary payload file is left on
+-- disk, which removes the old world-readable /tmp exposure entirely.
 pushMemgraphBatchViaFile :: Text -> Text -> Text -> (Int, [Text]) -> IO (Either Text ())
 pushMemgraphBatchViaFile uri user password (batchNum, stmts) = catch (do
-  tmpDir <- getTemporaryDirectory
-  (tmpPath, tmpHandle) <- openTempFile tmpDir "graphos-memgraph-batch.cypher"
-  -- Write all statements to temp file as UTF-8 (no shell escaping needed)
-  TIO.hPutStr tmpHandle (T.intercalate "\n" stmts)
-  hClose tmpHandle
+  let baseArgs = mgconsoleBaseArgs uri
+      cypherContent = T.intercalate "\n" stmts
 
-  -- Read file content and pipe to mgconsole via stdin
-  cypherContent <- TIO.readFile tmpPath
-  let args = mgconsoleArgs uri user password
-
-  (exitCode, _stdout, stderr) <- readProcessWithExitCode "mgconsole"
-    args
-    (T.unpack cypherContent)
-
-  -- Clean up temp file
-  removeFile tmpPath `catch` \(_ :: SomeException) -> pure ()
+  (exitCode, _stdout, stderr) <- runMgconsole baseArgs user password (T.unpack cypherContent)
 
   case exitCode of
     ExitSuccess -> pure $ Right ()
