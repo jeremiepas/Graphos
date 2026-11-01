@@ -40,6 +40,7 @@ Apply this gate when triaging a task's status:
 - An approving review verdict is not complete until it is posted to GitHub as an approving review (REST API: `POST /repos/{owner}/{repo}/pulls/{n}/reviews` with `event=APPROVE`). Prose-only approval in a Paperclip comment is never sufficient.
 - `haskell-reviewer` posts the code-review approval; `merge-gatekeeper` relies on the GitHub approval check to satisfy required-approvals branch protection.
 - `REQUEST_CHANGES` / `COMMENT` reviews are posted the same way for red-CI or remediation verdicts.
+- Tooling: `scripts/post-github-review.sh <pr-number> <APPROVE|REQUEST_CHANGES|COMMENT> [body]` wraps the REST call; haskell-reviewer MUST call it for every verdict and never rely on `gh pr comment` alone.
 
 ## Merge SLA (gatekeeper-exclusive)
 
