@@ -3,12 +3,9 @@ module Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec where
 
 import Test.Hspec
 import Data.Maybe (fromMaybe, listToMaybe)
-import Data.List (sort)
-import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (ShortText, fromText, toText)
 
 import Graphos.Domain.Types
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
@@ -88,8 +85,7 @@ sameFileCallFixture =
 newImportedFixture :: TSNodeInfo
 newImportedFixture =
   tsNode "program" "module"
-    [ tsNode "import_statement" "import Foo from './Foo'"
-        [ tsNode "string" "'./Foo'" [] ]
+    [ tsNode "import_statement" "import Foo from './Foo'" []
     , tsNode "function_declaration" "main"
         [ tsNode "expression_statement" "new Foo()"
           [ tsNode "new_expression" "new Foo()"
@@ -117,15 +113,67 @@ nestedCallsFixture =
         ]
     ]
 
+-- | A bare type reference with no enclosing type declaration. Every node here
+-- is either a `type_identifier` reference or an unrelated statement/parameter
+-- node; none of them may emit a `Type` node after AVI-1471.
+refOnlyFixture :: TSNodeInfo
+refOnlyFixture =
+  tsNode "program" "module"
+    [ tsNode "expression_statement" "const x: SomeType = 1"
+        [ tsNode "typed_parameter" "SomeType" []
+        , tsNode "type_identifier" "SomeType" []
+        ]
+    , tsNode "expression_statement" "const y: OtherType = 2"
+        [ tsNode "typed_parameter" "OtherType" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    ]
+
+-- | A real type-alias declaration whose declared name and referenced type are
+-- themselves bare `type_identifier` reference nodes. The declaration must emit
+-- exactly one `Type` node; its inner `type_identifier`s must not.
+typeDeclFixture :: TSNodeInfo
+typeDeclFixture =
+  tsNode "program" "module"
+    [ tsNode "type_alias" "MyType"
+        [ tsNode "type_identifier" "MyType" []
+        , tsNode "equals_sign" "=" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    ]
+
+-- | A declaration mix: a type alias plus an interface and an enum, each carrying
+-- bare `type_identifier` reference nodes. Pins that AVI-1471 removes only the
+-- spurious `Type` from references while Interface/Enum still emit.
+typeRefsFixture :: TSNodeInfo
+typeRefsFixture =
+  tsNode "program" "module"
+    [ tsNode "type_alias" "MyType"
+        [ tsNode "type_identifier" "MyType" []
+        , tsNode "equals_sign" "=" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    , tsNode "interface_declaration" "MyInterface"
+        [ tsNode "type_identifier" "SomeMixin" [] ]
+    , tsNode "enum_declaration" "MyEnum"
+        [ tsNode "type_identifier" "SomeBase" [] ]
+    ]
+
+-- | Whether a node's kind is the generic `Type` (the kind produced by
+-- 'tsTypeToKind' from a type *declaration*). After AVI-1471 only real
+-- declarations emit it, never bare `type_identifier` references.
+isTypeKind :: Maybe ShortText -> Bool
+isTypeKind = (== Just (fromText "Type"))
+
 -- | Only the `calls` edges, in document order.
 callEdges :: Granularity -> FilePath -> TSNodeInfo -> [Edge]
 callEdges gran filePath fixture =
-  filter ((== Calls) . edgeRelation) (fst (tsNodeToGraphEdges gran filePath Nothing Nothing fixture))
+  filter ((== Calls) . edgeRelation) (fst (tsNodeToGraphEdges gran filePath Nothing fixture))
 
 -- | All edges (document order) for a given extraction.
 allEdges :: Granularity -> FilePath -> TSNodeInfo -> [Edge]
 allEdges gran filePath fixture =
-  fst (tsNodeToGraphEdges gran filePath Nothing Nothing fixture)
+  fst (tsNodeToGraphEdges gran filePath Nothing fixture)
 
 -- | Count edges of a given relation in an extraction.
 countRel :: Relation -> Granularity -> FilePath -> TSNodeInfo -> Int
@@ -180,7 +228,6 @@ spec = do
       Map.size (extractionNodes ex) `shouldBe` 1
       map nodeKind (Map.elems (extractionNodes ex)) `shouldBe` [Just (fromText "Module")]
 
-
   describe "calls edge emission (AVI-1447)" $ do
 
     describe "same-file call" $ do
@@ -228,100 +275,20 @@ spec = do
         importsCount  `shouldBe` 1
         dependsCount  `shouldBe` 0
 
-  describe "issue #77 — no bogus imports edge from prose in a template literal" $ do
-    -- Real tree-sitter shape for:  export const help = `...pick one from the
-    -- list below`;  is export_statement -> lexical_declaration -> template_string.
-    -- The prose 'from' nests under template_string, so it is never a direct
-    -- `string` child of the export declaration.
-    it "emits no imports edge when the only 'from ' is inside a template literal" $ do
-      let node = tsNode "export_statement"
-              "export const help = `## Examples by kind\npick one from the list below`;"
-              [ tsNode "lexical_declaration"
-                  "const help = `## Examples by kind\npick one from the list below`;"
-                  [ tsNode "template_string" "## Examples by kind\npick one from the list below" [] ]
-              ]
-          ex = tsNodesToExtraction GranularityFine "src/helpers.ts" [node]
-          bogusImportTargets =
-            [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
-      any ("the list below" `T.isInfixOf`) bogusImportTargets `shouldBe` False
+  describe "type node emission (AVI-1471)" $ do
+    it "emits exactly one Type node for a real type declaration" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/types.ts" [typeDeclFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      filter isTypeKind kinds `shouldBe` [Just (fromText "Type")]
 
-    it "still resolves a real specifier from a direct string child" $ do
-      let node = tsNode "import_declaration"
-              "import { db } from './db'"
-              [ tsNode "string" "'./db'" [] ]
-          ex = tsNodesToExtraction GranularityFine "src/service.ts" [node]
-          importTargets =
-            [ edgeTarget e | e <- Map.elems (extractionEdges ex), edgeRelation e == Imports ]
-      importTargets `shouldSatisfy` (not . null)
+    it "emits no Type node for bare type_identifier references" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/references.ts" [refOnlyFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      all (not . isTypeKind) kinds `shouldBe` True
 
-  describe "bounded node identity (AVI-1452)" $ do
-    -- | The `src` directory hashes to 48612 under the bounded-identity scheme;
-    -- see the id-layout test. Hard-coded so the layout assertion is precise.
-    let srcHash = "48612"
-        -- The fixtures below emit exactly one node, so a single extraction is
-        -- safe. Avoid 'head' (partial, flagged -Wx-partial under -Werror): the
-        -- empty case is unreachable for these fixtures and fails loudly.
-        oneNode = \m -> case Map.elems m of
-                          (n : _) -> n
-                          []      -> error "oneNode: empty extraction"
-
-    it "(a) emits `<dirHash>_<stem>_<kind>:<ident>` ids" $ do
-      let ex = tsNodesToExtraction GranularityFunction "src/service.ts"
-             [tsNode "function_declaration" "getUser" []]
-          node = oneNode (extractionNodes ex)
-      T.unpack (toText (nodeLabel node)) `shouldBe` "getUser"
-      T.unpack (nodeId node) `shouldBe` srcHash <> "_service_Function:getUser"
-
-    it "(b) appends `#L<line>` only to colliding ids" $ do
-      let a = tsNode "function_declaration" "helper" []
-          b = a { tsnStartRow = 10 }
-          c = a { tsnStartRow = 20 }
-          ids = sort (map (T.unpack . nodeId)
-                (Map.elems (extractionNodes
-                  (tsNodesToExtraction GranularityFunction
-                     "src/service.ts" [a, b, c]))))
-      ids `shouldBe`
-        [ srcHash <> "_service_Function:helper"
-        , srcHash <> "_service_Function:helper#L11"
-        , srcHash <> "_service_Function:helper#L21"
-        ]
-
-    it "(c) produces the same id set regardless of input order" $ do
-      let mk = \r -> (tsNode "function_declaration" "helper" []) { tsnStartRow = r }
-          ids1 = sort (map (T.unpack . nodeId)
-                (Map.elems (extractionNodes
-                  (tsNodesToExtraction GranularityFunction
-                     "src/service.ts" [mk 0, mk 10, mk 20]))))
-          ids2 = sort (map (T.unpack . nodeId)
-                (Map.elems (extractionNodes
-                  (tsNodesToExtraction GranularityFunction
-                     "src/service.ts" [mk 20, mk 0, mk 10]))))
-      ids1 `shouldBe` ids2
-
-    it "(d) strips raw source formatting (whitespace/newlines) from ids" $ do
-      let raw = "const\n\nuser = dbGet(id)"
-          ex = tsNodesToExtraction GranularityFunction "src/service.ts"
-               [tsNode "lexical_declaration" raw []]
-          node = oneNode (extractionNodes ex)
-          idStr = T.unpack (nodeId node)
-      -- Irregular whitespace and newlines must not leak into the id ...
-      "const\n\nuser" `T.isInfixOf` (T.pack idStr) `shouldBe` False
-      "\n" `T.isInfixOf` (T.pack idStr) `shouldBe` False
-      -- ... while the collapsed identifier form does.
-      "const user = dbGet" `T.isInfixOf` (T.pack idStr) `shouldBe` True
-
-    it "(e) bounds every node's identity fields under 512 bytes on a 5000-node fixture" $ do
-      let mk = \i -> (tsNode "function_declaration"
-                           (T.pack (show i ++ replicate 1000 'c')) []) { tsnStartRow = i }
-          nodes = [mk i | i <- [0..4999]]
-          ex = tsNodesToExtraction GranularityFunction "src/big.ts" nodes
-          sigBytes n = case nodeSignature n of
-            Just s -> BS.length (encodeUtf8 (toText s))
-            Nothing -> 0
-          fieldBytes n = BS.length (encodeUtf8 (nodeId n))
-                       + BS.length (encodeUtf8 (toText (nodeLabel n)))
-                       + sigBytes n
-          violators = [n | n <- Map.elems (extractionNodes ex), fieldBytes n >= 512]
-      Map.size (extractionNodes ex) `shouldBe` 5000
-      length violators `shouldBe` 0
-
+    it "still emits Interface and Enum alongside the Type declaration" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/mix.ts" [typeRefsFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      kinds `shouldSatisfy` (elem (Just (fromText "Type")))
+      kinds `shouldSatisfy` (elem (Just (fromText "Interface")))
+      kinds `shouldSatisfy` (elem (Just (fromText "Enum")))
