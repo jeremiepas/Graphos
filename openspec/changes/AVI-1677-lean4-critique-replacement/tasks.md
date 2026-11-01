@@ -46,5 +46,7 @@
 
 ## Verification
 - [ ] V.1 OSS: `lake build`, zero errors/warnings/sorry, ABI smoke tests
-- [ ] V.2 Graphos: Cabal build linking the OSS library, FFI round-trip, parity, fallback
+- [x] V.2a Graphos: default `cabal build lib:graphos` passes (no Lean toolchain dependency).
+- [x] V.2b Graphos: `cabal build lib:graphos -flean-critique --extra-lib-dirs=...` passes and registers; FFI round-trip verified (spike consumer prints 6/10/1).
+- [ ] V.2c Graphos: parity tests against Haskell `surpriseScore` and fallback selection.
 - [ ] V.3 Cross-repo: pin OSS version in Graphos integration branch and test

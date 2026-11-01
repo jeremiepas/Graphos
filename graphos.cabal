@@ -256,9 +256,11 @@ library
 
   if flag(lean-critique)
     exposed-modules: Graphos.Infrastructure.Critique.Lean
-    include-dirs:  spikes/avi-1677-lean-critique/include
-    extra-lib-dirs: spikes/avi-1677-lean-critique
     extra-libraries: graphoslean
+    -- The Lean library (libgraphoslean.a) and its headers are an external
+    -- build dependency (see spikes/avi-1677-lean-critique/README.md).  Supply
+    -- their location via --extra-lib-dirs / --include-dirs at configure time;
+    -- keeping them out of the .cabal file avoids non-portable relative paths.
 
   other-modules:
                     Graphos.Domain.HexColor
