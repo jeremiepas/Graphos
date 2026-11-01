@@ -53,18 +53,18 @@
 ## 3. Intent code-graph projection (depends on 2)
 
 ### 3.1 Deterministic kind classifier
-- [ ] Check criteria first: classification is pure, config-driven (globs, LSP symbol
+- [x] Check criteria first: classification is pure, config-driven (globs, LSP symbol
       kind, name patterns), stable across runs; no rule matched ⇒ kind `other`; never a
       model call
-- [ ] Pure Domain classifier + config schema; Hspec on a fixture tree covering every
+- [x] Pure Domain classifier + config schema; Hspec on a fixture tree covering every
       intent kind
 
 ### 3.2 Projection + well-formedness
-- [ ] Check criteria first: every edge endpoint declared in the projection (O2's
+- [x] Check criteria first: every edge endpoint declared in the projection (O2's
       hypothesis); `NodeId` preserved verbatim (µ = identity); signature and body hash
       present for code nodes where LSP provided them; loader rejects ill-formed input
       naming the dangling endpoint
-- [ ] UseCase projection from the built graph; Infrastructure export/load; Hspec
+- [x] UseCase projection from the built graph; Infrastructure export/load; Hspec
       well-formedness property test (QuickCheck)
 
 ## 4. Domain checkers mirroring Lean (depends on 1, 3)
