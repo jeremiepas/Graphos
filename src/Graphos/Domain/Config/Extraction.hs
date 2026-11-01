@@ -177,15 +177,35 @@ defaultExtractors = Map.fromList
   , (".cpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
   , (".h",   ExtractorConfig ExtractTreeSitter (Just "c")   (Just "c") Nothing)
   , (".hpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".cc",  ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".cxx", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".hh",  ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".hxx", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
     -- Nix: tree-sitter (zero-dependency; uncomment for LSP)
   , (".nix", ExtractorConfig ExtractTreeSitter (Just "nix") (Just "nix") Nothing)
     -- Ruby: tree-sitter (zero-dependency; uncomment for LSP)
   , (".rb",  ExtractorConfig ExtractTreeSitter (Just "ruby") (Just "ruby") Nothing)
     -- Java: tree-sitter (zero-dependency; uncomment for LSP)
   , (".java",ExtractorConfig ExtractTreeSitter (Just "java") (Just "java") Nothing)
+    -- PHP: tree-sitter
+  , (".php", ExtractorConfig ExtractTreeSitter (Just "php") (Just "php") Nothing)
+    -- Kotlin
+  , (".kt",  ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+  , (".kts", ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+    -- Perl
+  , (".pl",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , (".pm",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , (".psgi",ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+    -- C#
+  , (".cs",  ExtractorConfig ExtractTreeSitter (Just "csharp") (Just "csharp") Nothing)
     -- JSON: tree-sitter parser; data files collapse to one node per file
     -- so lock files and config JSON do not inflate the graph
   , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
+    -- YAML: same data-file treatment as JSON (one node per document stream)
+  , (".yaml",ExtractorConfig ExtractTreeSitter (Just "yaml") (Just "yaml") (Just GranularityFile))
+  , (".yml", ExtractorConfig ExtractTreeSitter (Just "yaml") (Just "yaml") (Just GranularityFile))
+    -- SQL: tree-sitter (DDL statements become tables/functions/types)
+  , (".sql", ExtractorConfig ExtractTreeSitter (Just "sql") (Just "sql") Nothing)
     -- Markdown: use tree-sitter mode with built-in parser
     -- (no external LSP server needed for docs)
   , (".md",  ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "markdown") Nothing)
@@ -237,7 +257,11 @@ defaultLSPServers = Map.fromList
   , (".rb",    LSPServerConfig "solargraph" ["--stdio"] "ruby")
   , (".hs",    LSPServerConfig "haskell-language-server" ["--lsp"] "haskell")
   , (".lhs",   LSPServerConfig "haskell-language-server" ["--lsp"] "haskell")
-  , (".php",   LSPServerConfig "phpactor" [] "php")
+  , (".php",   LSPServerConfig "phpactor" ["language-server"] "php")
+  , (".pl",    LSPServerConfig "perlnavigator" [] "perl")
+  , (".pm",    LSPServerConfig "perlnavigator" [] "perl")
+  , (".psgi",  LSPServerConfig "perlnavigator" [] "perl")
+  , (".t",     LSPServerConfig "perlnavigator" [] "perl")
   , (".swift", LSPServerConfig "sourcekit-lsp" [] "swift")
   , (".kt",    LSPServerConfig "kotlin-language-server" [] "kotlin")
   , (".kts",   LSPServerConfig "kotlin-language-server" [] "kotlin")
@@ -275,6 +299,10 @@ defaultLanguageIds = Map.fromList
   , (".cs",    "csharp")
   , (".rb",    "ruby")
   , (".php",   "php")
+  , (".pl",    "perl")
+  , (".pm",    "perl")
+  , (".psgi",  "perl")
+  , (".t",     "perl")
   , (".swift", "swift")
   , (".kt",    "kotlin")
   , (".kts",   "kotlin")
@@ -318,6 +346,9 @@ defaultFileExtensions = FileExtensionConfig
                 , ".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua", ".zig", ".hs", ".lhs"
                 , ".ex", ".exs", ".m", ".mm", ".jl", ".vue", ".svelte", ".dart", ".ps1"
                  , ".nix"  -- Nix DSL
+                 , ".cc", ".cxx", ".hh", ".hxx"  -- C++ (vendored tree-sitter-cpp)
+                 , ".yaml", ".yml"               -- YAML (vendored tree-sitter-yaml)
+                 , ".sql"                        -- SQL (vendored tree-sitter-sql)
                  ]
   , fecDoc   = [ ".md", ".txt", ".rst", ".adoc", ".org"
                , ".text", ".raml"  -- NEW

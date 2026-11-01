@@ -6,16 +6,14 @@ import Test.Hspec
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
+import Test.QuickCheck (property, (==>), (===))
 import Data.Aeson (toJSON)
 import Data.Text.Short (fromText)
 import qualified Data.Set as Set
 import Data.Set (Set)
-import Data.Time.Clock (UTCTime(..), secondsToDiffTime)
-import Data.Time.Calendar (fromGregorian)
-import Test.QuickCheck (property, (==>), (===))
-
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
+
 import Graphos.Domain.Labeling
   ( labelPrompt
   , batchCommunities
@@ -178,9 +176,8 @@ spec = do
         `shouldNotBe` fingerprintOf (Set.fromList ["a", "b", "c"])
   
   describe "matchCommunity" $ do
-    let entry _cid model members label =
-          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model
-            (UTCTime (fromGregorian 2026 10 6) (secondsToDiffTime 0))
+    let entry _cid model members lab =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) lab model "2026-10-06T00:00:00Z"
   
     it "exact hit reuses the cached label with no LLM call" $ do
       let cache = [entry (0 :: Int) "gpt-4o" (Set.fromList ["a", "b"]) "Auth"]
@@ -255,9 +252,9 @@ spec = do
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
 
   describe "matchCommunity (QuickCheck property)" $ do
-    let qce model members label =
-          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model
-            (UTCTime (fromGregorian 2026 10 6) (secondsToDiffTime 0))
+    let qce model members lab =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) lab model
+            "2026-10-06T00:00:00Z"
     it "returns Nothing whenever either containment ratio < 0.8 (non-empty)" $ property $ \oldStr newStr ->
       let old = Set.fromList (map T.pack oldStr) :: Set Text
           new = Set.fromList (map T.pack newStr) :: Set Text

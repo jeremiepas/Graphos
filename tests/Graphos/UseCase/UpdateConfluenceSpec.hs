@@ -18,6 +18,8 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Text as T
 import Data.Text (Text)
+import Data.Version (showVersion) -- derive the graphos version from the build, not hardcoded
+import Paths_graphos              -- exports `version` (cabal does not emit the `<pkg>Version` alias here)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
@@ -33,8 +35,9 @@ spec = describe "update-run confluence (wire-incremental-update 4.4)" $ do
           outFresh  = root </> "out-fresh"
           outWarmed = root </> "out-warmed"
       createFixture srcdir
-      let exe = "dist-newstyle/build/x86_64-linux/ghc-9.10.3" <>
-                "/graphos-0.1.0.0/x/graphos/build/graphos/graphos"
+      let exe = "dist-newstyle/build/x86_64-linux/ghc-9.10.3" ++
+                "/graphos-" ++ showVersion version ++
+                "/x/graphos/build/graphos/graphos"
       _ <- runGraphos exe [srcdir, "--fresh", "--no-viz", "--output", outFresh]
       _ <- runGraphos exe [srcdir, "--no-viz", "--output", outWarmed]
       g1 <- readShape (outFresh  </> "graph.json")

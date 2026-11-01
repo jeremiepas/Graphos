@@ -23,5 +23,4 @@ data AppEnv = AppEnv
   , loggingPort         :: LoggingPort
   , observabilityPort    :: ObservabilityPort
   , llmPort              :: LLMPort
-  , appEnvOutputDir      :: FilePath
   }

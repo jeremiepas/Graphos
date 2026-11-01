@@ -15,6 +15,8 @@
 -- filter) survives @edges = semantic@ regardless of confidence.
 module Graphos.UseCase.Infer.Document
   ( inferCoLocationEdges
+  , inferFileCoLocationEdges
+  , maxCoLocationFiles
   , inferSymbolMentionEdges
   , inferPathReferenceEdges
   , inferSymbolMentionEdgesWith
@@ -26,7 +28,8 @@ module Graphos.UseCase.Infer.Document
 
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.List (nub, sort, sortOn, isPrefixOf)
+import Data.List (nub, sort, sortOn, isPrefixOf, minimumBy)
+import Data.Ord (comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
@@ -226,6 +229,64 @@ inferCoLocationEdges g =
         , sameSubtree docDir codeDir
         ]
   in sortOn edgeSortKey docCodeEdges
+
+-- | Maximum number of distinct code files a doc may co-locate with in
+-- 'inferFileCoLocationEdges'. A doc whose directory subtree holds more code
+-- files than this (a @src/README.md@ over a whole source tree) carries no
+-- locality signal and is skipped: linking it would add one hub that pulls
+-- every file into the same community.
+maxCoLocationFiles :: Int
+maxCoLocationFiles = 25
+
+-- | File-level co-location pass, the bounded form of 'inferCoLocationEdges'
+-- used by the pipeline.
+--
+-- 'inferCoLocationEdges' links every doc node to every code node of the
+-- subtree, so a single Markdown file (its file node plus one node per
+-- heading) under @src/@ yields @docNodes × codeNodes@ edges — hundreds of
+-- thousands on a symbol-level graph. This pass instead:
+--
+--  * links one representative node per doc /file/ (the @File@-kind node when
+--    present) to one representative node per code /file/ (the @Module@/@File@
+--    node when present), so edges grow with files, not symbols;
+--  * skips a doc whose subtree holds more than @maxFiles@ code files.
+--
+-- On graphs where each file has a single node (the Lean fixture) it agrees
+-- with 'inferCoLocationEdges' whenever the cap is not reached.
+inferFileCoLocationEdges :: Int -> Graph -> [Edge]
+inferFileCoLocationEdges maxFiles g =
+  let docReps  = fileRepresentatives (docNodes g)
+      codeReps = fileRepresentatives (codeNodes g)
+      edges =
+        [ documentEdge docNid codeNid
+        | (docFile, docNid) <- docReps
+        , let docDir = pathDir docFile
+              targets = [ codeNid
+                        | (codeFile, codeNid) <- codeReps
+                        , sameSubtree docDir (pathDir codeFile)
+                        ]
+        , length targets <= maxFiles
+        , codeNid <- targets
+        ]
+  in sortOn edgeSortKey edges
+
+-- | One representative node per non-empty source file: the node whose kind
+-- marks it as the file itself (@File@ / @Module@) when there is one, otherwise
+-- the smallest node id. Deterministic for a given graph.
+fileRepresentatives :: [(NodeId, Node)] -> [(Text, NodeId)]
+fileRepresentatives ns =
+  [ (sf, fst (minimumBy (comparing rank) members))
+  | (sf, members) <- Map.toList byFile
+  ]
+  where
+    byFile = Map.fromListWith (++)
+      [ (sf, [(nid, n)])
+      | (nid, n) <- ns
+      , let sf = toText (nodeSourceFile n)
+      , not (T.null sf)
+      ]
+    rank (nid, n) = (not (isFileKind n), nid)
+    isFileKind n = fmap toText (nodeKind n) `elem` [Just "File", Just "Module"]
 
 -- | Symbol-mention pass: a doc links to the unique node defining an identifier
 -- mentioned in its text. Identifiers defined by more than one node are ambiguous
