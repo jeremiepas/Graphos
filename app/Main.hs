@@ -38,14 +38,14 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig, productionLLMPort)
+import Graphos.Infrastructure.Wiring (productionAppEnv, productionAppEnvWithConfig, productionLLMPort)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
 import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
 import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
 import Graphos.Domain.Config (defaultLabelingConfig)
-import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..), findSuggestions)
+import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..), findSuggestions)
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
@@ -316,6 +316,10 @@ main = do
           debugDir = if isAbsolute rawDebugDir
                        then rawDebugDir
                        else outputDir </> rawDebugDir
+          baseCc       = gcClustering graphosCfg
+          effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
+          effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
+          effCc        = ClusteringConfig effFraction effEnabled
           config' = config { cfgOutputDir    = outputDir
                            , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg

@@ -27,7 +27,7 @@ import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
-import Graphos.Domain.Config.Extraction (Granularity(..))
+
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
