@@ -36,6 +36,7 @@ import Data.Text.Short (fromText)
 import Data.Maybe (fromMaybe)
 import Data.Aeson (object, (.=))
 import Data.Word (Word64)
+import System.FilePath (takeFileName)
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config (Granularity(..))
@@ -169,7 +170,7 @@ descendInto GranularityFine     _     _    = True
 nodeIdentifier :: SourceFile -> Granularity -> TSNodeInfo -> Maybe Text
 nodeIdentifier sf _ node =
   case tsnType node of
-    t | t `elem` moduleTypes       -> Just (truncateText defaultTruncationBudget (sourceStem sf))
+    t | t `elem` moduleTypes       -> Just (truncateText defaultTruncationBudget (T.pack (takeFileName (sourceFilePathStr sf))))
       | t `elem` importExportTypes -> Just (truncateText defaultTruncationBudget (fromMaybe "" (extractSpecifier sf node)))
       | otherwise                  -> fmap (truncateText defaultTruncationBudget) (extractIdentifier node)
 
@@ -418,7 +419,8 @@ importPartsFor sf parentBase tType node =
       in [ (parentBase, ImportTarget
             { itPath = impPath
             , itName = impName
-            , itIsReExport = not (tType `elem` ["import_declaration", "import_statement", "import_from_statement"]) }) ]
+            , itIsReExport = not (tType `elem` ["import_declaration", "import_statement", "import_from_statement"])
+                              || T.isInfixOf "export" (tsnText node) }) ]
     Nothing -> []
 
 -- | Fold over children, threading a parent base id and exported flag.
