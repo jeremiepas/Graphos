@@ -86,7 +86,7 @@ stable tag. Do not cut releases from any branch other than `main`.
 
 | Routine (Paperclip, project `graphos`) | Schedule | Run brief |
 |-----------------------------------------|----------|-----------|
-| Daily Graphos PR review intake | 09:00 Europe/Paris | Every open PR carries a live review lane; create missing lanes same day; force verdicts on PRs stale >7 days |
+| Daily Graphos PR review intake | 09:00 Europe/Paris | **Rebase-readiness gate first:** for every open PR read `mergeable_state`; if `dirty`/`behind`, do not open a review lane yet — create/repoint one rebase follow-up task owned by head-of-dev naming the PR number + base branch and record the conflict + PR link in the run issue. For mergeable PRs: every open PR carries a live review lane; create missing lanes same day; force verdicts on PRs stale >7 days |
 | Daily Graphos merge gate | 13:00 Europe/Paris | PRs that are reviewed **and** mergeable get a merge-gate lane to merge-gatekeeper; dated next action otherwise |
 | Weekly Graphos release run | Fri 14:00 Europe/Paris | Apply this policy §4–§5 |
 
