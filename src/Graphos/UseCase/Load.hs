@@ -289,7 +289,7 @@ parseNodeItem strict v =
       degree <- optionalInt "degree" km
       isBridge <- optionalBool "is_bridge" km
       extra <- optionalValue "extra" km
-      pure (Node nid (fromText label) ft (fromText src) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra 0, degraded)
+      pure (Node nid (fromText label) ft (fromText src) lineStart lineEnd (fromText <$> signature) communityId (fromText <$> kind) degree isBridge extra Nothing 0, degraded)
     _ -> Left $ "graph.json: node entry must be an object"
 
 -- | Parse one edge entry. Returns the edge plus whether its relation was

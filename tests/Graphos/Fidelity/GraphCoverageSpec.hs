@@ -112,7 +112,7 @@ groupMissing onDisk graphFiles' =
 graphForFiles :: [FilePath] -> LabeledGraph
 graphForFiles files =
   let node i f = Node (T.pack (show i)) (fromText (T.pack f)) CodeFile (fromText (T.pack f))
-                        Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+                        Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
       nodes = Map.fromList [ (nodeId (node i f), node i f) | (i, f) <- zip [0 :: Int ..] files ]
   in LabeledGraph nodes Map.empty Map.empty Map.empty
 

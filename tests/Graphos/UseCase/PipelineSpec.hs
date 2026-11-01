@@ -79,7 +79,7 @@ spec = do
             if "fail" `T.isInfixOf` t then Left "boom" else Right [fromIntegral (T.length t)]
           llm = stubLLM (\_ input -> deterministic input)
           mkNode :: Text -> Text -> Text -> Node
-          mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+          mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
           ns = [ mkNode "n1" "getUser" "a.hs"
                , mkNode "n2" "Promise" "b.hs"
                , mkNode "n3" "Promise" "c.hs"
@@ -104,7 +104,7 @@ spec = do
             if "fail" `T.isInfixOf` t then Left "boom" else Right [fromIntegral (T.length t)]
           llm = stubLLM (\_ input -> deterministic input)
           mkNode :: Text -> Text -> Text -> Node
-          mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+          mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
           ns = [ mkNode "n1" "getUser" "a.hs"
                , mkNode "n4" "failing" "fail.hs" ]
           g = testGraph ns
@@ -119,7 +119,7 @@ spec = do
             perText t = pure (Right [fromIntegral (T.length t)])
             llm = countingLLM callsRef perText
             mkNode :: Text -> Text -> Text -> Node
-            mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+            mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
             g = testGraph [mkNode "n1" "getUser" "a.hs"]
             cfg = defaultEmbeddingConfig { embBatchSize = 64 }
         embs1 <- generateGraphEmbeddings llm cfg g dir
@@ -136,7 +136,7 @@ spec = do
           perText t = pure (Right [fromIntegral (T.length t)])
           llm = countingLLM callsRef perText
           mkNode :: Text -> Text -> Text -> Node
-          mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+          mkNode nid lbl src = Node nid (fromText lbl) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
           -- 3 chunks' worth of unique texts; the stub's latency differs per
           -- batch so completions may invert, but the assignment is stable.
           ns = [ mkNode ("n" <> T.pack (show i)) ("L" <> T.pack (show i)) ("s" <> T.pack (show i) <> ".hs")
@@ -184,7 +184,7 @@ spec = do
 -- ───────────────────────────────────────────────
 
 testNode :: NodeId -> Text -> Text -> Node
-testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+testNode nid label src = Node nid (fromText label) CodeFile (fromText src) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 testGraph :: [Node] -> Graph
 testGraph ns = Graph

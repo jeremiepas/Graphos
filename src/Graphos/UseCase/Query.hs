@@ -280,6 +280,7 @@ explainNodeWithIndex g idx term =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
+    , nodeBodyHash = Nothing
     , nodePresentBits  = 0
     }) nid (gNodes g)) best
 

@@ -69,6 +69,7 @@ haskellStubNodes filePath content =
                , nodeLineEnd      = Nothing
                , nodeKind         = Just (fromText "Module")
                , nodeSignature    = Nothing
+               , nodeBodyHash = Nothing
                , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
                }
               ]
@@ -86,6 +87,7 @@ haskellStubNodes filePath content =
         , nodeLineEnd      = Nothing
         , nodeKind         = Just (fromText "Module")
         , nodeSignature    = Nothing
+        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeKind
         }
         | imp <- imports
@@ -103,6 +105,7 @@ haskellStubNodes filePath content =
         , nodeLineEnd      = Nothing
         , nodeKind         = Just (fromText declKind')
         , nodeSignature    = Nothing
+        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeKind
         }
         | (declName, declKind') <- decls

@@ -45,7 +45,7 @@ import Graphos.Domain.Community
 testNode :: Text -> Node
 testNode nid =
   Node nid (fromText nid) CodeFile (fromText "test.hs")
-    (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+    (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 -- | A directed edge between two ids.
 testEdge :: Text -> Text -> Edge

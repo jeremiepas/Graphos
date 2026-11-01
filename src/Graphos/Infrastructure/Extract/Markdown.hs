@@ -74,6 +74,7 @@ docFileNode filePath =
      , nodeLineEnd      = Nothing
      , nodeKind         = Just (fromText "File")
      , nodeSignature    = Nothing
+     , nodeBodyHash = Nothing
      , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
      }
 
@@ -121,6 +122,7 @@ mkHeaderNode filePath level title lineNum =
     , nodeLineEnd      = Nothing
     , nodeKind         = Just (fromText "Header")
     , nodeSignature    = Nothing
+    , nodeBodyHash = Nothing
     , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
     }
 
@@ -174,6 +176,7 @@ mkTagNode filePath tag =
     , nodeLineEnd      = Nothing
     , nodeKind         = Just (fromText "Tag")
     , nodeSignature    = Nothing
+    , nodeBodyHash = Nothing
     , nodePresentBits  = bitNodeKind
     }
 
