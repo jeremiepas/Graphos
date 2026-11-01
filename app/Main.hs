@@ -978,7 +978,7 @@ main = do
 
     Serve dir graphPath port apiOnly noApi -> do
       putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
-      startServeServer dir graphPath port apiOnly noApi
+      startServeServer dir graphPath port apiOnly noApi "127.0.0.1"
 
     Init agentsOpt -> do
       initConfigFile
