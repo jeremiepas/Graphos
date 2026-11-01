@@ -12,6 +12,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Core
   , normalizeText
   , truncateText
   , truncateWithElision
+  , extractIdentifier
   ) where
 
 import Control.Exception (catch, SomeException(..), bracket)
@@ -182,3 +183,16 @@ truncateWithElision maxLen t tailText
   | otherwise = 
       let headLen = max 0 (maxLen - T.length tailText - 3)
       in T.take headLen t <> "..." <> tailText
+
+
+-- | The identifier text for a node: the first named child whose type is one of
+-- the language-neutral identifier forms. Returns 'Nothing' when none exists.
+extractIdentifier :: TSNodeInfo -> Maybe Text
+extractIdentifier info =
+  let candidates = filter (\c -> tsnIsNamed c && tsnType c `elem` identifierTypes) (tsnChildren info)
+  in case candidates of
+       (c : _) -> Just (tsnText c)
+       []      -> Nothing
+  where
+    identifierTypes = [ "identifier", "type_identifier", "property_identifier"
+                      , "field_identifier", "name" ]
