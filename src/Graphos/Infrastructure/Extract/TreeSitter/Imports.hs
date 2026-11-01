@@ -80,8 +80,6 @@ importLangForGrammar "go"   = Just LangGo
 importLangForGrammar "rust" = Just LangRust
 importLangForGrammar "ruby" = Just LangRuby
 importLangForGrammar "java" = Just LangJava
--- Kotlin intentionally left unmapped (scoped as follow-up; map only if parser import
--- node matches Java's, per AVI-1716 review cleanup decision).
 importLangForGrammar _      = Nothing
 
 -- | One import statement (Go: one @import_spec@).
@@ -286,6 +284,7 @@ resolveJava file site = do
       isWild = ".*" `T.isSuffixOf` spec
       specNoWild = if isWild then T.dropEnd 2 spec else spec
       segs = T.splitOn "." specNoWild
+
       -- source file for a concrete type: a/b/C.java
       concreteRel = T.unpack (T.intercalate "/" segs) ++ ".java"
       -- directory of a wildcard package import
