@@ -41,7 +41,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (toText)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
 
