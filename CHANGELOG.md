@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- Tree-sitter grammars for PHP, Kotlin (aliased to the Java parser), Perl, and
+  C# are registered, plus vendored Perl/C# parsers and Hackage PHP; Java
+  imports of the form `a.b.C` now resolve to `source-root/a/b/C.java`.
+
+### Fixed
+- Java wildcard imports deduplicate source files discovered across ancestor
+  directories.
+
 ### Changed
 - Node ids now use the `<dirHash>_<stem>_<kind>:<identifier>` layout (Group 3
   node identity, `idScheme=2`), with a `#L<line>` suffix for in-file
