@@ -319,6 +319,22 @@ graphos explain "RequestHandler" --graph path/to/graph.json
 # List available LSP servers
 graphos lservers
 
+### LSP security notes
+
+- Third-party LSP servers may execute project build tools. For example,
+  `jdtls` and `kotlin-language-server` can run Gradle/Maven during startup.
+  Only run Graphos against projects and language servers you trust.
+- To opt out of LSP for an extension, set its command to an empty string in
+  `graphos.yaml`:
+  ```yaml
+  lsp:
+    ".java":
+      command: ""
+  ```
+- Graphos has no separate `--no-lsp` flag; per-extension opt-out via `lsp:`
+  is supported today. Disable all extensions by clearing the `lsp:` entries or
+  running with stub/tree-sitter extraction where configured.
+
 # Serve HTML visualization over HTTP
 graphos serve --dir graphos-out --port 8080
 

@@ -7,6 +7,7 @@ module Graphos.Domain.Labeling
 
     -- * Label cache
   , LabelCacheEntry(..)
+  , LabelCacheFile(..)
   , MatchKind(..)
   , fingerprintOf
   , containmentRatio
@@ -20,19 +21,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Short (toText)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), eitherDecode, encode, object, withObject, (.=), (.:?))
+import Data.Aeson (Value, eitherDecode, encode, ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.ByteString as BS
 import Crypto.Hash.SHA256 (hash)
 import Numeric (showHex)
 import Data.Word (Word8)
-import Data.Maybe (fromMaybe)
-import Control.DeepSeq (NFData)
-import GHC.Generics (Generic)
-import Data.Time.Calendar (fromGregorian)
-import Data.Time.Clock (UTCTime(..), secondsToDiffTime)
-import Data.Time.Format (formatTime, defaultTimeLocale, parseTimeM)
 
 import Graphos.Domain.Types (CommunityId, Node(..), CommunityMap, FileType(..))
 import Graphos.Domain.Types.Node (NodeId)
@@ -41,10 +36,13 @@ import Graphos.Domain.Community (CommunityComposition(..))
 
 -- | Result of LLM community labeling.
 data LabelingResult = LabelingResult
-  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → LLM-generated label
+  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → effective label (cache-served or LLM)
   , lrTokensIn     :: Int                     -- ^ Total input tokens used
   , lrTokensOut    :: Int                     -- ^ Total output tokens used
   , llmRawResponses :: [Text]                 -- ^ Raw LLM responses for debugging
+  , lrExactHits    :: Int                     -- ^ Communities served by an exact cache match
+  , lrFuzzyHits    :: Int                     -- ^ Communities served by a fuzzy cache match
+  , lrLlmLabeled   :: Int                     -- ^ Communities freshly labeled by the LLM this run
   } deriving (Eq, Show)
 
 -- | Build a labeling prompt for a batch of communities.
@@ -144,50 +142,46 @@ data LabelCacheEntry = LabelCacheEntry
   , lceMembers     :: ![NodeId]      -- ^ The community's member NodeIds
   , lceLabel       :: !Text          -- ^ The LLM-generated label
   , lceModel       :: !Text          -- ^ The labeling model that produced the label
-   , lceLabeledAt   :: !UTCTime       -- ^ Timestamp of labeling (UTC).
-   } deriving (Eq, Show, Generic)
-
-instance NFData LabelCacheEntry
+  , lceLabeledAt   :: !Text          -- ^ ISO-8601 timestamp of labeling
+  } deriving (Eq, Show)
 
 -- | How a cached entry matched a new community.
 data MatchKind
   = ExactMatch   -- ^ Sorted member set equals a cached entry exactly.
   | FuzzyMatch   -- ^ Bidirectional containment >= 0.8 against a cached entry.
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show)
 
-instance NFData MatchKind
+-- | The persisted label cache: a flat list of per-community entries.
+--
+-- Serialized as @<output>/cache/label-cache.json@ by the Infrastructure layer
+-- (task 4.1). The UseCase treats this as a last-run snapshot: after a labeling
+-- pass it is rewritten to contain exactly the current run's communities.
+data LabelCacheFile = LabelCacheFile
+  { lcfEntries :: [LabelCacheEntry]
+  } deriving (Eq, Show)
 
--- | Default labeling timestamp used when the persisted cache omits or corrupts
--- the @labeledAt@ field (cache-tolerant decode). Never itself written by a run.
-defaultLabeledAt :: UTCTime
-defaultLabeledAt = UTCTime (fromGregorian 1970 1 1) (secondsToDiffTime 0)
-
--- | JSON encoding of a cache entry. Key names match the persisted format so the
--- file round-trips through disk unchanged.
 instance ToJSON LabelCacheEntry where
-  toJSON (LabelCacheEntry fp mem lbl model at) = object
-    [ "fingerprint" .= fp
-    , "members"     .= mem
-    , "label"       .= lbl
-    , "model"       .= model
-    , "labeledAt"   .= formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" at
+  toJSON e = object
+    [ "fingerprint" .= lceFingerprint e
+    , "members"     .= lceMembers e
+    , "label"       .= lceLabel e
+    , "model"       .= lceModel e
+    , "labeledAt"   .= lceLabeledAt e
     ]
 
--- | Cache-tolerant decode: any missing field falls back to a safe default, so a
--- partially written or older cache file never fails to load. The @labeledAt@
--- field is decoded as text and parsed leniently (unparseable → 'defaultLabeledAt').
 instance FromJSON LabelCacheEntry where
-   parseJSON = withObject "LabelCacheEntry" $ \v -> do
-     fp    <- fromMaybe ""       <$> v .:? "fingerprint"
-     mem   <- fromMaybe []       <$> v .:? "members"
-     lbl   <- fromMaybe ""       <$> v .:? "label"
-     model <- fromMaybe ""       <$> v .:? "model"
-     at    <- maybe defaultLabeledAt parseOpt <$> v .:? "labeledAt"
-     pure (LabelCacheEntry fp mem lbl model at)
-    where
-       parseOpt t = case parseTimeM False defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" (T.unpack t) of
-         Just u -> u
-         Nothing -> defaultLabeledAt
+  parseJSON = withObject "LabelCacheEntry" $ \v -> LabelCacheEntry
+    <$> v .: "fingerprint"
+    <*> v .: "members"
+    <*> v .: "label"
+    <*> v .: "model"
+    <*> v .: "labeledAt"
+
+instance ToJSON LabelCacheFile where
+  toJSON (LabelCacheFile entries) = object ["entries" .= entries]
+
+instance FromJSON LabelCacheFile where
+  parseJSON = withObject "LabelCacheFile" $ \v -> LabelCacheFile <$> v .: "entries"
 
 -- | SHA-256 (hex) of a community's sorted member NodeIds.
 --
@@ -242,8 +236,8 @@ matchCommunity entries model newMembers =
           in case kept of
                 [] -> Nothing
                 _  -> case sortBy cmp kept of
-                        ((_, _, e):_) -> Just (e, FuzzyMatch)
-                        [] -> Nothing
+                          ((_, _, e) :_) -> Just (e, FuzzyMatch)
+                          []              -> Nothing
           where
             toScored :: (Int, LabelCacheEntry) -> (Int, Int, LabelCacheEntry)
             toScored (position, e) =

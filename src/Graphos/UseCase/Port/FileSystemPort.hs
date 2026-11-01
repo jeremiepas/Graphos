@@ -10,9 +10,9 @@ module Graphos.UseCase.Port.FileSystemPort
   ) where
 
 import Data.Text (Text)
+import Graphos.Domain.Labeling (LabelCacheFile(..))
 import Graphos.Domain.Types (Extraction)
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint)
-import Graphos.Domain.Labeling (LabelCacheEntry)
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), IgnorePattern(..))
 
 -- | Record-of-functions port for file system operations.
@@ -36,11 +36,9 @@ data FileSystemPort = FileSystemPort
     -- | Write an extraction through to the persistent extraction cache under
     -- the fingerprinted content key.
   , fspSaveCachedExtraction :: Text -> FilePath -> Extraction -> FilePath -> IO ()
-    -- | Load the last-run label-cache snapshot from the output directory.
-    -- A missing file yields @Right []@ silently (first run). A malformed file
-    -- yields @Left@ with a WARNING message naming the path; the caller logs it
-    -- and proceeds with an empty cache.
-  , fspLoadLabelCache       :: FilePath -> IO (Either Text [LabelCacheEntry])
-    -- | Rewrite the label-cache snapshot in the output directory as an atomic write.
-  , fspSaveLabelCache       :: FilePath -> [LabelCacheEntry] -> IO ()
+    -- | Load the persisted label cache for the output directory (multi-source-graphs
+    -- 4.1). Returns an empty cache on first run or corrupt contents.
+  , fspLoadLabelCache  :: FilePath -> IO LabelCacheFile
+    -- | Persist the label cache as a last-run snapshot (multi-source-graphs 4.1).
+  , fspSaveLabelCache  :: FilePath -> LabelCacheFile -> IO ()
   }

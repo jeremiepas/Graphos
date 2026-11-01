@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Graphos.Infrastructure.Extract.TreeSitter.Resolver
   ( resolveImport
+  , resolveDots
   ) where
 
 import Data.List (isPrefixOf, isSuffixOf)
