@@ -21,11 +21,10 @@ module Graphos.UseCase.Extract.Haskell
 import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar, withMVar)
 import Control.Exception (SomeException, catch, try)
 import Control.Monad (filterM)
-import Data.Char (isAlpha, isAlphaNum, isSpace)
+import Data.Char (isAlpha, isAlphaNum)
 import Data.List (find, isPrefixOf, isSuffixOf, nub, sort)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe, maybe)
+import Data.Maybe (listToMaybe)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropExtension, makeRelative, takeDirectory, (</>), takeExtension)
 import System.IO.Unsafe (unsafePerformIO)
@@ -419,7 +418,7 @@ tryIO :: IO a -> IO (Either SomeException a)
 tryIO = try
 
 isAbsolute :: FilePath -> Bool
-isAbsolute p = not (null p) && head p == '/'
+isAbsolute p = isPrefixOf "/" p
 
 {-# NOINLINE fileIndexCacheVar #-}
 fileIndexCacheVar :: MVar (Map.Map FilePath [FilePath])
