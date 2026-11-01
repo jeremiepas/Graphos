@@ -7,6 +7,15 @@ not split it, so the guidance is misleading and possibly the mapping is inverted
 relative to standard Leiden (where higher resolution yields more, smaller
 communities).
 
+Verified against the implementation (`src/Graphos/Domain/Community.hs`,
+`bestCommunityFor`): the gain `δQ = σ_in/m − γ·(σ_tot·k_i)/2m²` matches standard
+Leiden signed gain, so **higher γ gives more, smaller communities** — the help
+text's direction is inverted while the code is not. The accepted
+`community-detection` spec requirement "Resolution data type and defaults" also
+prescribes size-based auto-tuning (`100k+ → γ 0.3–0.5`); no auto-tune exists in
+the code (the pipeline uses `cfgResolution`/`--resolution` only), so that
+requirement is unimplemented and unrelated to observed behavior.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -17,6 +26,9 @@ communities).
 **Non-Goals:**
 - Redesigning the clustering algorithm.
 - The community-size cap itself (separate change, referenced here).
+- Implementing or revising the `community-detection` spec's unimplemented
+  auto-tune gamma table — recorded as a separate follow-up if the sweep
+  contradicts it (task 2.4).
 
 ## Decisions
 
@@ -24,6 +36,9 @@ communities).
   code if the mapping is provably inverted relative to intent.
   - *Alternative considered:* assume standard Leiden and rewrite docs — rejected,
     the observed behavior must be the source of truth.
+  - *Verification update:* code inspection shows the mapping already matches
+    standard Leiden, so the expected outcome is a docs-only fix; task 4 stays
+    conditional for the sweep to confirm.
 - **Add an INFO echo of effective resolution** so runs are self-documenting.
   - *Alternative considered:* debug-only — rejected, low-cost and broadly useful.
 - **Reference the community-size cap** for the dense-blob case rather than

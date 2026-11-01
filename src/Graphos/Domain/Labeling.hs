@@ -7,6 +7,7 @@ module Graphos.Domain.Labeling
 
     -- * Label cache
   , LabelCacheEntry(..)
+  , LabelCacheFile(..)
   , MatchKind(..)
   , fingerprintOf
   , containmentRatio
@@ -20,7 +21,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Short (toText)
-import Data.Aeson (Value, eitherDecode, encode)
+import Data.Aeson (Value, eitherDecode, encode, ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.ByteString as BS
@@ -35,10 +36,13 @@ import Graphos.Domain.Community (CommunityComposition(..))
 
 -- | Result of LLM community labeling.
 data LabelingResult = LabelingResult
-  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → LLM-generated label
+  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → effective label (cache-served or LLM)
   , lrTokensIn     :: Int                     -- ^ Total input tokens used
   , lrTokensOut    :: Int                     -- ^ Total output tokens used
   , llmRawResponses :: [Text]                 -- ^ Raw LLM responses for debugging
+  , lrExactHits    :: Int                     -- ^ Communities served by an exact cache match
+  , lrFuzzyHits    :: Int                     -- ^ Communities served by a fuzzy cache match
+  , lrLlmLabeled   :: Int                     -- ^ Communities freshly labeled by the LLM this run
   } deriving (Eq, Show)
 
 -- | Build a labeling prompt for a batch of communities.
@@ -146,6 +150,38 @@ data MatchKind
   = ExactMatch   -- ^ Sorted member set equals a cached entry exactly.
   | FuzzyMatch   -- ^ Bidirectional containment >= 0.8 against a cached entry.
   deriving (Eq, Show)
+
+-- | The persisted label cache: a flat list of per-community entries.
+--
+-- Serialized as @<output>/cache/label-cache.json@ by the Infrastructure layer
+-- (task 4.1). The UseCase treats this as a last-run snapshot: after a labeling
+-- pass it is rewritten to contain exactly the current run's communities.
+data LabelCacheFile = LabelCacheFile
+  { lcfEntries :: [LabelCacheEntry]
+  } deriving (Eq, Show)
+
+instance ToJSON LabelCacheEntry where
+  toJSON e = object
+    [ "fingerprint" .= lceFingerprint e
+    , "members"     .= lceMembers e
+    , "label"       .= lceLabel e
+    , "model"       .= lceModel e
+    , "labeledAt"   .= lceLabeledAt e
+    ]
+
+instance FromJSON LabelCacheEntry where
+  parseJSON = withObject "LabelCacheEntry" $ \v -> LabelCacheEntry
+    <$> v .: "fingerprint"
+    <*> v .: "members"
+    <*> v .: "label"
+    <*> v .: "model"
+    <*> v .: "labeledAt"
+
+instance ToJSON LabelCacheFile where
+  toJSON (LabelCacheFile entries) = object ["entries" .= entries]
+
+instance FromJSON LabelCacheFile where
+  parseJSON = withObject "LabelCacheFile" $ \v -> LabelCacheFile <$> v .: "entries"
 
 -- | SHA-256 (hex) of a community's sorted member NodeIds.
 --

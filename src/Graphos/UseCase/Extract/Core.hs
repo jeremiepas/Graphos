@@ -46,7 +46,7 @@ import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
-import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId, mkSourceFile)
+import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
 import Data.Aeson (object, (.=))
@@ -407,7 +407,7 @@ applyTaggingSources (Just prov) ext =
   where
     tagNode n = case Map.lookup (toText (nodeSourceFile n)) prov of
       Just (srcName, qPath) ->
-        let newNid  = makeNodeId (mkSourceFile (T.unpack qPath) "") (maybe "" toText (nodeKind n)) (toText (nodeLabel n))
+        let newNid  = makeNodeId (T.unpack qPath) (toText (nodeLabel n))
             tagged  = n { nodeId           = newNid
                       , nodeSource       = Just (fromText srcName)
                       , nodeSourceFile   = fromText qPath
@@ -538,6 +538,10 @@ extractionConfigFingerprint config = T.pack . unwords $
     [ [ "granularity=" ++ show (gcGranularity gcfg)
       , "cliGranularity=" ++ maybe "none" show (cfgGranularity config)
       , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
+        -- bump when tree-sitter extraction output changes for unchanged files
+      , "treesitter-imports=go,rust,ruby:1"
+        -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
+      , "nodeIdentity=av1452-bounded-ids"
       , "idScheme=2"
       ]
     , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
