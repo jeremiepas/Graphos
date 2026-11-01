@@ -19,6 +19,7 @@ import Network.HTTP.Types
   ( Status
   , status200
   , status400
+  , status401
   , status404
   , status405
   , hContentType
@@ -27,12 +28,14 @@ import Network.HTTP.Types
   )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 
 import Data.Aeson (object, (.=), (.:), (.:?), (.!=), eitherDecode, withObject, FromJSON(..))
 import Data.IORef (IORef, readIORef, writeIORef)
+import System.Environment (lookupEnv)
 import Graphos.Domain.Graph (gNodes)
 import Graphos.Domain.Graph.Mutation (MutationSummary(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
@@ -182,6 +185,13 @@ fullBody req = go []
 
 handleCypherMutate :: SharedLoad -> Application
 handleCypherMutate shared req respond = do
+  envKey <- lookupEnv "GRAPHOS_SERVE_API_KEY"
+  case envKey of
+    Just expected | not (authorisedFor expected req) -> respond (corsResponse status401 "Unauthorized")
+    _ -> handleCypherMutateBody shared req respond
+
+handleCypherMutateBody :: SharedLoad -> Application
+handleCypherMutateBody shared req respond = do
   body <- fullBody req
   case eitherDecode body :: Either String MutateBody of
     Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Invalid JSON body: " ++ err :: String)]))
@@ -216,6 +226,16 @@ handleCypherMutate shared req respond = do
               , "truncated" .= crTruncated (mrResult mr)
               ] ++ maybe [] (\b -> ["backup" .= b]) backupMsg
 
+-- | Whether the request carries the configured API key (Authorization: Bearer
+-- or X-Api-Key). Used to gate the mutation surface.
+authorisedFor :: String -> Request -> Bool
+authorisedFor expected req =
+  let hs = requestHeaders req
+      provided = case lookup "authorization" hs of
+        Just v | "Bearer " `BS.isPrefixOf` v -> Just (BS.drop 7 v)
+        _ -> lookup "x-api-key" hs
+  in provided == Just (BSC.pack expected)
+
 -- | Decoded POST body for the mutation route.
 data MutateBody = MutateBody { mubQuery :: Text, mubPersist :: Bool }
 
@@ -234,11 +254,11 @@ mcpLoadResultFor :: LoadResult -> LoadResult
 mcpLoadResultFor = id
 
 -- | Start a query API server on the given port.
-startQueryServer :: Int -> LoadResult -> IO ()
-startQueryServer port lr = do
+startQueryServer :: String -> Int -> LoadResult -> IO ()
+startQueryServer host port lr = do
   let app = apiApp lr
       warpSettings = setPort port
-                   $ setHost "0.0.0.0"
+                   $ setHost (fromString host)
                    $ defaultSettings
   runSettings warpSettings app
 
