@@ -33,7 +33,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
 import qualified Data.ByteString.Lazy.Char8 as BSL8
-import qualified Data.Text.IO as TIO
 import System.Exit (ExitCode(..))
 import System.IO (hFlush, hPutStrLn)
 import System.Process (readProcessWithExitCode)
