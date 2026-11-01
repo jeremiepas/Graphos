@@ -585,8 +585,12 @@ nodeIdentifier filePath node
   | tsTypeToKind (tsnType node) == "Module" =
       Just (T.pack (takeFileName' filePath))
   | tsnType node `elem` importExportTypes =
-      case extractSpecifier filePath node of
-        Just (_, targetName) -> Just targetName
+      case firstChildOfType "string" (tsnChildren node) of
+        Just child ->
+          let spec = stripQuotes (T.strip (tsnText child))
+          in if T.null spec
+               then Just (T.pack (takeFileName' filePath))
+               else Just spec
         Nothing -> Just (T.pack (takeFileName' filePath))
   | otherwise = extractIdentifier node
 
@@ -599,10 +603,17 @@ makeNode filePath node =
         rawIdent = fromMaybe (tsNodeUntruncatedLabel node) (nodeIdentifier filePath node)
         identText = normalizeText rawIdent
         -- 'truncateText' appends a 3-char elision "...", so reserve it and keep
-        -- the final <ident> — and the label/signature derived from it — within
+        -- the final <ident> — and the label derived from it — within
         -- nodeIdentityBudget (AVI-1452). See Core.truncateText.
         elisionBudget = 3
         ident = truncateText (nodeIdentityBudget - elisionBudget) identText
+        declText = tsNodeUntruncatedLabel node
+        isModuleNode = tsTypeToKind (tsnType node) == "Module"
+        isImportExport = tsnType node `elem` importExportTypes
+        sigText
+          | isModuleNode = Nothing
+          | isImportExport = Just (truncateWithElision defaultTruncationBudget declText (extractTail declText))
+          | otherwise = Just (truncateText defaultTruncationBudget declText)
     in Node
          { nodeId           = nodeKeyId sf kindText ident line 0
          , nodeLabel        = fromText ident
@@ -612,8 +623,9 @@ makeNode filePath node =
          , nodeLineStart    = Just line
          , nodeLineEnd      = Just (tsnEndRow node + 1)
          , nodeKind         = Just kind
-         , nodeSignature    = Just (fromText ident)
-         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|. bitNodeSignature
+         , nodeSignature    = maybe Nothing (Just . fromText) sigText
+         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|.
+                               if isJust sigText then bitNodeSignature else 0
          , nodeCommunityId  = Nothing
          , nodeDegree       = Nothing
          , nodeIsBridge     = Nothing
