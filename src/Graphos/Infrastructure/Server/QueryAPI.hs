@@ -277,14 +277,19 @@ mutationAuthTokenOK req = do
 -- | Resolve the configured mutation token from the environment.
 configuredMutationToken :: IO (Maybe String)
 configuredMutationToken = do
-  v1 <- lookupEnv "GRAPHOS_API_KEY"
-  case v1 of
-    Just t | not (null t) -> pure (Just t)
-    _ -> do
-      v2 <- lookupEnv "GRAPHOS_API_TOKEN"
-      case v2 of
+  firstNonEmpty
+    [ "GRAPHOS_SERVE_API_KEY"
+    , "GRAPHOS_API_KEY"
+    , "GRAPHOS_API_TOKEN"
+    , "GRAPHOS_API_SECRET"
+    ]
+  where
+    firstNonEmpty [] = pure Nothing
+    firstNonEmpty (k:ks) = do
+      v <- lookupEnv k
+      case v of
         Just t | not (null t) -> pure (Just t)
-        _ -> pure Nothing
+        _ -> firstNonEmpty ks
 
 -- | Extract the bearer token presented by the client.
 providedToken :: Request -> Maybe String
