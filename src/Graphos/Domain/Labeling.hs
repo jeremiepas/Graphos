@@ -20,13 +20,19 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Short (toText)
-import Data.Aeson (Value, eitherDecode, encode)
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), eitherDecode, encode, object, withObject, (.=), (.:?))
 import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.ByteString as BS
 import Crypto.Hash.SHA256 (hash)
 import Numeric (showHex)
 import Data.Word (Word8)
+import Data.Maybe (fromMaybe)
+import Control.DeepSeq (NFData)
+import GHC.Generics (Generic)
+import Data.Time.Calendar (fromGregorian)
+import Data.Time.Clock (UTCTime(..), secondsToDiffTime)
+import Data.Time.Format (formatTime, defaultTimeLocale, parseTimeM)
 
 import Graphos.Domain.Types (CommunityId, Node(..), CommunityMap, FileType(..))
 import Graphos.Domain.Types.Node (NodeId)
@@ -138,14 +144,50 @@ data LabelCacheEntry = LabelCacheEntry
   , lceMembers     :: ![NodeId]      -- ^ The community's member NodeIds
   , lceLabel       :: !Text          -- ^ The LLM-generated label
   , lceModel       :: !Text          -- ^ The labeling model that produced the label
-  , lceLabeledAt   :: !Text          -- ^ ISO-8601 timestamp of labeling
-  } deriving (Eq, Show)
+   , lceLabeledAt   :: !UTCTime       -- ^ Timestamp of labeling (UTC).
+   } deriving (Eq, Show, Generic)
+
+instance NFData LabelCacheEntry
 
 -- | How a cached entry matched a new community.
 data MatchKind
   = ExactMatch   -- ^ Sorted member set equals a cached entry exactly.
   | FuzzyMatch   -- ^ Bidirectional containment >= 0.8 against a cached entry.
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData MatchKind
+
+-- | Default labeling timestamp used when the persisted cache omits or corrupts
+-- the @labeledAt@ field (cache-tolerant decode). Never itself written by a run.
+defaultLabeledAt :: UTCTime
+defaultLabeledAt = UTCTime (fromGregorian 1970 1 1) (secondsToDiffTime 0)
+
+-- | JSON encoding of a cache entry. Key names match the persisted format so the
+-- file round-trips through disk unchanged.
+instance ToJSON LabelCacheEntry where
+  toJSON (LabelCacheEntry fp mem lbl model at) = object
+    [ "fingerprint" .= fp
+    , "members"     .= mem
+    , "label"       .= lbl
+    , "model"       .= model
+    , "labeledAt"   .= formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" at
+    ]
+
+-- | Cache-tolerant decode: any missing field falls back to a safe default, so a
+-- partially written or older cache file never fails to load. The @labeledAt@
+-- field is decoded as text and parsed leniently (unparseable → 'defaultLabeledAt').
+instance FromJSON LabelCacheEntry where
+   parseJSON = withObject "LabelCacheEntry" $ \v -> do
+     fp    <- fromMaybe ""       <$> v .:? "fingerprint"
+     mem   <- fromMaybe []       <$> v .:? "members"
+     lbl   <- fromMaybe ""       <$> v .:? "label"
+     model <- fromMaybe ""       <$> v .:? "model"
+     at    <- maybe defaultLabeledAt parseOpt <$> v .:? "labeledAt"
+     pure (LabelCacheEntry fp mem lbl model at)
+    where
+       parseOpt t = case parseTimeM False defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" (T.unpack t) of
+         Just u -> u
+         Nothing -> defaultLabeledAt
 
 -- | SHA-256 (hex) of a community's sorted member NodeIds.
 --

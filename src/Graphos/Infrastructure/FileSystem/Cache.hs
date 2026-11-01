@@ -25,11 +25,14 @@ module Graphos.Infrastructure.FileSystem.Cache
   , cacheDirIn
   , embedCacheDir
   , embedCacheDirIn
-  , evictToCap
-  , loadPipelineCheckpoint
-  , savePipelineCheckpoint
-  , clearPipelineCheckpoint
-  ) where
+   , evictToCap
+   , loadPipelineCheckpoint
+   , savePipelineCheckpoint
+   , clearPipelineCheckpoint
+   , loadLabelCache
+   , saveLabelCache
+   , labelCachePath
+   ) where
 
 import Control.Exception (SomeException, catch)
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
@@ -56,6 +59,7 @@ import qualified Crypto.Hash.SHA256 as Hash
 import Graphos.Domain.Config (defaultOutputDirName)
 import Graphos.Domain.Types
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
+import Graphos.Domain.Labeling (LabelCacheEntry)
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
 -- | Get the cache directory for the effective pipeline output directory
@@ -334,3 +338,37 @@ clearPipelineCheckpoint :: FilePath -> IO ()
 clearPipelineCheckpoint outputDir = do
   let path = checkpointPath outputDir
   removeFile path `catch` \(_ :: SomeException) -> pure ()
+
+-- ───────────────────────────────────────────────
+-- Label cache (multi-source-graphs AVI-983 4.1/4.2)
+-- ───────────────────────────────────────────────
+
+-- | Path to the persisted label-cache snapshot: @<outDir>/cache/label-cache.json@.
+-- Follows the port-level convention that caches live under the effective output
+-- directory, never a hardcoded project-root name.
+labelCachePath :: FilePath -> FilePath
+labelCachePath outputDir = cacheDirIn outputDir </> "label-cache.json"
+
+-- | Load the label-cache snapshot from the output directory.
+-- Tolerant by design: a missing file yields @Right []@ silently (a first run
+-- is not special); a malformed file yields @Left@ carrying a WARNING message
+-- that names the path, and the caller logs it and starts with an empty cache.
+-- The pipeline never fails on cache state.
+loadLabelCache :: FilePath -> IO (Either Text [LabelCacheEntry])
+loadLabelCache outputDir = do
+  let path = labelCachePath outputDir
+  exists <- doesFileExist path
+  if not exists
+    then pure (Right [])
+    else do
+      bs <- BSL.readFile path
+      pure $ case eitherDecode bs of
+        Left err ->
+          Left ("[label] cache: malformed label cache at " <> T.pack path
+                <> "; ignoring it for this run (" <> T.take 120 (T.pack err) <> ")")
+        Right entries -> Right entries
+
+-- | Rewrite the label-cache snapshot atomically in the output directory.
+saveLabelCache :: FilePath -> [LabelCacheEntry] -> IO ()
+saveLabelCache outputDir entries =
+  writeFileAtomic (labelCachePath outputDir) (encode entries)

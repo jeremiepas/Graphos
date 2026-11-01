@@ -51,6 +51,7 @@ import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint
   , loadCachedFingerprinted, saveCachedFingerprinted
+  , loadLabelCache, saveLabelCache
   )
 import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, ignoreMatches)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
@@ -87,16 +88,20 @@ import qualified Graphos.UseCase.Export as UE
 -- Infrastructure imports for PDF extraction
 import qualified Graphos.Infrastructure.Extract.Pdf as Pdf
 
--- | Create a production AppEnv from a LogEnv and ObservabilityEnv.
+-- | Create a production AppEnv from a LogEnv, ObservabilityEnv, and the
+-- pipeline output directory. The output dir is threaded here so that the
+-- label-cache IO (which lives under @<outDir>/cache/@) is reachable from
+-- 'Graphos.UseCase.Label.labelCommunities' without changing its signature.
 -- Called once at startup in Main.hs.
-productionAppEnv :: LogEnv -> ObservabilityEnv -> AppEnv
-productionAppEnv logEnv obsEnv = AppEnv
+productionAppEnv :: LogEnv -> ObservabilityEnv -> FilePath -> AppEnv
+productionAppEnv logEnv obsEnv outDir = AppEnv
   { extractionPort      = productionExtractionPort logEnv
   , exportPort          = productionExportPort logEnv obsEnv
   , fileSystemPort      = productionFileSystemPort
   , loggingPort         = productionLoggingPort logEnv
   , observabilityPort   = productionObservabilityPort obsEnv
   , llmPort              = productionLLMPort
+  , appEnvOutputDir      = outDir
   }
 
 -- | Production logging port — delegates to Infrastructure.Logging.
@@ -131,9 +136,11 @@ productionFileSystemPort = FileSystemPort
   , fspClearCheckpoint    = clearPipelineCheckpoint
   , fspLoadIgnorePatterns = loadIgnorePatterns
   , fspShouldIgnore = ignoreMatches
-  , fspLoadCachedExtraction = loadCachedFingerprinted
-  , fspSaveCachedExtraction = saveCachedFingerprinted
-  }
+   , fspLoadCachedExtraction = loadCachedFingerprinted
+   , fspSaveCachedExtraction = saveCachedFingerprinted
+   , fspLoadLabelCache       = loadLabelCache
+   , fspSaveLabelCache        = saveLabelCache
+   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.
 productionExtractionPort :: LogEnv -> ExtractionPort

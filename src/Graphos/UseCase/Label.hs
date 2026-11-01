@@ -11,6 +11,8 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.List (sort)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -18,33 +20,88 @@ import System.Directory (removeFile)
 import Control.Exception (catch, SomeException)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
+import Data.Time.Clock (getCurrentTime)
 
 import Graphos.Domain.Types (CommunityId, CommunityMap, CohesionMap)
 import Graphos.Domain.Graph (Graph)
 import Graphos.Domain.Config (LabelingConfig(..), Neo4jConfig(..))
-import Graphos.Domain.Labeling (LabelingResult(..), labelPrompt, batchCommunities)
+import Graphos.Domain.Labeling
+  ( LabelingResult(..)
+  , labelPrompt, batchCommunities
+  , matchCommunity, fingerprintOf
+  , LabelCacheEntry(..)
+  , MatchKind(..)
+  )
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
+import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
+import Graphos.UseCase.Port.LoggingPort (lpLogInfo, lpLogWarn)
 
--- | Label communities using an LLM.
--- Batches communities, sends prompts, parses responses.
+-- | Label communities using an LLM, consulting the persisted label cache first.
+--
+-- Communities whose member set already has a cached label under the current
+-- model are reused without an LLM call; only misses are batched and sent.
+-- Exact and fuzzy hits are counted separately for the cost-accounting line.
+--
+-- On completion the cache is REWRITTEN as a last-run snapshot: it holds
+-- exactly this run's communities — hit entries carried with their ORIGINAL
+-- @labeledAt@, misses stamped fresh — and entries for communities not in this
+-- run are discarded.
 labelCommunities :: AppEnv -> Graph -> CommunityMap -> CohesionMap -> LabelingConfig -> IO LabelingResult
 labelCommunities appEnv g commMap cohesion cfg = do
-  let lp = llmPort appEnv
-      cids = Map.keys commMap
-      batchSize = labelingBatchSize cfg
-      batches = batchCommunities cids batchSize
+  let lp         = llmPort appEnv
+      fs         = fileSystemPort appEnv
+      outDir     = appEnvOutputDir appEnv
+      model      = T.pack (labelingModel cfg)
+      cids       = Map.keys commMap
+      batchSize  = labelingBatchSize cfg
+      memberList = \cid -> Map.findWithDefault [] cid commMap
+      membersOf  = \cid -> Set.fromList (memberList cid)
+      lpWarn     = lpLogWarn (loggingPort appEnv)
+      lpInfo     = lpLogInfo (loggingPort appEnv)
 
-  TIO.putStrLn $ "[label] Labeling " <> T.pack (show (length cids)) <> " communities in "
-              <> T.pack (show (length batches)) <> " batch(es)"
+  loadResult <- fspLoadLabelCache fs outDir
+  cached <- case loadResult of
+    Right entries -> pure entries
+    Left warnMsg  -> do
+      lpWarn warnMsg
+      pure []
 
-  allLabels <- mapM (labelBatch lp g commMap cohesion cfg) batches
+  let candidates = filter (\e -> lceModel e == model) cached
+      resolved   = map (\cid -> (cid, matchCommunity candidates model (membersOf cid))) cids
+      hits       = [(cid, e, k) | (cid, Just (e, k)) <- resolved]
+      missCids   = [cid | (cid, Nothing) <- resolved]
+      nExact     = length [() | (_, _, ExactMatch) <- hits]
+      nFuzzy     = length [() | (_, _, FuzzyMatch) <- hits]
+      hitLabels  = Map.fromList [(cid, lceLabel e) | (cid, e, _) <- hits]
 
-  let mergedLabels = Map.unions allLabels
+  TIO.putStrLn $ "[label] Labeling " <> T.pack (show (length cids)) <> " communities: "
+               <> T.pack (show (nExact + nFuzzy)) <> " cache hits, " <> T.pack (show (length missCids)) <> " misses"
+
+  missLabels <- if null missCids
+    then pure Map.empty
+    else do
+      results <- mapM (\b -> labelBatch lp g commMap cohesion cfg b)
+                 (batchCommunities (sort missCids) batchSize)
+      pure (Map.unions results)
+
+  now <- getCurrentTime
+  let hitSnap  = [ LabelCacheEntry (fingerprintOf (membersOf cid)) (memberList cid)
+                   (lceLabel e) model (lceLabeledAt e)
+                 | (cid, e, _) <- hits ]
+      missSnap = [ LabelCacheEntry (fingerprintOf (membersOf cid)) (memberList cid)
+                   lbl model now
+                 | (cid, lbl) <- Map.toList (Map.restrictKeys missLabels (Set.fromList missCids)) ]
+  fspSaveLabelCache fs outDir (hitSnap ++ missSnap)
+  lpInfo $ "[label] cache: " <> T.pack (show nExact) <> " exact hits, "
+        <> T.pack (show nFuzzy) <> " fuzzy hits, "
+        <> T.pack (show (length missCids)) <> " LLM-labeled"
+
+  let mergedLabels = Map.union hitLabels missLabels
   pure LabelingResult
-    { lrLabels = mergedLabels
-    , lrTokensIn = 0
-    , lrTokensOut = 0
+    { lrLabels        = mergedLabels
+    , lrTokensIn      = 0
+    , lrTokensOut     = 0
     , llmRawResponses = []
     }
 

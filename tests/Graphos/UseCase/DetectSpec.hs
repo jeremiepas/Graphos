@@ -330,6 +330,8 @@ testFSP = FileSystemPort
   , fspShouldIgnore         = \_ ps path -> shouldIgnore ps path
   , fspLoadCachedExtraction = \_ _ _ -> pure Nothing
   , fspSaveCachedExtraction = \_ _ _ _ -> pure ()
+  , fspLoadLabelCache       = \_ -> pure (Right [])
+  , fspSaveLabelCache       = \_ _ -> pure ()
   }
 
 mkEdge :: NodeId -> NodeId -> Edge

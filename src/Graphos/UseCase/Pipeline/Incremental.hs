@@ -282,7 +282,8 @@ runSingleFilePipeline appEnv config filePath = catch (do
       llmLabels <- if cfgLabel config
         then do
           let lblCfg = gcLabeling (cfgGraphosConfig config)
-          result <- labelCommunities appEnv enrichedGraph finalCommMap Map.empty lblCfg
+          result <- labelCommunities (appEnv { appEnvOutputDir = cfgOutputDir config })
+                                     enrichedGraph finalCommMap Map.empty lblCfg
           pure $ if Map.null (lrLabels result) then Nothing else Just (lrLabels result)
         else pure Nothing
 

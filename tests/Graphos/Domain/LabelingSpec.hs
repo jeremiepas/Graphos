@@ -9,6 +9,10 @@ import qualified Data.Map.Strict as Map
 import Data.Aeson (toJSON)
 import Data.Text.Short (fromText)
 import qualified Data.Set as Set
+import Data.Set (Set)
+import Data.Time.Clock (UTCTime(..), secondsToDiffTime)
+import Data.Time.Calendar (fromGregorian)
+import Test.QuickCheck (property, (==>), (===))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
@@ -175,7 +179,8 @@ spec = do
   
   describe "matchCommunity" $ do
     let entry _cid model members label =
-          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model "2026-10-06T00:00:00Z"
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model
+            (UTCTime (fromGregorian 2026 10 6) (secondsToDiffTime 0))
   
     it "exact hit reuses the cached label with no LLM call" $ do
       let cache = [entry (0 :: Int) "gpt-4o" (Set.fromList ["a", "b"]) "Auth"]
@@ -240,3 +245,16 @@ spec = do
           new = Set.fromList ["x0", "x1", "x2", "x3"]  -- 4 of 5 = 0.8 >= 0.8
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
+
+  describe "matchCommunity (QuickCheck property)" $ do
+    let qce model members label =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model
+            (UTCTime (fromGregorian 2026 10 6) (secondsToDiffTime 0))
+    it "returns Nothing whenever either containment ratio < 0.8 (non-empty)" $ property $ \oldStr newStr ->
+      let old = Set.fromList (map T.pack oldStr) :: Set Text
+          new = Set.fromList (map T.pack newStr) :: Set Text
+          inter = Set.size (Set.intersection old new)
+          orl = fromIntegral inter / fromIntegral (Set.size old) :: Double
+          nrl = fromIntegral inter / fromIntegral (Set.size new) :: Double
+      in (not (Set.null old) && not (Set.null new)) ==>
+         ((orl < 0.8 || nrl < 0.8) ==> matchCommunity [qce "gpt-4o" old "Auth"] "gpt-4o" new === Nothing)

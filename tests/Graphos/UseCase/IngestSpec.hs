@@ -39,6 +39,7 @@ stubEnv llm = AppEnv
       }
   , observabilityPort = error "not used"
   , llmPort = llm
+  , appEnvOutputDir = "graphos-out"
   }
 
 -- | A port answering each text with @perText@, recording submitted batches.
