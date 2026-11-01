@@ -3,6 +3,7 @@ module Graphos.Domain.Analysis
   ( analyze
   , surprisingConnections
   , suggestQuestions
+  , surpriseScore
   , dedupOn
   , selectTopNOn
   ) where
