@@ -41,12 +41,11 @@ import System.FilePath (takeExtension)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, ShortText)
-import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Aeson (toJSON, object, (.=))
 import qualified Data.Map.Strict as Map
 
 import Data.Map (Map)
-import Data.Set (Set)
 
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
@@ -263,7 +262,7 @@ resolveCalls filePath ctx enclosingId node =
 
 -- | Resolve a callee name to a target node id.
 resolveCalleeTarget :: FilePath -> CallsCtx -> Text -> Maybe NodeId
-resolveCalleeTarget filePath ctx callee
+resolveCalleeTarget _filePath ctx callee
   -- imported callee -> the External node produced by resolveImport/extractSpecifier
   | callee `Map.member` imports = case Map.lookup callee imports of
                                        Just calleeId -> Just calleeId
