@@ -49,7 +49,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (filterM)
 import Data.Aeson (Value, object, (.=))
 import Data.Char (isAlphaNum, isSpace, isAlpha)
-import Data.List (isSuffixOf, sort)
+import Data.List (isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -80,6 +80,8 @@ importLangForGrammar "go"   = Just LangGo
 importLangForGrammar "rust" = Just LangRust
 importLangForGrammar "ruby" = Just LangRuby
 importLangForGrammar "java" = Just LangJava
+-- Kotlin intentionally left unmapped (scoped as follow-up; map only if parser import
+-- node matches Java's, per AVI-1716 review cleanup decision).
 importLangForGrammar _      = Nothing
 
 -- | One import statement (Go: one @import_spec@).
@@ -308,7 +310,7 @@ resolveJava file site = do
 wildJavaFiles :: FilePath -> FilePath -> IO [FilePath]
 wildJavaFiles start relDir = do
   results <- fmap concat $ mapM tryAncestor (ancestors start)
-  pure (sort results)
+  pure (sort (nub results))
   where
     tryAncestor d = do
       let dir = d </> relDir
