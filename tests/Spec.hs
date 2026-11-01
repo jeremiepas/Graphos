@@ -112,6 +112,7 @@ import qualified Graphos.Domain.Intent.ClassifierSpec
 import qualified Graphos.Domain.Intent.ProjectionSpec
 import qualified Graphos.Domain.Config.OutputSpec
 import qualified Graphos.Infrastructure.FileSystem.OutputPlacementSpec
+import qualified Graphos.Infrastructure.FileSystem.WatcherSpec
 
 main :: IO ()
 main = Test.Hspec.hspec $ do
@@ -216,4 +217,5 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Intent.ProjectionSpec.spec
   Graphos.Domain.Config.OutputSpec.spec
   Graphos.Infrastructure.FileSystem.OutputPlacementSpec.spec
+  Graphos.Infrastructure.FileSystem.WatcherSpec.spec
 

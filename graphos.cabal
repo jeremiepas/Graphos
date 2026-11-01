@@ -472,6 +472,7 @@ test-suite graphos-test
     Graphos.Domain.Intent.ProjectionSpec
     Graphos.Domain.Config.OutputSpec
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec
+    Graphos.Infrastructure.FileSystem.WatcherSpec
   build-depends:
        base
      , graphos
