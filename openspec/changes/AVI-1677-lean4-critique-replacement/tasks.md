@@ -32,6 +32,7 @@
 - [x] 5.1 Add Infrastructure FFI adapter (`src/Graphos/Infrastructure/Critique/Lean.hs`, Cabal `lean-critique` flag)
 - [x] 5.2 Keep Haskell implementation as reference/optional fallback (flag defaults to False)
 - [ ] 5.3 Parity tests and version checks
+  - [x] 5.3a Haskell surpriseScore numeric-arm baseline (fixtures 6/10/1) — AnalysisSpec
 - [ ] 5.4 Rollout via configuration and build flags
 
 ## 6. Parity, performance, cutover
@@ -49,4 +50,5 @@
 - [x] V.2a Graphos: default `cabal build lib:graphos` passes (no Lean toolchain dependency).
 - [x] V.2b Graphos: `cabal build lib:graphos -flean-critique --extra-lib-dirs=...` passes and registers; FFI round-trip verified (spike consumer prints 6/10/1).
 - [ ] V.2c Graphos: parity tests against Haskell `surpriseScore` and fallback selection.
+  - [x] V.2c-a Haskell surpriseScore numeric-arm baseline (fixtures 6/10/1) passes.
 - [ ] V.3 Cross-repo: pin OSS version in Graphos integration branch and test
