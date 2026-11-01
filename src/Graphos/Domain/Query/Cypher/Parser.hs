@@ -61,6 +61,8 @@ import Text.Megaparsec
   , many
   , some
   , sepBy
+  , lookAhead
+  , notFollowedBy
   )
 import Text.Megaparsec.Char (char, space)
 import Text.Megaparsec.Error (errorBundlePretty)
@@ -168,6 +170,33 @@ natural = do
   ds <- some (oneOf ("0123456789" :: [Char]))
   pure (read ds)
 
+-- | Error message for a rejected named-path assignment.
+namedPathErrorMsg :: Text
+namedPathErrorMsg =
+  T.pack
+    ("named path variables are not supported: "
+     ++ "use `graphos path <start> <end>` for reachability")
+
+-- | Named-path guard: reject `MATCH <ident> = ...`.
+--
+-- Named paths (`MATCH p = (a)-[:R]->(b)`) are out of scope for the
+-- read-only subset; reachability is handled by `graphos path <start>
+-- <end>`. The guard only fires on the canonical `<ident> =` shape (an
+-- identifier immediately followed by a single `=`, not `==`) so that
+-- other malformed inputs still surface the ordinary parse error.
+--
+-- Megaparsec restores the cursor on failure, so wrapping the guarded peek
+-- in `optional` guarantees real patterns (which begin with `(`) are never
+-- consumed: when the input is not a named path the inner parser fails and
+-- the cursor is rolled back before `patternList` runs.
+rejectNamedPath :: Parser ()
+rejectNamedPath = do
+  np <- (True <$ lookAhead (ident *> ws *> singleEq)) <|> pure False
+  when np (fail (T.unpack namedPathErrorMsg))
+  pure ()
+  where
+    singleEq = char '=' *> notFollowedBy (char '=')
+
 -- ───────────────────────────────────────────────
 -- Query
 -- ───────────────────────────────────────────────
@@ -178,6 +207,7 @@ readQueryP = do
   ws
   keyword "match"
   ws
+  rejectNamedPath
   pats <- patternList
   ws
   wh <- optional $ do
@@ -207,6 +237,7 @@ readQueryBody :: Parser CypherQuery
 readQueryBody = do
   keyword "match"
   ws
+  rejectNamedPath
   pats <- patternList
   ws
   wh <- optional $ do
@@ -226,7 +257,7 @@ readQueryBody = do
 mutStatement :: Parser CypherStatement
 mutStatement = do
   mPrefix <- optional $ do
-    try (keyword "match" *> ws)
+    try (keyword "match" *> ws *> rejectNamedPath)
     pats <- patternList
     ws
     wh <- optional $ do
