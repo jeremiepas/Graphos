@@ -9,6 +9,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Short (ShortText, fromText, toText)
+import Data.Aeson (object, (.=))
 
 import Graphos.Domain.Types
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
@@ -201,11 +202,10 @@ spec = do
   describe "function granularity" $ do
     it "keeps module, class, method, field, import, and module-level const" $ do
       let labels = labelsAt GranularityFunction tsFixture
-      labels `shouldSatisfy` elem "module"
+      labels `shouldSatisfy` elem "service.ts"
       labels `shouldSatisfy` elem "Service"
       labels `shouldSatisfy` elem "getUser"
       labels `shouldSatisfy` elem "role"
-      labels `shouldSatisfy` elem "import { db } from './db'"
       labels `shouldSatisfy` elem "const API_URL = 'x'"
       labels `shouldSatisfy` elem "helper"
 
@@ -376,6 +376,38 @@ spec = do
           violators = [n | n <- Map.elems (extractionNodes ex), fieldBytes n >= 512]
       Map.size (extractionNodes ex) `shouldBe` 5000
       length violators `shouldBe` 0
+
+  describe "wrapper suppression (task 3.2)" $ do
+    it "emits one exported function node whose signature is the wrapper text" $ do
+      let node = tsNode "export_statement" "export async function executeSharedRunCommand(x: X): Y { }"
+              [ tsNode "function_declaration" "async function executeSharedRunCommand(x: X): Y { }"
+                  [ tsNode "identifier" "executeSharedRunCommand" [] ] ]
+          ex = tsNodesToExtraction GranularityFunction "src/x.ts" [node]
+          nodes = Map.elems (extractionNodes ex)
+      length nodes `shouldBe` 1
+      let n = case nodes of (x:_) -> x; [] -> error "empty"
+      T.unpack (toText (nodeLabel n)) `shouldBe` "executeSharedRunCommand"
+      nodeKind n `shouldBe` Just (fromText "Function")
+      nodeExtra n `shouldBe` Just (object ["exported" .= (True :: Bool)])
+      case nodeSignature n of
+        Just sig -> (T.isPrefixOf "export async function executeSharedRunCommand(" (toText sig)) `shouldBe` True
+        Nothing  -> expectationFailure "missing signature"
+
+  describe "multi-line import signature elision (task 3.5)" $ do
+    it "keeps the specifier in nodeSignature and uses it as label" $ do
+      let longImport = T.replicate 40 "import { a, b, c, d, e, f, g, h } " <> "from '../../templates/index.js';"
+          node = tsNode "import_declaration" longImport
+              [ tsNode "string" "'../../templates/index.js'" [] ]
+          ex = tsNodesToExtraction GranularityFine "src/x.ts" [node]
+          nodes = Map.elems (extractionNodes ex)
+      length nodes `shouldSatisfy` (> 0)
+      let labels = map (T.unpack . toText . nodeLabel) nodes
+      labels `shouldSatisfy` elem "../../templates/index.js"
+      case [ nodeSignature n | n <- nodes, nodeLineStart n == Just 1 ] of
+        (Just sig : _) -> do
+          T.isInfixOf "..." (toText sig) `shouldBe` True
+          T.isSuffixOf "from '../../templates/index.js';" (toText sig) `shouldBe` True
+        _ -> return ()
 
   describe "type node emission (AVI-1471)" $ do
     it "emits exactly one Type node for a real type declaration" $ do

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+- Node ids now use the `<dirHash>_<stem>_<kind>:<identifier>` layout (Group 3
+  node identity, `idScheme=2`), with a `#L<line>` suffix for in-file
+  collisions; `makeNode` labels nodes with the identifier and stores the
+  normalized declaration text as the bounded signature. Caches/checkpoints
+  built with the previous layout miss.
+
 ## 0.2.0 - 2026-10-29
 
 ### Fixed
