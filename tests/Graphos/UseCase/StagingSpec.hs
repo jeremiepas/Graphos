@@ -120,6 +120,19 @@ spec = do
         oldKept `shouldBe` True
         newKept `shouldBe` True
 
+    it "carries cache/label-cache.json across a staged rebuild" $ do
+      withSystemTempDirectory "graphos-staging-lc" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "label-cache.json") "[{\"label\":\"Auth\"}]"
+          pure (Right ())
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        present <- doesFileExist (out </> "cache" </> "label-cache.json")
+        present `shouldBe` True
+
     it "runs on a missing output directory (first build)" $ do
       withSystemTempDirectory "graphos-staging" $ \root -> do
         let out = root </> "nested" </> "graphos-out"

@@ -326,7 +326,7 @@ main = do
       let _tracer = otelTracer obsEnv
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
-          appEnv = productionAppEnv env obsEnv
+          appEnv = productionAppEnv env obsEnv outputDir
       when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
@@ -685,7 +685,7 @@ main = do
       let logLevel = if verbose then LogDebug else LogInfo
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir ++ "/traces")
-      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv
+      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv outputDir
       logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
       resultA <- loadGraphFromFile pathA
       case resultA of
@@ -760,7 +760,7 @@ main = do
                 }
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
-      let appEnv = productionAppEnv env obsEnv
+      let appEnv = productionAppEnv env obsEnv outputDir
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of
