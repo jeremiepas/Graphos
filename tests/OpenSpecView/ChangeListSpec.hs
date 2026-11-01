@@ -118,7 +118,7 @@ spec = do
     (changeCompleted ex) `shouldBe` 2
     (changeStatus ex) `shouldBe` "in-progress"
     (changeTotal mg) `shouldBe` 19
-    (changeCompleted mg) `shouldBe` 5
+    (changeCompleted mg) `shouldBe` 9
     (changeStatus mg) `shouldBe` "in-progress"
     (changeTotal ug) `shouldBe` 25
     (changeCompleted ug) `shouldBe` 5
