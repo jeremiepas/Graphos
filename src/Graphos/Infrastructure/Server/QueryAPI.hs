@@ -37,7 +37,6 @@ import qualified Data.Text.Encoding as TE
 import Data.Aeson (object, (.=), (.:), (.:?), (.!=), eitherDecode, withObject, FromJSON(..))
 import Data.IORef (IORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
-import Data.Maybe (fromMaybe)
 import Control.Applicative ((<|>))
 import Graphos.Domain.Graph (gNodes)
 import Graphos.Domain.Graph.Mutation (MutationSummary(..))
