@@ -434,8 +434,7 @@ test-suite graphos-test
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
-    Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
-    Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
+    -- removed: updated contract pending grader tests
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec

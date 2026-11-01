@@ -63,7 +63,7 @@ import Graphos.Domain.Types
   ( Node(..), Edge(..), Extraction(..), NodeId, FileType(..), Relation(..)
   , Confidence(..), EdgeId(..), bitNodeKind
   )
-import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId, fileModuleNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveDots)
 
@@ -622,12 +622,12 @@ importEdgesFor src rs = unzip (concatMap edgesOf rs)
   where
     edgesOf ri = case riTarget ri of
       TargetExternal name ->
-        [mk ri 1.0 Nothing (makeNodeId "external" name) name ("external:" <> name)]
+        [mk ri 1.0 Nothing (makeNodeId (mkSourceFile "external" "") "External" name) name ("external:" <> name)]
       TargetFiles fs ->
         let n = length fs
             w = 1 / fromIntegral n
         in [ mk ri w (if n > 1 then Just n else Nothing)
-                (makeNodeId f (T.pack (takeBaseName f))) (T.pack (takeBaseName f)) (T.pack f)
+                (makeNodeId (mkSourceFile f "") "Module" (T.pack (takeBaseName f))) (T.pack (takeBaseName f)) (T.pack f)
            | f <- fs ]
     mk ri w mN tid label sf =
       ( Edge

@@ -12,6 +12,8 @@ module Graphos.Infrastructure.Extract.TreeSitter.Core
   , normalizeText
   , truncateText
   , truncateWithElision
+  , SourceFile(..)
+  , mkSourceFile
   ) where
 
 import Control.Exception (catch, SomeException(..), bracket)
@@ -20,6 +22,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
+import System.FilePath (takeExtension)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
@@ -182,3 +185,46 @@ truncateWithElision maxLen t tailText
   | otherwise = 
       let headLen = max 0 (maxLen - T.length tailText - 3)
       in T.take headLen t <> "..." <> tailText
+
+-- | Source file identity (Group 3 node-identity scheme, AVI-984/AVI-973).
+-- Carries a stable directory hash, file stem, and file name so node ids do not
+-- embed the full path.
+data SourceFile = SourceFile
+  { sourcePath     :: !Text
+  , sourceDirHash  :: !Int
+  , sourceStem     :: !Text
+  , sourceFileName :: !Text
+  } deriving (Eq, Show)
+
+-- | Create a 'SourceFile' from a path. The second argument is reserved for
+-- future metadata (currently ignored) so callers may pass a content hash.
+mkSourceFile :: FilePath -> Text -> SourceFile
+mkSourceFile filePath _meta =
+  let dirPart = takeDirectory' filePath
+      stem    = takeBaseName' filePath
+      name    = takeFileName' filePath
+      dirPartT = T.pack dirPart
+      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPartT) `mod` 65536
+  in SourceFile
+       { sourcePath     = T.pack filePath
+       , sourceDirHash  = dirHash
+       , sourceStem     = T.pack stem
+       , sourceFileName = T.pack name
+       }
+
+takeDirectory' :: FilePath -> FilePath
+takeDirectory' p =
+  case break (== '/') (reverse p) of
+    (_, '/' : dirRest) -> reverse dirRest
+    _                  -> ""
+
+takeFileName' :: FilePath -> FilePath
+takeFileName' p = reverse (fst (break (== '/') (reverse p)))
+
+takeBaseName' :: FilePath -> FilePath
+takeBaseName' f =
+  let fn  = takeFileName' f
+      ext = takeExtension fn
+  in if null ext then fn
+       else let stem = take (length fn - length ext) fn
+            in if null stem then fn else stem
