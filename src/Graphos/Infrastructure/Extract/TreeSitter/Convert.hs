@@ -44,7 +44,7 @@ import Data.Text.Short (fromText, ShortText)
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Aeson (toJSON, object, (.=))
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
+
 import Data.Map (Map)
 import Data.Set (Set)
 
@@ -158,12 +158,12 @@ functionBoundaryTypes =
 -- | File-wide context for `calls` edge emission.
 data CallsCtx = CallsCtx
   { callsCtxImports  :: !(Map Text NodeId)     -- ^ import binding name -> External node id
-  , callsCtxLocal    :: !(Set Text)            -- ^ local definition names
+  , callsCtxLocal    :: !(Map Text NodeId)     -- ^ local definition name -> bounded node id
   , callsCtxInside   :: !Bool                  -- ^ threaded: inside a call subtree
   }
 
 emptyCallsCtx :: CallsCtx
-emptyCallsCtx = CallsCtx Map.empty Set.empty False
+emptyCallsCtx = CallsCtx Map.empty Map.empty False
 
 -- | Build a file-wide 'CallsCtx' from a root node: collect the file's import
 -- bindings and local definition names. `callsCtxInside` starts `False`; it is
@@ -172,7 +172,7 @@ collectCallsCtx :: FilePath -> TSNodeInfo -> CallsCtx
 collectCallsCtx filePath node =
   emptyCallsCtx
     { callsCtxImports  = Map.fromList (concatMap importBindings (tsnChildren node))
-    , callsCtxLocal    = Set.fromList (mapMaybe firstIdentOrTypeName (tsnChildren node))
+    , callsCtxLocal    = Map.fromList [ (name, seedIdFor filePath n) | n <- tsnChildren node, Just name <- [firstIdentOrTypeName n] ]
     }
   where
     -- | Identifier characters, hoisted for reuse by 'bindingNames'.
@@ -249,16 +249,17 @@ callsRelation srcId tgtId =
 --   * same-file callee that is a local definition -> in-file node
 --   * imported callee -> matching `External` node id
 --   * anything else (e.g. a global such as `Date`) -> drop
-resolveCalls :: FilePath -> CallsCtx -> Text -> TSNodeInfo -> Maybe Edge
-resolveCalls filePath ctx enclosingDef node =
+resolveCalls :: FilePath -> CallsCtx -> Maybe NodeId -> TSNodeInfo -> Maybe Edge
+resolveCalls filePath ctx enclosingId node =
   case calleeName node of
     Nothing -> Nothing
     Just calleeText ->
-      let srcId = makeNodeId filePath enclosingDef
-          tgtId = resolveCalleeTarget filePath ctx calleeText
-      in case tgtId of
-           Just calleeId -> Just (callsRelation srcId calleeId)
-           Nothing -> Nothing
+      case enclosingId of
+        Nothing     -> Nothing
+        Just srcId  ->
+          case resolveCalleeTarget filePath ctx calleeText of
+            Just calleeId -> Just (callsRelation srcId calleeId)
+            Nothing       -> Nothing
 
 -- | Resolve a callee name to a target node id.
 resolveCalleeTarget :: FilePath -> CallsCtx -> Text -> Maybe NodeId
@@ -267,8 +268,8 @@ resolveCalleeTarget filePath ctx callee
   | callee `Map.member` imports = case Map.lookup callee imports of
                                        Just calleeId -> Just calleeId
                                        Nothing -> Nothing
-  -- same-file callee that is a local definition -> in-file node
-  | callee `Set.member` local = Just (makeNodeId filePath callee)
+  -- same-file callee that is a local definition -> its bounded node id
+  | Just nid <- Map.lookup callee local = Just nid
   -- unresolvable global (e.g. Date) -> drop
   | otherwise = Nothing
   where
@@ -364,13 +365,13 @@ tsNodeToGraphNodes = tsNodeToGraphNodesX False
 tsNodeToGraphEdges
   :: Granularity -> FilePath -> Maybe NodeId -> Maybe Text -> TSNodeInfo -> ([Edge], [Node])
 tsNodeToGraphEdges gran filePath parentId parentLabel node =
-  tsNodeToGraphEdges' gran filePath (collectCallsCtx filePath node) parentId parentLabel (tsNodeLabel node) node
+  tsNodeToGraphEdges' gran filePath (collectCallsCtx filePath node) parentId parentLabel (Just (seedIdFor filePath node)) node
 
 -- | Internal recursion carrying the call context, the parent's seed id and the
 -- enclosing definition label down the tree.
 tsNodeToGraphEdges'
-  :: Granularity -> FilePath -> CallsCtx -> Maybe NodeId -> Maybe Text -> Text -> TSNodeInfo -> ([Edge], [Node])
-tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
+  :: Granularity -> FilePath -> CallsCtx -> Maybe NodeId -> Maybe Text -> Maybe NodeId -> TSNodeInfo -> ([Edge], [Node])
+tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingId node =
   let myLabel = tsNodeLabel node
       isWrapper = tsnIsNamed node && tsnType node `elem` wrapperTypes
       isDef     = (not isWrapper) && tsnType node `elem` typesFor gran && tsnIsNamed node
@@ -382,7 +383,11 @@ tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
       -- boundary) nodes unchanged; it only updates when we descend into a
       -- function/method/constructor boundary. This is the source of `calls`
       -- edges (spec: enclosing function name, or `module` for module-level).
-      childDef = if tType `elem` functionBoundaryTypes then myLabel else enclosingDef
+      -- Thread the enclosing definition's *bounded node id* down the tree, so
+      -- `calls` edges (which run through 'resolveCalls') reference the real node
+      -- ids of the enclosing function instead of a legacy path/name id.
+      childEnclosing =
+        if tType `elem` functionBoundaryTypes then Just myId else enclosingId
 
       containsEdge source target = Edge
         { edgeId        = EdgeId (source <> "->" <> target <> ":contains")
@@ -403,7 +408,7 @@ tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
       -- Calls edge (top-level call of an enclosing function only).
       callsEdges =
         if isCall && not insideCall
-           then case resolveCalls filePath ctx enclosingDef node of
+           then case resolveCalls filePath ctx enclosingId node of
                   Just e -> [e]
                   Nothing -> []
            else []
@@ -467,10 +472,10 @@ tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
       (childEdges, childNodes)
         | not (descendInto gran isDef node) = ([], [])
         | isDef = foldr (\child (es, ns) ->
-              let (e, n) = tsNodeToGraphEdges' gran filePath childCtx (Just myId) (Just myLabel) childDef child
+              let (e, n) = tsNodeToGraphEdges' gran filePath childCtx (Just myId) (Just myLabel) childEnclosing child
               in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
         | otherwise = foldr (\child (es, ns) ->
-              let (e, n) = tsNodeToGraphEdges' gran filePath childCtx parentId parentLabel childDef child
+              let (e, n) = tsNodeToGraphEdges' gran filePath childCtx parentId parentLabel childEnclosing child
               in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
 
     in (myEdges ++ callsEdges ++ bodyUseEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
