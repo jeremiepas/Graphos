@@ -51,7 +51,7 @@ import Data.Aeson (Value, object, (.=))
 import Data.Char (isAlphaNum, isSpace, isAlpha)
 import Data.List (isSuffixOf, sort)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -284,7 +284,6 @@ resolveJava file site = do
       isWild = ".*" `T.isSuffixOf` spec
       specNoWild = if isWild then T.dropEnd 2 spec else spec
       segs = T.splitOn "." specNoWild
-      pathSegs = map T.unpack segs
       -- source file for a concrete type: a/b/C.java
       concreteRel = T.unpack (T.intercalate "/" segs) ++ ".java"
       -- directory of a wildcard package import

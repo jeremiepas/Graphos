@@ -22,7 +22,7 @@ import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
-import Graphos.Domain.Config (defaultOtelConfig, defaultGraphosConfig)
+import Graphos.Domain.Config (defaultOtelConfig)
 import Graphos.Infrastructure.Logging (LogLevel(..))
 import Graphos.Infrastructure.Observability.SDK (initObservability, ObservabilityEnv(..))
 import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig)
