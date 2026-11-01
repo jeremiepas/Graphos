@@ -20,7 +20,6 @@ import Graphos.Domain.Labeling
   , LabelCacheEntry(..)
   , MatchKind(..)
   , fingerprintOf
-  , containmentRatio
   , matchCommunity
   )
 import Graphos.Domain.Community (CommunityComposition(..))
