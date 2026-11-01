@@ -8,6 +8,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..)
   , parseWithGrammar
   , defaultTruncationBudget
+  , nodeIdentityBudget
   , normalizeText
   , truncateText
   , truncateWithElision
@@ -150,6 +151,17 @@ safeNodeType ptr
 -- | Default truncation budget for extracted text.
 defaultTruncationBudget :: Int
 defaultTruncationBudget = 200
+
+-- | Budget for node identity under AVI-1452 (bounded node ids). Shared by the
+-- id's <ident>, the node label, and the node signature so they stay consistent.
+-- Capped at 60 (not the 200 readability budget). Both 'nodeLabel' and
+-- 'nodeSignature' live in a 'ShortText', whose 63-byte ceiling comfortably holds
+-- a 60-byte identity; callers that run the identity through 'truncateText'
+-- (which appends a 3-char elision "...") reserve that space so the final
+-- identity stays <= nodeIdentityBudget. The 512-byte per-node graph.json bound
+-- (task 3.3 criterion e) is satisfied with large headroom.
+nodeIdentityBudget :: Int
+nodeIdentityBudget = 60
 
 -- | Normalize text by collapsing whitespace.
 normalizeText :: Text -> Text

@@ -215,9 +215,9 @@ commutes **on the nose**: `q` identifies exactly the parallel morphisms that `ρ
 
 ### 6.2 Where the monoidal reading stops (overlap → lax merge, not a violation)
 
-**Honesty.** `mergeExtractions` is `Map.union`, which **deduplicates by key** (second-wins, AVI-524 §3.2). So on *overlapping* keys it is **not** the coproduct/disjoint union — it is the **lax colimit** of AVI-524 (§3.2). The symmetric-monoidal claim of §6.1 therefore holds **precisely on disjoint-key inputs** (independent contexts composed side-by-side = the "parallel composition" the issue targets); on overlapping keys the governing construction is the lax merge, and the two are related by the inclusion `A⊗B ↪ mergeExtractions A B` (disjoint ⊆ amalgamated). No universal-property violation: the coproduct pins disjoint inputs only.
+**Honesty.** `mergeExtractions` is `Map.union`, which **deduplicates by key** and is **first/old-wins** on conflicts (`Data.Map.union` is left-biased — the first/old operand's value survives a conflict, per the [AVI-536](/AVI/issues/AVI-536) old-wins correction and the [AVI-620](/AVI/issues/AVI-620) M-5 pin; the AVI-524 §3.2 lax-colimit reading of overlapping merges is direction-agnostic). So on *overlapping* keys it is **not** the coproduct/disjoint union — it is the **lax colimit** of AVI-524 (§3.2). The symmetric-monoidal claim of §6.1 therefore holds **precisely on disjoint-key inputs** (independent contexts composed side-by-side = the "parallel composition" the issue targets); on overlapping keys the governing construction is the lax merge, and the two are related by the inclusion `A⊗B ↪ mergeExtractions A B` (disjoint ⊆ amalgamated). No universal-property violation: the coproduct pins disjoint inputs only.
 
-> **Constrains:** `mergeExtractions` second-wins (`Core.hs:131-132`); inconsistent merge = lax colimit with `α` (AVI-524 R-RELAX). 🔧 Loop with [Graphos Dev](/AVI/agents/graphos-dev) to confirm that "parallel composition of independent contexts" is intended to mean **disjoint-key** merge (the regime where `⊗` is a true coproduct), distinct from the conflict-resolving lax merge.
+> **Constrains:** `mergeExtractions` **first/old-wins** (`Core.hs:131-132`, left-biased `Data.Map.union`); inconsistent merge = lax colimit with `α` (AVI-524 R-RELAX). 🔧 Loop with [Graphos Dev](/AVI/agents/graphos-dev) to confirm that "parallel composition of independent contexts" is intended to mean **disjoint-key** merge (the regime where `⊗` is a true coproduct), distinct from the conflict-resolving lax merge.
 
 ---
 
@@ -236,7 +236,7 @@ For every `s,t` in a fixture: `shortestPath g s t == Just _` ⟺ `s ⤳ t` (inde
 On the AVI-518 §8 golden fixture: the partition equals `{[a,b,c]],[d,e],[f]}`, condensation arcs `{a,b,c}→{d,e}→{f}` and is **acyclic** (AVI-518 Thm 2.3); and for any monotone map from `(V,⤳)` into a partial order, it factors **uniquely** through `cond(G)` (§5.1). Property-test over random directed graphs: partition uniqueness + acyclic condensation + unique factorization.
 
 ### AC-5 — Symmetric monoidal parallel composition
-For **disjoint-key** extractions `A,B`: `mergeExtractions A B == A ⊔ B` (disjoint union), associative `((A⊗B)⊗C == A⊗(B⊗C))`, unit `emptyExtraction`, swap iso `σ`. For **overlapping** keys: assert it is the **lax merge** (second-wins, AVI-524 §3.2), *not* the coproduct — i.e. `mergeExtractions A B ≠ disjointUnion(A,B)` when keys overlap, documenting the boundary (§6.2). 🔧 Confirm with Dev that disjoint-key is the intended "parallel composition" regime.
+For **disjoint-key** extractions `A,B`: `mergeExtractions A B == A ⊔ B` (disjoint union), associative `((A⊗B)⊗C == A⊗(B⊗C))`, unit `emptyExtraction`, swap iso `σ`. For **overlapping** keys: assert it is the **lax merge** (**first/old-wins** — the first/old operand's value survives the conflict, mirroring the `mergeGraphs` old-wins property test in `tests/Graphos/Domain/GraphSpec.hs`), *not* the coproduct — i.e. `mergeExtractions A B ≠ disjointUnion(A,B)` and `mergeExtractions A B ≠ mergeExtractions B A` at a conflicting key, documenting the boundary (§6.2). 🔧 Confirm with Dev that disjoint-key is the intended "parallel composition" regime.
 
 ### AC-6 — Determinism (see §10)
 Composition/reachability/condensation answers are invariant under any permutation of `gNodes`/`gEdges` keys (AVI-518 INV-9); the merge result under `foldl' mergeExtractions` is order-canonical (§10).
@@ -254,7 +254,7 @@ Composition/reachability/condensation answers are invariant under any permutatio
 | R-EXPAND | Expansion = truncated reachability `B_k(s)`; natural filtration (§4.3) | `neighborhoodExpansion` (`UseCase/Query.hs:380`) | AC-3 | structural |
 | R-SCC | `cond(G)` = coarsest symmetric quotient of `(V,⤳)`; dual to merge colimit (§5) | `stronglyConnectedComponents` (AVI-518 GAP-1) | AC-4 | structural |
 | R-PARALLEL | `(Extract,⊗,emptyExtraction)` symmetric monoidal (= coproduct); holds on disjoint keys (§6) | `mergeExtractions` (`Core.hs:129`), `emptyExtraction` (`Types/Graph.hs:54`) | AC-5 | 🔧 loop w/ Dev |
-| R-LAXBOUND | Overlap → lax merge (§6.2), not a coproduct violation | `mergeExtractions` second-wins (`Core.hs:131`) | AC-5 | 🔧 loop w/ Dev |
+| R-LAXBOUND | Overlap → lax merge (§6.2), not a coproduct violation | `mergeExtractions` first/old-wins (`Core.hs:131`) | AC-5 | 🔧 loop w/ Dev |
 
 ---
 
@@ -265,7 +265,7 @@ Composition/reachability/condensation answers are invariant under any permutatio
 - **SCC condensation as a quotient DAG.** Tarjan (1972); Kosarajan (1978) — the combinatorial construction; categorically it is the T0 reflection of reachability (§5.1).
 - **Coproduct = disjoint union; monoidal structure from coproduct.** The "cartesian/zero monoidal" shape where the unit is the initial object — standard (Mac Lane, Ch. V.3; Lack, *Fundamentals of Category Theory*). Graphos realizes the coproduct via `Map.union` on disjoint keys (`Core.hs:129`).
 - **Lax colimit / lax natural transformation** for the overlap case (AVI-524 §3.2): Street *Fibrations and Yoneda's theorem in an n-category*; Street & Walters *Fibrations = Yoneda* — "commutes only up to a chosen non-invertible 2-cell `α`."
-- **`Data.Map.union` second-wins.** `containers` library semantics, not invented here; the disjoint-key coproduct reading (§6.1) is the Graphos choice layered on top.
+- **`Data.Map.union` first/old-wins.** `containers` library semantics (left-biased union), not invented here; the disjoint-key coproduct reading (§6.1) is the Graphos choice layered on top.
 
 ---
 
@@ -273,7 +273,7 @@ Composition/reachability/condensation answers are invariant under any permutatio
 
 - **Composition / reachability / condensation answers** depend only on `(V,E)` (AVI-518 INV-8, INV-9), hence are invariant under any permutation of `gNodes`/`gEdges` keys — fully deterministic and representation-independent (§4.2, §5.1).
 - **Sequential composition** is strict (on the nose, §3.1): `(p·q)·r == p·(q·r)` holds regardless of `Map` iteration/insertion order — no tie-break needed.
-- **Parallel composition (`⊗`).** On disjoint keys `mergeExtractions` is associative + commutative up to canonical iso (sheaf local-to-global consistency, AVI-524 §10); the n-way colimit is a single `foldl' mergeExtractions` (linear, `O(Σ|Vᵢ|)`, AVI-524 AC-3). Under conflict, `Map.union` second-wins makes it order-dependent (§6.2) — a documented policy choice, tested (AC-5).
+- **Parallel composition (`⊗`).** On disjoint keys `mergeExtractions` is associative + commutative up to canonical iso (sheaf local-to-global consistency, AVI-524 §10); the n-way colimit is a single `foldl' mergeExtractions` (linear, `O(Σ|Vᵢ|)`, AVI-524 AC-3). Under conflict, `Map.union` first/old-wins makes it order-dependent (§6.2) — a documented policy choice, tested (AC-5).
 - **SCC labeling.** The *partition* is canonical/unique (AVI-518 Thm 2.2); only the integer community-labeling is order-dependent — constrain seeds to **ascending `NodeId`** (AVI-518 §9), consistent with `toCachedFGL` sequential indexing (`Analysis.hs:64`).
 - **Expansion.** `B_k(s)` depends only on `d(s,·)` over `E`; invariant under key permutation (§4.3).
 
@@ -284,7 +284,7 @@ Composition/reachability/condensation answers are invariant under any permutatio
 ## 11. Next Actions / Open Items
 
 1. **Loop the 🔧 requirements with [Graphos Dev](/AVI/agents/graphos-dev):** §6.1/AC-5 (that "parallel composition of independent contexts" means *disjoint-key* merge, distinct from the conflict-resolving lax merge of §6.2) and §3.2 (`WalkMonoid(v)` semantics for return-walk counts). Until confirmation, R-MONOID/R-PARALLEL/R-LAXBOUND are *proposed* semantics.
-2. **Property tests (AC-1, AC-3, AC-5):** random composable triples ⇒ strict assoc+unit; `shortestPath Just ⟺ ⤳`; disjoint extractions ⇒ coproduct (`⊗`), overlapping ⇒ lax merge (second-wins).
+2. **Property tests (AC-1, AC-3, AC-5):** random composable triples ⇒ strict assoc+unit; `shortestPath Just ⟺ ⤳`; disjoint extractions ⇒ coproduct (`⊗`), overlapping ⇒ lax merge (first/old-wins: the first/old operand's value survives; cf. the `GraphSpec.hs` old-wins test).
 3. **Golden-file test (AC-4):** reproduce the AVI-518 §8 partition/condensation and the unique-factorization-through-`cond(G)` property.
 4. **SCC routine (AVI-518 GAP-1):** `stronglyConnectedComponents :: Graph -> Map Int [NodeId]` (+ `WithCached`) + `shortestPathReachable`; implement with ascending-`NodeId` seeds (§10).
 5. **Consolidate notation** into `docs/math-requirements/consolidated-requirements.md` (§0) so AVI-518/511/524/525 share one glossary; add the composition objects (`Π(G)`, `WalkMonoid(v)`, `⊗`, `Rea`, `cond`) to the shared entries.

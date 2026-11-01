@@ -21,6 +21,7 @@ module Graphos.Domain.Graph.Core
     -- * Analysis helpers
   , isFileNode
   , isConceptNode
+  , isGeneratedOrVendoredNode
   , makeStubNode
   ) where
 
@@ -93,12 +94,16 @@ instance FromJSON Graph where
 -- ───────────────────────────────────────────────
 
 -- | Build a graph from an Extraction result
--- Dangling edges (referencing nodes not in extractionNodes) are silently dropped.
+-- Dangling edges (referencing nodes not in extractionNodes) are silently dropped,
+-- and self-edges (edgeSource e == edgeTarget e) are dropped as well. This keeps the
+-- support graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract
+-- (adj v v == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction =
   let nodes = extNodes extraction
       edgeList = Map.elems (extEdges extraction)
       validEdges = [e | e <- edgeList
+                      , edgeSource e /= edgeTarget e
                       , Map.member (edgeSource e) nodes
                       , Map.member (edgeTarget e) nodes]
       edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
@@ -210,12 +215,17 @@ addEdges graph edges =
       bwdUpdates = Map.fromListWith Set.union
         [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
       -- For undirected graphs, also add reverse adjacency
+      -- Merge per-node neighbour sets ('Map.unionWith'), never 'Map.union':
+      -- the left-biased union kept a node's existing set and silently dropped
+      -- every added edge incident to a node that already had neighbours, so
+      -- inferred edges were invisible to clustering and traversal.
+      merge = Map.unionWith Set.union
       (fwdAdj, bwdAdj) = if directed
-        then (Map.union (gAdjFwd graph) fwdUpdates, Map.union (gAdjBack graph) bwdUpdates)
+        then (merge (gAdjFwd graph) fwdUpdates, merge (gAdjBack graph) bwdUpdates)
         else let revFwd = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
                  revBwd = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
-             in (Map.union (gAdjFwd graph) (fwdUpdates `Map.union` revFwd)
-                , Map.union (gAdjBack graph) (bwdUpdates `Map.union` revBwd))
+             in (merge (gAdjFwd graph) (fwdUpdates `merge` revFwd)
+                , merge (gAdjBack graph) (bwdUpdates `merge` revBwd))
       newHash = computeGraphHash nodes newEdgeMap
   in graph
     { gEdges    = newEdgeMap
@@ -279,6 +289,13 @@ isConceptNode :: Node -> Bool
 isConceptNode n =
   let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
+
+-- | Check if a node is generated / vendored / minified (injected by the
+-- collapse detection pass). Such synthetic nodes carry the "Collapsed" kind
+-- marker set by 'collapsedNode'; they are excluded from god-node and bridge
+-- centrality so injected markers never dominate the structural analysis.
+isGeneratedOrVendoredNode :: Node -> Bool
+isGeneratedOrVendoredNode n = fmap toText (nodeKind n) == Just "Collapsed"
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
 -- Uses FNV-1a 32-bit, returned as 8-char hex — same scheme as resultHash in Score.hs.
