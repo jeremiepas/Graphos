@@ -42,7 +42,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, ShortText)
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
-import Data.Aeson (toJSON)
+import Data.Aeson (toJSON, object, (.=))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Map (Map)
@@ -55,7 +55,7 @@ import Graphos.Domain.Types
   , bitNodeKind, bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   )
 import Data.Bits ((.|.))
-import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision, truncateText, nodeIdentityBudget)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision, truncateText, nodeIdentityBudget, SourceFile(..), mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- | Tier 1 — file/module structure. Emitted at every granularity level.
@@ -187,8 +187,8 @@ collectCallsCtx filePath node =
     importBindings n = case extractSpecifier filePath n of
           Just (targetPath, targetName) ->
             let targetId = if "external:" `isPrefixOf` targetPath
-                            then makeNodeId "external" targetName
-                            else makeNodeId targetPath targetName
+                            then makeNodeId (mkSourceFile "external" "") "External" targetName
+                            else makeNodeId (mkSourceFile targetPath "") "Module" targetName
             in map (\b -> (b, targetId)) (bindingNames n)
           Nothing -> []
 
@@ -254,7 +254,7 @@ resolveCalls filePath ctx enclosingDef node =
   case calleeName node of
     Nothing -> Nothing
     Just calleeText ->
-      let srcId = makeNodeId filePath enclosingDef
+      let srcId = makeNodeId (mkSourceFile filePath "") "Function" enclosingDef
           tgtId = resolveCalleeTarget filePath ctx calleeText
       in case tgtId of
            Just calleeId -> Just (callsRelation srcId calleeId)
@@ -268,7 +268,7 @@ resolveCalleeTarget filePath ctx callee
                                        Just calleeId -> Just calleeId
                                        Nothing -> Nothing
   -- same-file callee that is a local definition -> in-file node
-  | callee `Set.member` local = Just (makeNodeId filePath callee)
+  | callee `Set.member` local = Just (makeNodeId (mkSourceFile filePath "") "Function" callee)
   -- unresolvable global (e.g. Date) -> drop
   | otherwise = Nothing
   where
@@ -315,31 +315,34 @@ descendInto GranularityFunction isDef node =
   not (isDef && tsnType node `elem` functionBoundaryTypes)
 
 -- | Convert a tree of TSNodeInfo into an Extraction at a given granularity.
-tsNodesToExtraction :: Granularity -> FilePath -> [TSNodeInfo] -> Extraction
-tsNodesToExtraction gran filePath nodes =
-    let results = map (\node ->
-            ( tsNodeToGraphNodes gran filePath node
+tsNodesToExtraction :: SourceFile -> Granularity -> Int -> [TSNodeInfo] -> Extraction
+tsNodesToExtraction sourceFile gran _budget nodes =
+    let filePath = T.unpack (sourcePath sourceFile)
+        results = map (\node ->
+            ( tsNodeToGraphNodes gran filePath False node
             , tsNodeToGraphEdges gran filePath Nothing Nothing node )) nodes
         graphNodes = concatMap fst results
         extraNodes = concatMap (snd . snd) results
         graphEdges = concatMap (fst . snd) results
-        -- Deterministic in-file collision pass: append `#L<line>` to colliding
-        -- node ids and rewire contains edges so the bounded ids stay
-        -- consistent. Applied to the node/edge lists *before*
-        -- 'extractionFromLists' so true in-file collisions (same seed id) are
-        -- disambiguated, not collapsed by Map.fromList.
         (finalNodes, finalEdges) = applyCollisionRanks (graphNodes ++ extraNodes) graphEdges
     in extractionFromLists finalNodes finalEdges
 
 -- | Convert a TSNodeInfo and its children into Graphos Nodes and Edges.
-tsNodeToGraphNodes :: Granularity -> FilePath -> TSNodeInfo -> [Node]
-tsNodeToGraphNodes gran filePath node =
-  let isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
-      self = [makeNode filePath node | isDef]
+tsNodeToGraphNodes :: Granularity -> FilePath -> Bool -> TSNodeInfo -> [Node]
+tsNodeToGraphNodes gran filePath exportedCtx node =
+  let wrapper = tsnType node `elem` ["export_statement", "decorated_definition"]
+      isDef = (not wrapper) && tsnType node `elem` typesFor gran && tsnIsNamed node
+      childExported = exportedCtx || wrapper
+      selfNodes = if wrapper
+             then []
+             else [if exportedCtx
+                    then (makeNode filePath node) { nodeExtra = Just (object ["exported" .= (True :: Bool)]) }
+                    else makeNode filePath node
+                  | isDef]
       children = if descendInto gran isDef node
-        then concatMap (tsNodeToGraphNodes gran filePath) (tsnChildren node)
+        then concatMap (tsNodeToGraphNodes gran filePath childExported) (tsnChildren node)
         else map (makeNode filePath) (opaqueBodyUses gran isDef node)
-  in self ++ children
+  in selfNodes ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
 --
@@ -362,7 +365,8 @@ tsNodeToGraphEdges'
   :: Granularity -> FilePath -> CallsCtx -> Maybe NodeId -> Maybe Text -> Text -> TSNodeInfo -> ([Edge], [Node])
 tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
   let myLabel = tsNodeLabel node
-      isDef     = tsnType node `elem` typesFor gran && tsnIsNamed node
+      wrapper = tsnType node `elem` ["export_statement", "decorated_definition"]
+      isDef     = (not wrapper) && tsnType node `elem` typesFor gran && tsnIsNamed node
       tType     = tsnType node
       myId      = seedIdFor filePath node
       isCall    = tType == "call_expression" || tType == "new_expression"
@@ -469,12 +473,12 @@ tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
     importSource :: NodeId
     importSource = case parentId of
       Just p   -> p
-      Nothing  -> makeNodeId filePath (fromMaybe "" parentLabel)
+      Nothing  -> makeNodeId (mkSourceFile filePath "") "Module" (fromMaybe "" parentLabel)
 
     importTargetId :: FilePath -> Text -> NodeId
     importTargetId targetPath targetName
-      | "external:" `isPrefixOf` targetPath = makeNodeId "external" targetName
-      | otherwise = makeNodeId targetPath targetName
+      | "external:" `isPrefixOf` targetPath = makeNodeId (mkSourceFile "external" "") "External" targetName
+      | otherwise = makeNodeId (mkSourceFile targetPath "") "Module" targetName
 
 -- | Extract the import/export specifier: the direct @string@ child of the
 -- declaration node — i.e. the import path (the token after @from@).
@@ -550,27 +554,38 @@ opaqueBodyUses _ _ _ = []
 -- bit is set so 'computePresentBits' / the JGF FromJSON round-trip preserves it.
 makeNode :: FilePath -> TSNodeInfo -> Node
 makeNode filePath node =
-    let sf = mkSourceFile filePath
+    let sf = mkSourceFile filePath ""
         line = tsnStartRow node + 1
         text' = tsNodeUntruncatedLabel node
-        -- 'truncateText' appends a 3-char elision "...", so reserve it and keep
-        -- the final <ident> — and the label/signature derived from it — within
-        -- nodeIdentityBudget (AVI-1452). See Core.truncateText.
-        elisionBudget = 3
-        ident = truncateText (nodeIdentityBudget - elisionBudget) text'
+        identifier = extractIdentifier filePath node
+        ident = truncateText (nodeIdentityBudget - 3) identifier
         kindText = T.pack (tsTypeToKind (tsnType node))
         kind  = fromText kindText
+        isStructure = tsnType node `elem` structureTypes
+        -- signatures: module/structure nodes -> Nothing; imports/exports -> elision preserving tail;
+        -- others -> bounded normalized decl text.
+        sigText = if isStructure
+                    then Nothing
+                    else Just (fromText
+                               (if tsnType node `elem` importExportTypes
+                                 then truncateWithElision defaultTruncationBudget text' (extractTail text')
+                                 else (let txt = text' in
+                                        if T.length txt <= defaultTruncationBudget
+                                        then txt
+                                        else truncateWithElision defaultTruncationBudget txt "")))
     in Node
          { nodeId           = nodeKeyId sf kindText ident line 0
-         , nodeLabel        = fromText ident
+         , nodeLabel        = fromText identifier
          , nodeFileType     = CodeFile
          , nodeSourceFile   = fromText (T.pack filePath)
          , nodeSource       = Nothing
          , nodeLineStart    = Just line
          , nodeLineEnd      = Just (tsnEndRow node + 1)
          , nodeKind         = Just kind
-         , nodeSignature    = Just (fromText ident)
-         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|. bitNodeSignature
+         , nodeSignature    = sigText
+         , nodePresentBits  = if isStructure
+                               then bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
+                               else bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|. bitNodeSignature
          , nodeCommunityId  = Nothing
          , nodeDegree       = Nothing
          , nodeIsBridge     = Nothing
@@ -583,11 +598,9 @@ makeNode filePath node =
 -- append a `#L<line>` suffix to disambiguate in-file collisions.
 seedIdFor :: FilePath -> TSNodeInfo -> NodeId
 seedIdFor filePath node =
-    let sf     = mkSourceFile filePath
+    let sf     = mkSourceFile filePath ""
         kindText = T.pack (tsTypeToKind (tsnType node))
-        -- Reserve elision space so the final <ident> stays within
-        -- nodeIdentityBudget (see makeNode).
-        ident    = truncateText (nodeIdentityBudget - 3) (tsNodeUntruncatedLabel node)
+        ident    = truncateText (nodeIdentityBudget - 3) (extractIdentifier filePath node)
         line     = tsnStartRow node + 1
     in nodeKeyId sf kindText ident line 0
 
@@ -667,22 +680,72 @@ tsNodeUntruncatedLabel node =
   let raw = let t = tsnText node in if T.null t then T.pack (tsnType node) else t
   in normalizeText raw
 
--- | Get a display label for a node — use text if available, otherwise type.
--- For imports/exports, preserves the specifier via middle-elision.
-tsNodeLabel :: TSNodeInfo -> Text
-tsNodeLabel node =
-  let untruncated = tsNodeUntruncatedLabel node
-      tType = tsnType node
-  in if tType `elem` importExportTypes && T.length untruncated > defaultTruncationBudget
-     then truncateWithElision defaultTruncationBudget untruncated (extractTail untruncated)
-     else untruncated
+-- | Canonical identifier extraction (task 3.1). Used for both 'nodeLabel' and
+-- the identity's <ident> part. Structure nodes take the file stem; import and
+-- re-export nodes take the resolved-ish raw specifier; other nodes take the
+-- first named identifier-class child, falling back to a keyword-stripped first
+-- token.
+extractIdentifier :: FilePath -> TSNodeInfo -> Text
+extractIdentifier filePath node
+  | tsnType node `elem` structureTypes =
+      let stem = sourceStem (mkSourceFile filePath "")
+      in if T.null stem then firstToken (tsNodeUntruncatedLabel node) else stem
+  | tsnType node `elem` importExportTypes =
+      case extractRawSpecifier node of
+        "" -> firstToken (tsNodeUntruncatedLabel node)
+        s  -> s
+  | otherwise =
+      case findIdentChild (tsnChildren node) of
+        Just c  -> normalizeText (tsnText c)
+        Nothing -> keywordStrippedIdent (tsNodeUntruncatedLabel node)
 
--- | Extract the 'from <specifier>' part of a declaration.
+-- | First named identifier-class child of a declaration (direct children only).
+findIdentChild :: [TSNodeInfo] -> Maybe TSNodeInfo
+findIdentChild xs =
+  case filter (\c -> tsnType c `elem` ["identifier","type_identifier","property_identifier","field_identifier","name"]) xs of
+    (c : _) -> Just c
+    []      -> Nothing
+
+extractRawSpecifier :: TSNodeInfo -> Text
+extractRawSpecifier node =
+  case firstChildOfType "string" (tsnChildren node) of
+    Just c ->
+      let s = stripQuotes (normalizeText (tsnText c))
+      in if T.null s then parseSpecifierFromText node else s
+    Nothing -> parseSpecifierFromText node
+
+parseSpecifierFromText :: TSNodeInfo -> Text
+parseSpecifierFromText node =
+  let t = tsNodeUntruncatedLabel node
+  in case T.breakOnEnd "from " t of
+       (_, suffix) | not (T.null suffix) -> stripQuotes (T.strip suffix)
+       _ -> T.empty
+
+-- | Display label: now the extracted identifier. Kept as a thin wrapper so
+-- existing callers that only have the node still get a usable label.
+tsNodeLabel :: TSNodeInfo -> Text
+tsNodeLabel node = extractIdentifier "" node
+
+-- | Keyword-stripped first token heuristic for identifier-less nodes.
+firstToken :: Text -> Text
+firstToken t = case T.words t of (w : _) -> w; _ -> t
+
+keywordStrippedIdent :: Text -> Text
+keywordStrippedIdent t =
+  let toks = T.words t
+      stripped = dropWhile (`elem` ["export","async","function","class","const","let","var","default","abstract","public","private","static","trait","interface","type","enum","struct","impl","module"]) toks
+  in case stripped of
+       (w : _) -> w
+       _       -> firstToken t
+
+-- | Extract the 'from <specifier>' part of a declaration, normalized across
+-- newlines (the input is assumed already normalized; we still normalize).
 extractTail :: Text -> Text
 extractTail t =
-  case T.breakOnEnd "from " t of
-    (prefix, suffix) | not (T.null prefix) -> "from " <> suffix
-    _ -> ""
+  let n = normalizeText t
+  in case T.breakOnEnd "from " n of
+       (prefix, suffix) | not (T.null prefix) && not (T.null suffix) -> "from " <> T.strip suffix
+       _ -> ""
 
 -- | Convert tree-sitter type to human-readable kind.
 tsTypeToKind :: String -> String
@@ -818,15 +881,16 @@ tsTypeToKind t = case t of
   _ -> t
 
 -- | Create a node ID from file path and name.
-makeNodeId :: FilePath -> Text -> NodeId
-makeNodeId filePath name =
-  let normalizedName = normalizeText name
-      stem = T.pack $ takeWhile (/= '.') $ reverse $ takeWhile (/= '/') $ reverse filePath
-      dirPart = reverse $ dropWhile (/= '/') $ reverse filePath
-      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart) `mod` 65536)
-      hashPrefix = T.pack $ show dirHash
+makeNodeId :: SourceFile -> Text -> Text -> NodeId
+makeNodeId sourceFile kind ident =
+  let normalizedName = normalizeText ident
+      dirPart = T.unpack (sourcePath sourceFile)
+      dirPart' = reverse (dropWhile (/= '/') (reverse dirPart))
+      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) (T.pack dirPart')) `mod` 65536
+      stem = sourceStem sourceFile
+      hashPrefix = T.pack (show dirHash)
       safeName = T.filter (\c -> c /= '"' && c /= '\'' && c /= '`') normalizedName
-   in hashPrefix <> "_" <> stem <> "_" <> safeName
+   in hashPrefix <> "_" <> stem <> "_" <> kind <> ":" <> safeName
 
 -- ---------------------------------------------------------------------------
 -- Group 3 node identity (AVI-984 / AVI-973)
@@ -837,54 +901,8 @@ makeNodeId filePath name =
 -- 'makeNodeId' behaviour.
 -- ---------------------------------------------------------------------------
 
--- | Identifies a source file for the identity scheme. `sourceDirHash` is a
--- small, stable fingerprint of the directory so that two files with the same
--- stem never collide even when they share a working tree.
-data SourceFile = SourceFile
-  { sourcePath     :: !Text
-  , sourceDirHash  :: !Int
-  , sourceStem     :: !Text
-  , sourceFileName :: !Text
-  }
 
-mkSourceFile :: FilePath -> SourceFile
-mkSourceFile filePath =
-  let dirPart = T.pack (takeDirectory' filePath)
-      stem    = T.pack (takeBaseName' filePath)
-      name    = T.pack (takeFileName' filePath)
-      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPart) `mod` 65536
-  in SourceFile
-       { sourcePath     = T.pack filePath
-       , sourceDirHash  = dirHash
-       , sourceStem     = stem
-       , sourceFileName = name
-       }
-
--- | Directory portion of a path (everything before its final '/').
-takeDirectory' :: FilePath -> FilePath
-takeDirectory' p =
-  case break (== '/') (reverse p) of
-    (_, '/' : dirRest) -> reverse dirRest
-    _                  -> ""
-
--- | File name portion of a path (its final component).
-takeFileName' :: FilePath -> FilePath
-takeFileName' p = reverse (fst (break (== '/') (reverse p)))
-
--- | File stem (file name without its final extension), matching
--- 'System.FilePath.takeBaseName': only the final extension is removed, and a
--- dotfile such as @.bashrc@ (no dot past position 0) is left untouched.
-takeBaseName' :: FilePath -> FilePath
-takeBaseName' f =
-  let fn  = takeFileName' f
-      ext = takeExtension fn
-  in if null ext then fn
-       else let stem = take (length fn - length ext) fn
-            in if null stem then fn else stem
-
--- | Stable identifier for a node under the AVI-1452 bounded-identity scheme.
--- When `rank > 0` the declaration gets a file-wide `#L<line>` suffix so that
--- in-file collisions are disambiguated deterministically.
+-- | Stable identifier for a node under the bounded-identity scheme.
 nodeKeyId :: SourceFile -> Text -> Text -> Int -> Int -> NodeId
 nodeKeyId sourceFile kind ident line rank =
   let dirHash' = T.pack (show (sourceDirHash sourceFile))

@@ -30,6 +30,7 @@ import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Map (Map)
 import Data.Text.Short (fromText, toText)
@@ -46,6 +47,7 @@ import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
@@ -407,7 +409,7 @@ applyTaggingSources (Just prov) ext =
   where
     tagNode n = case Map.lookup (toText (nodeSourceFile n)) prov of
       Just (srcName, qPath) ->
-        let newNid  = makeNodeId (T.unpack qPath) (toText (nodeLabel n))
+        let newNid  = makeNodeId (mkSourceFile (T.unpack qPath) "") (fromMaybe "Module" (fmap toText (nodeKind n))) (toText (nodeLabel n))
             tagged  = n { nodeId           = newNid
                       , nodeSource       = Just (fromText srcName)
                       , nodeSourceFile   = fromText qPath
