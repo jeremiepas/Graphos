@@ -19,6 +19,15 @@ feature/AVI-XXX (or fix/AVI-XXX)  --PR-->  main  --tag vX.Y.Z-->  release CI  --
 - Production-affecting or cross-project merges additionally require explicit CTO comment
   approval on the lane before merge.
 
+### Merge SLA (gatekeeper-exclusive, adopted 2026-11-01 via AVI-1782)
+
+- Green + approved PRs are merged by `merge-gatekeeper` within 24 h, oldest-first.
+- After each merge, re-check remaining open PRs and file rebase tasks for any new conflicts.
+- Only `merge-gatekeeper` merges; no direct pushes to `main`.
+- Queue state (oldest-first) and SLA compliance are reported in the merge-gate / audit
+  comments. Every open PR carries a merge-gate issue blocked-by its review issue; gate issues
+  close on merge.
+
 ## 2. Versioning
 
 - Tags: `vX.Y.Z` on `main` (annotated). Pre-1.0: **PATCH** for fixes, **MINOR** for features
