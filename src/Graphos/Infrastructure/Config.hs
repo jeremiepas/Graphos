@@ -66,6 +66,7 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
    )
 
 import Graphos.Domain.Config.Detection (DetectionConfig(..))
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..))
 
 -- ───────────────────────────────────────────────
 -- Configuration file format (YAML)
@@ -89,6 +90,7 @@ data ConfigFile = ConfigFile
   , cfVision            :: Maybe VisionConfig
    , cfIngest            :: Maybe IngestConfig
    , cfDetection         :: Maybe DetectionConfig
+    , cfClustering        :: Maybe ClusteringConfig
    , cfMemory            :: Maybe MemoryConfig
    , cfSources           :: Maybe [SourceConfig]
    , cfOutput            :: Maybe FilePath
@@ -112,6 +114,7 @@ instance FromJSON ConfigFile where
      <*> v .:? "vision"
      <*> v .:? "ingest"
      <*> v .:? "detection"
+      <*> v .:? "clustering"
      <*> v .:? "memory"
      <*> v .:? "sources"
      <*> v .:? "output"
@@ -246,6 +249,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcDetection = case cfDetection cfgFile of
       Just det -> det
       Nothing   -> gcDetection defaults
+   , gcClustering = case cfClustering cfgFile of
+       Just cl -> cl
+       Nothing  -> gcClustering defaults
   , gcMemory = case cfMemory cfgFile of
       Just mem -> mem
       Nothing  -> gcMemory defaults

@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 on:
   push:
     branches: ["main", "develop"]
@@ -15,19 +17,24 @@ jobs:
     if: github.actor == 'jeremiepas'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: devenv
 
-      - name: Install devenv.sh
-        run: nix profile add nixpkgs#devenv
+      - name: Install devenv.sh (nixpkgs rev from devenv.lock)
+        # AVI-1521: pin the bootstrap to devenv.lock's nixpkgs rev, never the
+        # floating `nixpkgs` channel.
+        run: |
+          rev=$(jq -r '.nodes.nixpkgs.locked.rev' devenv.lock)
+          echo "Bootstrapping devenv from nixpkgs@${rev}"
+          nix profile add "github:NixOS/nixpkgs/${rev}#devenv"
 
       - name: Restore cabal store cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.local/state/cabal/store
@@ -44,7 +51,7 @@ jobs:
         run: devenv tasks run ci:build
 
       - name: Upload build products
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: build-products
           # cabal.project.local is written by `cabal configure` and carries the
@@ -64,37 +71,42 @@ jobs:
 
       - name: Upload binary artifact
         if: success() && github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: graphos-bin
           path: dist/release/graphos-linux-x86_64
           retention-days: 14
 
-      - name: Install OpenSpec CLI
-        run: npm install -g openspec
-
       - name: Validate OpenSpec changes
         continue-on-error: true
-        run: openspec validate --changes --json
+        # AVI-1521: use the openspec pinned by devenv.lock (devenv.nix already
+        # provides it in the dev shell) instead of an unversioned global npm
+        # install that ran whatever the registry served that day.
+        run: devenv shell -- openspec validate --changes --json
 
   test:
     if: github.actor == 'jeremiepas'
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: devenv
 
-      - name: Install devenv.sh
-        run: nix profile add nixpkgs#devenv
+      - name: Install devenv.sh (nixpkgs rev from devenv.lock)
+        # AVI-1521: pin the bootstrap to devenv.lock's nixpkgs rev, never the
+        # floating `nixpkgs` channel.
+        run: |
+          rev=$(jq -r '.nodes.nixpkgs.locked.rev' devenv.lock)
+          echo "Bootstrapping devenv from nixpkgs@${rev}"
+          nix profile add "github:NixOS/nixpkgs/${rev}#devenv"
 
       - name: Restore cabal store cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.local/state/cabal/store
@@ -108,7 +120,7 @@ jobs:
             cabal-${{ runner.os }}-ghc910-
 
       - name: Download build products
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: build-products
           # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
@@ -132,19 +144,24 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: devenv
 
-      - name: Install devenv.sh
-        run: nix profile add nixpkgs#devenv
+      - name: Install devenv.sh (nixpkgs rev from devenv.lock)
+        # AVI-1521: pin the bootstrap to devenv.lock's nixpkgs rev, never the
+        # floating `nixpkgs` channel.
+        run: |
+          rev=$(jq -r '.nodes.nixpkgs.locked.rev' devenv.lock)
+          echo "Bootstrapping devenv from nixpkgs@${rev}"
+          nix profile add "github:NixOS/nixpkgs/${rev}#devenv"
 
       - name: Restore cabal store cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.local/state/cabal/store
@@ -158,7 +175,7 @@ jobs:
             cabal-${{ runner.os }}-ghc910-
 
       - name: Download build products
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: build-products
           # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).
@@ -213,7 +230,7 @@ jobs:
           done
 
       - name: Upload graphos fixtures
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: graphos-fixture
           path: graphos-fixture/
@@ -228,18 +245,18 @@ jobs:
     needs: fixture
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
       - name: Download graphos fixtures
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: graphos-fixture
           path: graphos-fixture
 
       - name: Restore elm package cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.elm
           key: elm-${{ runner.os }}-${{ hashFiles('studio/elm.json') }}
@@ -264,19 +281,24 @@ jobs:
     if: github.event_name == 'push' && github.actor == 'jeremiepas'
     needs: build
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
 
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: devenv
 
-      - name: Install devenv.sh
-        run: nix profile add nixpkgs#devenv
+      - name: Install devenv.sh (nixpkgs rev from devenv.lock)
+        # AVI-1521: pin the bootstrap to devenv.lock's nixpkgs rev, never the
+        # floating `nixpkgs` channel.
+        run: |
+          rev=$(jq -r '.nodes.nixpkgs.locked.rev' devenv.lock)
+          echo "Bootstrapping devenv from nixpkgs@${rev}"
+          nix profile add "github:NixOS/nixpkgs/${rev}#devenv"
 
       - name: Restore cabal store cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.local/state/cabal/store
@@ -290,7 +312,7 @@ jobs:
             cabal-${{ runner.os }}-ghc910-
 
       - name: Download build products
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: build-products
           # Artifact root is the repo root (dist-newstyle/ + cabal.project.local).

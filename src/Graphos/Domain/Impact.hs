@@ -42,15 +42,12 @@ import Graphos.Domain.Graph.Diff (graphDiff)
 import Graphos.Domain.Types.Graph (GraphDiff (..))
 import Graphos.Domain.Types.Node
   ( Node, nodeKind, nodeLabel, nodeSignature
-  , nodeSourceFile, nodeLineStart, nodeLineEnd, nodeExtra )
+  , nodeSourceFile, nodeLineStart, nodeLineEnd, nodeBodyHash )
 import Graphos.Domain.Types.Edge
   ( Edge, edgeRelation, Relation (Calls, Implements, References, Maps, DependsOn) )
 import Graphos.Domain.IntentCheck
   ( SpecDocument, Verdict, docSpecs, evaluateSpec, holds, witnesses )
-import qualified Data.Aeson as Aeson
 import Data.Text.Short (toText)
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 
 -- | A change is a before / after pair of projections.
@@ -75,14 +72,10 @@ stableNodeKey n =
   , bodyHash n
   )
 
--- | Body identity carried under @body_hash@ in @nodeExtra@ (optional field from
+-- | Body identity carried under @body_hash@ in 'nodeExtra' (optional field from
 -- the graph-json-contract). Absent ⇒ Nothing.
 bodyHash :: Node -> Maybe Text
-bodyHash n = case nodeExtra n of
-  Just (Aeson.Object km) -> case KM.lookup (Key.fromText "body_hash") km of
-    Just (Aeson.String t) -> Just t
-    _                       -> Nothing
-  _                        -> Nothing
+bodyHash n = fmap toText (nodeBodyHash n)
 
 -- | Outgoing edges of a node.
 outEdges :: Graph -> Text -> [Edge]

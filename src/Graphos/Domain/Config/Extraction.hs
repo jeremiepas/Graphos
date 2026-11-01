@@ -177,6 +177,10 @@ defaultExtractors = Map.fromList
   , (".cpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
   , (".h",   ExtractorConfig ExtractTreeSitter (Just "c")   (Just "c") Nothing)
   , (".hpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".cc",  ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".cxx", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".hh",  ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , (".hxx", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
     -- Nix: tree-sitter (zero-dependency; uncomment for LSP)
   , (".nix", ExtractorConfig ExtractTreeSitter (Just "nix") (Just "nix") Nothing)
     -- Ruby: tree-sitter (zero-dependency; uncomment for LSP)
@@ -186,6 +190,11 @@ defaultExtractors = Map.fromList
     -- JSON: tree-sitter parser; data files collapse to one node per file
     -- so lock files and config JSON do not inflate the graph
   , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
+    -- YAML: same data-file treatment as JSON (one node per document stream)
+  , (".yaml",ExtractorConfig ExtractTreeSitter (Just "yaml") (Just "yaml") (Just GranularityFile))
+  , (".yml", ExtractorConfig ExtractTreeSitter (Just "yaml") (Just "yaml") (Just GranularityFile))
+    -- SQL: tree-sitter (DDL statements become tables/functions/types)
+  , (".sql", ExtractorConfig ExtractTreeSitter (Just "sql") (Just "sql") Nothing)
     -- Markdown: use tree-sitter mode with built-in parser
     -- (no external LSP server needed for docs)
   , (".md",  ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "markdown") Nothing)
@@ -318,6 +327,9 @@ defaultFileExtensions = FileExtensionConfig
                 , ".rb", ".cs", ".kt", ".kts", ".scala", ".php", ".swift", ".lua", ".zig", ".hs", ".lhs"
                 , ".ex", ".exs", ".m", ".mm", ".jl", ".vue", ".svelte", ".dart", ".ps1"
                  , ".nix"  -- Nix DSL
+                 , ".cc", ".cxx", ".hh", ".hxx"  -- C++ (vendored tree-sitter-cpp)
+                 , ".yaml", ".yml"               -- YAML (vendored tree-sitter-yaml)
+                 , ".sql"                        -- SQL (vendored tree-sitter-sql)
                  ]
   , fecDoc   = [ ".md", ".txt", ".rst", ".adoc", ".org"
                , ".text", ".raml"  -- NEW

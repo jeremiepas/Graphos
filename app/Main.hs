@@ -7,7 +7,7 @@ import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
@@ -24,6 +24,14 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
+import OpenSpecView.ChangeList (readAllChangeInfos, ChangeInfo(..))
+import OpenSpecView.ArtifactView (displayChangeArtifacts)
+import OpenSpecView.SpecDiff (diffPaths, renderSpecDiff)
+import OpenSpecView.StateDashboard (showDashboard)
+import Graphos.UseCase.IntentCheck (runIntentCheck, renderIntentReport, reportVerdict, violatedSpecs, runProbes, irRows, ProbeSummary(..))
+import Graphos.UseCase.Impact (runImpact, renderImpactReport, reportAdmissible, runImpactGate)
+import Graphos.Domain.Impact (Discharge(..), stableSignature)
+import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
 import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
@@ -66,11 +74,12 @@ import Graphos.Infrastructure.Observability.SDK
   , defaultOtelConfig
   )
 import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ccMaxCommunityFraction, ccCommunityCapEnabled, validClusteringConfig)
 import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
-import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
+import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig, resolveWatchPaths)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
@@ -302,12 +311,18 @@ main = do
                        Nothing -> if null (obsDebugTraceDir obsCfg)
                                     then outputDir ++ "/traces"
                                     else obsDebugTraceDir obsCfg
+          baseCc       = gcClustering graphosCfg
+          effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
+          effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
+          effCc        = ClusteringConfig effFraction effEnabled
           config' = config { cfgOutputDir    = outputDir
                            , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
                             , cfgActiveBudgetBytes = activeBudget
+                            , cfgMaxCommunityFraction = ccMaxCommunityFraction effCc
+                            , cfgCommunityCapEnabled  = ccCommunityCapEnabled effCc
                             }
       -- Fail-fast on a corrupt existing graph.json before doing any work.
       -- Strict by default; pass --no-strict-graph for tolerant loading.
@@ -327,6 +342,13 @@ main = do
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
           appEnv = productionAppEnv env obsEnv
+
+      -- Validate the effective community-size-cap config; fail fast if mis-set.
+      case validClusteringConfig effCc of
+        Left err -> do
+          logError env $ "[graphos] Invalid community-size-cap config: " <> T.pack err
+          exitWith (ExitFailure 1)
+        Right _ -> pure ()
       when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
@@ -350,14 +372,26 @@ main = do
                    logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
                    -- Start watcher
                    shutdownVar <- newMVar ()
-                   watchDirectory (cfgInputPath config') (\changedFiles -> do
-                     let filesList = T.splitOn ", " (T.pack changedFiles)
-                     logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
-                     incResult <- runIncrementalPipeline appEnv config' (map T.unpack filesList)
-                     case incResult of
-                       Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
-                       Right _ -> logInfo env "[watch] Incremental update complete"
-                     ) defaultGraphosWatchConfig shutdownVar
+                   let sourceConfigs = gcSources graphosCfg
+                   if null sourceConfigs
+                     then do
+                       let onChange sp = do
+                             let filePaths = map snd sp
+                             logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
+                             incResult <- runIncrementalPipeline appEnv config' filePaths
+                             case incResult of
+                               Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                               Right _ -> logInfo env "[watch] Incremental update complete"
+                       watchDirectory (cfgInputPath config') onChange defaultGraphosWatchConfig shutdownVar
+                     else do
+                       let onChange sp = do
+                             let filePaths = resolveWatchPaths sourceConfigs sp
+                             logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
+                             incResult <- runIncrementalPipeline appEnv config' filePaths
+                             case incResult of
+                               Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                               Right _ -> logInfo env "[watch] Incremental update complete"
+                       watchSources sourceConfigs onChange defaultGraphosWatchConfig shutdownVar
               else do
                 -- Normal mode: run once and exit
                 logInfo env "Starting pipeline..."
@@ -761,6 +795,7 @@ main = do
       env <- defaultLogEnv logLevel
       obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
       let appEnv = productionAppEnv env obsEnv
+
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of
@@ -816,6 +851,79 @@ main = do
             then BL.putStr (encode (filterReport checks report)) >> putStrLn ""
             else TIO.putStrLn (renderSpecReport (filterReport checks report))
           if reportGates report then exitWith (ExitFailure 1) else exitSuccess
+
+    IntentcheckCmd specsFile graphPath probePaths asJson -> do
+      specsBytes <- BL.readFile specsFile
+      case parseSpecDocument specsBytes of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] intentcheck: failed to parse specs JSON: " ++ err
+          exitWith (ExitFailure 1)
+        Right doc -> do
+          mainLoad <- loadGraphFromFile graphPath
+          case mainLoad of
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] intentcheck: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right mainResult -> do
+              let g = lrGraph mainResult
+                  report = runIntentCheck g doc (T.pack graphPath)
+              forM_ probePaths $ \p -> do
+                rl <- loadGraphFromFile (T.unpack p)
+                case rl of
+                  Left err -> hPutStrLn stderr ("[graphos] intentcheck: probe " ++ T.unpack p ++ ": " ++ T.unpack err)
+                  Right pg -> do
+                    let summ = case runProbes g doc p (irRows report) [lrGraph pg] of
+                               (s:_) -> s
+                               []    -> ProbeSummary T.empty [] True
+                    when (not (prMatches summ)) $
+                      hPutStrLn stderr ("[graphos] intentcheck [non-triviality]: probe " ++ T.unpack p ++ " differs from main graph")
+              if asJson
+                then BL.putStr (encode report) >> putStrLn ""
+                else TIO.putStrLn (renderIntentReport report)
+              if reportVerdict report
+                then exitSuccess
+                else do
+                  hPutStrLn stderr "[graphos] intentcheck: violated specs:"
+                  let msgs =
+                        [ "  " ++ maybe "(unnamed)" (("'" ++) . T.unpack) nm
+                            ++ if null (witnesses v) then ""
+                               else " — violating nodes: " ++ T.unpack (T.intercalate ", " (witnesses v))
+                        | (nm, v) <- violatedSpecs report ]
+                  mapM_ (hPutStrLn stderr) msgs
+                  exitWith (ExitFailure 1)
+
+    ImpactCmd beforePath afterPath ackIds mSpecsFile mNewSpec asJson asGate -> do
+      bLoad <- loadGraphFromFile beforePath
+      case bLoad of
+        Left err -> do
+          hPutStrLn stderr $ "[graphos] impact: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right bResult -> do
+          aLoad <- loadGraphFromFile afterPath
+          case aLoad of
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] impact: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right aResult -> do
+              let d = Discharge ackIds [stableSignature]
+                  rep = runImpact (lrGraph bResult) (lrGraph aResult) d
+              (admissible, failures, gateReport) <-
+                case mSpecsFile of
+                  Nothing -> pure (reportAdmissible rep, [], rep)
+                  Just sf -> do
+                    sb <- BL.readFile (T.unpack sf)
+                    case parseSpecDocument sb of
+                      Left err -> do
+                        hPutStrLn stderr ("[graphos] impact: failed to parse specs JSON: " ++ err)
+                        exitWith (ExitFailure 1)
+                      Right doc -> pure (runImpactGate (lrGraph bResult) (lrGraph aResult) d (Just doc) mNewSpec)
+              if asJson
+                then BL.putStr (encode gateReport) >> putStrLn ""
+                else TIO.putStrLn (renderImpactReport gateReport)
+              mapM_ (\f -> hPutStrLn stderr ("[graphos] impact: " ++ show f)) failures
+              if asGate && not admissible
+                then exitWith (ExitFailure 1)
+                else exitSuccess
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
       case mConfigPath of
@@ -908,6 +1016,24 @@ main = do
       let ref = CommandReference renderCommandReference
       runInstallSkill "0.1.0.0" target ref
 
+    ViewCmd sub -> do
+      case sub of
+        ViewChanges root -> do
+          infos <- readAllChangeInfos root
+          putStrLn (renderChangesList infos)
+        ViewArtifacts dir -> displayChangeArtifacts dir
+        ViewDiff delta basePath -> do
+          result <- diffPaths delta basePath
+          case result of
+            Left err -> do
+              hPutStrLn stderr ("diff: " ++ err)
+              exitWith (ExitFailure 1)
+            Right changes -> putStrLn (renderSpecDiff specName changes)
+              where specName = reverse (takeWhile (/= '/') (reverse delta))
+        ViewDashboard root -> do
+          out <- showDashboard root
+          putStrLn out
+
   where
     opts = info (commandOpts <**> helper)
       ( fullDesc
@@ -928,6 +1054,28 @@ toLabeledGraph gr = LG.LabeledGraph
   , LG.gAdjFwd  = gAdjFwd gr
   , LG.gAdjBack = gAdjBack gr
   }
+
+
+-- ───────────────────────────────────────────────
+-- openspec view changes — compact change listing
+-- ───────────────────────────────────────────────
+
+renderChangesList :: [ChangeInfo] -> String
+renderChangesList infos =
+  unlines $
+    [ "OpenSpec Changes"
+    , "----------------"
+    , ""
+    ]
+    ++ map renderRow infos
+    ++ [""]
+  where
+    rpad :: Int -> String -> String
+    rpad n s = let l = length s in if l >= n then s else replicate (n - l) ' ' ++ s
+    renderRow ci =
+      changeName ci ++ "  "
+      ++ rpad 12 (changeStatus ci) ++ "  "
+      ++ rpad 6 (show (changeCompleted ci) ++ "/" ++ show (changeTotal ci))
 
 
 -- ───────────────────────────────────────────────
