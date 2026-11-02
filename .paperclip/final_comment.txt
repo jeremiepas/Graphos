@@ -1,0 +1,9 @@
+AVI-2013 merge gate resolved:
+- PR #155 "AVI-1841: reconcile AVI-984-group3-convert-wip with origin/main (dev integration)" merged into main
+- Merge commit 76d4496: preserves ec385f5 as ancestor, fast-forward from fae5517
+- Review lane AVI-1949 sign-off: diff approved (drop unused containmentRatio import in LabelingSpec)
+- All CI checks passed: build, test (1504 examples, 0 failures, 3 pending), fixture, studio-contract, openspec-archived, prepare, workflow-pinning
+- Verification: `cabal build` green, `cabal test` PASS
+- No changes needed beyond the approved diff
+- Merge-gate lane unblocked; task disposition terminalized
+- Work product: pull_request #155 merged on GitHub
