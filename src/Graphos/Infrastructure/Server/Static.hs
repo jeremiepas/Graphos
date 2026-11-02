@@ -5,6 +5,7 @@ module Graphos.Infrastructure.Server.Static
   ) where
 
 import Network.Wai
+import Data.String (fromString)
 import Network.Wai.Handler.Warp (runSettings, setPort, setHost, setBeforeMainLoop, defaultSettings)
 import Network.HTTP.Types (status200, status404, status405, hContentType, methodGet, methodOptions)
 import qualified Data.ByteString.Char8 as BS8
@@ -71,14 +72,14 @@ startStaticServer dir port = do
   env <- defaultLogEnv LogInfo
   let app = staticApp dir
       warpSettings = setPort port
-                   $ setHost "0.0.0.0"
+                   $ setHost "127.0.0.1"
                    $ setBeforeMainLoop (logInfo env $ T.pack $ "Serving " ++ dir ++ " at http://localhost:" ++ show port ++ "/graph.html")
                    $ defaultSettings
   runSettings warpSettings app
 
 -- | Combined static + query API server.
-startServeServer :: FilePath -> FilePath -> Int -> Bool -> Bool -> IO ()
-startServeServer dir graphPath port apiOnly noApi = do
+startServeServer :: FilePath -> FilePath -> Int -> Bool -> Bool -> String -> IO ()
+startServeServer dir graphPath port apiOnly noApi bindHost = do
   env <- defaultLogEnv LogInfo
   loadResult <- loadGraphFromFile graphPath
   case loadResult of
@@ -89,8 +90,8 @@ startServeServer dir graphPath port apiOnly noApi = do
       ref <- newIORef lr
       let app = serveApp dir graphPath ref apiOnly noApi
           warpSettings = setPort port
-                       $ setHost "0.0.0.0"
-                       $ setBeforeMainLoop (logInfo env $ T.pack $ "Serving " ++ dir ++ " + API on http://localhost:" ++ show port)
+                       $ setHost (fromString bindHost)
+                       $ setBeforeMainLoop (logInfo env $ T.pack $ "Serving " ++ dir ++ " + API on http://" ++ bindHost ++ ":" ++ show port)
                        $ defaultSettings
       runSettings warpSettings app
 
