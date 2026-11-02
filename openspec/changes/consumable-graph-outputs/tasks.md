@@ -2,9 +2,12 @@
 
 ## 1. Subcommand help (smallest, unblocks discovery of everything else)
 
-### 1.1 Helper on every registration
-- [ ] Add `<**> helper` to the nine bare `info` registrations in `CLI/Parser.hs` (`cypher`, `push`, `push-memgraph`, `merge`, `ingest`, `subgraph`, `serve`, `init`, `install-skill`)
-- [ ] Usage examples in the footers of `subgraph`, `cypher` (and `diff` when it lands)
+### 1.2 Usage examples in the footers
+- [x] Add `<**> helper` to the nine bare `info` registrations in `CLI/Parser.hs` (`cypher`, `push`, `push-memgraph`, `merge`, `ingest`, `subgraph`, `serve`, `init`, `install-skill`)
+  - Added `<**> helper` to `cypher`, `push`, `push-memgraph`, `merge`, `ingest`, `subgraph`, `serve`, `init`, and `install-skill` command registrations
+- [x] Add usage examples in the footers of `subgraph` and `cypher`
+  - Added `footer "Example: graphos subgraph --seeds nodes.txt --hops 2"` to subgraph command
+  - Added `footer "Example: graphos cypher --json \"MATCH (n) RETURN n\""` to cypher command
 - [ ] Hspec parser test: every registered subcommand answers `--help` with its own text (structural — fails on a future helper-less registration)
 - [ ] Check: `graphos subgraph --help` and `graphos cypher --help` show their own flags, not the top-level list
 
