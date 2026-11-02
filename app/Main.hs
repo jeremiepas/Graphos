@@ -975,9 +975,9 @@ main = do
           putStrLn $ "[graphos] Nodes: " ++ show (Map.size (gNodes g))
                      ++ ", edges: " ++ show (Map.size (gEdges g))
 
-    Serve dir graphPath port apiOnly noApi -> do
-      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
-      startServeServer dir graphPath port apiOnly noApi
+    Serve dir graphPath port apiOnly noApi host -> do
+      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port ++ " (host " ++ host ++ ")"
+      startServeServer dir graphPath port apiOnly noApi host
 
     Init agentsOpt -> do
       initConfigFile
