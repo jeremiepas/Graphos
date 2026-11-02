@@ -408,6 +408,7 @@ test-suite graphos-test
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
+    Graphos.Infrastructure.Critique.LeanSpec
      Graphos.UseCase.PipelineSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
@@ -521,6 +522,9 @@ test-suite graphos-test
      , wai                  >= 3.2
      , http-types           >= 0.12
      , yaml                 >= 0.11
+
+  if flag(lean-critique)
+    cpp-options: -DLEAN_CRITIQUE
 
 test-suite graphos-test-focus
   import:         shared
