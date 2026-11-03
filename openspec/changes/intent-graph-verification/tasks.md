@@ -115,13 +115,19 @@
 - [x] `openspec validate intent-graph-verification` passes; tick every scenario in the
        PR description
 
-> **Unit 5 + conformance completion note (2026-10-16)** — CLI and conformance are
-> implemented and verified. `cabal build lib:graphos exe:graphos` green under `-Werror`;
-> `openspec validate intent-graph-verification` passes; `lake build` succeeds (exit 0).
-> The four `sorry`s at lines 336/343/350/365 are the pre-existing, documented O1–O4
-> obligations (task 1.2), not in scope here. `cabal test` is blocked by two untracked
-> unit-3 spec files (`tests/Graphos/Domain/Intent/Intent/{Classifier,Projection}Spec.hs`)
-> that declare module names not matching their path and import unit-3 modules
-> (`Graphos.Domain.Intent.Classifier/.Projection`) which are themselves uncommitted and
-> do not compile under `-Werror` (`No instance for 'Eq KindRule'`, Classifier.hs:109).
-> Those are out of scope for AVI-963 (unit 5); wiring them requires closing unit 3.
+> **Unit 5 + conformance completion note (2026-11-03 refresh)** — CLI and conformance
+> are implemented and verified end-to-end on this branch:
+> - `graphos intentcheck --specs ... [--graph G] [--probe G]... [--json]`: clean graph
+>   exits 0 (`verdict: PASS`, 4 specs); `--json` emits a single JSON document.
+> - `graphos impact --before G --after G' ... [--gate]`: omission (schema field
+>   without contract field, `graph-omission.json`) rejected → exit 1
+>   (`NewSpecViolated (Just "schemaContract") "6"`); admitted (`graph-admitted.json`)
+>   → exit 0; acks recorded in the report (audit trail).
+> - Conformance fixtures: `conformance/{graph-before,graph-omission,graph-admitted,intent-specs}.json`.
+> - Gates: `cabal build` green under `-Werror`; `cabal test` green (1501 examples, 0 failures,
+>   3 pending) — previously blocked by untracked unit-3 spec files, now green on `main`.
+> - `cd lean && lake build` exits 0 (4 pre-existing `sorry`s at lines 336/343/350/365
+>   are the documented O1–O4 obligations, task 1.2, owned by graph-theory-expert / head-rnd;
+>   out of AVI-963 unit-5 scope — hence the `[ ]` box above is knowingly left open).
+> - `openspec validate intent-graph-verification` → "Change 'intent-graph-verification' is valid."
+> Residual (out of scope): zero-`sorry` (task 1.2 / O1–O4). No force-release; tracked separately.
