@@ -13,10 +13,12 @@ on:
     branches: ["main", "develop"]
     paths:
       - "formalization/lean/**"
+      - "openspec/changes/intent-graph-verification/lean/**"
       - ".github/workflows/lean.yml"
   pull_request:
     paths:
       - "formalization/lean/**"
+      - "openspec/changes/intent-graph-verification/lean/**"
       - ".github/workflows/lean.yml"
 
 concurrency:
@@ -85,6 +87,53 @@ jobs:
 
       - name: check the pinned fixture table is current (AVI-1301)
         run: lake exe modularity-crosscheck --check crosscheck/q-lean.tsv
+
+      - name: Report package identity
+        if: always()
+        run: lake env lean --version
+
+  intent-graph-lean-build:
+    name: lake build (intent-graph-verification, report-only)
+    runs-on: ubuntu-latest
+    # Report-only, non-gating (continue-on-error): a red result is a signal for
+    # the R&D cell, not a release gate. Verifies the dependency-free Lean 4 model
+    # under an elan-launched toolchain (Lean >= 4.29).
+    # Requirements: openspec/changes/intent-graph-verification/lean/README.md
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: openspec/changes/intent-graph-verification/lean
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # AVI-1521 (SEC-2): bootstrap elan from an immutable release asset with a
+      # pinned SHA-256 instead of piping a moving-branch script into a shell.
+      - name: Install elan (pinned release + checksum)
+        working-directory: .
+        env:
+          ELAN_VERSION: v4.2.4
+          ELAN_SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
+        run: |
+          curl -sSfL -o elan-init.tar.gz \
+            "https://github.com/leanprover/elan/releases/download/${ELAN_VERSION}/elan-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ELAN_SHA256}  elan-init.tar.gz" | sha256sum -c -
+          tar xzf elan-init.tar.gz elan-init
+          ./elan-init -y --default-toolchain none
+          rm -rf elan-init elan-init.tar.gz
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache toolchain and lake build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.elan/toolchains
+            openspec/changes/intent-graph-verification/lean/.lake
+          key: igv-lean-${{ runner.os }}-${{ hashFiles('openspec/changes/intent-graph-verification/lean/lean-toolchain', 'openspec/changes/intent-graph-verification/lean/lakefile.toml', 'openspec/changes/intent-graph-verification/lean/lake-manifest.json') }}
+          restore-keys: |
+            igv-lean-${{ runner.os }}-
+
+      - name: lake build
+        run: lake build
 
       - name: Report package identity
         if: always()
