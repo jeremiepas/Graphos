@@ -20,7 +20,12 @@ module Graphos.CLI.Parser
   , ingestOpts
   , subgraphOpts
   , migrateGraphOpts
+  , speccheckOpts
+  , intentcheckOpts
+  , impactOpts
   , commandOpts
+  , initOpts
+  , installSkillOpts
   , granularityReader
     -- * Install-skill target
   , InstallSkillTarget(..)
@@ -36,7 +41,7 @@ import Text.Read (readMaybe)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), FormatOpt(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Domain.Config.Detection (DetectionMode(..))
@@ -56,7 +61,7 @@ data Command
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
-  | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
+  | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool [Text] (Maybe FilePath)
   | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
   | IntentcheckCmd FilePath FilePath [Text] Bool
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
@@ -186,13 +191,20 @@ heapSizeReader s = case span (`notElem` ['G','g','M','m']) s of
     [(n, "")] -> Right (round (n :: Double))
     _ -> Left $ "Cannot parse heap size: " ++ s ++ ". Expected a number with optional G/M suffix (e.g. 1G, 512M, 2048)"
 
+formatOptReader :: String -> Either String FormatOpt
+formatOptReader s = case map toLower s of
+  "json"   -> Right FormatJson
+  "csv"    -> Right FormatCsv
+  "tsv"    -> Right FormatTsv
+  other    -> Left $ "Unknown format: " ++ other ++ ". Expected json, csv, or tsv."
+
 edgeModeReader :: ReadM EdgeMode
 edgeModeReader = eitherReader $ \s -> case s of
   "semantic" -> Right Semantic
   "all"      -> Right All
   other      -> Left $ "Unknown edge mode: " ++ other ++ ". Expected semantic or all"
 
--- | Shared query-family flags: --graph, --budget, --json, --label-width, --edges.
+-- | Shared query-family flags: --graph, --budget, --json, --format, --label-width, --edges.
 -- Reused by query/path/explain/symbols/neighbors so every command in the family
 -- accepts the same machine-readable flag surface (query-cli-contract).
 commonQueryOptsP :: Parser CommonQueryOpts
@@ -200,6 +212,8 @@ commonQueryOptsP = CommonQueryOpts
   <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
   <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
   <*> switch (long "json" <> help "Output as JSON")
+  -- | Select output format: json, csv, or tsv. --json is equivalent to --format json.
+  <*> option (eitherReader formatOptReader) (long "format" <> value FormatTsv <> help "Output format: json|csv|tsv (default: tsv)")
   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
   <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
@@ -230,6 +244,7 @@ researchOpts =
         { cqoGraphPath   = graphPath
         , cqoBudget      = 2000
         , cqoJson        = False
+        , cqoFormat      = FormatTsv
         , cqoLabelWidth  = 120
         , cqoEdges       = Semantic
         , cqoStrictGraph = False
@@ -324,6 +339,8 @@ subgraphOpts = SubgraphCmd
   <*> strOption (long "out" <> short 'o' <> value "graphos-out/subgraph.json" <> help "Output graph.json path (default: graphos-out/subgraph.json)")
   <*> option auto (long "boundary-hops" <> value 1 <> help "Boundary expansion hops over imports edges (default: 1)")
   <*> switch (long "no-derive" <> help "Disable deriving imports edges from Import nodes")
+  <*> many (strOption (long "path" <> metavar "PATTERN" <> help "Path pattern for subsystem selection (repeatable)"))
+  <*> optional (strOption (long "seeds" <> metavar "FILE" <> help "File containing seed terms, one per line"))
 
 speccheckOpts :: Parser Command
 speccheckOpts = SpeccheckCmd
@@ -387,25 +404,25 @@ migrateGraphOpts = MigrateGraphCmd
 commandOpts :: Parser Command
 commandOpts = subparser
   ( command "query" (info (queryOpts <**> helper) (progDesc "Query the knowledge graph"))
-  <> command "cypher" (info cypherOpts (progDesc "Run an openCypher/GQL query (read-only unless --write)"))
+  <> command "cypher" (info (cypherOpts <**> helper) (progDesc "Run an openCypher/GQL query (read-only unless --write)" <> footer "Example: graphos cypher --json \"MATCH (n) RETURN n\""))
   <> command "path"  (info (pathOpts <**> helper) (progDesc "Find shortest path between two nodes"))
   <> command "explain" (info (explainOpts <**> helper) (progDesc "Explain a node"))
   <> command "symbols" (info (symbolsOpts <**> helper) (progDesc "Look up an exact symbol by name"))
   <> command "neighbors" (info (neighborsOpts <**> helper) (progDesc "Expand neighborhood around a node"))
-  <> command "push"  (info pushOpts (progDesc "Push graph.json to Neo4j (no extraction needed)"))
-  <> command "push-memgraph" (info pushMemgraphOpts (progDesc "Push graph.json to Memgraph (no extraction needed)"))
-  <> command "merge" (info mergeOpts (progDesc "Merge two graph.json files into one"))
-  <> command "ingest" (info ingestOpts (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
-  <> command "subgraph" (info subgraphOpts (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json"))
+  <> command "push"  (info (pushOpts <**> helper) (progDesc "Push graph.json to Neo4j (no extraction needed)"))
+  <> command "push-memgraph" (info (pushMemgraphOpts <**> helper) (progDesc "Push graph.json to Memgraph (no extraction needed)"))
+  <> command "merge" (info (mergeOpts <**> helper) (progDesc "Merge two graph.json files into one"))
+  <> command "ingest" (info (ingestOpts <**> helper) (progDesc "Ingest a single file into the knowledge graph (optionally with embeddings)"))
+  <> command "subgraph" (info (subgraphOpts <**> helper) (progDesc "Extract a path/taxonomy-driven subgraph from a graph.json" <> footer "Example: graphos subgraph --seeds nodes.txt --hops 2"))
   <> command "migrate-graph" (info migrateGraphOpts (progDesc "Upgrade a legacy graph.json to the JGF envelope format (in place unless --output)" <> footer "Example: graphos migrate-graph graphos-out/graph.json"))
   <> command "speccheck" (info (speccheckOpts <**> helper) (progDesc "Verify spec artifacts: dependency cycles, contradiction candidates, coverage, stale ADRs" <> footer "Example: graphos speccheck --specs openspec --json"))
   <> command "intentcheck" (info (intentcheckOpts <**> helper) (progDesc "Verify intent specs against a graph: violated spec -> non-zero exit, all pass -> zero" <> footer "Example: graphos intentcheck --specs specs.json --graph graphos-out/graph.json"))
   <> command "impact" (info (impactOpts <**> helper) (progDesc "Analyze change impact obligations: per-node discharge status, --gate exits non-zero unless admissible" <> footer "Example: graphos impact --before before.json --after after.json --gate"))
   <> command "view" (info (viewOpts <**> helper) (progDesc "View OpenSpec changes, artifacts, diffs, and dashboard"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
-  <> command "serve" (info serveOpts (progDesc "Serve HTML graph output via HTTP"))
-    <> command "init" (info initOpts (progDesc "Generate a graphos.yaml config file"))
-    <> command "install-skill" (info installSkillOpts (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
+  <> command "serve" (info (serveOpts <**> helper) (progDesc "Serve HTML graph output via HTTP"))
+    <> command "init" (info (initOpts <**> helper) (progDesc "Generate a graphos.yaml config file"))
+    <> command "install-skill" (info (installSkillOpts <**> helper) (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
     <> command "research" (info (researchOpts <**> helper) (progDesc "Multi-query knowledge research with subgraph extraction"))
     )
   <|> Run <$> pipelineOpts

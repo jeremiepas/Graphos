@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 -- | Graphos CLI - main entry point
 module Main where
 
@@ -34,7 +35,7 @@ import Graphos.Domain.Impact (Discharge(..), stableSignature)
 import Graphos.Domain.IntentCheck (parseSpecDocument, witnesses)
 import Graphos.Domain.Types (PipelineConfig(..), Node(..), Edge(..), relationToText, edgeConfidence, Detection(..), emptyExclusionCounts, defaultConfig, Analysis(..), NullModel(..))
 import qualified Graphos.Domain.Types.Graph as LG (LabeledGraph(..))
-import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
+import Graphos.UseCase.Subgraph (extractSubgraph, SeedEntry, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
@@ -48,7 +49,7 @@ import Graphos.Domain.Config (defaultLabelingConfig)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
-import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
+import Graphos.Domain.Query.Cypher.Eval (evaluateStatement, mrResult)
 import qualified Graphos.Domain.Query.Cypher.Eval as MutEval (mrGraph)
 import Graphos.UseCase.Query.Research (buildResearchViewIO)
 import Graphos.Domain.Community (computeCompositions)
@@ -58,7 +59,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors
 import Graphos.Domain.Graph.Analysis (articulationPoints, toCachedFGL)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), FormatOpt(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderCypherResultText, renderCypherResultJSON, renderCypherResultCSV)
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
@@ -478,9 +479,14 @@ main = do
               _ -> case evaluateStatement budget st g idx of
                 Left err -> (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Cypher error: " ++ T.unpack err
                 Right mr -> do
-                  if cqoJson copts
-                    then putStrLn $ T.unpack $ renderMutationResultJSON mr
-                    else putStrLn $ T.unpack $ renderMutationResultText budget mr
+                  -- | Determine output format: --json or --format json => JSON,
+                  -- --format csv => CSV, otherwise TSV (default).
+                  -- --json is equivalent to --format json.
+                  let effectiveFormat = if cqoJson copts then FormatJson else cqoFormat copts
+                  case effectiveFormat of
+                    FormatJson -> putStrLn $ T.unpack $ renderCypherResultJSON (mrResult mr)
+                    FormatCsv  -> putStrLn $ T.unpack $ renderCypherResultCSV (mrResult mr)
+                    FormatTsv  -> putStrLn $ T.unpack $ renderCypherResultText budget (mrResult mr)
                   when allowWrite $ case st of
                     MutStatement _ -> do
                       res <- persistMutatedGraph graphPath loaded (MutEval.mrGraph mr)
@@ -924,12 +930,10 @@ main = do
                 then exitWith (ExitFailure 1)
                 else exitSuccess
 
-    SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
-      case mConfigPath of
-        Nothing -> do
-          hPutStrLn stderr "[graphos] subgraph: --config is required (JSON: named subsystems with path patterns)"
-          exitWith (ExitFailure 1)
-        Just configPath -> do
+    SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive pathPatterns seedFilePaths -> do
+      case (mConfigPath, pathPatterns, seedFilePaths) of
+        -- Mode 1: --config JSON file
+        (Just configPath, _, _) -> do
           putStrLn $ "[graphos] Subgraph: loading " ++ graphPath
           loadResult <- loadGraphFromFile graphPath
           case loadResult of
@@ -949,6 +953,51 @@ main = do
                            ++ " nodes, " ++ show (Map.size (LG.gEdges sub)) ++ " edges"
                   exportSubgraphJSON sub outPath
                   putStrLn $ "[graphos] Subgraph written to " ++ outPath
+        -- Mode 2: --path and/or --seeds seed mode (no --config needed)
+        (Nothing, patterns, seedFilePaths) -> do
+          putStrLn $ "[graphos] Subgraph: loading " ++ graphPath
+          loadResult <- loadGraphFromFile graphPath
+          case loadResult of
+            Left err -> do
+              putStrLn $ "Error: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right loaded -> do
+              -- Collect seed patterns from --path and --seeds FILE
+              seedPatterns <- pure patterns
+              case seedFilePaths of
+                Just sf -> do
+                  seedFileContent <- BL.readFile sf
+                  let filePatterns = lines . filter (/='#') . filter (/='\r') . T.unpack $ seedFileContent
+                      allPatterns = patterns ++ map T.pack filePatterns
+                  let subCfg = SubgraphConfig
+                        { scSubsystems = []
+                        , scMaxHops = boundaryHops
+                        , scIncludeDerived = not noDerive
+                        , scSeedEntries = map (\p -> SeedEntry p "path") allPatterns
+                        }
+                      sub = extractSubgraph (toLabeledGraph (lrGraph loaded)) subCfg
+                  putStrLn $ "[graphos] Subgraph: " ++ show (Map.size (LG.gNodes sub))
+                           ++ " nodes, " ++ show (Map.size (LG.gEdges sub)) ++ " edges"
+                  exportSubgraphJSON sub outPath
+                  putStrLn $ "[graphos] Subgraph written to " ++ outPath
+                Nothing -> do
+                  -- Only --path patterns provided, no --seeds FILE
+                  let allPatterns = patterns
+                      subCfg = SubgraphConfig
+                        { scSubsystems = []
+                        , scMaxHops = boundaryHops
+                        , scIncludeDerived = not noDerive
+                        , scSeedEntries = map (\p -> SeedEntry p "path") allPatterns
+                        }
+                      sub = extractSubgraph (toLabeledGraph (lrGraph loaded)) subCfg
+                  putStrLn $ "[graphos] Subgraph: " ++ show (Map.size (LG.gNodes sub))
+                           ++ " nodes, " ++ show (Map.size (LG.gEdges sub)) ++ " edges"
+                  exportSubgraphJSON sub outPath
+                  putStrLn $ "[graphos] Subgraph written to " ++ outPath
+        -- Mode 3: seedless invocation - error
+        (Nothing, [], Nothing) -> do
+          hPutStrLn stderr "[graphos] subgraph: error: no seed form specified. Use --path PATTERN, --seeds FILE, or --config CONFIG."
+          exitWith (ExitFailure 1)
 
     LServers -> do
       putStrLn "[graphos] Discovering available LSP servers..."

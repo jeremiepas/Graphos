@@ -1,0 +1,1 @@
+resolutionNote: PR #124 (security/AVI-1487-eliminate-curl-credentials) reviewed and APPROVED. All three attack surfaces resolved: credentials routed off argv via curl --config files, payloads written to private mode-0600 temp files with auto-cleanup. No new runtime dependencies. Review complete per earlier successful runs. Session usage limit caused retry; work was already done.
