@@ -21,6 +21,7 @@ module Graphos.Domain.Graph.Core
     -- * Analysis helpers
   , isFileNode
   , isConceptNode
+  , isGeneratedOrVendoredNode
   , makeStubNode
   ) where
 
@@ -288,6 +289,13 @@ isConceptNode :: Node -> Bool
 isConceptNode n =
   let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
+
+-- | Check if a node is generated / vendored / minified (injected by the
+-- collapse detection pass). Such synthetic nodes carry the "Collapsed" kind
+-- marker set by 'collapsedNode'; they are excluded from god-node and bridge
+-- centrality so injected markers never dominate the structural analysis.
+isGeneratedOrVendoredNode :: Node -> Bool
+isGeneratedOrVendoredNode n = fmap toText (nodeKind n) == Just "Collapsed"
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
 -- Uses FNV-1a 32-bit, returned as 8-char hex — same scheme as resultHash in Score.hs.
