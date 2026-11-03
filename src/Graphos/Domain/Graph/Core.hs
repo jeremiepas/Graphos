@@ -21,6 +21,7 @@ module Graphos.Domain.Graph.Core
     -- * Analysis helpers
   , isFileNode
   , isConceptNode
+  , isGeneratedOrVendoredNode
   , makeStubNode
   ) where
 
@@ -93,12 +94,16 @@ instance FromJSON Graph where
 -- ───────────────────────────────────────────────
 
 -- | Build a graph from an Extraction result
--- Dangling edges (referencing nodes not in extractionNodes) are silently dropped.
+-- Dangling edges (referencing nodes not in extractionNodes) are silently dropped,
+-- and self-edges (edgeSource e == edgeTarget e) are dropped as well. This keeps the
+-- support graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract
+-- (adj v v == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction =
   let nodes = extNodes extraction
       edgeList = Map.elems (extEdges extraction)
       validEdges = [e | e <- edgeList
+                      , edgeSource e /= edgeTarget e
                       , Map.member (edgeSource e) nodes
                       , Map.member (edgeTarget e) nodes]
       edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
@@ -284,6 +289,13 @@ isConceptNode :: Node -> Bool
 isConceptNode n =
   let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
+
+-- | Check if a node is generated / vendored / minified (injected by the
+-- collapse detection pass). Such synthetic nodes carry the "Collapsed" kind
+-- marker set by 'collapsedNode'; they are excluded from god-node and bridge
+-- centrality so injected markers never dominate the structural analysis.
+isGeneratedOrVendoredNode :: Node -> Bool
+isGeneratedOrVendoredNode n = fmap toText (nodeKind n) == Just "Collapsed"
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
 -- Uses FNV-1a 32-bit, returned as 8-char hex — same scheme as resultHash in Score.hs.

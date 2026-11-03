@@ -13,40 +13,51 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   ( tsNodesToExtraction
   , tsNodeToGraphNodes
   , tsNodeToGraphEdges
+  , applyCollisionRanks
   , definitionTypes
   , structureTypes
   , apiSurfaceTypes
+  , wrapperTypes
   , importExportTypes
   , implementationDetailTypes
   , functionBoundaryTypes
     , makeNodeId
+    , makeNode
     , fileModuleNode
     , tsNodeLabel
     , tsNodeUntruncatedLabel
-    -- | Group 3 node-identity helpers (AVI-984): stable identity scheme
-    --   <dirHash>_<stem>_<kind>:<ident> with file-wide collision ranks.
+    , nodeIdentityBudget
+    , nodeIdentifier
+    -- | Node-identity helpers: stable `<dirHash>_<stem>_<kind>:<ident>`
+    -- scheme (AVI-1452). 'nodeKeyId' emits the seed id (rank 0); the
+    -- deterministic in-file collision pass appends `#L<line>` ranks later.
     , SourceFile(..)
     , mkSourceFile
     , nodeKeyId
-   ) where
+    ) where
 
 
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, find, sortBy, groupBy)
+import Data.Ord (comparing)
 import System.FilePath (takeExtension)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText)
-import Data.Maybe (fromMaybe)
-import Data.Aeson (toJSON)
+import Data.Text.Short (fromText, ShortText)
+import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Aeson (toJSON, object, (.=))
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import Data.Map (Map)
+import Data.Set (Set)
 
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
   ( Node(..), Edge(..), Extraction(..), extractionFromLists
   , NodeId, FileType(..), Relation(..), Confidence(..), EdgeId(..)
-  , bitNodeKind, bitNodeLineStart, bitNodeLineEnd
+  , bitNodeKind, bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   )
 import Data.Bits ((.|.))
-import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision, truncateText, nodeIdentityBudget, extractIdentifier)
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- | Tier 1 — file/module structure. Emitted at every granularity level.
@@ -69,7 +80,7 @@ apiSurfaceTypes =
   , "class_declaration", "class_definition", "class"
   , "interface_declaration", "interface_definition", "interface"
   , "type_declaration", "type_alias_declaration", "type_definition"
-  , "type_alias", "type_item", "type_identifier"
+  , "type_alias", "type_item"
   , "enum_declaration", "enum_definition", "enum"
   , "enum_item"
   , "variable_declaration", "lexical_declaration", "variable_declarator"
@@ -136,8 +147,158 @@ functionBoundaryTypes =
   , "create_function_statement"   -- SQL
   ]
 
--- | All node types that can represent definitions (fine level).
--- Kept for backward compatibility and as the fine-level whitelist.
+-- ---------------------------------------------------------------------------
+-- Group 4 call edges (AVI-1447)
+--
+-- A file-wide context threaded through 'tsNodeToGraphEdges' that carries the
+-- file's import bindings and local definition names, used for best-effort,
+-- name-based callee resolution. The threaded "inside a call" flag suppresses
+-- calls nested inside a call's arguments (only the top-level call of an
+-- enclosing function is emitted).
+-- ---------------------------------------------------------------------------
+
+-- | File-wide context for `calls` edge emission.
+data CallsCtx = CallsCtx
+  { callsCtxImports  :: !(Map Text NodeId)     -- ^ import binding name -> External node id
+  , callsCtxLocal    :: !(Set Text)            -- ^ local definition names
+  , callsCtxInside   :: !Bool                  -- ^ threaded: inside a call subtree
+  }
+
+emptyCallsCtx :: CallsCtx
+emptyCallsCtx = CallsCtx Map.empty Set.empty False
+
+-- | Build a file-wide 'CallsCtx' from a root node: collect the file's import
+-- bindings and local definition names. `callsCtxInside` starts `False`; it is
+-- threaded down the recursion by 'tsNodeToGraphEdges'.
+collectCallsCtx :: FilePath -> TSNodeInfo -> CallsCtx
+collectCallsCtx filePath node =
+  emptyCallsCtx
+    { callsCtxImports  = Map.fromList (concatMap importBindings (tsnChildren node))
+    , callsCtxLocal    = Set.fromList (mapMaybe firstIdentOrTypeName (tsnChildren node))
+    }
+  where
+    -- | Identifier characters, hoisted for reuse by 'bindingNames'.
+    identChars :: String
+    identChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$"
+
+    -- | Import binding name(s) -> External node id. Returns one pair per
+    -- binding in the import (fixes multi-binding destructured imports such as
+    -- `import { a, b }`, where the old single-binding version registered only
+    -- the first). Every binding collapses onto the same resolved External node.
+    importBindings :: TSNodeInfo -> [(Text, NodeId)]
+    importBindings n = case extractSpecifier filePath n of
+          Just (targetPath, targetName) ->
+            let targetId = if "external:" `isPrefixOf` targetPath
+                            then makeNodeId "external" targetName
+                            else makeNodeId targetPath targetName
+            in map (\b -> (b, targetId)) (bindingNames n)
+          Nothing -> []
+
+    -- | Local binding name(s) of an import node: every identifier used in this
+    -- file to refer to an imported symbol (best-effort, name-based).
+    --
+    -- For `import Foo` this returns `[Foo]`; for `{ a, b }` destructured
+    -- imports it returns both bindings. Best-effort: extract every identifier
+    -- run in the import text preceding the `from <specifier>` (the specifier is
+    -- a string literal, so it never contributes identifiers).
+    bindingNames :: TSNodeInfo -> [Text]
+    bindingNames n =
+      let txt      = normalizeText (tsnText n)
+          afterImp = T.drop (T.length "import") txt
+          body     = T.strip (fst (T.breakOnEnd "from" afterImp))
+      in identifierRuns body
+
+    -- | All maximal identifier runs in a text (e.g. the bindings of an import).
+    identifierRuns :: Text -> [Text]
+    identifierRuns t =
+      let t' = T.dropWhile (`notElem` identChars) t
+      in case T.uncons t' of
+           Just (c, rest)
+             | c `elem` identChars ->
+                 let run = T.cons c (T.takeWhile (`elem` identChars) rest)
+                 in run : identifierRuns rest
+           _ -> []
+
+    -- | Local definition name (skips imports, which carry a long specifier
+    -- text). Returns the binding name of a definition node when it is named
+    -- and is not itself an import/export specifier.
+    firstIdentOrTypeName :: TSNodeInfo -> Maybe Text
+    firstIdentOrTypeName n =
+      let t = tsnType n
+      in if t `elem` typesFor GranularityFine
+             && tsnIsNamed n
+             && t `notElem` importExportTypes
+           then Just (tsNodeLabel n)
+           else Nothing
+
+-- | Build a single `calls` edge from an enclosing-definition source id to a
+-- resolved callee target id, matching the LSP `parseIncomingCall` shape.
+callsRelation :: NodeId -> NodeId -> Edge
+callsRelation srcId tgtId =
+  Edge
+    { edgeId        = EdgeId (srcId <> "->call:" <> tgtId)
+    , edgeSource    = srcId
+    , edgeTarget    = tgtId
+    , edgeRelation  = Calls
+    , edgeConfidence = Confidence 0.9
+    , edgeWeight    = 0.9
+    , edgeExtra     = Nothing
+    }
+
+-- | Resolve the callee of a `call_expression`/`new_expression` to a `calls`
+-- edge, or drop the edge (best-effort, name-based resolution).
+--
+--   * same-file callee that is a local definition -> in-file node
+--   * imported callee -> matching `External` node id
+--   * anything else (e.g. a global such as `Date`) -> drop
+resolveCalls :: FilePath -> CallsCtx -> Text -> TSNodeInfo -> Maybe Edge
+resolveCalls filePath ctx enclosingDef node =
+  case calleeName node of
+    Nothing -> Nothing
+    Just calleeText ->
+      let srcId = makeNodeId filePath enclosingDef
+          tgtId = resolveCalleeTarget filePath ctx calleeText
+      in case tgtId of
+           Just calleeId -> Just (callsRelation srcId calleeId)
+           Nothing -> Nothing
+
+-- | Resolve a callee name to a target node id.
+resolveCalleeTarget :: FilePath -> CallsCtx -> Text -> Maybe NodeId
+resolveCalleeTarget filePath ctx callee
+  -- imported callee -> the External node produced by resolveImport/extractSpecifier
+  | callee `Map.member` imports = case Map.lookup callee imports of
+                                       Just calleeId -> Just calleeId
+                                       Nothing -> Nothing
+  -- same-file callee that is a local definition -> in-file node
+  | callee `Set.member` local = Just (makeNodeId filePath callee)
+  -- unresolvable global (e.g. Date) -> drop
+  | otherwise = Nothing
+  where
+    imports = callsCtxImports ctx
+    local   = callsCtxLocal ctx
+
+-- | The callee name of a call/new node: the first `identifier` in its subtree
+-- (the class name for `new Foo()`, the receiver for `receiver.method()`).
+calleeName :: TSNodeInfo -> Maybe Text
+calleeName node = firstIdentifierInList (tsnChildren node)
+
+-- | First `identifier` node text in a preorder DFS of a single node's subtree.
+firstIdentifierIn :: TSNodeInfo -> Maybe Text
+firstIdentifierIn n = case tsnType n of
+  "identifier" | not (T.null (tsnText n)) -> Just (tsnText n)
+  _ -> case tsnChildren n of
+         (k : rest) -> case firstIdentifierIn k of
+                          Just r -> Just r
+                          Nothing -> firstIdentifierInList rest
+         [] -> Nothing
+
+-- | First `identifier` node text across a list of nodes (preorder).
+firstIdentifierInList :: [TSNodeInfo] -> Maybe Text
+firstIdentifierInList xs = case xs of
+  (k : rest) -> case firstIdentifierIn k of
+                  Just r -> Just r
+                  Nothing -> firstIdentifierInList rest
+  [] -> Nothing
 definitionTypes :: [String]
 definitionTypes = structureTypes ++ apiSurfaceTypes ++ implementationDetailTypes
 
@@ -158,117 +319,203 @@ descendInto GranularityFunction isDef node =
 -- | Convert a tree of TSNodeInfo into an Extraction at a given granularity.
 tsNodesToExtraction :: Granularity -> FilePath -> [TSNodeInfo] -> Extraction
 tsNodesToExtraction gran filePath nodes =
-  let results = map (\node -> (tsNodeToGraphNodes gran filePath node, tsNodeToGraphEdges gran filePath Nothing node)) nodes
-      graphNodes = concatMap fst results
-      extraNodes = concatMap (snd . snd) results
-      graphEdges = concatMap (fst . snd) results
-  in extractionFromLists (graphNodes ++ extraNodes) graphEdges
+    let results = map (\node ->
+            ( tsNodeToGraphNodes gran filePath node
+            , tsNodeToGraphEdges gran filePath Nothing Nothing node )) nodes
+        graphNodes = concatMap fst results
+        extraNodes = concatMap (snd . snd) results
+        graphEdges = concatMap (fst . snd) results
+        -- Deterministic in-file collision pass: append `#L<line>` to colliding
+        -- node ids and rewire contains edges so the bounded ids stay
+        -- consistent. Applied to the node/edge lists *before*
+        -- 'extractionFromLists' so true in-file collisions (same seed id) are
+        -- disambiguated, not collapsed by Map.fromList.
+        (finalNodes, finalEdges) = applyCollisionRanks (graphNodes ++ extraNodes) graphEdges
+    in extractionFromLists finalNodes finalEdges
 
 -- | Convert a TSNodeInfo and its children into Graphos Nodes and Edges.
 tsNodeToGraphNodes :: Granularity -> FilePath -> TSNodeInfo -> [Node]
-tsNodeToGraphNodes gran filePath node =
-  let isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
-      self = [makeNode filePath node | isDef]
+tsNodeToGraphNodes gran filePath node = tsNodeToGraphNodesX gran filePath False Nothing node
+
+-- | Internal worker carrying the `exported` flag and an optional signature-text
+-- override threaded down from an enclosing wrapper (`export_statement` /
+-- `decorated_definition`). When a wrapper suppresses its inner declaration,
+-- the outer declaration text is used as the node's signature (task 3.5).
+tsNodeToGraphNodesX :: Granularity -> FilePath -> Bool -> Maybe Text -> TSNodeInfo -> [Node]
+tsNodeToGraphNodesX gran filePath isExported sigOverride node =
+  let sigNode = case sigOverride of
+                  Just t  -> node { tsnText = t }
+                  Nothing -> node
+      isWrapper = tsnIsNamed node && tsnType node `elem` wrapperTypes
+      isDef = tsnType node `elem` typesFor gran && tsnIsNamed node && not isWrapper
+      marker = if isExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
+      self = [ (makeNode filePath sigNode) { nodeExtra = marker } | isDef ]
+      childExported = isExported || isWrapper
+      childMarker = if childExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
+      childOverride = if isWrapper then Just (tsnText node) else sigOverride
       children = if descendInto gran isDef node
-        then concatMap (tsNodeToGraphNodes gran filePath) (tsnChildren node)
-        else map (makeNode filePath) (opaqueBodyUses gran isDef node)
+        then concatMap (tsNodeToGraphNodesX gran filePath childExported childOverride) (tsnChildren node)
+        else map (\u -> (makeNode filePath (case childOverride of Just t -> u { tsnText = t } ; Nothing -> u)) { nodeExtra = childMarker }) (opaqueBodyUses gran isDef node)
   in self ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
-tsNodeToGraphEdges :: Granularity -> FilePath -> Maybe Text -> TSNodeInfo -> ([Edge], [Node])
-tsNodeToGraphEdges gran filePath parentLabel node =
+--
+-- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
+--
+-- Threads the parent node's bounded seed id ('parentId') so a contains edge
+-- references the exact seed id of the parent node, and a file-wide 'CallsCtx'
+-- (built from the root by 'collectCallsCtx') carries the file's import bindings
+-- and local definition names for best-effort `calls` edge emission. Both are
+-- threaded down the recursion together. In-file collisions are resolved later
+-- by 'applyCollisionRanks', which appends `#L<line>` and rewires contains edges.
+tsNodeToGraphEdges
+  :: Granularity -> FilePath -> Maybe NodeId -> Maybe Text -> TSNodeInfo -> ([Edge], [Node])
+tsNodeToGraphEdges gran filePath parentId parentLabel node =
+  tsNodeToGraphEdges' gran filePath (collectCallsCtx filePath node) parentId parentLabel (tsNodeLabel node) node
+
+-- | Internal recursion carrying the call context, the parent's seed id and the
+-- enclosing definition label down the tree.
+tsNodeToGraphEdges'
+  :: Granularity -> FilePath -> CallsCtx -> Maybe NodeId -> Maybe Text -> Text -> TSNodeInfo -> ([Edge], [Node])
+tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
   let myLabel = tsNodeLabel node
-      isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
-      tType = tsnType node
-      
-      containsEdge p targetId = Edge
-            { edgeId        = EdgeId (makeNodeId filePath p <> "->" <> targetId <> ":contains")
-            , edgeSource    = makeNodeId filePath p
-            , edgeTarget    = targetId
-            , edgeRelation  = Contains
-            , edgeConfidence = Confidence 1.0
-            , edgeWeight    = 1.0
-            , edgeExtra     = Nothing
-            }
+      isWrapper = tsnIsNamed node && tsnType node `elem` wrapperTypes
+      isDef     = tsnType node `elem` typesFor gran && tsnIsNamed node && not isWrapper
+      tType     = tsnType node
+      myId      = seedIdFor filePath node
+      isCall    = tType == "call_expression" || tType == "new_expression"
+      insideCall = callsCtxInside ctx
+      -- The enclosing definition label threads through statement-level (non
+      -- boundary) nodes unchanged; it only updates when we descend into a
+      -- function/method/constructor boundary. This is the source of `calls`
+      -- edges (spec: enclosing function name, or `module` for module-level).
+      childDef = if tType `elem` functionBoundaryTypes then myLabel else enclosingDef
 
-      -- Parent → child edge (Contains)
-      myEdges = case (parentLabel, isDef) of
-        (Just p, True) ->
-          [ containsEdge p (if tType `elem` perOccurrenceTypes
-                              then defNodeId filePath node
-                              else makeNodeId filePath myLabel) ]
-        _ -> []
+      containsEdge source target = Edge
+        { edgeId        = EdgeId (source <> "->" <> target <> ":contains")
+        , edgeSource    = source
+        , edgeTarget    = target
+        , edgeRelation  = Contains
+        , edgeConfidence = Confidence 1.0
+        , edgeWeight    = 1.0
+        , edgeExtra     = Nothing
+        }
 
-      -- Function → `use` edges for `use` items inside an opaque function body
-      bodyUseEdges = [ containsEdge myLabel (defNodeId filePath u) | u <- opaqueBodyUses gran isDef node ]
+      -- Parent → child edge (Contains). References the parent's seed id
+      -- ('parentId') and this node's seed id ('myId').
+      myEdges = case (parentId, isDef) of
+        (Just p, True) -> [ containsEdge p myId ]
+        _              -> []
 
-      -- Imports/Exports edges
-      -- Go/Rust/Ruby imports are resolved with repository context in
+      -- Calls edge (top-level call of an enclosing function only).
+      callsEdges =
+        if isCall && not insideCall
+           then case resolveCalls filePath ctx enclosingDef node of
+                  Just e -> [e]
+                  Nothing -> []
+           else []
+
+      -- Function → `use` edges for `use` items inside an opaque function body.
+      bodyUseEdges = [ containsEdge myId (seedIdFor filePath u) | u <- opaqueBodyUses gran isDef node ]
+
+      -- Imports/Exports edges. Go/Rust/Ruby imports are resolved with
+      -- repository context in
       -- Graphos.Infrastructure.Extract.TreeSitter.Imports; Go's
-      -- @import_declaration@ must not go through the TypeScript specifier path.
-      (importEdges, importNodes) = if tType `elem` importExportTypes && takeExtension filePath /= ".go"
-        then case extractSpecifier node of
-                Just (targetPath, targetName) ->
-                  let targetId = if "external:" `isPrefixOf` targetPath
-                                 then makeNodeId "external" targetName
-                                 else makeNodeId targetPath targetName
-                      edge = Edge
-                        { edgeId        = EdgeId (makeNodeId filePath (fromMaybe "" parentLabel) <> "->" <> targetId <> ":imports")
-                        , edgeSource    = makeNodeId filePath (fromMaybe "" parentLabel)
-                        , edgeTarget    = targetId
-                        , edgeRelation  = Imports
-                        , edgeConfidence = Confidence 1.0
-                        , edgeWeight    = 1.0
-                        , edgeExtra     = if tType /= "import_declaration" && tType /= "import_statement" && tType /= "import_from_statement"
-                                           then Just (toJSON (T.pack "re-export"))
-                                           else Nothing
-                        }
-                      targetNode = Node
-                        { nodeId           = targetId
-                        , nodeLabel        = fromText targetName
-                        , nodeFileType     = CodeFile
-                        , nodeSourceFile   = fromText (T.pack targetPath)
-                        , nodeSource       = Nothing
-                        , nodeLineStart    = Nothing
-                        , nodeLineEnd      = Nothing
-                        , nodeSignature    = Nothing
-                        , nodeCommunityId  = Nothing
-                        , nodeKind         = Just (fromText "External")
-                        , nodeDegree       = Nothing
-                        , nodeIsBridge     = Nothing
-                        , nodeExtra        = Nothing
-                        , nodePresentBits  = bitNodeKind
-                        }
-                  in ([edge], [targetNode])
-                Nothing -> ([], [])
-        else ([], [])
+      -- @import_declaration@ must not use the TypeScript specifier path.
+      importEdges
+        | tType `elem` importExportTypes && takeExtension filePath /= ".go" =
+            case extractSpecifier filePath node of
+              Just (targetPath, targetName) ->
+                [ Edge
+                    { edgeId        = EdgeId (importSource <> "->" <> importTargetId targetPath targetName <> ":imports")
+                    , edgeSource    = importSource
+                    , edgeTarget    = importTargetId targetPath targetName
+                    , edgeRelation  = Imports
+                    , edgeConfidence = Confidence 1.0
+                    , edgeWeight    = 1.0
+                    , edgeExtra     = if tType /= "import_declaration" && tType /= "import_statement" && tType /= "import_from_statement"
+                                      then Just (toJSON (T.pack "re-export"))
+                                      else Nothing
+                    } ]
+              Nothing -> []
+          | otherwise = []
 
-      -- Recurse into children
-      (childEdges, childNodes) = 
-        if not (descendInto gran isDef node)
-        then ([], [])
-        else if isDef
-             then foldr (\child (es, ns) -> 
-                    let (e, n) = tsNodeToGraphEdges gran filePath (Just myLabel) child
-                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
-             else foldr (\child (es, ns) -> 
-                    let (e, n) = tsNodeToGraphEdges gran filePath parentLabel child
-                    in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+      importNodes
+        | tType `elem` importExportTypes && takeExtension filePath /= ".go" =
+            case extractSpecifier filePath node of
+              Just (targetPath, targetName) ->
+                [ Node
+                    { nodeId           = importTargetId targetPath targetName
+                    , nodeLabel        = fromText targetName
+                    , nodeFileType     = CodeFile
+                    , nodeSourceFile   = fromText (T.pack targetPath)
+                    , nodeSource       = Nothing
+                    , nodeLineStart    = Nothing
+                    , nodeLineEnd      = Nothing
+                    , nodeSignature    = Nothing
+                    , nodeCommunityId  = Nothing
+                    , nodeKind         = Just (fromText "External")
+                    , nodeDegree       = Nothing
+                    , nodeIsBridge     = Nothing
+                    , nodeExtra        = Nothing
+                    , nodePresentBits  = bitNodeKind
+                    } ]
+              Nothing -> []
+          | otherwise = []
 
-  in (myEdges ++ bodyUseEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
+      -- Recurse into children with a threaded call context. The child context
+      -- flips `callsCtxInside` on whenever the current node is a call (or we are
+      -- already inside one), so calls nested inside a call's arguments are
+      -- suppressed by the `callsEdges` guard above. The parent id threads down
+      -- as 'Just myId' for a definition's children, staying 'parentId' for
+      -- intervening (non-definition) nodes.
+      childCtx = ctx { callsCtxInside = insideCall || isCall }
 
-      where
-        extractSpecifier :: TSNodeInfo -> Maybe (FilePath, Text)
-        extractSpecifier n =
-          let tailText = extractTail (tsnText n)
-          in if T.null tailText
-             then Nothing
-             else let raw = T.strip (T.drop (T.length "from ") tailText)
-                      rawNoSemi = if T.null raw || T.last raw /= ';' then raw else T.init raw
-                      specifier = stripQuotes (T.stripEnd rawNoSemi)
-                  in if T.null specifier
-                     then Nothing
-                     else resolveImport filePath (T.unpack specifier)
+      (childEdges, childNodes)
+        | not (descendInto gran isDef node) = ([], [])
+        | isDef = foldr (\child (es, ns) ->
+              let (e, n) = tsNodeToGraphEdges' gran filePath childCtx (Just myId) (Just myLabel) childDef child
+              in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+        | otherwise = foldr (\child (es, ns) ->
+              let (e, n) = tsNodeToGraphEdges' gran filePath childCtx parentId parentLabel childDef child
+              in (e ++ es, n ++ ns)) ([], []) (tsnChildren node)
+
+    in (myEdges ++ callsEdges ++ bodyUseEdges ++ importEdges ++ childEdges, importNodes ++ childNodes)
+  where
+    -- | Source id of an import edge: the parent's seed id when available, else
+    -- the legacy path-scheme id of the enclosing module.
+    importSource :: NodeId
+    importSource = case parentId of
+      Just p   -> p
+      Nothing  -> makeNodeId filePath (fromMaybe "" parentLabel)
+
+    importTargetId :: FilePath -> Text -> NodeId
+    importTargetId targetPath targetName
+      | "external:" `isPrefixOf` targetPath = makeNodeId "external" targetName
+      | otherwise = makeNodeId targetPath targetName
+
+-- | Extract the import/export specifier: the direct @string@ child of the
+-- declaration node — i.e. the import path (the token after @from@).
+--
+-- Sourcing the specifier from the AST rather than scanning the whole node text
+-- is what keeps template literals and prose that merely contain the word
+-- @from@ (issue #77) from producing bogus @imports@ edges. A template literal's
+-- text lives under a nested @template_string@ node, so it is never a direct
+-- @string@ child of an import/export declaration and can never be mistaken for
+-- a specifier.
+extractSpecifier :: FilePath -> TSNodeInfo -> Maybe (FilePath, Text)
+extractSpecifier filePath n =
+  case firstChildOfType "string" (tsnChildren n) of
+    Just child ->
+      let specifier = stripQuotes (T.strip (tsnText child))
+      in if T.null specifier
+           then Nothing
+           else resolveImport filePath (T.unpack specifier)
+    Nothing -> Nothing
+
+-- | First direct child of the given type, if any.
+firstChildOfType :: String -> [TSNodeInfo] -> Maybe TSNodeInfo
+firstChildOfType t = find (\c -> tsnType c == t)
 
 -- | Strip surrounding single/double quotes/backticks from a specifier.
 stripQuotes :: Text -> Text
@@ -286,19 +533,6 @@ stripQuotes t0
 -- ───────────────────────────────────────────────
 -- Helpers
 -- ───────────────────────────────────────────────
-
--- | AST types that get one node per occurrence: the same text repeated in a
--- file (a Rust @use super::*;@ at module level and again in @mod tests@) is
--- several items, so the id carries the start line.
-perOccurrenceTypes :: [String]
-perOccurrenceTypes = ["use_declaration"]
-
--- | Node id of a definition node.
-defNodeId :: FilePath -> TSNodeInfo -> NodeId
-defNodeId filePath node
-  | tsnType node `elem` perOccurrenceTypes =
-      makeNodeId filePath (tsNodeUntruncatedLabel node) <> "#L" <> T.pack (show (tsnStartRow node + 1))
-  | otherwise = makeNodeId filePath (tsNodeUntruncatedLabel node)
 
 -- | The file's module node (the root @source_file@/@program@/… node), the
 -- source of the file's import edges. When the grammar could not parse the
@@ -324,23 +558,164 @@ opaqueBodyUses GranularityFunction True node
 opaqueBodyUses _ _ _ = []
 
 -- | Make a Graphos Node from a TSNodeInfo.
+--
+-- Emits a bounded node identity: the id is the seed of the
+-- `<dirHash>_<stem>_<kind>:<ident>` scheme (rank 0, no `#L` suffix — the
+-- deterministic collision pass in 'tsNodesToExtraction' appends that later
+-- once it has sibling context). The label and the signature are both the
+-- declaration text bounded by 'nodeIdentityBudget', so the per-node size of
+-- graph.json stays bounded (task 3.3, AVI-1452). The 'nodeSignature' present
+-- bit is set so 'computePresentBits' / the JGF FromJSON round-trip preserves it.
+-- | Wrapper types whose own declaration offers no identifier; their inner
+-- declaration is emitted instead (task 3.2). For 3.1, identifier extraction
+-- returns 'Nothing' for such a node so it is not emitted under its wrapper type.
+wrapperTypes :: [String]
+wrapperTypes = ["export_statement", "decorated_definition"]
+
+-- | Identifier selection for a node (task 3.1):
+--   * module/structure nodes use the source file's basename
+--   * import / re-export nodes use the resolved specifier (target name),
+--     with the file name as fallback where unresolved
+--   * wrapper nodes yield 'Nothing' (handled separately, task 3.2)
+--   * ordinary declarations use the first named identifier-class child
+--     via 'Core.extractIdentifier'.
+nodeIdentifier :: FilePath -> TSNodeInfo -> Maybe Text
+nodeIdentifier filePath node
+  | tsnType node `elem` wrapperTypes = Nothing
+  | tsTypeToKind (tsnType node) == "Module" =
+      Just (T.pack (takeFileName' filePath))
+  | tsnType node `elem` importExportTypes =
+      case firstChildOfType "string" (tsnChildren node) of
+        Just child ->
+          let spec = stripQuotes (T.strip (tsnText child))
+          in if T.null spec
+               then Just (T.pack (takeFileName' filePath))
+               else Just spec
+        Nothing -> Just (T.pack (takeFileName' filePath))
+  | otherwise = extractIdentifier node
+
 makeNode :: FilePath -> TSNodeInfo -> Node
-makeNode filePath node = Node
-  { nodeId           = defNodeId filePath node
-  , nodeLabel        = fromText (tsNodeLabel node)
-  , nodeFileType     = CodeFile
-  , nodeSourceFile   = fromText (T.pack filePath)
-  , nodeSource       = Nothing
-  , nodeLineStart    = Just (tsnStartRow node + 1)
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-  , nodeLineEnd      = Just (tsnEndRow node + 1)
-           , nodeKind         = Just (fromText (T.pack $ tsTypeToKind (tsnType node)))
-  , nodeSignature    = Nothing
-  , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
-  }
+makeNode filePath node =
+    let sf = mkSourceFile filePath
+        line = tsnStartRow node + 1
+        kindText = T.pack (tsTypeToKind (tsnType node))
+        kind  = fromText kindText
+        rawIdent = fromMaybe (tsNodeUntruncatedLabel node) (nodeIdentifier filePath node)
+        identText = normalizeText rawIdent
+        -- 'truncateText' appends a 3-char elision "...", so reserve it and keep
+        -- the final <ident> — and the label derived from it — within
+        -- nodeIdentityBudget (AVI-1452). See Core.truncateText.
+        elisionBudget = 3
+        ident = truncateText (nodeIdentityBudget - elisionBudget) identText
+        declText = tsNodeUntruncatedLabel node
+        isModuleNode = tsTypeToKind (tsnType node) == "Module"
+        isImportExport = tsnType node `elem` importExportTypes
+        sigText
+          | isModuleNode = Nothing
+          | isImportExport = Just (truncateWithElision defaultTruncationBudget declText (extractTail declText))
+          | otherwise = Just (truncateText defaultTruncationBudget declText)
+    in Node
+         { nodeId           = nodeKeyId sf kindText ident line 0
+         , nodeLabel        = fromText ident
+         , nodeFileType     = CodeFile
+         , nodeSourceFile   = fromText (T.pack filePath)
+         , nodeSource       = Nothing
+         , nodeLineStart    = Just line
+         , nodeLineEnd      = Just (tsnEndRow node + 1)
+         , nodeKind         = Just kind
+         , nodeSignature    = maybe Nothing (Just . fromText) sigText
+         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|.
+                               if isJust sigText then bitNodeSignature else 0
+         , nodeCommunityId  = Nothing
+         , nodeDegree       = Nothing
+         , nodeIsBridge     = Nothing
+         , nodeExtra        = Nothing
+         }
+
+-- | Seed id (rank 0, no `#L` suffix) of a node under the bounded-identity
+-- scheme. Threads a parent's exact seed id down the recursion and references a
+-- child's seed id in a contains edge before 'applyCollisionRanks' may later
+-- append a `#L<line>` suffix to disambiguate in-file collisions.
+seedIdFor :: FilePath -> TSNodeInfo -> NodeId
+seedIdFor filePath node =
+    let sf     = mkSourceFile filePath
+        kindText = T.pack (tsTypeToKind (tsnType node))
+        rawIdent = fromMaybe (tsNodeUntruncatedLabel node) (nodeIdentifier filePath node)
+        -- Reserve elision space so the final <ident> stays within
+        -- nodeIdentityBudget (see makeNode).
+        ident    = truncateText (nodeIdentityBudget - 3) (normalizeText rawIdent)
+        line     = tsnStartRow node + 1
+    in nodeKeyId sf kindText ident line 0
+
+-- | Deterministic in-file collision pass for the bounded-identity scheme.
+--
+-- The rank-0 seed id emitted by 'makeNode' / 'seedIdFor' is
+-- `<dirHash>_<stem>_<kind>:<ident>` and does NOT carry the start line, so two
+-- definitions in one file that normalise to the same text share an id and are
+-- collapsed by 'extractionFromLists'. This pass restores them: nodes are
+-- grouped by their (shared) seed id, and within each colliding group the
+-- first occurrence (by `(seedId, lineStart)`) keeps its bare seed id while
+-- later occurrences get a `#L<lineStart>` suffix. Colliding nodes sit on
+-- distinct lines, so the suffixes are unique and the run-to-run order is
+-- irrelevant (criterion c). Only nodes that actually share a seed id are
+-- suffixed; a unique-seed node (e.g. the module node that is the source of an
+-- import edge) keeps its bare id so the edge needs no rewiring (criterion d).
+-- Import/specifier stub nodes (no start line) are excluded from the pass.
+applyCollisionRanks :: [Node] -> [Edge] -> ([Node], [Edge])
+applyCollisionRanks nodes edges =
+    let withRank  = concatMap rankFile (Map.toAscList byFile)
+        remap     = Map.fromList [ (seedId, newId) | (seedId, _, newId) <- withRank ]
+        newNodes  = map (\(_, n, _) -> n) withRank
+                    ++ [ n | n <- nodes, not (isJust (nodeLineStart n)) ]
+        newEdges  = map (remapContains remap) edges
+    in (newNodes, newEdges)
+  where
+    -- Group-3 nodes (with a start line), grouped by source file. File order is
+    -- ascending (Map.toAscList), so the rank assignment below is deterministic.
+    byFile :: Map.Map ShortText [Node]
+    byFile = Map.fromListWith (++)
+           [ (nodeSourceFile n, [n]) | n <- nodes, isJust (nodeLineStart n) ]
+
+    -- (originalSeed, nodeWithNewId, newId). Nodes are grouped by their seed id:
+    -- only nodes that actually collide (share the same rank-0 seed id) receive
+    -- a `#L<lineStart>` suffix. A unique-seed node stays at rank 0 with its
+    -- bare id, so edges referencing it (e.g. an import edge from the module
+    -- node) need no rewiring. Within each seed group, nodes are stably sorted
+    -- by (seedId, lineStart) so input order is irrelevant (criterion c).
+    rankFile :: (ShortText, [Node]) -> [(NodeId, Node, NodeId)]
+    rankFile (_, ns) =
+      concatMap rankGroup
+        (groupBy sameSeed (sortBy (comparing key) keyed))
+      where
+        keyed = [ (nodeId n, fromMaybe 0 (nodeLineStart n), n) | n <- ns ]
+        key (seed, line, _) = (seed, line)
+
+        -- Same colliding group iff the rank-0 seed ids match.
+        sameSeed :: (NodeId, Int, Node) -> (NodeId, Int, Node) -> Bool
+        sameSeed (a, _, _) (b, _, _) = a == b
+
+        rankGroup :: [(NodeId, Int, Node)] -> [(NodeId, Node, NodeId)]
+        rankGroup ranked = zipWith assign [0 ..] ranked
+          where
+            assign :: Int -> (NodeId, Int, Node) -> (NodeId, Node, NodeId)
+            assign i (seed, line, n)
+              | i > 0     = (seed, n { nodeId = newId }, newId)
+              | otherwise = (seed, n, seed)
+              where
+                newId = seed <> "#L" <> T.pack (show line)
+
+    -- Rewire only Contains edges: their endpoints are Group-3 seed ids that may
+    -- have been suffixed. Everything else (Imports/external stubs) is left
+    -- as-is, falling back to the original id via findWithDefault.
+    remapContains :: Map.Map NodeId NodeId -> Edge -> Edge
+    remapContains remap e =
+      case edgeRelation e of
+        Contains ->
+          let s = Map.findWithDefault (edgeSource e) (edgeSource e) remap
+              t = Map.findWithDefault (edgeTarget e) (edgeTarget e) remap
+          in e { edgeSource = s, edgeTarget = t,
+                 edgeId   = EdgeId (s <> "->" <> t <> ":contains") }
+        _ -> e
 
 -- | Get the untruncated, normalized label for a node.
 tsNodeUntruncatedLabel :: TSNodeInfo -> Text
@@ -443,7 +818,13 @@ tsTypeToKind t = case t of
   "except_clause" -> "Except"
   -- Go-specific
   "package_clause" -> "Module"
-  "type_identifier" -> "Type"
+  -- `type_identifier` is intentionally *not* mapped here (AVI-1440). A bare
+  -- type reference — the `type_identifier` node under a field annotation like
+  -- `role: UserRole`, or the declared name of an `interface`/`type`/`enum` —
+  -- is a *reference*, not a declaration, so it produces no node. Only declared
+  -- types yield `kind: "Type"`: `type_declaration`, `type_alias_declaration`,
+  -- `type_definition`, `type_alias`, `type_item`, `type_synonym`,
+  -- `data_type`, `new_type`, and (C++) `alias_declaration`.
   -- Rust-specific
   "extern_item" -> "Extern"
   "attribute_item" -> "Attribute"
@@ -546,16 +927,20 @@ takeDirectory' p =
 takeFileName' :: FilePath -> FilePath
 takeFileName' p = reverse (fst (break (== '/') (reverse p)))
 
--- | File stem (file name without its final extension).
+-- | File stem (file name without its final extension), matching
+-- 'System.FilePath.takeBaseName': only the final extension is removed, and a
+-- dotfile such as @.bashrc@ (no dot past position 0) is left untouched.
 takeBaseName' :: FilePath -> FilePath
 takeBaseName' f =
-  let fn = reverse (takeFileName' f)
-      (stem, _) = break (== '.') fn
-  in if null stem then fn else reverse stem
+  let fn  = takeFileName' f
+      ext = takeExtension fn
+  in if null ext then fn
+       else let stem = take (length fn - length ext) fn
+            in if null stem then fn else stem
 
--- | Stable identifier for a node under the Group 3 identity scheme. When
--- `rank > 0` the declaration gets a file-wide `#L<line>` suffix so that
--- collisions are disambiguated deterministically.
+-- | Stable identifier for a node under the AVI-1452 bounded-identity scheme.
+-- When `rank > 0` the declaration gets a file-wide `#L<line>` suffix so that
+-- in-file collisions are disambiguated deterministically.
 nodeKeyId :: SourceFile -> Text -> Text -> Int -> Int -> NodeId
 nodeKeyId sourceFile kind ident line rank =
   let dirHash' = T.pack (show (sourceDirHash sourceFile))

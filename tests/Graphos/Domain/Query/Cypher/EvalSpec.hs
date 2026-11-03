@@ -2,6 +2,7 @@ module Graphos.Domain.Query.Cypher.EvalSpec where
 
 import Data.Aeson (Value(..))
 import qualified Data.Map.Strict as Map
+import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
@@ -19,7 +20,7 @@ import Graphos.Domain.Graph.Index (GraphIndex(..))
 import Graphos.Domain.Graph.Mutation (nodeExtraLabels, MutationSummary(..))
 import Graphos.Domain.Query.Cypher.Mapping (nodeProperty, nodeCypherLabel)
 import Graphos.Domain.Query.Cypher.Parser (parseQuery, parseStatement)
-import Graphos.Domain.Query.Cypher.Eval (evaluate, evaluateStatement, CypherResult(..), MutationResult(..))
+import Graphos.Domain.Query.Cypher.Eval (evaluate, evaluateStatement, CypherResult(..), MutationResult(..), idAnchor)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 
 -- ───────────────────────────────────────────────
@@ -152,6 +153,14 @@ evalSpec = describe "Cypher Evaluator" $ do
       let r = runQuery "MATCH (n:Function) WHERE n.source_file =~ 'src/services/.*' RETURN n" 100
       length (crRows r) `shouldBe` 3
 
+    it "filters WHERE before applying the row cap" $ do
+      -- Five candidate rows, only one matches; a budget below the raw
+      -- enumeration size must still return the single match and must NOT
+      -- report truncation (the old code capped *before* filtering).
+      let r = runQuery "MATCH (n) WHERE n.source_file CONTAINS 'qux' RETURN n" 2
+      length (crRows r) `shouldBe` 1
+      crTruncated r `shouldBe` False
+
     it "excludes rows for unknown property" $ do
       let r = runQuery "MATCH (n) WHERE n.nonexistent = 'foo' RETURN n" 100
       length (crRows r) `shouldBe` 0
@@ -159,6 +168,42 @@ evalSpec = describe "Cypher Evaluator" $ do
     it "filters by equality" $ do
       let r = runQuery "MATCH (n:Function) WHERE n.label = 'n1' RETURN n" 100
       length (crRows r) `shouldBe` 1
+
+  describe "id anchor" $ do
+    it "resolves a single node by id equality" $ do
+      let r = runQuery "MATCH (n) WHERE n.id = 'n1' RETURN n" 100
+      length (crRows r) `shouldBe` 1
+      crTruncated r `shouldBe` False
+
+    it "resolves by id even under a tight budget" $ do
+      -- The id anchor resolves the node directly rather than enumerating
+      -- the whole table then capping; the single match still survives.
+      let r = runQuery "MATCH (n) WHERE n.id = 'n1' RETURN n" 1
+      length (crRows r) `shouldBe` 1
+      crTruncated r `shouldBe` False
+
+    it "respects the pattern label on the anchored node" $ do
+      -- n4 is a File, not a Function: the id anchor re-checks the label
+      -- and must not emit a binding for a non-matching node.
+      let r = runQuery "MATCH (n:Function) WHERE n.id = 'n4' RETURN n" 100
+      length (crRows r) `shouldBe` 0
+
+    it "returns no row for an unknown id" $ do
+      let r = runQuery "MATCH (n) WHERE n.id = 'does-not-exist' RETURN n" 100
+      length (crRows r) `shouldBe` 0
+
+    it "fires only on a pure id-equality guard" $ do
+      case parseQuery "MATCH (n) WHERE n.id = 'n1' RETURN n" of
+        Left _ -> error "parse error"
+        Right q -> idAnchor q fixtureGraph `shouldSatisfy` isJust
+      case parseQuery "MATCH (n) WHERE n.label = 'n1' RETURN n" of
+        Left _ -> error "parse error"
+        Right q -> idAnchor q fixtureGraph `shouldSatisfy` isNothing
+
+    it "falls back for multi-variable patterns" $ do
+      case parseQuery "MATCH (a)-[:Calls]->(b) WHERE a.id = 'n1' RETURN b" of
+        Left _ -> error "parse error"
+        Right q -> idAnchor q fixtureGraph `shouldSatisfy` isNothing
 
   describe "projection" $ do
     it "returns node properties as an object" $ do
