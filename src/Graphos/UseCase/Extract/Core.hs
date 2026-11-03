@@ -10,6 +10,11 @@ module Graphos.UseCase.Extract.Core
   , granularityName
   , extractionConfigFingerprint
   , isStubExtraction
+  , StubCoverage(..)
+  , stubCoverage
+  , stubDominanceThreshold
+  , dominantStubExt
+  , stubCoverageWarning
   , concatMapM
   , chunkList
   , ImageSource(..)
@@ -23,7 +28,7 @@ import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Exception (bracket_, evaluate)
 import Control.Monad (forM, unless, void, when)
-import Data.List (nubBy, sortBy)
+import Data.List (nubBy, sortBy, intercalate, maximumBy)
 import Data.Ord (comparing)
 import Data.Bits ((.|.))
 import qualified Data.List as List (foldl')
@@ -122,8 +127,8 @@ extractAll appEnv config detection mProvenance = do
     logInfo $ T.pack $ "  tree-sitter: " ++ show (length treeSitterFiles) ++ " files"
   unless (null lspFiles) $
     logInfo $ T.pack $ "  LSP: " ++ show (length lspFiles) ++ " files"
-  unless (null stubFiles) $
-    logDebug $ T.pack $ "  stub: " ++ show (length stubFiles) ++ " files"
+  mapM_ (\msg -> logInfo $ T.pack $ "  [extract] WARNING: " ++ msg)
+    (stubCoverageWarning (stubCoverage (treeSitterFiles ++ lspFiles) stubFiles))
 
   let docThreads = min 8 (max 1 numThreads)
 
@@ -522,6 +527,57 @@ granularityName :: Granularity -> String
 granularityName GranularityFine     = "fine"
 granularityName GranularityFunction = "function"
 granularityName GranularityFile     = "file"
+
+-- | Coverage summary for a 'partitionByExtractor' split of code files: how
+-- many were routed to a real extractor (tree-sitter or LSP) versus fell
+-- through to 'ExtractStub' because no 'defaultExtractors'/config entry
+-- matched their extension, broken down by extension for the stubbed half.
+data StubCoverage = StubCoverage
+  { scDetected     :: Int
+  , scStructural   :: Int
+  , scStubbedByExt :: [(String, Int)]
+  } deriving (Eq, Show)
+
+-- | Build a 'StubCoverage' from the structural (tree-sitter ++ LSP) and
+-- 'ExtractStub' file lists 'partitionByExtractor' already produces.
+stubCoverage :: [FilePath] -> [FilePath] -> StubCoverage
+stubCoverage structuralFiles stubFiles = StubCoverage
+  { scDetected     = length structuralFiles + length stubFiles
+  , scStructural   = length structuralFiles
+  , scStubbedByExt = Map.toAscList $ Map.fromListWith (+)
+      [ (takeExtension fp, 1 :: Int) | fp <- stubFiles ]
+  }
+
+-- | Fraction of stubbed code files above which 'stubCoverageWarning' states
+-- that the graph likely under-represents the corpus.
+stubDominanceThreshold :: Double
+stubDominanceThreshold = 0.5
+
+-- | The extension responsible for the most stubbed files, if any were.
+dominantStubExt :: StubCoverage -> Maybe String
+dominantStubExt sc = case scStubbedByExt sc of
+  []  -> Nothing
+  xs  -> Just . fst $ maximumBy (comparing snd) xs
+
+-- | Render the INFO-level stub-coverage warning (extraction-quality:
+-- "Stub extraction is a visible, reported outcome"), or 'Nothing' when no
+-- code file was stubbed. Appends a dominance clause when the stubbed share
+-- exceeds 'stubDominanceThreshold'.
+stubCoverageWarning :: StubCoverage -> Maybe String
+stubCoverageWarning sc
+  | null (scStubbedByExt sc) = Nothing
+  | otherwise = Just $
+      show totalStubbed ++ " code files produced stub nodes only (no structure extracted): "
+        ++ intercalate ", " [ ext ++ " (" ++ show n ++ ")" | (ext, n) <- scStubbedByExt sc ]
+        ++ dominanceSuffix
+  where
+    totalStubbed = sum (map snd (scStubbedByExt sc))
+    dominanceSuffix
+      | scDetected sc > 0
+      , fromIntegral totalStubbed / fromIntegral (scDetected sc) > stubDominanceThreshold
+      , Just dom <- dominantStubExt sc
+      = " -- the graph likely under-represents this corpus; dominant stubbed type: " ++ dom
+      | otherwise = ""
 
 -- | Canonical fingerprint text of every extraction-affecting configuration
 -- value: the effective per-extension granularity under the CLI override, the
