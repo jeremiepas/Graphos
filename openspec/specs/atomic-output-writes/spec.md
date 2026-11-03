@@ -31,13 +31,15 @@ output directory only after all artifacts are written successfully.
 
 The system SHALL preserve, across a staged full rebuild, every entry in the
 output directory that Graphos does not regenerate. Graphos-owned artifacts —
-`graph.json`, `graph.checkpoint.json`, `GRAPH_REPORT.md`, `graph.html`,
-`community_graph.json`, `embeddings.json`, and any other name listed in
-`ownedArtifacts` — are refreshed by the atomic swap; every other entry,
-including user files, hidden files, and unknown directories, is carried into
-staging before the rename and survives the rebuild unchanged. Owned directories
-(such as `obsidian/`) are fully replaced by the fresh build rather than merged
-with the previous run's contents.
+`graph.json`, `graph.checkpoint.json`, `pipeline.checkpoint.json`,
+`GRAPH_REPORT.md`, `graph.html`, `community_graph.json`, `embeddings.json`, and
+any other name listed in `ownedArtifacts` — are refreshed by the atomic swap;
+every other entry, including user files, hidden files, and unknown directories,
+is carried into staging before the rename and survives the rebuild unchanged.
+Owned directories (such as `obsidian/`) are fully replaced by the fresh build
+rather than merged with the previous run's contents. A carried-over entry never
+replaces an artifact the fresh build already wrote under the same name: the
+staged copy wins.
 
 #### Scenario: foreign file survives a rebuild
 - **WHEN** a full rebuild runs against an output directory that already contains a file Graphos does not own

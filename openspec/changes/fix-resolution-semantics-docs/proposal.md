@@ -25,8 +25,14 @@ sends users the wrong direction and wastes long clustering runs.
   clustering resolution parameter's effect.
 
 ### Modified Capabilities
-<!-- If a clustering spec exists in openspec/specs/, this may modify its
-     resolution guidance; confirm during specs phase. -->
+None in this change. Inspection of `openspec/specs/community-detection/spec.md`
+found its "Resolution data type and defaults" requirement prescribing an
+auto-tune table (`100k+ → γ 0.3–0.5`) that (a) is **not implemented** (the
+pipeline uses only `cfgResolution`/`--resolution`, default 1.0) and (b) names
+the same range the new guidance forbids when it worsens outcomes. Changing a
+behavioral requirement without the empirical sweep would be silent guesswork,
+so no `community-detection` delta is included here; `tasks.md` requires
+reconciling that accepted spec with the sweep's findings.
 
 ## Impact
 
