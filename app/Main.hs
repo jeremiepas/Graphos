@@ -38,13 +38,12 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig)
+import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig, productionLLMPort)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
 import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
 import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
-import Graphos.Infrastructure.Wiring (productionLLMPort)
 import Graphos.Domain.Config (defaultLabelingConfig)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
@@ -59,7 +58,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors
 import Graphos.Domain.Graph.Analysis (articulationPoints, toCachedFGL)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..), Format(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
@@ -479,7 +478,8 @@ main = do
               _ -> case evaluateStatement budget st g idx of
                 Left err -> (if cqoJson copts then hPutStrLn stderr else putStrLn) $ "Cypher error: " ++ T.unpack err
                 Right mr -> do
-                  if cqoJson copts
+                  let useJson = cqoFormat copts == Just Json || cqoJson copts
+                  if useJson
                     then putStrLn $ T.unpack $ renderMutationResultJSON mr
                     else putStrLn $ T.unpack $ renderMutationResultText budget mr
                   when allowWrite $ case st of
