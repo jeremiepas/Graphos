@@ -1,0 +1,23 @@
+AVI-1966 — Merge gate Graphos PR #209 (pr128-head) — RESOLUTION
+
+Status: HELD / BLOCKED (deliberate wait) — gate correctly closed.
+Recovery cause: deliberate_wait_without_target (review lane AVI-1902 not terminal).
+
+BLOCKER (verified live 2026-11-03):
+- Review lane AVI-1902: status=in_progress, no review verdict, 0 comments. Orphaned (no reviewer activity since PR creation).
+- PR #209 (pr128-head): OPEN, mergeStateStatus=DIRTY, reviewDecision=REVIEW_REQUIRED, never merged, never updated since 2026-11-02T14:32:52Z.
+
+GATE RULE (AGENTS.md / docs/release-policy.md):
+- merge-gatekeeper SHALL NOT process (merge) the merge-gate lane until its associated review lane (AVI-1902) is done.
+- Review lane is review-only; merge authority is the merge-gate lane. No merge is permitted while the review lane is non-terminal.
+
+DISPOSITION:
+- Explicit keep: branch `pr128-head` kept (not merged), deferred pending AVI-1902 sign-off.
+- Cannot be cleared by merge-gatekeeper alone. Unblock path: (a) AVI-1902 completes review -> done, or (b) board/operator decision (reassign reviewer / clear orphaned lane / formal deferral).
+
+NOT A LOOP: prior runs re-documented the same block with unverifiable "no approvals" claims. This entry replaces those with live-verified state (Paperclip API + GitHub REST) so the gate record reflects reality.
+
+Artifacts:
+- .paperclip/AVI-1966-explicit-keep.md (live-verified explicit keep)
+- .paperclip/AVI-1966-disposition-comment.txt (disposition comment)
+- AVI-1966_RESOLUTION.txt (this file)
