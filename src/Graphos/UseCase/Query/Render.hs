@@ -2,6 +2,10 @@
 module Graphos.UseCase.Query.Render
   ( -- * Types
     CommonQueryOpts(..)
+    , FormatOpt(..)
+  , renderCypherResultCSV
+  , renderCypherResultJSON
+  , renderCypherResultText
   , defaultCommonQueryOpts
 
     -- * Rendering
@@ -31,9 +35,10 @@ module Graphos.UseCase.Query.Render
   , enforceResponseBudget
      ) where
 
-import Data.Aeson (toJSON, object, (.=), Value(..), encode)
+import Data.Aeson (toJSON, object, (.=), Value(..), encode, ToJSON(..), FromJSON(..))
+import Control.DeepSeq (NFData(..))
 import qualified Data.Set as Set
-import Data.Text (Text)
+import Data.Text (Text, toLower)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL (decodeUtf8)
@@ -44,10 +49,33 @@ import Graphos.Domain.Types.Node (Node(..), NodeId)
 import Graphos.UseCase.Query (SymbolResult(..), NeighborsResult(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
 
+data FormatOpt = FormatJson | FormatCsv | FormatTsv
+  deriving (Eq, Show)
+
+instance NFData FormatOpt where
+  rnf FormatJson = ()
+  rnf FormatCsv  = ()
+  rnf FormatTsv  = ()
+
+instance ToJSON FormatOpt where
+  toJSON FormatJson = String "json"
+  toJSON FormatCsv  = String "csv"
+  toJSON FormatTsv  = String "tsv"
+
+instance FromJSON FormatOpt where
+  parseJSON (String s) = case T.toCaseFold s of
+    "json"   -> pure FormatJson
+    "csv"    -> pure FormatCsv
+    "tsv"    -> pure FormatTsv
+    other    -> fail $ "Unknown format: " ++ T.unpack other
+  parseJSON _        = fail $ "Expected a string format, got: " ++ show (undefined :: Value)
+
+
 data CommonQueryOpts = CommonQueryOpts
   { cqoGraphPath     :: !FilePath
   , cqoBudget        :: !Int
   , cqoJson          :: !Bool
+  , cqoFormat        :: !FormatOpt
   , cqoLabelWidth    :: !Int
   , cqoEdges         :: !EdgeMode
   , cqoStrictGraph   :: !Bool
@@ -61,6 +89,7 @@ defaultCommonQueryOpts = CommonQueryOpts
   { cqoGraphPath     = "graphos-out/graph.json"
   , cqoBudget        = 2000
   , cqoJson          = False
+  , cqoFormat        = FormatTsv
   , cqoLabelWidth    = 120
   , cqoEdges         = Semantic
   , cqoStrictGraph   = False
@@ -244,6 +273,40 @@ renderCypherResultJSON cr = encodeText $ object
   , "rows"      .= crRows cr
   , "truncated" .= crTruncated cr
   ]
+
+-- | Render a CypherResult as CSV (RFC 4180 quoted) format.
+renderCypherResultCSV :: CypherResult -> Text
+renderCypherResultCSV cr = renderCSVrow (crColumns cr) <> "\n" <> renderCSVrows (convertRows (crRows cr))
+  where
+    -- Convert a Value to Text for CSV rendering
+    valueToText :: Value -> Text
+    valueToText v = case v of
+      Object _     -> T.pack "{}"
+      Array _      -> T.pack "[]"
+      Bool True    -> "true"
+      Bool False   -> "false"
+      Number n     -> T.pack (show n)
+      String text  -> text
+      Null         -> "null"
+    
+    convertRows :: [[Value]] -> [[Text]]
+    convertRows = map (map valueToText)
+    
+    -- Render a single CSV field, quoting fields containing separators per RFC 4180
+    renderCSVfield :: Text -> Text
+    renderCSVfield f
+      | ',' `T.elem` f || '"' `T.elem` f || '\n' `T.elem` f
+      = quoteAround f
+      | otherwise = f
+      where
+        -- Double up internal quotes then wrap in outer quotes (RFC 4180)
+        quoteAround txt = "\"" `T.append` (T.replace "\"" "\"\"\"" txt) `T.append` "\""
+
+    renderCSVrow :: [Text] -> Text
+    renderCSVrow cols = T.intercalate "," (map renderCSVfield cols)
+
+    renderCSVrows :: [[Text]] -> Text
+    renderCSVrows rows = T.intercalate "\n" (map renderCSVrow rows)
 
 -- | Render a MutationResult as human-readable text: a summary line of
 -- non-zero counts, then any RETURN rows.
