@@ -50,6 +50,15 @@ jobs:
     - name: Run tests
       run: devenv tasks run ci:release-test
 
+    - name: Cleanup disk space
+      run: |
+        echo "Disk usage before cleanup"
+        df -h
+        rm -rf ~/.cabal/store ~/.local/state/cabal/store
+        sync
+        echo "Disk usage after cleanup"
+        df -h
+
     - name: Generate SHA256 checksums
       run: |
         mkdir -p dist/release

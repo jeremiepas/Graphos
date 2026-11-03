@@ -23,6 +23,9 @@ module Graphos.Domain.Community
 
    , bestCommunityFor
 
+   , capCommunitySizes
+   , oversizedCommunities
+
    , CommunityStats(..)
    , computeCommunityStats
    , modularity
@@ -43,7 +46,7 @@ import Control.Monad.ST (ST, runST)
 import Data.Aeson (ToJSON(..), FromJSON(..), withObject, object, (.=), (.:), (.:?))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (sortOn)
+import Data.List (sort, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
@@ -56,7 +59,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import qualified Data.Vector as V
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph(..), neighbors, gNodes, gEdges)
+import Graphos.Domain.Graph (Graph(..), neighbors, gNodes, gEdges, subgraph)
 
 data Resolution = Resolution
   { resGamma         :: Double
@@ -103,6 +106,132 @@ detectCommunitiesWithResolution g0 res =
   let g = undirectedView g0
       raw = leidenPhase g res
   in mergeSmallCommunities g res raw
+
+-- ───────────────────────────────────────────────
+-- Post-Leiden community size cap
+--
+-- Leiden (default resolution) can place a densely self-referential subgraph
+-- into a single community regardless of the resolution setting. 'capCommunitySizes'
+-- is a deterministic post-pass that splits any community larger than
+-- @maxCommunityFraction@ of the total node count into sub-communities each at
+-- or below that cap. It never changes a community that already fits.
+--
+-- Split children receive fresh 'CommunityId's strictly above every existing id
+-- (assigned by a monotonically increasing counter), so they can never collide
+-- with a kept community. Coverage is preserved: every input node appears in
+-- exactly one output community.
+
+-- | Largest community the cap permits, derived from the fraction. Bounded to a
+-- minimum of one so a degenerate fraction still yields a sane chunk size.
+capCountFromFraction :: Double -> Int -> Int
+capCountFromFraction frac totalNodes = max 1 (floor (frac * fromIntegral totalNodes))
+
+-- | Split any community exceeding the cap into sub-communities each at or below
+-- the cap. Pure and deterministic: a no-op when no community is oversized.
+capCommunitySizes :: Graph -> CommunityMap -> Double -> CommunityMap
+capCommunitySizes g commMap frac =
+  let totalNodes = Map.size (gNodes g)
+      capCount   = capCountFromFraction frac totalNodes
+      startId    = 1 + if Map.null commMap then 0 else maximum (Map.keys commMap)
+  in if Map.null commMap || capCount >= totalNodes
+       then commMap
+       else worker startId capCount maxSplitDepth g commMap
+
+-- | Report every community that currently exceeds the cap, as
+-- @(community id, member count)@ pairs in ascending id order. The caller logs
+-- these as WARNINGs before splitting; this function performs no IO.
+oversizedCommunities :: Graph -> CommunityMap -> Double -> [(CommunityId, Int)]
+oversizedCommunities g commMap frac =
+  let capCount = capCountFromFraction frac (Map.size (gNodes g))
+  in [ (cid, length members)
+     | (cid, members) <- Map.toList commMap
+     , length members > capCount ]
+
+-- Max Leiden re-clustering attempts before the last-resort chunk fallback kicks
+-- in. Combined with the strictly-decreasing member count on every productive
+-- recursion, this bounds the recursion and guarantees termination.
+maxSplitDepth :: Int
+maxSplitDepth = 64
+
+-- | Recursive driver: partition into kept (≤ cap) and oversized (> cap), then
+-- split each oversized one. Fresh ids flow through the @nextId@ accumulator so
+-- every batch lands above all previously assigned ids.
+worker :: Int -> Int -> Int -> Graph -> CommunityMap -> CommunityMap
+worker nextId capCount depth g0 commMap =
+  let big   = Map.filter (\m -> length m > capCount) commMap
+      small = Map.filter (\m -> length m <= capCount) commMap
+  in if Map.null big
+       then small
+       else
+         let (splitMap, _) =
+               foldl' (\(!acc, !n) (_, members) ->
+                         let (childMap, n') = splitCommunity capCount n depth g0 members
+                         in (Map.union acc childMap, n'))
+                     (Map.empty, nextId)
+                     (Map.toList big)
+         in Map.union small splitMap
+
+-- | Split a single oversized community into pieces each at or below the cap,
+-- re-running Leiden on the induced subgraph at an escalated resolution. Falls
+-- back to contiguous chunking when recursion is exhausted. Returns the pieces
+-- (with fresh ids) and the next free id.
+splitCommunity :: Int -> Int -> Int -> Graph -> [NodeId] -> (CommunityMap, Int)
+splitCommunity capCount nextId depth g0 members =
+  let gSub = subgraph g0 (Set.fromList members)
+  in if depth <= 0
+       then lastResort capCount nextId members
+       else
+         let cand     = detectCommunitiesWithResolution gSub (escalatedResolution depth)
+             remapped = renameIds nextId cand
+             stillBig = [ (cid, ms) | (cid, ms) <- Map.toList remapped
+                                     , length ms > capCount ]
+         in if null stillBig
+              then (remapped, nextFreeId remapped)
+              else
+                let keepPart = Map.filter (\m -> length m <= capCount) remapped
+                    (recMap, nextId') =
+                      foldl' (\(!acc, !n) (_, ms) ->
+                                let (childMap, n') = splitCommunity capCount n (depth - 1) g0 ms
+                                in (Map.union acc childMap, n'))
+                             (Map.empty, nextFreeId remapped)
+                             stillBig
+                in (Map.union keepPart recMap, nextId')
+
+-- | Last-resort fallback: cut the members into contiguous pieces of @capCount@
+-- nodes each. Never recurses, so it always terminates.
+lastResort :: Int -> Int -> [NodeId] -> (CommunityMap, Int)
+lastResort capCount start members =
+  let chunks = chunksOf capCount (sort members)
+  in (Map.fromList [ (start + i, chunk)
+                    | (i, chunk) <- zip [0 ..] chunks ]
+     , start + length chunks)
+
+-- | Escalate resolution on the induced subgraph: higher gamma drives finer
+-- partitioning, resMinSize = 1 lets tiny blobs break apart. Depth-graded but
+-- capped so the value stays reasonable.
+escalatedResolution :: Int -> Resolution
+escalatedResolution depth =
+  defaultResolution { resGamma = escal, resMinSize = 1 }
+  where
+    base  = resGamma defaultResolution
+    escal = min (8.0 * base) (base * (2 ^ min depth 3))
+
+-- | Renumber a 'CommunityMap' onto dense fresh ids starting at @start@, in
+-- canonical (ascending original id) order. A deterministic bijection.
+renameIds :: Int -> CommunityMap -> CommunityMap
+renameIds start cm =
+  Map.fromList [ (start + i, members)
+               | (i, (_, members)) <- zip [0 ..] (Map.toList cm) ]
+
+-- | First id strictly above every key in the map. Assumes a non-empty map.
+nextFreeId :: CommunityMap -> Int
+nextFreeId cm = 1 + maximum (Map.keys cm)
+
+-- | Split a list into contiguous chunks of @n@ elements. Requires @n >= 1@.
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf _   [] = []
+chunksOf n xs | n <= 0 = [xs]
+chunksOf n xs = take n xs : chunksOf n (drop n xs)
 
 -- | The undirected projection of a graph for community detection: the same
 -- nodes and edges, with 'neighbors' answering both directions. 'gAdjBack' is
