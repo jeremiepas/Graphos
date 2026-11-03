@@ -187,6 +187,17 @@ defaultExtractors = Map.fromList
   , (".rb",  ExtractorConfig ExtractTreeSitter (Just "ruby") (Just "ruby") Nothing)
     -- Java: tree-sitter (zero-dependency; uncomment for LSP)
   , (".java",ExtractorConfig ExtractTreeSitter (Just "java") (Just "java") Nothing)
+    -- PHP: tree-sitter
+  , (".php", ExtractorConfig ExtractTreeSitter (Just "php") (Just "php") Nothing)
+    -- Kotlin
+  , (".kt",  ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+  , (".kts", ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+    -- Perl
+  , (".pl",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , (".pm",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , (".psgi",ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+    -- C#
+  , (".cs",  ExtractorConfig ExtractTreeSitter (Just "csharp") (Just "csharp") Nothing)
     -- JSON: tree-sitter parser; data files collapse to one node per file
     -- so lock files and config JSON do not inflate the graph
   , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
@@ -246,7 +257,11 @@ defaultLSPServers = Map.fromList
   , (".rb",    LSPServerConfig "solargraph" ["--stdio"] "ruby")
   , (".hs",    LSPServerConfig "haskell-language-server" ["--lsp"] "haskell")
   , (".lhs",   LSPServerConfig "haskell-language-server" ["--lsp"] "haskell")
-  , (".php",   LSPServerConfig "phpactor" [] "php")
+  , (".php",   LSPServerConfig "phpactor" ["language-server"] "php")
+  , (".pl",    LSPServerConfig "perlnavigator" [] "perl")
+  , (".pm",    LSPServerConfig "perlnavigator" [] "perl")
+  , (".psgi",  LSPServerConfig "perlnavigator" [] "perl")
+  , (".t",     LSPServerConfig "perlnavigator" [] "perl")
   , (".swift", LSPServerConfig "sourcekit-lsp" [] "swift")
   , (".kt",    LSPServerConfig "kotlin-language-server" [] "kotlin")
   , (".kts",   LSPServerConfig "kotlin-language-server" [] "kotlin")
@@ -284,6 +299,10 @@ defaultLanguageIds = Map.fromList
   , (".cs",    "csharp")
   , (".rb",    "ruby")
   , (".php",   "php")
+  , (".pl",    "perl")
+  , (".pm",    "perl")
+  , (".psgi",  "perl")
+  , (".t",     "perl")
   , (".swift", "swift")
   , (".kt",    "kotlin")
   , (".kts",   "kotlin")

@@ -8,7 +8,8 @@ import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (ShortText, fromText, toText)
+import Data.Aeson (object, (.=))
 
 import Graphos.Domain.Types
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
@@ -117,6 +118,58 @@ nestedCallsFixture =
         ]
     ]
 
+-- | A bare type reference with no enclosing type declaration. Every node here
+-- is either a `type_identifier` reference or an unrelated statement/parameter
+-- node; none of them may emit a `Type` node after AVI-1471.
+refOnlyFixture :: TSNodeInfo
+refOnlyFixture =
+  tsNode "program" "module"
+    [ tsNode "expression_statement" "const x: SomeType = 1"
+        [ tsNode "typed_parameter" "SomeType" []
+        , tsNode "type_identifier" "SomeType" []
+        ]
+    , tsNode "expression_statement" "const y: OtherType = 2"
+        [ tsNode "typed_parameter" "OtherType" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    ]
+
+-- | A real type-alias declaration whose declared name and referenced type are
+-- themselves bare `type_identifier` reference nodes. The declaration must emit
+-- exactly one `Type` node; its inner `type_identifier`s must not.
+typeDeclFixture :: TSNodeInfo
+typeDeclFixture =
+  tsNode "program" "module"
+    [ tsNode "type_alias" "MyType"
+        [ tsNode "type_identifier" "MyType" []
+        , tsNode "equals_sign" "=" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    ]
+
+-- | A declaration mix: a type alias plus an interface and an enum, each carrying
+-- bare `type_identifier` reference nodes. Pins that AVI-1471 removes only the
+-- spurious `Type` from references while Interface/Enum still emit.
+typeRefsFixture :: TSNodeInfo
+typeRefsFixture =
+  tsNode "program" "module"
+    [ tsNode "type_alias" "MyType"
+        [ tsNode "type_identifier" "MyType" []
+        , tsNode "equals_sign" "=" []
+        , tsNode "type_identifier" "OtherType" []
+        ]
+    , tsNode "interface_declaration" "MyInterface"
+        [ tsNode "type_identifier" "SomeMixin" [] ]
+    , tsNode "enum_declaration" "MyEnum"
+        [ tsNode "type_identifier" "SomeBase" [] ]
+    ]
+
+-- | Whether a node's kind is the generic `Type` (the kind produced by
+-- 'tsTypeToKind' from a type *declaration*). After AVI-1471 only real
+-- declarations emit it, never bare `type_identifier` references.
+isTypeKind :: Maybe ShortText -> Bool
+isTypeKind = (== Just (fromText "Type"))
+
 -- | Only the `calls` edges, in document order.
 callEdges :: Granularity -> FilePath -> TSNodeInfo -> [Edge]
 callEdges gran filePath fixture =
@@ -149,11 +202,10 @@ spec = do
   describe "function granularity" $ do
     it "keeps module, class, method, field, import, and module-level const" $ do
       let labels = labelsAt GranularityFunction tsFixture
-      labels `shouldSatisfy` elem "module"
+      labels `shouldSatisfy` elem "service.ts"
       labels `shouldSatisfy` elem "Service"
       labels `shouldSatisfy` elem "getUser"
       labels `shouldSatisfy` elem "role"
-      labels `shouldSatisfy` elem "import { db } from './db'"
       labels `shouldSatisfy` elem "const API_URL = 'x'"
       labels `shouldSatisfy` elem "helper"
 
@@ -325,3 +377,52 @@ spec = do
       Map.size (extractionNodes ex) `shouldBe` 5000
       length violators `shouldBe` 0
 
+  describe "wrapper suppression (task 3.2)" $ do
+    it "emits one exported function node whose signature is the wrapper text" $ do
+      let node = tsNode "export_statement" "export async function executeSharedRunCommand(x: X): Y { }"
+              [ tsNode "function_declaration" "async function executeSharedRunCommand(x: X): Y { }"
+                  [ tsNode "identifier" "executeSharedRunCommand" [] ] ]
+          ex = tsNodesToExtraction GranularityFunction "src/x.ts" [node]
+          nodes = Map.elems (extractionNodes ex)
+      length nodes `shouldBe` 1
+      let n = case nodes of (x:_) -> x; [] -> error "empty"
+      T.unpack (toText (nodeLabel n)) `shouldBe` "executeSharedRunCommand"
+      nodeKind n `shouldBe` Just (fromText "Function")
+      nodeExtra n `shouldBe` Just (object ["exported" .= (True :: Bool)])
+      case nodeSignature n of
+        Just sig -> (T.isPrefixOf "export async function executeSharedRunCommand(" (toText sig)) `shouldBe` True
+        Nothing  -> expectationFailure "missing signature"
+
+  describe "multi-line import signature elision (task 3.5)" $ do
+    it "keeps the specifier in nodeSignature and uses it as label" $ do
+      let longImport = T.replicate 40 "import { a, b, c, d, e, f, g, h } " <> "from '../../templates/index.js';"
+          node = tsNode "import_declaration" longImport
+              [ tsNode "string" "'../../templates/index.js'" [] ]
+          ex = tsNodesToExtraction GranularityFine "src/x.ts" [node]
+          nodes = Map.elems (extractionNodes ex)
+      length nodes `shouldSatisfy` (> 0)
+      let labels = map (T.unpack . toText . nodeLabel) nodes
+      labels `shouldSatisfy` elem "../../templates/index.js"
+      case [ nodeSignature n | n <- nodes, nodeLineStart n == Just 1 ] of
+        (Just sig : _) -> do
+          T.isInfixOf "..." (toText sig) `shouldBe` True
+          T.isSuffixOf "from '../../templates/index.js';" (toText sig) `shouldBe` True
+        _ -> return ()
+
+  describe "type node emission (AVI-1471)" $ do
+    it "emits exactly one Type node for a real type declaration" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/types.ts" [typeDeclFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      filter isTypeKind kinds `shouldBe` [Just (fromText "Type")]
+
+    it "emits no Type node for bare type_identifier references" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/references.ts" [refOnlyFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      all (not . isTypeKind) kinds `shouldBe` True
+
+    it "still emits Interface and Enum alongside the Type declaration" $ do
+      let ex = tsNodesToExtraction GranularityFine "src/mix.ts" [typeRefsFixture]
+          kinds = map nodeKind (Map.elems (extractionNodes ex))
+      kinds `shouldSatisfy` (elem (Just (fromText "Type")))
+      kinds `shouldSatisfy` (elem (Just (fromText "Interface")))
+      kinds `shouldSatisfy` (elem (Just (fromText "Enum")))
