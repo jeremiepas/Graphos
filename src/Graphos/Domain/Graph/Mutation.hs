@@ -39,6 +39,7 @@ module Graphos.Domain.Graph.Mutation
   , removeEdgeProp
   , deleteEdge
   , deleteEdgesTouching
+  , deleteNodeIncident
 
     -- * Rebuild
   , rebuildAdjacency
@@ -132,6 +133,26 @@ deleteEdgesTouching :: NodeId -> Graph -> (Graph, Int)
 deleteEdgesTouching nid g =
   let (kept, removed) = Map.partitionWithKey (\(s, t) _ -> s /= nid && t /= nid) (gEdges g)
   in (g { gEdges = kept }, Map.size removed)
+
+-- | Remove a node and every incident edge using reverse/forward adjacency.
+--
+-- Runs in O(deg(n)) rather than O(|E|): only incident edge keys are looked up
+-- through gAdjFwd/gAdjBack, and removal touches at most deg(n) neighbours.
+deleteNodeIncident :: NodeId -> Graph -> (Graph, Int)
+deleteNodeIncident nid g =
+  let fwdNs = Map.findWithDefault Set.empty nid (gAdjFwd g)
+      bwdNs = Map.findWithDefault Set.empty nid (gAdjBack g)
+      candidates =
+        Set.fromList ([(nid, v) | v <- Set.toList fwdNs]
+                      ++ [(u, nid) | u <- Set.toList bwdNs])
+      deletedKeys = Set.filter (`Map.member` gEdges g) candidates
+      deletedCount = Set.size deletedKeys
+      nodes' = Map.delete nid (gNodes g)
+      edges' = foldl' (flip Map.delete) (gEdges g) (Set.toList deletedKeys)
+      -- Rebuild canonical adjacency/hash from surviving edges (matches
+      -- 'rebuildAdjacency', incl. undirected merge and empty dropping).
+      g' = rebuildAdjacency (g { gNodes = nodes', gEdges = edges' })
+  in (g', deletedCount)
 
 -- | Add a label: primary @nodeKind@ if unset, else the extra-labels list.
 addNodeLabel :: Text -> Node -> Node
