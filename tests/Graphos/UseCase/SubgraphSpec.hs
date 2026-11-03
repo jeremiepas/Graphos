@@ -19,14 +19,14 @@ spec = do
   describe "extractSubgraph" $ do
     it "returns an empty graph when given an empty graph" $ do
       let g = LabeledGraph Map.empty Map.empty Map.empty Map.empty
-          config = SubgraphConfig [] 1 False
+          config = SubgraphConfig [] 1 False []
       gNodes (extractSubgraph g config) `shouldBe` Map.empty
 
     it "extracts a single node as core if it matches patterns" $ do
       let n1 = Node "n1" (fromText "module1") CodeFile (fromText "src/file1.hs") (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           node1Id = nodeId n1
           g = LabeledGraph (Map.singleton node1Id n1) Map.empty Map.empty Map.empty
-          config = SubgraphConfig [SubsystemConfig "core" ["src/file1.hs"]] 1 False
+          config = SubgraphConfig [SubsystemConfig "core" ["src/file1.hs"]] 1 False []
           subgraph = extractSubgraph g config
       Map.member node1Id (gNodes subgraph) `shouldBe` True
       case Map.lookup node1Id (gNodes subgraph) of
@@ -36,7 +36,7 @@ spec = do
     it "tags a core node with tier, subsystem and layer" $ do
       let n1 = Node "n1" (fromText "module1") CodeFile (fromText "src/UseCase/Core.hs") (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe ShortText) (Nothing :: Maybe Int) (Nothing :: Maybe Bool) (Nothing :: Maybe Value) (0 :: Word64)
           g = LabeledGraph (Map.singleton (nodeId n1) n1) Map.empty Map.empty Map.empty
-          config = SubgraphConfig [SubsystemConfig "svc" ["src/UseCase/*"]] 1 False
+          config = SubgraphConfig [SubsystemConfig "svc" ["src/UseCase/*"]] 1 False []
           subgraph = extractSubgraph g config
           extra = nodeExtra (gNodes subgraph Map.! nodeId n1)
       extra `shouldSatisfy` isJust
@@ -57,7 +57,7 @@ spec = do
           g = LabeledGraph
                 (Map.fromList [(nodeId imp, imp), (nodeId nodeA, nodeA), (nodeId nodeB, nodeB)])
                 Map.empty Map.empty Map.empty
-          config = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True
+          config = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True []
           subgraph = extractSubgraph g config
       Map.member (nodeId nodeB) (gNodes subgraph) `shouldBe` True
       let derivedEdges = [ e | e <- Map.elems (gEdges subgraph)
@@ -78,7 +78,7 @@ spec = do
           g = LabeledGraph
                 (Map.fromList [(nodeId imp, imp), (nodeId nodeA, nodeA)])
                 Map.empty Map.empty Map.empty
-          config = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True
+          config = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True []
           subgraph = extractSubgraph g config
       Map.lookup "ext:pkg-lib" (gNodes subgraph) `shouldSatisfy` isJust
 
@@ -93,7 +93,7 @@ spec = do
                 (Map.fromList [(nodeId imp, imp), (nodeId nodeA, nodeA), (nodeId nodeB, nodeB)])
                 (Map.singleton (EdgeId "e1") edge)
                 Map.empty Map.empty
-          config = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True
+          config = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True []
           subgraph = extractSubgraph g config
       Map.size (gEdges subgraph) `shouldBe` 1
       case Map.elems (gEdges subgraph) of
@@ -113,8 +113,8 @@ spec = do
                 (Map.singleton (EdgeId "e1") edge)
                 (Map.fromList [(nodeId nodeA, Set.singleton (nodeId nodeB))])
                 (Map.fromList [(nodeId nodeB, Set.singleton (nodeId nodeA))])
-          withDerived = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True
-          withoutDerived = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 False
+          withDerived = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 True []
+          withoutDerived = SubgraphConfig [SubsystemConfig "core" ["src/a.ts"]] 1 False []
           importEdgesOf gr = Set.fromList
             [ (edgeSource e, edgeTarget e)
             | e <- Map.elems (gEdges gr), edgeRelation e == Imports ]

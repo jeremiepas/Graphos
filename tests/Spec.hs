@@ -62,6 +62,9 @@ import qualified Graphos.Domain.Graph.ColimitPropertySpec
 import qualified Graphos.Domain.Graph.MergeConfluenceSpec
 import qualified Graphos.Domain.Graph.ConflictSpec
 import qualified Graphos.Domain.Graph.MergeIdempotencySpec
+import qualified Graphos.Domain.Graph.UQICohesionSpec
+import qualified Graphos.Domain.Graph.UQIFreshRedetectionSpec
+import qualified Graphos.Domain.Graph.UQIMonotonicitySpec
 import qualified Graphos.Domain.Query.Cypher.MappingSpec
 import qualified Graphos.Domain.Query.Cypher.ParserSpec
 import qualified Graphos.Domain.Query.Cypher.EvalSpec
@@ -167,6 +170,9 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Graph.MergeConfluenceSpec.spec
   Graphos.Domain.Graph.ConflictSpec.spec
   Graphos.Domain.Graph.MergeIdempotencySpec.spec
+  Graphos.Domain.Graph.UQICohesionSpec.spec
+  Graphos.Domain.Graph.UQIFreshRedetectionSpec.spec
+  Graphos.Domain.Graph.UQIMonotonicitySpec.spec
   Graphos.Domain.Query.Cypher.MappingSpec.spec
   Graphos.Domain.Query.Cypher.ParserSpec.spec
   Graphos.Domain.Query.Cypher.EvalSpec.spec

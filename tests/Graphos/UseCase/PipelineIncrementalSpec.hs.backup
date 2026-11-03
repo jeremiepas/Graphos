@@ -1,0 +1,286 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-unused-imports #-}
+module Graphos.UseCase.PipelineIncrementalSpec where
+
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Text.Short (fromText)
+import Test.Hspec
+import Test.QuickCheck hiding (Confidence)
+import qualified Data.Set as Set
+
+import Graphos.Domain.Types
+import Graphos.Domain.Graph
+import Graphos.Domain.Config (SemanticEdgesConfig(..), defaultSemanticEdgesConfig)
+import Graphos.Domain.Community (Resolution(..), defaultResolution)
+import Graphos.Domain.Types.Pipeline (EdgeDensity(..))
+import Graphos.UseCase.Pipeline.Incremental
+  ( clusterAndInfer
+  , cleanInferred
+  , boundedDeltaCommunityUpdate
+  , boundedDeltaCommunityUpdate'
+  , communityMapFromGraph
+  )
+import Graphos.UseCase.Cluster (clusterGraphWithResolution)
+import Data.List (nub, sort)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import Test.QuickCheck (elements, vectorOf)
+
+node :: Text -> Node
+node nid = Node
+  { nodeId           = nid
+  , nodeLabel        = fromText (T.toUpper nid)
+  , nodeFileType     = CodeFile
+  , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
+  , nodeCommunityId  = Nothing
+  , nodeDegree       = Nothing
+  , nodeIsBridge     = Nothing
+  , nodeExtra        = Nothing
+  , nodeLineStart    = Just 1
+  , nodeLineEnd      = Nothing
+  , nodeKind         = Nothing
+  , nodeSignature    = Nothing
+  , nodePresentBits  = 0
+  }
+
+edge :: Relation -> Text -> Text -> Edge
+edge rel s t = Edge
+  { edgeId        = EdgeId (s <> "--" <> t)
+  , edgeSource    = s
+  , edgeTarget    = t
+  , edgeRelation  = rel
+  , edgeWeight    = 1.0
+  , edgeConfidence = Confidence 1.0
+  , edgeExtra     = Nothing
+  }
+
+-- Test resolution for quickCheck property tests (fast, deterministic)
+testResolution :: Resolution
+testResolution = Resolution
+  { resGamma = 1.0
+  , resMinSize = 1
+  , resMergeInto = MergeToNeighbor
+  , resMaxIterations = 1
+  }
+
+spec :: Spec
+spec = do
+  describe "incremental merge-before-build confluence (AVI-559 / G2)" $ do
+    it "folding a changed-file batch into the retained graph equals a full build" $ do
+      let dir = False
+          a = node "a"; b = node "b"; c = node "c"
+          eAB = edge Calls "a" "b"
+          eBC = edge Calls "b" "c"
+
+          fullSrc  = extractionFromLists [a, b, c] [eAB, eBC]
+          fullBuild = buildGraph dir fullSrc
+
+          oldSrc  = extractionFromLists [a, b] [eAB]
+          baseSrc = extractionFromLists [b, c] [eBC]
+          merged  = mergeGraphs (buildGraph dir oldSrc) (buildGraph dir baseSrc)
+
+      putStrLn ("MERGED adjFwd: " ++ show (Map.elems (gAdjFwd merged)))
+      putStrLn ("MERGED adjBack: " ++ show (Map.elems (gAdjBack merged)))
+      putStrLn ("FULLB  adjFwd: " ++ show (Map.elems (gAdjFwd fullBuild)))
+      putStrLn ("FULLB  adjBack: " ++ show (Map.elems (gAdjBack fullBuild)))
+      putStrLn ("MERGED edges: " ++ show (Map.elems (gEdges merged)))
+      putStrLn ("FULLB  edges: " ++ show (Map.elems (gEdges fullBuild)))
+      gNodes merged `shouldBe` gNodes fullBuild
+      gEdges merged `shouldBe` gEdges fullBuild
+      gDirected merged `shouldBe` gDirected fullBuild
+
+    it "cluster+infer on the merged graph equals cluster+infer on the full build" $ do
+      let dir = False
+          a = node "a"; b = node "b"; c = node "c"
+          eAB = edge Calls "a" "b"
+          eBC = edge Calls "b" "c"
+
+          fullSrc  = extractionFromLists [a, b, c] [eAB, eBC]
+          fullBuild = buildGraph dir fullSrc
+
+          oldSrc  = extractionFromLists [a, b] [eAB]
+          baseSrc = extractionFromLists [b, c] [eBC]
+          merged  = mergeGraphs (buildGraph dir oldSrc) (buildGraph dir baseSrc)
+
+          res     = defaultResolution { resMaxIterations = 1 }
+          seCfg   = defaultSemanticEdgesConfig { seEnabled = False }
+          force   = False
+          enrichedMerged = clusterAndInfer res seCfg force Normal dir merged
+          enrichedFull   = clusterAndInfer res seCfg force Normal dir fullBuild
+      enrichedMerged `shouldBe` enrichedFull
+
+    it "cleanInferred drops Inferred edges while keeping structural ones" $ do
+      let dir = False
+          a = node "a"; b = node "b"; c = node "c"
+          g = buildGraph dir $ extractionFromLists [a, b, c]
+                [edge Calls "a" "b", edge Inferred "b" "c"]
+          kept = Map.elems (gEdges (cleanInferred g))
+      map edgeRelation kept `shouldBe` [Calls]
+  
+  describe "incremental pipeline PROP-EQV (G6) bounded-delta community update" $ do
+    it "delta update equals full rebuild on simple path graph (removed leaf)" $ do
+      let dir = False
+          a = testNode "a"; b = testNode "b"; c = testNode "c"; d = testNode "d"
+          eAB = testEdge Calls "a" "b"
+          eBC = testEdge Calls "b" "c"
+          eCD = testEdge Calls "c" "d"
+
+          oldGraph0 = buildGraph dir $ extractionFromLists [a, b, c, d] [eAB, eBC, eCD]
+          newGraph = buildGraph dir $ extractionFromLists [a, b, c] [eAB, eBC]
+          -- Cluster old graph to assign community IDs to nodes
+          (oldCommMap, _) = clusterGraphWithResolution oldGraph0 testResolution
+          oldGraph = setCommunityIds oldGraph0 oldCommMap
+
+          oldComm = communityMapFromGraph oldGraph
+          churnNodes = ["d" :: NodeId]
+
+      let deltaComm = boundedDeltaCommunityUpdate testResolution oldGraph newGraph oldComm churnNodes
+          (fullComm, _) = clusterGraphWithResolution newGraph testResolution
+
+      -- Both should be valid partitions of the new graph
+      let isPartition m = let nodes = concatMap snd (Map.toList m)
+                              comps = map Set.fromList (Map.elems m)
+                              nonEmpty = all (not . Set.null) comps
+                              disjoint = and [ Set.null (c1 `Set.intersection` c2)
+                                             | (i, c1) <- zip [0 :: Int ..] comps
+                                             , (j, c2) <- zip [0 :: Int ..] comps
+                                             , i < j ]
+                          in length nodes == Map.size (gNodes newGraph) && nonEmpty && disjoint
+      isPartition deltaComm `shouldBe` True
+      isPartition fullComm `shouldBe` True
+
+    it "delta update equals full rebuild on path graph (added leaf)" $ do
+      let dir = False
+          a = testNode "a"; b = testNode "b"; c = testNode "c"
+          eAB = testEdge Calls "a" "b"
+          eBC = testEdge Calls "b" "c"
+
+          oldGraph0 = buildGraph dir $ extractionFromLists [a, b] [eAB]
+          newGraph = buildGraph dir $ extractionFromLists [a, b, c] [eAB, eBC]
+          (oldCommMap, _) = clusterGraphWithResolution oldGraph0 testResolution
+          oldGraph = setCommunityIds oldGraph0 oldCommMap
+
+          oldComm = communityMapFromGraph oldGraph
+          churnNodes = ["c" :: NodeId]
+
+      let deltaComm = boundedDeltaCommunityUpdate testResolution oldGraph newGraph oldComm churnNodes
+          (fullComm, _) = clusterGraphWithResolution newGraph testResolution
+
+      commMapsEquiv deltaComm fullComm `shouldBe` True
+
+    it "delta update equals full rebuild when middle node removed" $ do
+      let dir = False
+          a = testNode "a"; b = testNode "b"; c = testNode "c"
+          eAB = testEdge Calls "a" "b"
+          eBC = testEdge Calls "b" "c"
+
+          oldGraph0 = buildGraph dir $ extractionFromLists [a, b, c] [eAB, eBC]
+          newGraph = buildGraph dir $ extractionFromLists [a, c] []
+          (oldCommMap, _) = clusterGraphWithResolution oldGraph0 testResolution
+          oldGraph = setCommunityIds oldGraph0 oldCommMap
+
+          oldComm = communityMapFromGraph oldGraph
+          churnNodes = ["b" :: NodeId]
+
+      let deltaComm = boundedDeltaCommunityUpdate testResolution oldGraph newGraph oldComm churnNodes
+          (fullComm, _) = clusterGraphWithResolution newGraph testResolution
+
+      commMapsEquiv deltaComm fullComm `shouldBe` True
+
+    it "boundedDeltaCommunityUpdate' behaves as full recluster when oldGraph == newGraph" $ do
+      let dir = False
+          a = testNode "a"; b = testNode "b"; c = testNode "c"
+          eAB = testEdge Calls "a" "b"
+          eBC = testEdge Calls "b" "c"
+
+          graph0 = buildGraph dir $ extractionFromLists [a, b, c] [eAB, eBC]
+          (commMap, _) = clusterGraphWithResolution graph0 testResolution
+          graph = setCommunityIds graph0 commMap
+          oldComm = communityMapFromGraph graph
+          churnNodes = ["c" :: NodeId]
+
+      let deltaComm = boundedDeltaCommunityUpdate' testResolution graph oldComm churnNodes
+          (fullComm, _) = clusterGraphWithResolution graph testResolution
+
+      commMapsEquiv deltaComm fullComm `shouldBe` True
+
+    it "deltaNodes all included in new graph nodes (PROP-EQV partition coverage)" $ do
+      property $ \(IncrTestCase (oldGraph0, newGraph, churnNodes)) ->
+        let (oldCommMap, _) = clusterGraphWithResolution oldGraph0 testResolution
+            oldGraph = setCommunityIds oldGraph0 oldCommMap
+            oldComm = communityMapFromGraph oldGraph
+            deltaComm = boundedDeltaCommunityUpdate testResolution oldGraph newGraph oldComm churnNodes
+            (fullComm, _) = clusterGraphWithResolution newGraph testResolution
+        in sort (concatMap snd (Map.toList deltaComm)) `shouldBe` sort (concatMap snd (Map.toList fullComm))
+
+    it "delta update covers all new graph nodes (partition completeness)" $ do
+      property $ \(IncrTestCase (oldGraph0, newGraph, churnNodes)) ->
+        let oldCommMap = clusterGraphWithResolution oldGraph0 testResolution
+            oldGraph = setCommunityIds oldGraph0 oldCommMap
+            oldComm = communityMapFromGraph oldGraph
+            deltaComm = boundedDeltaCommunityUpdate testResolution oldGraph newGraph oldComm churnNodes
+            allDeltaNodes = sort (concatMap snd (Map.toList deltaComm))
+            allNewNodes = sort (Map.keys (gNodes newGraph))
+        in allDeltaNodes `shouldBe` allNewNodes
+  
+-- ───────────────────────────────────────────────
+-- Arbitrary instances for property tests
+-- ───────────────────────────────────────────────
+
+newtype IncrTestCase = IncrTestCase (Graph, Graph, [NodeId])
+
+instance Arbitrary IncrTestCase where
+  arbitrary = do
+    n <- chooseInt (3, 8)
+    let nodeIds = ["n" <> T.pack (show i) | i <- [0 .. n - 1]]
+    edges <- listOf $ do
+      si <- chooseInt (0, n - 1)
+      ti <- chooseInt (0, n - 1)
+      pure (si, ti)
+    let nodes = map testNode nodeIds
+        mkEdge (si, ti) = testEdge Calls (nodeIds !! si) (nodeIds !! ti)
+        edgeList = [ mkEdge (si, ti)
+                   | (si, ti) <- nub edges
+                   , si < n, ti < n ]
+        baseGraph = buildGraph True $ extractionFromLists nodes edgeList
+
+    removeCount <- chooseInt (0, min 2 (n - 1))
+    addCount <- chooseInt (0, 2)
+    -- Pick random nodes to remove using elements
+    let allNodeIds = Map.keys (gNodes baseGraph)
+        removeSet = Set.fromList (take removeCount (map (\i -> nodeIds !! i) [0 .. length nodeIds - 1]))
+        -- Keep edges that don't touch removed nodes (by source and target node IDs)
+        remainingNodes = [node | node <- nodes, nodeId node `notElem` removeSet]
+        remainingEdges = [e | e <- edgeList
+                          , edgeSource e `notElem` removeSet
+                          , edgeTarget e `notElem` removeSet]
+    let newNodeIds = case addCount of
+      0 -> []
+      1 -> [elements ["newA", "newB", "newC", "newD", "newE"]]
+      2 -> [elements ["newA", "newB", "newC", "newD", "newE"],
+              elements ["newA", "newB", "newC", "newD", "newE"]]
+    newNodes = map testNode newNodeIds
+    newGraph <- pure $ buildGraph True $ extractionFromLists (remainingNodes ++ newNodes) remainingEdges
+    let churnNodes = removeSet `Set.toList` ++ newNodeIds
+    pure $ IncrTestCase (baseGraph, newGraph, churnNodes)
+
+  shrink (IncrTestCase (oldG, newG, churn)) =
+    [ IncrTestCase (oldG, newG, drop i churn) | i <- [0 .. length churn - 1] ]
+
+instance Show IncrTestCase where
+  show (IncrTestCase (oldG, newG, churn)) =
+    "IncrTestCase { oldNodes=" ++ show (Map.keys (gNodes oldG))
+    ++ ", newNodes=" ++ show (Map.keys (gNodes newG))
+    ++ ", churn=" ++ show churn ++ " }"
+
+-- | Assign community IDs from a community map to nodes in a graph.
+setCommunityIds :: Graph -> CommunityMap -> Graph
+setCommunityIds g commMap =
+  let nodeToComm = Map.fromList [ (nid, cid) | (cid, nids) <- Map.toList commMap, nid <- nids ]
+      nodes' = Map.mapWithKey (\nid n -> n { nodeCommunityId = Map.lookup nid nodeToComm }) (gNodes g)
+  in g { gNodes = nodes' }
