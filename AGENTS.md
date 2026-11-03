@@ -39,3 +39,32 @@ A run is **not** done until all of the following hold, and the verification resu
    - an uploaded `artifact` / task document.
 3. **Evidence in a comment.** The final comment names the commit/branch/PR and the verification command(s) run (`build`/`test`), with the work-product ID or PR link.
 4. **No "done via comment only"** — an informal prose `done` with no registered PR/work product/artifact is not a disposition and blocks promotion to `done`.
+## Trunk-based integration (Option A — accepted plan)
+
+- `main` is the single integration + production branch. The `develop` GitFlow branch is retired; do not create or target `develop` for new work.
+- Per issue AVI-XXX: `git worktree add .worktrees/AVI-XXX -b feature/AVI-XXX main` (worktrees live in the Graphos repo); PRs target `main`.
+- Existing worktrees under `.worktrees/` and `.paperclip/worktrees/` belong to other issues — do not touch them.
+- The board may override; revisit GitFlow only if release isolation becomes the constraint.
+
+## GitHub approvals — materialize verdicts
+
+- An approving review verdict is not complete until it is posted to GitHub as an approving review (REST API: `POST /repos/{owner}/{repo}/pulls/{n}/reviews` with `event=APPROVE`). Prose-only approval in a Paperclip comment is never sufficient.
+- `haskell-reviewer` posts the code-review approval; `merge-gatekeeper` relies on the GitHub approval check to satisfy required-approvals branch protection.
+- `REQUEST_CHANGES` / `COMMENT` reviews are posted the same way for red-CI or remediation verdicts.
+- Tooling: `scripts/post-github-review.sh <pr-number> <APPROVE|REQUEST_CHANGES|COMMENT> [body]` wraps the REST call; haskell-reviewer MUST call it for every verdict and never rely on `gh pr comment` alone.
+
+## Merge SLA (gatekeeper-exclusive)
+
+- Green + approved PRs are merged by `merge-gatekeeper` within 24 h, oldest-first.
+- After each merge, re-check remaining open PRs and file rebase tasks for any new conflicts.
+- Only `merge-gatekeeper` merges; no direct pushes to `main`.
+
+## Zombie-GC rule
+
+- No issue may remain `done` while an associated PR is open. On merge/close of the PR, the owning issue moves to a terminal state (`done`/`cancelled`) within 24 h.
+- Blocked issues whose associated PR is merged or closed must be released to `backlog`/`todo` (or terminal) within 24 h per the blocked↔backlog gate above.
+- The weekly `branch-guardian` audit reports the zombie count; targets: zombie issues = 0, done-issues-with-open-PR = 0. A non-zero count is an escalation trigger.
+
+## Weekly fluidity metrics (branch-guardian audit)
+
+Targets published weekly: open PRs ≤ 5; median PR age open→merge < 48 h; merged < 24 h after green+approved = 100%; conflicting PRs > 24 h = 0; red-CI PRs without a remediation task = 0; zombie issues = 0; done-issues with open PR = 0.
