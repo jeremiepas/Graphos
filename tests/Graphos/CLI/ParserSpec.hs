@@ -102,6 +102,12 @@ spec = do
       parseWith neighborsOpts ["Some.Display.Name", "--depth", "1"] `shouldSatisfy` isRight
     it "cypher accepts a positional query plus --json / --budget" $ do
       parseWith cypherOpts ["MATCH (n) RETURN n", "--json", "--budget", "100"] `shouldSatisfy` isRight
+    it "cypher accepts --format json" $ do
+      parseWith cypherOpts ["MATCH (n) RETURN n", "--format", "json"] `shouldSatisfy` isRight
+    it "cypher accepts --format csv" $ do
+      parseWith cypherOpts ["MATCH (n) RETURN n", "--format", "csv"] `shouldSatisfy` isRight
+    it "cypher accepts --format tsv" $ do
+      parseWith cypherOpts ["MATCH (n) RETURN n", "--format", "tsv"] `shouldSatisfy` isRight
 
   describe "research subcommand parsing" $ do
     it "requires at least one term" $ do
@@ -223,3 +229,83 @@ spec = do
       parsePipeline ["--max-community-fraction", "0"]   `shouldSatisfy` isLeft
       parsePipeline ["--max-community-fraction", "1.5"] `shouldSatisfy` isLeft
       parsePipeline ["--max-community-fraction", "-0.1"] `shouldSatisfy` isLeft
+
+  describe "subcommand help" $ do
+    it "query accepts --help" $ do
+      -- When --help is passed, parseWith returns Failure with help text rendered;
+      -- we verify it's not an "invalid option" error (help was recognized)
+      parseWith (queryOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "cypher accepts --help" $ do
+      parseWith (cypherOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "path accepts --help" $ do
+      parseWith (pathOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "explain accepts --help" $ do
+      parseWith (explainOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "symbols accepts --help" $ do
+      parseWith (symbolsOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "neighbors accepts --help" $ do
+      parseWith (neighborsOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "push accepts --help" $ do
+      parseWith (pushOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "push-memgraph accepts --help" $ do
+      parseWith (pushMemgraphOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "merge accepts --help" $ do
+      parseWith (mergeOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "ingest accepts --help" $ do
+      parseWith (ingestOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "subgraph accepts --help" $ do
+      parseWith (subgraphOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "migrate-graph accepts --help" $ do
+      parseWith (migrateGraphOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "speccheck accepts --help" $ do
+      parseWith (speccheckOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "intentcheck accepts --help" $ do
+      parseWith (intentcheckOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "impact accepts --help" $ do
+      parseWith (impactOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "serve accepts --help" $ do
+      parseWith (serveOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "init accepts --help" $ do
+      parseWith (initOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "install-skill accepts --help" $ do
+      parseWith (installSkillOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
+    it "research accepts --help" $ do
+      parseWith (researchOpts <**> helper) ["--help"] `shouldSatisfy` \case
+        Left err -> not (err `isInfixOf` "Invalid option")
+        Right _ -> True
