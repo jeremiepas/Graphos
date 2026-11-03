@@ -22,10 +22,10 @@
 ## 3. Subgraph seed modes (depends on 1 for its help text)
 
 ### 3.1 Seed resolution + hop expansion
-- [ ] `subgraphOpts`: repeatable `--path`, `--seeds FILE`, stdin fallback (non-TTY, no other seed source), `--hops N` (default 1); `--config` mode untouched; seedless error naming all four forms
-- [ ] Seed resolution (glob over `source_file`, comment lines in seed files) + undirected hop expansion in the subgraph use-case
-- [ ] Hspec: path/file/stdin parity on a fixture; hop-1 expansion set; seedless error
-- [ ] Check criteria first: the feedback's three originally-failing invocations now work or fail with guidance
+- [x] `subgraphOpts`: repeatable `--path`, `--seeds FILE`, stdin fallback (non-TTY, no other seed source), `--hops N` (default 1); `--config` mode untouched; seedless error naming all four forms
+- [x] Seed resolution (glob over `source_file`, comment lines in seed files) + undirected hop expansion in the subgraph use-case
+- [x] Hspec: path/file/stdin parity on a fixture; hop-1 expansion set; seedless error
+- [x] Check criteria first: the feedback's three originally-failing invocations now work or fail with guidance
 
 ### 3.2 Output + summary
 - [ ] Contract-shaped output via `exportSubgraphJSON`; `--graphml` reuses the GraphML exporter; final summary line (nodes, edges, path, % of source retained)
