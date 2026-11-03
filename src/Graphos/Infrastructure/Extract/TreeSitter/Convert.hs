@@ -17,6 +17,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , definitionTypes
   , structureTypes
   , apiSurfaceTypes
+  , wrapperTypes
   , importExportTypes
   , implementationDetailTypes
   , functionBoundaryTypes
@@ -26,6 +27,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
     , tsNodeLabel
     , tsNodeUntruncatedLabel
     , nodeIdentityBudget
+    , nodeIdentifier
     -- | Node-identity helpers: stable `<dirHash>_<stem>_<kind>:<ident>`
     -- scheme (AVI-1452). 'nodeKeyId' emits the seed id (rank 0); the
     -- deterministic in-file collision pass appends `#L<line>` ranks later.
@@ -42,7 +44,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, ShortText)
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
-import Data.Aeson (toJSON)
+import Data.Aeson (toJSON, object, (.=))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Map (Map)
@@ -55,7 +57,7 @@ import Graphos.Domain.Types
   , bitNodeKind, bitNodeLineStart, bitNodeLineEnd, bitNodeSignature
   )
 import Data.Bits ((.|.))
-import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision, truncateText, nodeIdentityBudget)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), normalizeText, defaultTruncationBudget, truncateWithElision, truncateText, nodeIdentityBudget, extractIdentifier)
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- | Tier 1 — file/module structure. Emitted at every granularity level.
@@ -333,12 +335,27 @@ tsNodesToExtraction gran filePath nodes =
 
 -- | Convert a TSNodeInfo and its children into Graphos Nodes and Edges.
 tsNodeToGraphNodes :: Granularity -> FilePath -> TSNodeInfo -> [Node]
-tsNodeToGraphNodes gran filePath node =
-  let isDef = tsnType node `elem` typesFor gran && tsnIsNamed node
-      self = [makeNode filePath node | isDef]
+tsNodeToGraphNodes gran filePath node = tsNodeToGraphNodesX gran filePath False Nothing node
+
+-- | Internal worker carrying the `exported` flag and an optional signature-text
+-- override threaded down from an enclosing wrapper (`export_statement` /
+-- `decorated_definition`). When a wrapper suppresses its inner declaration,
+-- the outer declaration text is used as the node's signature (task 3.5).
+tsNodeToGraphNodesX :: Granularity -> FilePath -> Bool -> Maybe Text -> TSNodeInfo -> [Node]
+tsNodeToGraphNodesX gran filePath isExported sigOverride node =
+  let sigNode = case sigOverride of
+                  Just t  -> node { tsnText = t }
+                  Nothing -> node
+      isWrapper = tsnIsNamed node && tsnType node `elem` wrapperTypes
+      isDef = tsnType node `elem` typesFor gran && tsnIsNamed node && not isWrapper
+      marker = if isExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
+      self = [ (makeNode filePath sigNode) { nodeExtra = marker } | isDef ]
+      childExported = isExported || isWrapper
+      childMarker = if childExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
+      childOverride = if isWrapper then Just (tsnText node) else sigOverride
       children = if descendInto gran isDef node
-        then concatMap (tsNodeToGraphNodes gran filePath) (tsnChildren node)
-        else map (makeNode filePath) (opaqueBodyUses gran isDef node)
+        then concatMap (tsNodeToGraphNodesX gran filePath childExported childOverride) (tsnChildren node)
+        else map (\u -> (makeNode filePath (case childOverride of Just t -> u { tsnText = t } ; Nothing -> u)) { nodeExtra = childMarker }) (opaqueBodyUses gran isDef node)
   in self ++ children
 
 -- | Convert a TSNodeInfo tree into Graphos Edges (Contains parent→child).
@@ -362,7 +379,8 @@ tsNodeToGraphEdges'
   :: Granularity -> FilePath -> CallsCtx -> Maybe NodeId -> Maybe Text -> Text -> TSNodeInfo -> ([Edge], [Node])
 tsNodeToGraphEdges' gran filePath ctx parentId parentLabel enclosingDef node =
   let myLabel = tsNodeLabel node
-      isDef     = tsnType node `elem` typesFor gran && tsnIsNamed node
+      isWrapper = tsnIsNamed node && tsnType node `elem` wrapperTypes
+      isDef     = tsnType node `elem` typesFor gran && tsnIsNamed node && not isWrapper
       tType     = tsnType node
       myId      = seedIdFor filePath node
       isCall    = tType == "call_expression" || tType == "new_expression"
@@ -548,18 +566,54 @@ opaqueBodyUses _ _ _ = []
 -- declaration text bounded by 'nodeIdentityBudget', so the per-node size of
 -- graph.json stays bounded (task 3.3, AVI-1452). The 'nodeSignature' present
 -- bit is set so 'computePresentBits' / the JGF FromJSON round-trip preserves it.
+-- | Wrapper types whose own declaration offers no identifier; their inner
+-- declaration is emitted instead (task 3.2). For 3.1, identifier extraction
+-- returns 'Nothing' for such a node so it is not emitted under its wrapper type.
+wrapperTypes :: [String]
+wrapperTypes = ["export_statement", "decorated_definition"]
+
+-- | Identifier selection for a node (task 3.1):
+--   * module/structure nodes use the source file's basename
+--   * import / re-export nodes use the resolved specifier (target name),
+--     with the file name as fallback where unresolved
+--   * wrapper nodes yield 'Nothing' (handled separately, task 3.2)
+--   * ordinary declarations use the first named identifier-class child
+--     via 'Core.extractIdentifier'.
+nodeIdentifier :: FilePath -> TSNodeInfo -> Maybe Text
+nodeIdentifier filePath node
+  | tsnType node `elem` wrapperTypes = Nothing
+  | tsTypeToKind (tsnType node) == "Module" =
+      Just (T.pack (takeFileName' filePath))
+  | tsnType node `elem` importExportTypes =
+      case firstChildOfType "string" (tsnChildren node) of
+        Just child ->
+          let spec = stripQuotes (T.strip (tsnText child))
+          in if T.null spec
+               then Just (T.pack (takeFileName' filePath))
+               else Just spec
+        Nothing -> Just (T.pack (takeFileName' filePath))
+  | otherwise = extractIdentifier node
+
 makeNode :: FilePath -> TSNodeInfo -> Node
 makeNode filePath node =
     let sf = mkSourceFile filePath
         line = tsnStartRow node + 1
-        text' = tsNodeUntruncatedLabel node
-        -- 'truncateText' appends a 3-char elision "...", so reserve it and keep
-        -- the final <ident> — and the label/signature derived from it — within
-        -- nodeIdentityBudget (AVI-1452). See Core.truncateText.
-        elisionBudget = 3
-        ident = truncateText (nodeIdentityBudget - elisionBudget) text'
         kindText = T.pack (tsTypeToKind (tsnType node))
         kind  = fromText kindText
+        rawIdent = fromMaybe (tsNodeUntruncatedLabel node) (nodeIdentifier filePath node)
+        identText = normalizeText rawIdent
+        -- 'truncateText' appends a 3-char elision "...", so reserve it and keep
+        -- the final <ident> — and the label derived from it — within
+        -- nodeIdentityBudget (AVI-1452). See Core.truncateText.
+        elisionBudget = 3
+        ident = truncateText (nodeIdentityBudget - elisionBudget) identText
+        declText = tsNodeUntruncatedLabel node
+        isModuleNode = tsTypeToKind (tsnType node) == "Module"
+        isImportExport = tsnType node `elem` importExportTypes
+        sigText
+          | isModuleNode = Nothing
+          | isImportExport = Just (truncateWithElision defaultTruncationBudget declText (extractTail declText))
+          | otherwise = Just (truncateText defaultTruncationBudget declText)
     in Node
          { nodeId           = nodeKeyId sf kindText ident line 0
          , nodeLabel        = fromText ident
@@ -569,8 +623,9 @@ makeNode filePath node =
          , nodeLineStart    = Just line
          , nodeLineEnd      = Just (tsnEndRow node + 1)
          , nodeKind         = Just kind
-         , nodeSignature    = Just (fromText ident)
-         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|. bitNodeSignature
+         , nodeSignature    = maybe Nothing (Just . fromText) sigText
+         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|.
+                               if isJust sigText then bitNodeSignature else 0
          , nodeCommunityId  = Nothing
          , nodeDegree       = Nothing
          , nodeIsBridge     = Nothing
@@ -585,9 +640,10 @@ seedIdFor :: FilePath -> TSNodeInfo -> NodeId
 seedIdFor filePath node =
     let sf     = mkSourceFile filePath
         kindText = T.pack (tsTypeToKind (tsnType node))
+        rawIdent = fromMaybe (tsNodeUntruncatedLabel node) (nodeIdentifier filePath node)
         -- Reserve elision space so the final <ident> stays within
         -- nodeIdentityBudget (see makeNode).
-        ident    = truncateText (nodeIdentityBudget - 3) (tsNodeUntruncatedLabel node)
+        ident    = truncateText (nodeIdentityBudget - 3) (normalizeText rawIdent)
         line     = tsnStartRow node + 1
     in nodeKeyId sf kindText ident line 0
 

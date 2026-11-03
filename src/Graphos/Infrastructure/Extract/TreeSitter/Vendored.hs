@@ -9,6 +9,8 @@ module Graphos.Infrastructure.Extract.TreeSitter.Vendored
   ( tree_sitter_cpp
   , tree_sitter_yaml
   , tree_sitter_sql
+  , tree_sitter_perl
+  , tree_sitter_c_sharp
   ) where
 
 import Foreign.Ptr (Ptr)
@@ -22,3 +24,9 @@ foreign import ccall unsafe "vendor/tree-sitter-yaml/src/parser.c tree_sitter_ya
 
 foreign import ccall unsafe "vendor/tree-sitter-sql/src/parser.c tree_sitter_sql"
   tree_sitter_sql :: Ptr Language
+
+foreign import ccall unsafe "vendor/tree-sitter-perl/src/parser.c tree_sitter_perl"
+  tree_sitter_perl :: Ptr Language
+
+foreign import ccall unsafe "vendor/tree-sitter-c-sharp/src/parser.c tree_sitter_c_sharp"
+  tree_sitter_c_sharp :: Ptr Language
