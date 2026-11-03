@@ -49,7 +49,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (filterM)
 import Data.Aeson (Value, object, (.=))
 import Data.Char (isAlphaNum, isSpace, isAlpha)
-import Data.List (isSuffixOf, sort)
+import Data.List (isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -308,7 +308,7 @@ resolveJava file site = do
 wildJavaFiles :: FilePath -> FilePath -> IO [FilePath]
 wildJavaFiles start relDir = do
   results <- fmap concat $ mapM tryAncestor (ancestors start)
-  pure (sort results)
+  pure (sort (nub results))
   where
     tryAncestor d = do
       let dir = d </> relDir
