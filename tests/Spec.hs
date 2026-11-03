@@ -31,6 +31,7 @@ import qualified Graphos.Domain.Community.DeterminismSpec
 import qualified Graphos.Domain.Community.PermutationSpec
 import qualified Graphos.Domain.LabelingSpec
 import qualified Graphos.Domain.AnalysisSpec
+import qualified Graphos.Infrastructure.Critique.LeanSpec
 import qualified Graphos.Domain.ContextSpec
 import qualified Graphos.UseCase.PipelineSpec
 import qualified Graphos.UseCase.StagingSpec
@@ -136,6 +137,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Community.PermutationSpec.spec
   Graphos.Domain.LabelingSpec.spec
   Graphos.Domain.AnalysisSpec.spec
+  Graphos.Infrastructure.Critique.LeanSpec.spec
   Graphos.Domain.ContextSpec.spec
   Graphos.UseCase.PipelineSpec.spec
   Graphos.UseCase.StagingSpec.spec
