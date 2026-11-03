@@ -6,12 +6,14 @@ import Test.Hspec
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
+import Test.QuickCheck (property, (==>), (===))
 import Data.Aeson (toJSON)
 import Data.Text.Short (fromText)
 import qualified Data.Set as Set
-
+import Data.Set (Set)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions)
+
 import Graphos.Domain.Labeling
   ( labelPrompt
   , batchCommunities
@@ -174,8 +176,8 @@ spec = do
         `shouldNotBe` fingerprintOf (Set.fromList ["a", "b", "c"])
   
   describe "matchCommunity" $ do
-    let entry _cid model members label =
-          LabelCacheEntry (fingerprintOf members) (Set.toList members) label model "2026-10-06T00:00:00Z"
+    let entry _cid model members lab =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) lab model "2026-10-06T00:00:00Z"
   
     it "exact hit reuses the cached label with no LLM call" $ do
       let cache = [entry (0 :: Int) "gpt-4o" (Set.fromList ["a", "b"]) "Auth"]
@@ -185,6 +187,14 @@ spec = do
     it "drift hit inherits label within bidirectional containment (0.9)" $ do
       let old = Set.fromList ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]
           new = Set.difference old (Set.fromList ["m0"]) <> Set.fromList ["n0"]
+          cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
+      matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
+
+    it "drift hit inherits label for 100-member community (±5 in/out, ratios 0.95)" $ do
+      let old = Set.fromList [ "m" <> T.pack (show i) | i <- [0 .. 99 :: Int] ]
+          out = Set.fromList [ "m" <> T.pack (show i) | i <- [0 .. 4 :: Int] ]
+          ins = Set.fromList [ "n" <> T.pack (show i) | i <- [0 .. 4 :: Int] ]
+          new = Set.difference old out <> ins
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
   
@@ -240,3 +250,16 @@ spec = do
           new = Set.fromList ["x0", "x1", "x2", "x3"]  -- 4 of 5 = 0.8 >= 0.8
           cache = [entry (0 :: Int) "gpt-4o" old "Auth"]
       matchCommunity cache "gpt-4o" new `shouldBe` Just (cache !! 0, FuzzyMatch)
+
+  describe "matchCommunity (QuickCheck property)" $ do
+    let qce model members lab =
+          LabelCacheEntry (fingerprintOf members) (Set.toList members) lab model
+            "2026-10-06T00:00:00Z"
+    it "returns Nothing whenever either containment ratio < 0.8 (non-empty)" $ property $ \oldStr newStr ->
+      let old = Set.fromList (map T.pack oldStr) :: Set Text
+          new = Set.fromList (map T.pack newStr) :: Set Text
+          inter = Set.size (Set.intersection old new)
+          orl = fromIntegral inter / fromIntegral (Set.size old) :: Double
+          nrl = fromIntegral inter / fromIntegral (Set.size new) :: Double
+      in (not (Set.null old) && not (Set.null new)) ==>
+         ((orl < 0.8 || nrl < 0.8) ==> matchCommunity [qce "gpt-4o" old "Auth"] "gpt-4o" new === Nothing)

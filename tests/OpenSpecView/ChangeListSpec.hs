@@ -52,6 +52,21 @@ valid info =
 expectedOrder :: [ChangeInfo] -> [ChangeInfo]
 expectedOrder = sortBy (comparing (fmap Down changeLastModified) <> comparing changeName)
 
+-- Write a single change dir under `root` whose tasks.md contains `total`
+-- checkboxes of which `done` are marked complete. Used to build a hermetic
+-- fixture so `readAllChangeInfos` counts do not depend on the live
+-- openspec/changes tree (whose completion counts drift as work progresses).
+writeFixture :: FilePath -> ChangeName -> Int -> Int -> IO ()
+writeFixture root name total done = do
+  let dir = combine' root name
+  createDirectoryIfMissing True dir
+  let checkboxes =
+        [ "- [x] " ++ name ++ " task " ++ show i | i <- [1 .. done] ]
+        ++ [ "- [ ] " ++ name ++ " task " ++ show i | i <- [done + 1 .. total] ]
+  writeFile
+    (combine' dir "tasks.md")
+    ("# Tasks: " ++ name ++ "\n## Phase 1\n" ++ unlines checkboxes)
+
 spec :: Spec
 spec = do
   describe "OpenSpecView.ChangeList.parseTasksMd" $ do
@@ -101,11 +116,22 @@ spec = do
       Nothing -> error "streaming-embeddings change missing from parsed list"
 
   it "parses known changes with the expected task counts" $ do
-    root <- findChangesRoot
-    infos <- readAllChangeInfos root
+    -- Hermetic: build a fixture under the current working directory with known
+    -- change dirs and tasks.md files instead of reading the live
+    -- openspec/changes tree, whose completion counts drift as progress is made
+    -- (which broke this assertion). Kept out of openspec/changes so the other
+    -- disk-scanning specs are unaffected, and removed on completion.
+    cwd <- getCurrentDirectory
+    let tmp = combine' cwd ".openspec-change-list-fixture"
+    createDirectoryIfMissing True tmp
+    writeFixture tmp "openspec-view"          13 0
+    writeFixture tmp "extract-haskell-libs"   60 2
+    writeFixture tmp "multi-source-graphs"    19 5
+    writeFixture tmp "usable-graph-for-code-review" 25 5
+    infos <- readAllChangeInfos tmp
     let byName = Map.fromList [(changeName c, c) | c <- infos]
         lookup' k = case Map.lookup k byName of
-          Nothing -> error ("missing change in parsed list: " ++ k)
+          Nothing -> error ("missing change in parsed fixture: " ++ k)
           Just c  -> c
         view = lookup' "openspec-view"
         ex = lookup' "extract-haskell-libs"
@@ -123,3 +149,11 @@ spec = do
     (changeTotal ug) `shouldBe` 25
     (changeCompleted ug) `shouldBe` 5
     (changeStatus ug) `shouldBe` "in-progress"
+    -- Remove the fixture so it is not left behind in the working directory.
+    -- `removePathRecursive` is unavailable on this base version, so delete the
+    -- task files, then each change dir, then the parent dir.
+    let dirs = ["openspec-view", "extract-haskell-libs",
+                "multi-source-graphs", "usable-graph-for-code-review"]
+    mapM_ (\c -> removeFile (combine' (combine' tmp c) "tasks.md")) dirs
+    mapM_ (\c -> removeDirectory (combine' tmp c)) dirs
+    removeDirectory tmp >> pure ()
