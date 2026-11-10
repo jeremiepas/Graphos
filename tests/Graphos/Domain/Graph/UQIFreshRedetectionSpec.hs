@@ -10,7 +10,7 @@ import Data.List (sort, sortOn)
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph(..), buildGraph, mergeGraphs, gNodes, gEdges, degree)
+import Graphos.Domain.Graph (Graph(..), buildGraph, mergeGraphs)
 import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), MergeStrategy(..))
 import Data.Text.Short (fromText)
 
