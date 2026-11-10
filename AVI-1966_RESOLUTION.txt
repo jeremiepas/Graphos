@@ -1,25 +1,23 @@
-AVI-1966 Merge gate Graphos PR #209 — RESOLUTION
+AVI-1966 — Merge gate Graphos PR #209 (pr128-head) — RESOLUTION
 
-Recovery cause: deliberate_wait_without_target (previous run ended without recorded disposition)
+Status: HELD / BLOCKED (deliberate wait) — gate correctly closed.
+Recovery cause: deliberate_wait_without_target (review lane AVI-1902 not terminal).
 
-CHANGE STATUS: BLOCKED — merge gate cannot proceed until review lane AVI-1902 reaches `done` state
+BLOCKER (verified live 2026-11-03):
+- Review lane AVI-1902: status=in_progress, no review verdict, 0 comments. Orphaned (no reviewer activity since PR creation).
+- PR #209 (pr128-head): OPEN, mergeStateStatus=DIRTY, reviewDecision=REVIEW_REQUIRED, never merged, never updated since 2026-11-02T14:32:52Z.
 
-The merge gate for Graphos PR #209 (pr128-head, +202/-10, state=DIRTY) is BLOCKED because:
-- Review lane AVI-1902 ("Review Graphos PR #209: pr128 head") status is `in_progress`
-- No documented approval, comments, or verdict recorded for AVI-1902
-- Per merge gate policy: `merge-gatekeeper SHALL not process (merge) a merge-gate lane until its associated review lane has reached `done` state`
-- Gate rule documented in AGENTS.md: "Do NOT merge without that review lane's sign-off. Reference lane: AVI-1902"
+GATE RULE (AGENTS.md / docs/release-policy.md):
+- merge-gatekeeper SHALL NOT process (merge) the merge-gate lane until its associated review lane (AVI-1902) is done.
+- Review lane is review-only; merge authority is the merge-gate lane. No merge is permitted while the review lane is non-terminal.
 
-Artifacts verified:
-- PR #209 has +202/-10 changes, state=DIRTY
-- Review lane AVI-1902 linked to AVI-1966 with no approval documentation
-- No git branch or tag in repository confirms AVI-1902 `done` state
+DISPOSITION:
+- Explicit keep: branch `pr128-head` kept (not merged), deferred pending AVI-1902 sign-off.
+- Cannot be cleared by merge-gatekeeper alone. Unblock path: (a) AVI-1902 completes review -> done, or (b) board/operator decision (reassign reviewer / clear orphaned lane / formal deferral).
 
-Verification (already passed):
-- Merge gate formalization rule from AVI-1887/1891 confirmed: review lane must reach `done` state before merge
-- AVI-1902 review attention state: `none` (no review action documented)
-- AVI-1902 comments: 0 (no review comments or verdict recorded)
+NOT A LOOP: prior runs re-documented the same block with unverifiable "no approvals" claims. This entry replaces those with live-verified state (Paperclip API + GitHub REST) so the gate record reflects reality.
 
-Disposition: Issue AVI-1966 remains BLOCKED per merge gatekeeper gate rule. The merge-gatekeeper must not process (merge) PR #209 merge-gate lane until review lane AVI-1902 reaches `done` state and accepts the diff. Either a GitHub review approval on PR #203/pr128-head or equivalent documentation marking review lane AVI-1902 as `done` is required before the merge gate can proceed.
-
-Resolution note: Recovery from deliberate_wait_without_target. Blockade persists — review lane AVI-1902 sign-off unverifiable from git state alone. Per AVI-1891 merge-gatekeeper gate rule, PR #209 merge-gate lane cannot be processed. Awaiting AVI-1902 status confirmation through Paperclip issue tracking or alternative gate validation mechanism before merge can proceed. Change is purely additive specification documentation, no code changes needed to unblock this gate determination.
+Artifacts:
+- .paperclip/AVI-1966-explicit-keep.md (live-verified explicit keep)
+- .paperclip/AVI-1966-disposition-comment.txt (disposition comment)
+- AVI-1966_RESOLUTION.txt (this file)
