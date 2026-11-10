@@ -324,27 +324,41 @@ inferDeterministicDocEdges = inferDeterministicDocEdgesWith Map.empty
 -- | Deterministic @documents@ edges with doc-text index and configurable
 -- thresholds (@seMinIdentLength@, @sePathExtensions@ from graphos.yaml).
 inferDeterministicDocEdgesConfigured :: SemanticEdgesConfig -> Map NodeId Text -> Graph -> [Edge]
-inferDeterministicDocEdgesConfigured se docText g =
-  inferCoLocationEdges g
+inferDeterministicDocEdgesConfigured = inferDeterministicDocEdgesFor Normal
+
+-- | Deterministic @documents@ edges for an edge density (pipeline entry).
+--
+-- Co-location uses the file-level, fan-out-capped pass
+-- ('inferFileCoLocationEdges'), so a doc over a large source tree never
+-- becomes a hub that collapses the community partition. Under 'Sparse' the
+-- co-location heuristic is dropped entirely: only evidence-based links remain
+-- (a doc mentions a uniquely defined symbol, or cites a source path).
+-- A graph without doc nodes yields no @documents@ edge at any density.
+inferDeterministicDocEdgesFor :: EdgeDensity -> SemanticEdgesConfig -> Map NodeId Text -> Graph -> [Edge]
+inferDeterministicDocEdgesFor density se docText g =
+  coLocation
   ++ inferSymbolMentionEdgesWith (seMinIdentLength se) docText g
   ++ inferPathReferenceEdgesWith (sePathExtensions se) docText g
+  where
+    coLocation = case density of
+      Sparse -> []
+      _      -> inferFileCoLocationEdges maxCoLocationFiles g
 
 -- | Infer all non-semantic edges (community bridges, transitive deps, shared context, code-doc, documents).
 inferNonSemanticEdges :: EdgeDensity -> Graph -> CommunityMap -> [Edge]
-inferNonSemanticEdges density g cm = case density of
-  Sparse  -> inferCodeDocEdges g ++ inferDeterministicDocEdges g
-  Normal  -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g ++ inferDeterministicDocEdges g
-  Dense   -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g ++ inferDeterministicDocEdges g
-  Maximum -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g ++ inferDeterministicDocEdges g
+inferNonSemanticEdges density = inferNonSemanticEdgesWith density defaultSemanticEdgesConfig Map.empty
 
 -- | Infer all non-semantic edges with doc-body text and configured doc-link
 -- thresholds (doc-code-linking): the pipeline entry point.
 inferNonSemanticEdgesWith :: EdgeDensity -> SemanticEdgesConfig -> Map NodeId Text -> Graph -> CommunityMap -> [Edge]
-inferNonSemanticEdgesWith density se docText g cm = case density of
-  Sparse  -> inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
-  Normal  -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
-  Dense   -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3 ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
-  Maximum -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2 ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesConfigured se docText g
+inferNonSemanticEdgesWith density se docText g cm =
+  structural ++ inferCodeDocEdges g ++ inferDeterministicDocEdgesFor density se docText g
+  where
+    structural = case density of
+      Sparse  -> []
+      Normal  -> inferCommunityBridges g cm ++ inferTransitiveDeps g
+      Dense   -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 3
+      Maximum -> inferCommunityBridges g cm ++ inferTransitiveDeps g ++ inferSharedContextEdges g 2
 
 -- | Infer semantic code↔doc edges for the given mode (empty for disabled/skip/fallback modes).
 inferSemanticEdgesForMode :: SemanticMode -> SemanticEdgesConfig -> Graph -> [Edge]
