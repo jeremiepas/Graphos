@@ -343,6 +343,22 @@ graphos push-memgraph --graph graphos-out/graph.json --uri bolt://localhost:7688
 graphos init
 ```
 
+### LSP security notes
+
+- Third-party LSP servers may execute project build tools. For example,
+  `jdtls` and `kotlin-language-server` can run Gradle/Maven during startup.
+  Only run Graphos against projects and language servers you trust.
+- To opt out of LSP for an extension, set its command to an empty string in
+  `graphos.yaml`:
+  ```yaml
+  lsp:
+    ".java":
+      command: ""
+  ```
+- Graphos has no separate `--no-lsp` flag; per-extension opt-out via `lsp:`
+  is supported today. Disable all extensions by clearing the `lsp:` entries or
+  running with stub/tree-sitter extraction where configured.
+
 ### Query Options
 
 | Flag | Default | Description |
