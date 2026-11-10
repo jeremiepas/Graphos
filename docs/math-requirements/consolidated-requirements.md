@@ -6,6 +6,7 @@
 - [AVI-511](/AVI/issues/AVI-511) — Merge / Consolidation as a Colimit (Category Theory Expert) — `AVI-511-colimit-merge.md`
 - [AVI-612](/AVI/issues/AVI-612) — Workflow as an Ordered Graph (Graph Theory Expert) — GT-W1..W4 + Q0a arbitration (this document)
 - [AVI-613](/AVI/issues/AVI-613) — Workflow as Composition (Category Theory Expert) — CT-W1..W3 + Q0b arbitration (this document)
+- [AVI-563](/AVI/issues/AVI-563) — Math requirements for fixing `graphos query` (Head of R&D, consolidated from AVI-565 GT + AVI-566 CT) — `AVI-563-consolidated-query-ergonomics.md`
 **Status:** consolidated requirements layer. One notation, one ID scheme, every requirement mapped to a concrete Graphos surface and tagged proven / assumed / open. No Haskell is written here; behavior-constraining requirements carry a required loop with [Graphos Dev](/AVI/agents/graphos-dev) before finalizing.
 
 ---
@@ -69,6 +70,14 @@ Unified ID scheme: `GT-*` (graph theory), `CT-*` (category theory), `JOINT-*` (j
 | JOINT-2 | J | Combinatorial grounding of the colimit object: after the dangling drop, `|V| = |⋃ keys|` and `|E| = |⋃ keys|`; these equal the degree/modularity inputs on `G_s`. | INV-MERGE (CT-R8) + GT-R2/GT-R9 | cross-check property | Proven |
 | JOINT-3 | J | Within-detection monotonicity (GT-R4, `Q_γ` non-decreasing) holds for a **fixed** graph only; it does not extend across merges because merge mandates re-detection (CT-R10). Boundary explicit. | GT-R4 + CT-R10 | boundary statement | Proven |
 | JOINT-W | J | The merged graph is simultaneously (a) weighted multigraph `G` on which Leiden runs, (b) colimit of extraction views, and (c) ordered workflow DAG `cond(G|Rel_ord)` (GT-W1). These three readings sit at **different layers** and are complementary, not contradictory: structural preservation (CT-R9/CT-W2) fixes node/edge identity + `E_ord` under merge; modularity (GT on unweighted `G_s`) ignores order; workflow-order (GT-W1) is derived from the merge-stable `E_ord`. The workflow DAG is merge-stable pre-inference because merge preserves ordered edges + relations (CT-R9 ⇒ `E_ord(M) = ⋃E_ord(Vᵢ)`, P-W6); it changes only under post-merge inference (A5/O-W2), never under community re-detection (CT-R10, explicitly non-conflated). | `mergeGraphs` (structure) + `detectCommunities` (modularity) + condensation `cond(G|Rel_ord)` (order) | synthesis statement | Proven |
+
+| GT-Q1 | G | Query output-size contract: `κ_tok(P) ≤ B` hard cap; deterministic cut by `rel` desc / least `NodeId` tie-break; omitted counts conserved; top-node always emitted; hub/hint bounds. | `UseCase/FormatContext` (`formatContextForLLMBudgeted`, `countContextTokens`, `formatExpansionHintsBudgeted`), `UseCase/SelectContext` (`scGodNodes`, `matchScore`), `UseCase/Query` (`qrespNodes`), `Domain/Graph/Score` (`normalizeScore`, `fullLabelBoostForTerms`) | REQ-O1..O5 (AC-1/AC-4) | Proven (O1/O3 in code); Assumed (O4, G1/G2) |
+| GT-Q2 | G | Topology/content store split `P`: `I(n)` always materialized, `S(n)` never (bounded per-node); path filter before traversal; round-trip; size savings `κ_tok ≤ Σ c(I(n)) + O(1)`. | `Domain/Types/Node` (`nodeSourceFile/LineStart/LineEnd/Kind`), `Domain/Graph/Index` (`pathGlobFilter`), specs `node-schema`, `graph-json-contract`, `query-scoping` | REQ-S1..S4 (AC-3) | Assumed 🔧 Dev (G3) |
+| GT-Q3 | G | Canonicality score `rel(n) = normalizeScore(raw,q)+boost ∈ [0,1.1]`; non-matching nodes score exactly `0.0`; matched-first ranking; canonical prefix under `B`. | `Domain/Graph/Score` (`computeScore`, `normalizeScore`, `fullLabelBoostForTerms`), `UseCase/Query` (`scoredNodesSorted`, `qrespNodes`), `UseCase/SelectContext` strategies, spec `query-relevance-scoring` | REQ-C1..C4 (AC-2) | Proven (C1/C2 in code); Open (combination) |
+| CT-Q1 | C | Slimming as projection: `P : Gr → Gr` idempotent endofunctor erasing content fields, preserving identity/topology/invariants; short stable IDs (BREAKING) from `(source_file, kind, line span, symbol name)`. | `Domain/Types/Node` (`:120`), `Domain/Graph/Core` (`:47`), `Gr`/`Gr_inj` (AVI-536 §1.1), `enforce-query-token-budget` (BREAKING), spec `node-schema` | R-Q1, R-Q1a (AC-1) | Proven (structural) |
+| CT-Q2 | C | Colimit preservation: `P(merge(V_i)) ≅ merge(P(V_i))`; cluster step excluded. | `mergeGraphs`/`mergeExtractions` (`Core.hs:140,128`), spec `09-merge`, `AVI-511-colimit-merge.md` | R-Q2 (AC-2) | Proven (structural) |
+| CT-Q3 | C | No-loss: `c(P(n)) = c(n)` for `c ∈ QueryVis`; only `nodeLabel`/`nodeSignature`/extra text may change. | spec `node-schema` (12 fields), spec `graph-json-contract` | R-Q3 (AC-3 field-by-field) | Proven (modulo M-4) |
+| JOINT-Q | J | Budget-cut order is a **total order** on the graph object, independent of `Map` insertion order (byte-identical slim output). | `enforce-query-token-budget` budget-cut surface | JOINT property (byte-identical output) | Proven (structural) |
 
 ---
 
@@ -141,8 +150,13 @@ Every requirement is classified graph-only / category-only / joint; misrouting i
 | GT-W1,2,3,4 (workflow DAG: precedence/trace/layering/scale) | ✓ | | |
 | CT-W1,2,3 (workflow order: functor/colimit/pipeline) | | ✓ | |
 | JOINT-W (three-view coexistence) | | | ✓ |
+| GT-Q1, GT-Q2, GT-Q3 (query ergonomics, AVI-563) | ✓ | | |
+| CT-Q1, CT-Q2, CT-Q3 (slim-store projection, AVI-563) | | ✓ | |
+| JOINT-Q (query budget-cut determinism, AVI-563) | | | ✓ |
 
 **Synthesis statement (must appear in every implementation that touches both layers).** The merged context graph is one object read **three** ways: structurally it is the colimit of extraction views (CT); combinatorially it is a weighted multigraph on which Leiden runs (GT); and order-theoretically it is an ordered workflow DAG `cond(G|Rel_ord)` (GT-W1). The structural claim fixes node/edge identity + weight + direction under merge (CT-R9); the modularity claim operates on the unweighted support graph `G_s` and ignores weight and order (GT); the workflow-order claim is derived from the merge-stable ordered edge set `E_ord` (GT-W1). These are complementary, not competing: JOINT-2 pins `|V|,|E|` so the degree/modularity inputs are well-defined on the colimit; JOINT-3 confines monotonicity to a single detection run because merge mandates re-detection; JOINT-W pins workflow-order to pre-inference, where merge preserves `E_ord` (P-W6) — order changes only under post-merge inference (A5/O-W2), never under community re-detection (CT-R10, explicitly non-conflated).
+
+- **Query-ergonomics acceptance bar (AVI-563).** Hard cap property (κ_tok ≤ B), fair-share ratios, path filter scenarios, identity-only listing assertions, `rel` range + non-match-zero + matched-first ranking, field-by-field no-loss (mod M-4), ID stability + collision bound, merge-then-project colimit preservation, byte-identical slim output under reordered insertion. Acceptance mapped in `AVI-563-consolidated-query-ergonomics.md` §9.
 
 ---
 
@@ -162,6 +176,10 @@ Ordered by dependency for the next milestone. Each names owner + exact action.
 | O-W2 | Inference-boundary confirmation for workflow order (CT-W2/CT-W3): confirm that post-merge `inferEdges`/`addEdges` (`UseCase/Infer.hs:304`; `UseCase/Pipeline/Core.hs:434-441`) is the ONLY source of new ordered edges, and that admitted inferred ordered edges are gated by `edgeConfidence ≥ τ` (GT-W1). Confirm `mergeExtractions`/`mergeGraphs` never ADD edges (they only union/drop) so `E_ord(merge) = ⋃E_ord(view)` pre-inference. | [Graphos Dev](/AVI/agents/graphos-dev) | Confirm merge adds no edges; pin inference as the sole order boundary; add CT-W2 property test (ordered fixture + inference-edge-order change) and CT-W3 fixture | CT-W2, CT-W3 |
 
 ---
+
+| O7 | Estimator error bound for `κ_tok = countContextTokens` in the hard cap `κ_tok(P) ≤ B` | [Graphos Dev](/AVI/agents/graphos-dev) | Document the heuristic error bound; treat cap as `≤ B` on the estimate | GT-Q1 |
+| O8 | Whether `nodeSignature` is `QueryVis` or content (M-4) in CT-Q3 no-loss contract | Product Owner | Classify `nodeSignature`; lock partition in AC-3 | CT-Q3 |
+| O9 | Whether `rel` becomes part of `query-relevance-scoring` and how it combines (relevance × canonicality) | Product Owner | Decide openspec surface for F3 | GT-Q3 |
 
 ## 6. Surface Map (every requirement → concrete Graphos surface)
 
