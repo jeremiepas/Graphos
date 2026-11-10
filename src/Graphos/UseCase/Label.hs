@@ -8,18 +8,16 @@ module Graphos.UseCase.Label
   ) where
 
 import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy.Char8 as BSL8
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Set as Set
-import System.Directory (removeFile)
 import Control.Exception (catch, SomeException)
-import System.Exit (ExitCode(..))
-import System.Process (readProcessWithExitCode)
 import Data.Time.Clock (getCurrentTime)
+
+import Graphos.Infrastructure.Http (runCurl, CurlResult(..), withSecureTempFile)
 
 import Graphos.Domain.Types (CommunityId, CommunityMap, CohesionMap)
 import Graphos.Domain.Graph (Graph)
@@ -139,28 +137,17 @@ pushLabelsToNeo4j neoCfg labels
           password = neo4jPassword neoCfg
           stmts = map mkUpdateStmt (Map.toList labels)
           payload = Aeson.encode $ Aeson.object ["statements" Aeson..= stmts]
-          payloadPath = "/tmp/graphos-neo4j-labels.json"
-      BSL8.writeFile payloadPath payload
-
-      let endpoint = uri ++ "/db/neo4j/tx/commit"
-          userPass = user ++ ":" ++ password
-
-      (exitCode, _stdout, stderr) <- readProcessWithExitCode "curl"
-        [ "-s", "--max-time", "60"
-        , "-X", "POST"
-        , "-H", "Content-Type: application/json"
-        , "-H", "Accept: application/json"
-        , "-u", userPass
-        , "--data-binary", "@" ++ payloadPath
-        , endpoint
-        ]
-        ""
-
-      removeFile payloadPath `catch` \(_ :: SomeException) -> pure ()
-
-      case exitCode of
-        ExitSuccess -> pure (T.pack $ "Updated " ++ show (Map.size labels) ++ " community labels in Neo4j", Map.size labels, 1)
-        ExitFailure code -> pure (T.pack $ "Label push failed (curl exit " ++ show code ++ "): " ++ take 200 stderr, 0, 0)
+      withSecureTempFile "payload" payload $ \payloadPath -> do
+        let endpoint = uri ++ "/db/neo4j/tx/commit"
+            secretOpts = [("--header", "Content-Type: application/json")
+                          , ("--header", "Accept: application/json")
+                          , ("--user", user ++ ":" ++ password) ]
+            firstArgs = [ "-s", "--max-time", "60", "-X", "POST" ]
+            lastArgs = [ "--data-binary", "@" ++ payloadPath, endpoint ]
+        res <- runCurl firstArgs secretOpts lastArgs
+        case res of
+          CurlSuccess _stdout -> pure (T.pack $ "Updated " ++ show (Map.size labels) ++ " community labels in Neo4j", Map.size labels, 1)
+          CurlFailed n err -> pure (T.pack $ "Label push failed (curl exit " ++ show n ++ "): " ++ T.unpack (T.take 200 err), 0, 0)
   ) $ \(e :: SomeException) -> pure (T.pack $ "Label push error: " ++ show e, 0, 0)
 
 -- | Build a parameterized Cypher statement to update a community label.
