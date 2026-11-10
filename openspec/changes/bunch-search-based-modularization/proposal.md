@@ -110,6 +110,10 @@ stability evaluation the paper is about, which apply to Leiden too.
 - **UseCase**: `UseCase/Cluster.hs` dispatches on the algorithm and returns a
   `ClusterQuality` next to the partition; `UseCase/ClusterEval.hs` runs the
   landscape.
+- **Formalization** (Lean companion, report-only CI):
+  `formalization/lean/GraphosFormalization/Bunch/MQ.lean` proves the MQ
+  bounds, the paper fixture, and the single-move locality that justifies the
+  O(1) update; it is the oracle the Haskell `MQSpec` fixtures pin against.
 - **Infrastructure / CLI**: build flags `--cluster-algorithm`, `--seed`,
   `--bunch-population`, `--bunch-threshold`, `--bunch-sa`, `--bunch-max-files`,
   `--bunch-weighted`; `clustereval landscape` with `--runs`, `--seed`,

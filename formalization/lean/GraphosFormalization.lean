@@ -56,6 +56,14 @@
       that `Q` only sees the symmetric closure of the valid endpoint pairs
       (`buildGraph_supportAdj_merge_swap`, `ac4_seam_modularity_eq`,
       `dangling_resurrection`, AVI-1308).
+    * `GraphosFormalization.Bunch.MQ` — Lean arm of the
+      `bunch-search-based-modularization` change: exact (division-free)
+      Bunch modularization quality `MQ = Σ CF_i`,
+      `CF_i = 2µ_i / (2µ_i + ext_i)`; `0 ≤ CF ≤ 1` (`cf_le_one`),
+      `0 ≤ MQ ≤ k` (`mq_le_k`), closed cluster ⇒ `CF = 1`, the paper's
+      Fig. 2 value `2/5`, intra-edge fraction `≤ 1`, no intra-edge ⇒
+      `MQ = 0`, and single-move locality (`cf_moveTo`: only the source and
+      destination clusters change — the O(1) incremental update).
 
   Maintenance owner: R&D cell.
 -/
@@ -75,3 +83,4 @@ import GraphosFormalization.Ext.Complexity
 import GraphosFormalization.Seam.SupportGraph
 
 import GraphosFormalization.AVI1677.Critique
+import GraphosFormalization.Bunch.MQ
