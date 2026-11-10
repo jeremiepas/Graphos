@@ -236,8 +236,8 @@ matchCommunity entries model newMembers =
           in case kept of
                 [] -> Nothing
                 _  -> case sortBy cmp kept of
-                        ((_, _, e):_) -> Just (e, FuzzyMatch)
-                        [] -> Nothing
+                          ((_, _, e) :_) -> Just (e, FuzzyMatch)
+                          []              -> Nothing
           where
             toScored :: (Int, LabelCacheEntry) -> (Int, Int, LabelCacheEntry)
             toScored (position, e) =
