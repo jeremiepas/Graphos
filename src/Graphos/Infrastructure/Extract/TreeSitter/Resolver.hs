@@ -1,12 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Graphos.Infrastructure.Extract.TreeSitter.Resolver
   ( resolveImport
+  , resolveDots
   ) where
 
 import Data.List (isPrefixOf, isSuffixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.FilePath (takeDirectory, (</>), takeExtension, replaceExtension, takeBaseName)
+import System.FilePath (takeDirectory, (</>), takeExtension, replaceExtension, takeFileName)
 
 -- | Purely resolves an import specifier to a canonical target path and name.
 --
@@ -37,7 +38,7 @@ resolveImport base specifier
           finalTarget = if isSuffixOf "/" specifier || (not (null specifier) && last specifier == '/')
                       then newTarget </> "index.ts"
                       else newTarget
-          targetName = T.pack $ takeBaseName finalTarget
+          targetName = T.pack $ takeFileName finalTarget
       in Just (finalTarget, targetName)
 
 -- | Resolve '.' and '..' path components in a FilePath.
