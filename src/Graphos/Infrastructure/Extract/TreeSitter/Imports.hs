@@ -49,7 +49,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (filterM)
 import Data.Aeson (Value, object, (.=))
 import Data.Char (isAlphaNum, isSpace, isAlpha)
-import Data.List (isSuffixOf, sort)
+import Data.List (isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -63,15 +63,17 @@ import Graphos.Domain.Types
   ( Node(..), Edge(..), Extraction(..), NodeId, FileType(..), Relation(..)
   , Confidence(..), EdgeId(..), bitNodeKind
   )
+import Graphos.Domain.Config (Granularity(..))
 import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..))
-import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId, fileModuleNode)
+import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId, tsNodesToExtraction)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveDots)
 
 -- ───────────────────────────────────────────────
 -- Import sites
 -- ───────────────────────────────────────────────
 
-data ImportLang = LangGo | LangRust | LangRuby
+data ImportLang = LangGo | LangRust | LangRuby | LangJava
   deriving (Eq, Show)
 
 -- | Languages handled here, by tree-sitter grammar name.
@@ -79,6 +81,7 @@ importLangForGrammar :: String -> Maybe ImportLang
 importLangForGrammar "go"   = Just LangGo
 importLangForGrammar "rust" = Just LangRust
 importLangForGrammar "ruby" = Just LangRuby
+importLangForGrammar "java" = Just LangJava
 importLangForGrammar _      = Nothing
 
 -- | One import statement (Go: one @import_spec@).
@@ -103,6 +106,10 @@ collectImportSites lang = concatMap (go [])
       (LangRuby, t)
         | t `elem` ["call", "method_call"], Just s <- rubySite n ->
             s : concatMap (go mods) (tsnChildren n)
+      (LangJava, "import_declaration") ->
+        case javaSite n of
+          Just s  -> s : concatMap (go mods) (tsnChildren n)
+          Nothing -> concatMap (go mods) (tsnChildren n)
       _ -> concatMap (go mods) (tsnChildren n)
 
     line n = tsnStartRow n + 1
@@ -137,6 +144,18 @@ collectImportSites lang = concatMap (go [])
                   Just (ImportSite LangRuby (tsnText fn) spec Nothing (line n) [])
               _ -> Nothing
       _ -> Nothing
+
+    javaSite n =
+      let raw = T.strip (tsnText n)
+          withoutImport = fromMaybe raw (T.stripPrefix "import" raw)
+          withoutStatic = case T.stripPrefix "static" (T.strip withoutImport) of
+                            Just r  -> T.strip r
+                            Nothing -> T.strip withoutImport
+          spec0 = T.strip (T.dropWhileEnd (\c -> c == ';' || isSpace c) withoutStatic)
+          spec = if T.null spec0 then "" else spec0
+      in if T.null spec || not (validSpec (T.filter (/= '*') spec))
+           then Nothing
+           else Just (ImportSite LangJava "import" spec Nothing (line n) [])
 
 -- | Strip one pair of surrounding quotes / backticks.
 unquote :: Text -> Text
@@ -190,6 +209,8 @@ resolveImportSites file sites@(s0 : _) = case siteLang s0 of
   LangRuby -> do
     root <- findRubyRoot (takeDirectory file)
     catMaybes <$> mapM (resolveRuby root file) sites
+  LangJava -> do
+    catMaybes <$> mapM (resolveJava file) sites
 
 -- | Walk up from @dir@ (inclusive) to the filesystem root.
 ancestors :: FilePath -> [FilePath]
@@ -253,6 +274,50 @@ goPackageFiles dir = do
     entries <- listDirectory dir
     let cands = [dir </> e | e <- sort entries, takeExtension e == ".go", not ("_test.go" `isSuffixOf` e)]
     filterM doesFileExist cands
+
+-- Java ────────────────────────────────────────────
+
+-- | Resolve one Java import. Internal classes map to their source file (if it
+-- exists on disk); types not found in the corpus fall back to an @external:@
+-- target keyed under the dotted name.
+resolveJava :: FilePath -> ImportSite -> IO (Maybe ResolvedImport)
+resolveJava file site = do
+  let spec = siteSpec site
+      isWild = ".*" `T.isSuffixOf` spec
+      specNoWild = if isWild then T.dropEnd 2 spec else spec
+      segs = T.splitOn "." specNoWild
+
+      -- source file for a concrete type: a/b/C.java
+      concreteRel = T.unpack (T.intercalate "/" segs) ++ ".java"
+      -- directory of a wildcard package import
+      wildDirRel = T.unpack (T.intercalate "/" segs)
+  if T.null spec
+    then pure Nothing
+    else if isWild
+      then do
+        found <- wildJavaFiles (takeDirectory file) wildDirRel
+        pure $ Just $ if null found
+                       then ResolvedImport site spec (TargetExternal spec)
+                       else ResolvedImport site spec (TargetFiles (sort found))
+    else do
+      found <- firstExisting [ d </> concreteRel | d <- ancestors (takeDirectory file) ]
+      pure $ Just $ maybe (ResolvedImport site spec (TargetExternal spec))
+                          (\p -> ResolvedImport site spec (TargetFiles [p]))
+                          found
+
+-- | All @.java@ files found under @relDir@ (relative to one of the file's
+-- ancestors), for a wildcard package import.
+wildJavaFiles :: FilePath -> FilePath -> IO [FilePath]
+wildJavaFiles start relDir = do
+  results <- fmap concat $ mapM tryAncestor (ancestors start)
+  pure (sort (nub results))
+  where
+    tryAncestor d = do
+      let dir = d </> relDir
+      isDir <- doesDirectoryExist dir
+      if not isDir then pure [] else do
+        entries <- listDirectory dir
+        pure [ dir </> e | e <- entries, takeExtension e == ".java" ]
 
 -- Ruby ────────────────────────────────────────────
 
@@ -622,12 +687,12 @@ importEdgesFor src rs = unzip (concatMap edgesOf rs)
   where
     edgesOf ri = case riTarget ri of
       TargetExternal name ->
-        [mk ri 1.0 Nothing (makeNodeId "external" name) name ("external:" <> name)]
+        [mk ri 1.0 Nothing (makeNodeId (mkSourceFile "external" "") "External" name) name ("external:" <> name)]
       TargetFiles fs ->
         let n = length fs
             w = 1 / fromIntegral n
         in [ mk ri w (if n > 1 then Just n else Nothing)
-                (makeNodeId f (T.pack (takeBaseName f))) (T.pack (takeBaseName f)) (T.pack f)
+                (makeNodeId (mkSourceFile f "") "Module" (T.pack (takeBaseName f))) (T.pack (takeBaseName f)) (T.pack f)
            | f <- fs ]
     mk ri w mN tid label sf =
       ( Edge
@@ -666,6 +731,7 @@ importEdgesFor src rs = unzip (concatMap edgesOf rs)
     langName LangGo = "go" :: Text
     langName LangRust = "rust"
     langName LangRuby = "ruby"
+    langName LangJava = "java"
 
 -- | Append the import edges of a Go/Rust/Ruby file to its extraction.
 -- Other grammars, and files without a module node, are returned unchanged.
@@ -682,3 +748,13 @@ withImportEdges grammar file roots ex = case (importLangForGrammar grammar, file
         edges' = foldl (\m e -> Map.insert (edgeId e) e m) (extractionEdges ex) es
     pure ex { extractionNodes = nodes', extractionEdges = edges' }
   _ -> pure ex
+
+
+fileModuleNode :: FilePath -> [TSNodeInfo] -> Maybe Node
+fileModuleNode file roots =
+  case Map.elems (extractionNodes (tsNodesToExtraction (mkSourceFile file "")
+                                               GranularityFile
+                                               defaultTruncationBudget
+                                               roots)) of
+    (n : _) -> Just n
+    []      -> Nothing
