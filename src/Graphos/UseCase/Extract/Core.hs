@@ -52,6 +52,7 @@ import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
 import Data.Aeson (object, (.=))
@@ -412,7 +413,10 @@ applyTaggingSources (Just prov) ext =
   where
     tagNode n = case Map.lookup (toText (nodeSourceFile n)) prov of
       Just (srcName, qPath) ->
-        let newNid  = makeNodeId (T.unpack qPath) (toText (nodeLabel n))
+        let kindText = case nodeKind n of
+              Just k  -> toText k
+              Nothing -> ""
+            newNid = makeNodeId (mkSourceFile (T.unpack qPath) "") kindText (toText (nodeLabel n))
             tagged  = n { nodeId           = newNid
                       , nodeSource       = Just (fromText srcName)
                       , nodeSourceFile   = fromText qPath
