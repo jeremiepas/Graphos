@@ -73,3 +73,5 @@ import GraphosFormalization.Ext.Strict
 import GraphosFormalization.Ext.Lax
 import GraphosFormalization.Ext.Complexity
 import GraphosFormalization.Seam.SupportGraph
+
+import GraphosFormalization.AVI1677.Critique
