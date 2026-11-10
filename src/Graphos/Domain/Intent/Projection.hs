@@ -121,10 +121,13 @@ instance FromJSON IntentProjection where
   parseJSON = withObject "IntentProjection" $ \v -> do
     ns <- v .: "nodes"
     es <- v .: "edges"
-    pure IntentProjection
-      { intentNodes = Map.fromList [(intentNodeId n, n) | n <- ns]
-      , intentEdges = es
-      }
+    let proj = IntentProjection
+          { intentNodes = Map.fromList [(intentNodeId n, n) | n <- ns]
+          , intentEdges = es
+          }
+    case checkWellFormed proj of
+      Left err -> fail (T.unpack err)
+      Right _ -> pure proj
 
 -- | Project a built graph. Node ids pass through verbatim; each node's intent
 -- kind comes from the classifier; signature and body hash are carried through.
