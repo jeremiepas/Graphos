@@ -12,7 +12,6 @@ import qualified Data.Text as T
 import Graphos.UseCase.Query.Render
   ( renderCypherResultText
   , renderCypherResultJSON
-  , renderCypherResultCSV
   , renderMutationResultText
   , renderMutationResultJSON
   , enforceResponseBudget
@@ -78,32 +77,7 @@ cypherRenderSpec = describe "renderCypherResult" $ do
       let out = renderCypherResultJSON (mkResult { crTruncated = True })
       out `shouldBe` "{\"columns\":[\"n\"],\"rows\":[[\"fn-001\"],[\"fn-002\"]],\"truncated\":true}"
 
-  describe "renderCypherResultCSV" $ do
-    it "renders CSV with unquoted simple fields" $ do
-      let result = mkResult { crColumns = ["n"], crRows = [[String "fn-001"], [String "fn-002"]] }
-      let out = renderCypherResultCSV result
-      T.lines out `shouldBe` [ "n", "fn-001", "fn-002" ]
-
-    it "renders CSV with quoted fields containing commas" $ do
-      let result = CypherResult
-            { crColumns = ["name", "value"]
-            , crRows = [[String "a,b", String "val"]]
-            , crTruncated = False
-            }
-      let out = renderCypherResultCSV result
-      length (T.lines out) `shouldSatisfy` (>= 2)
-
-    it "renders CSV with quoted fields containing double quotes" $ do
-      let result = CypherResult
-            { crColumns = ["name"]
-            , crRows = [[String "he said \"hello\""]]
-            , crTruncated = False
-            }
-      let out = renderCypherResultCSV result
-      -- Should have at least a header and one data row
-      length (T.lines out) `shouldSatisfy` (>= 1)
-
-  -- Mutation result renderers (opencypher-write-mutations).
+-- Mutation result renderers (opencypher-write-mutations).
 mutationRenderSpec :: Spec
 mutationRenderSpec = describe "renderMutationResult" $ do
   let mr = MutationResult
