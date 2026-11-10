@@ -1,0 +1,5 @@
+dispositionFailure: AVI-1845 [Dispatch] Rebase AVI-973-usable-graph-for-code-review onto origin/main and open a PR. Technical work fully complete: branch rebased onto origin/main (fae5517), all 8 AVI-1559 commits preserved + AVI-1860 warnings fix at e08ee69. Push completed via --force-with-lease. PR #151 head updated, mergeable: MERGEABLE. CI: 3/4 checks pass (workflow-pinning, prepare, openspec-archived). All children terminal (AVI-1846, AVI-1847, AVI-1848, AVI-1860, AVI-1861). No active blockedByIssueIds.
+
+Issue: Paperclip disposition repair exhausted 2/2 attempts without durable source-state change. Terminal reason: unchanged_source_state_exhausted. Recovery owner: board. Source ownership unchanged; explicit source-owner decision required for disposition state change.
+
+Artifacts: .paperclip/AVI-1845_resolution-note.md, .paperclip/final_comment.txt, GitHub comment posted.
