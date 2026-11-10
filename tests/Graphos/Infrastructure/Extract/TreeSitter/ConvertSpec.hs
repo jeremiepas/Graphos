@@ -2,6 +2,8 @@
 module Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec (spec) where
 
 import Test.Hspec
+import Data.List (sort)
+import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Short (toText, fromText)
