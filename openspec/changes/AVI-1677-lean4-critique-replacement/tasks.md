@@ -19,9 +19,9 @@
 
 ## 3. Lean implementation
 - [ ] 3.1 Use Mathlib/external Lean where it improves proofs/algorithms
-- [ ] 3.2 Keep the extracted ABI surface primitive and serializable
-- [ ] 3.3 Exclude proof-only definitions from extraction
-- [ ] 3.4 Maintain theorem gates per lean-proof-methodology
+- [x] 3.2 Keep the extracted ABI surface primitive and serializable (Lean module uses Nat scalars)
+- [x] 3.3 Exclude proof-only definitions from extraction (theorems are proof-only)
+- [x] 3.4 Maintain theorem gates per lean-proof-methodology (confBonus buckets, nonneg, fixtures, ABI version)
 
 ## 4. Compilation bridge
 - [x] 4.1 Expose `graphos_lean_critique.h`, symbol naming/version macros (header + contract inventory)
@@ -29,9 +29,10 @@
 - [x] 4.3 Document linker inputs and NixOS build notes (README + contract inventory)
 
 ## 5. Graphos consumption
-- [ ] 5.1 Add Infrastructure FFI adapter
-- [ ] 5.2 Keep Haskell implementation as reference/optional fallback
+- [x] 5.1 Add Infrastructure FFI adapter (`src/Graphos/Infrastructure/Critique/Lean.hs`, Cabal `lean-critique` flag)
+- [x] 5.2 Keep Haskell implementation as reference/optional fallback (flag defaults to False)
 - [ ] 5.3 Parity tests and version checks
+  - [x] 5.3a Haskell surpriseScore numeric-arm baseline (fixtures 6/10/1) — AnalysisSpec
 - [ ] 5.4 Rollout via configuration and build flags
 
 ## 6. Parity, performance, cutover
@@ -46,5 +47,8 @@
 
 ## Verification
 - [ ] V.1 OSS: `lake build`, zero errors/warnings/sorry, ABI smoke tests
-- [ ] V.2 Graphos: Cabal build linking the OSS library, FFI round-trip, parity, fallback
+- [x] V.2a Graphos: default `cabal build lib:graphos` passes (no Lean toolchain dependency).
+- [x] V.2b Graphos: `cabal build lib:graphos -flean-critique --extra-lib-dirs=...` passes and registers; FFI round-trip verified (spike consumer prints 6/10/1).
+- [ ] V.2c Graphos: parity tests against Haskell `surpriseScore` and fallback selection.
+  - [x] V.2c-a Haskell surpriseScore numeric-arm baseline (fixtures 6/10/1) passes.
 - [ ] V.3 Cross-repo: pin OSS version in Graphos integration branch and test
