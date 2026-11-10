@@ -8,6 +8,7 @@ module Graphos.Infrastructure.Wiring
   , productionObservabilityPort
   , productionFileSystemPort
   , productionExtractionPort
+  , productionAppEnvWithConfig
   , productionExportPort
   , productionLLMPort
     -- * Tree-sitter grammar bindings
@@ -25,7 +26,8 @@ import Foreign.Ptr (Ptr)
 import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
-import Graphos.Domain.Config.Extraction (Granularity(..))
+import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
+
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
@@ -36,9 +38,10 @@ import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..), StartTime(
 import Graphos.UseCase.Port.LLMPort (LLMPort(..), ImageAnalysis(..), ImageKind(..), Entity(..))
 
 -- Infrastructure imports (only Wiring imports Infrastructure directly)
+import qualified Graphos.Infrastructure.Config as Cfg
 import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
@@ -52,6 +55,7 @@ import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint
   , loadCachedFingerprinted, saveCachedFingerprinted
+  , loadLabelCache, saveLabelCache
   )
 import Graphos.Infrastructure.FileSystem.Ignore (loadIgnorePatterns, ignoreMatches)
 import Graphos.Infrastructure.FileSystem.OfficeConvert
@@ -76,6 +80,7 @@ import qualified TreeSitter.Rust as TSRust
 import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Ruby as TSRuby
 import qualified TreeSitter.Java as TSJava
+import qualified TreeSitter.PHP as TSPhp
 import qualified TreeSitter.Language as TS_LANG
 import qualified Graphos.Infrastructure.Extract.TreeSitter.Vendored as TSVendored
 
@@ -90,10 +95,14 @@ import qualified Graphos.UseCase.Export as UE
 import qualified Graphos.Infrastructure.Extract.Pdf as Pdf
 
 -- | Create a production AppEnv from a LogEnv and ObservabilityEnv.
--- Called once at startup in Main.hs.
+-- Called once at startup in Main.hs. Uses default config for extraction wiring.
 productionAppEnv :: LogEnv -> ObservabilityEnv -> AppEnv
-productionAppEnv logEnv obsEnv = AppEnv
-  { extractionPort      = productionExtractionPort logEnv
+productionAppEnv logEnv obsEnv = productionAppEnvWithConfig logEnv obsEnv defaultGraphosConfig
+
+-- | Create a production AppEnv threading a 'GraphosConfig' into extraction wiring.
+productionAppEnvWithConfig :: LogEnv -> ObservabilityEnv -> GraphosConfig -> AppEnv
+productionAppEnvWithConfig logEnv obsEnv graphosCfg = AppEnv
+  { extractionPort      = productionExtractionPort logEnv graphosCfg
   , exportPort          = productionExportPort logEnv obsEnv
   , fileSystemPort      = productionFileSystemPort
   , loggingPort         = productionLoggingPort logEnv
@@ -135,12 +144,14 @@ productionFileSystemPort = FileSystemPort
   , fspShouldIgnore = ignoreMatches
   , fspLoadCachedExtraction = loadCachedFingerprinted
   , fspSaveCachedExtraction = saveCachedFingerprinted
+  , fspLoadLabelCache  = loadLabelCache
+  , fspSaveLabelCache  = saveLabelCache
   }
 
 -- | Production extraction port — delegates to Infrastructure.LSP, TreeSitter, etc.
-productionExtractionPort :: LogEnv -> ExtractionPort
-productionExtractionPort logEnv = ExtractionPort
-  { epFindLSPServer = LSP.findLSPServer
+productionExtractionPort :: LogEnv -> GraphosConfig -> ExtractionPort
+productionExtractionPort logEnv graphosCfg = ExtractionPort
+  { epFindLSPServer = \ext -> Cfg.resolveLSPServer graphosCfg ext
   , epConnectLSP = \cmd args rootUri -> do
       let config = LSP.LSPClientConfig
             { LSP.lspCommand = cmd
@@ -188,7 +199,7 @@ productionExtractionPort logEnv = ExtractionPort
                 ) fileMap
             Left err -> pure $ Left err
         Nothing -> pure $ Left "wiring: extractWorkspaceSymbols type mismatch"
-  , epParseWithGrammar = \grammar filePath content ->
+  , epParseWithGrammar = \gran grammar filePath content ->
       case getGrammarPtr grammar of
         Nothing -> pure Nothing
         Just lang -> do
@@ -196,7 +207,7 @@ productionExtractionPort logEnv = ExtractionPort
           case result of
             Nothing -> pure Nothing
             Just nodes -> Just <$> withImportEdges grammar filePath nodes
-                                     (tsNodesToExtraction GranularityFunction filePath nodes)
+                                     (tsNodesToExtraction (mkSourceFile filePath "") gran defaultTruncationBudget nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
@@ -216,7 +227,7 @@ productionExtractionPort logEnv = ExtractionPort
             (_msg, _stmts, _batches) <- Neo4j.pushFileExtraction extraction
               (neo4jsUri n4cfg) (neo4jsUser n4cfg) (neo4jsPassword n4cfg)
             pure ()
-  , epLanguageServerCommands = LSP.languageServerCommands
+  , epLanguageServerCommands = Cfg.effectiveLSPServerCommands graphosCfg
   , epHasTreeSitterGrammar = isJust . getGrammarPtr
   }
 
@@ -320,6 +331,12 @@ getGrammarPtr "rust"         = Just TSRust.tree_sitter_rust
 getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
 getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
 getGrammarPtr "java"         = Just TSJava.tree_sitter_java
+getGrammarPtr "php"          = Just TSPhp.tree_sitter_php
+getGrammarPtr "kotlin"       = Just TSJava.tree_sitter_java
+getGrammarPtr "perl"         = Just TSVendored.tree_sitter_perl
+getGrammarPtr "csharp"       = Just TSVendored.tree_sitter_c_sharp
+getGrammarPtr "c-sharp"      = Just TSVendored.tree_sitter_c_sharp
+getGrammarPtr "c_sharp"      = Just TSVendored.tree_sitter_c_sharp
 getGrammarPtr "cpp"          = Just TSVendored.tree_sitter_cpp
 getGrammarPtr "yaml"         = Just TSVendored.tree_sitter_yaml
 getGrammarPtr "sql"          = Just TSVendored.tree_sitter_sql

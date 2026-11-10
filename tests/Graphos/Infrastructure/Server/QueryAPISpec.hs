@@ -140,6 +140,7 @@ runApiWithBody method path body = do
         , rawPathInfo   = rawPath
         , pathInfo      = decodePathSegments rawPath
         , queryString   = parseQuery (BS8.drop 1 rawQuery)
+        , requestHeaders = [("X-API-Key", "graphos-dev")]
         }
   -- Serve the fixed body chunks through setRequestBodyChunks.
   chunksRef <- newIORef chunks

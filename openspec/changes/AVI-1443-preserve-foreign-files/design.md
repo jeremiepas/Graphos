@@ -71,10 +71,22 @@ treated as foreign.
 | `embeddings.json`      | yes (unless --no-embeddings) | no         |
 | `graph.checkpoint.json`| yes                       | no            |
 | `index.json`           | yes                       | no            |
+| `pipeline.checkpoint.json` | cleared on success (so it is never in the fresh staging dir) | no |
 | `obsidian/`            | yes (unless --no-obsidian)| no            |
 | `graph.cypher`         | yes (unless --neo4j)      | no            |
 | `memgraph.cypher`      | yes (unless --memgraph)   | no            |
 | any other entry        | no                        | **yes**       |
+
+### D2b. The staged copy always wins over a carried-over duplicate
+
+Because the allowlist is maintained by hand, a Graphos artifact added in the
+future without updating `ownedArtifacts` would otherwise be *reverted* to the
+previous run's contents: `renameFile` overwrites its destination, so the stale
+copy would land on top of the fresh one. `carryOverState` therefore skips any
+name that already exists in staging. The allowlist stays the primary mechanism
+(carrying over a stale owned artifact is still wrong even when nothing
+collides), but the guard makes the failure mode "stale artifact ignored" instead
+of "fresh artifact silently replaced".
 
 ### D3. Location in the clean-architecture stack
 
@@ -90,7 +102,9 @@ Infrastructure change is required.
   changed `Staging.hs` under `-Wall -Werror`.
 - `devenv shell -- cabal test graphos-test` — the `Graphos.UseCase.StagingSpec`
   cases cover foreign-file survival (files and directories), owned-directory
-  replacement, and unknown-entry preservation across a staged rebuild.
+  replacement, unknown-entry preservation, stale `pipeline.checkpoint.json`
+  not being resurrected, the staged copy winning over a carried-over duplicate,
+  and `memory/`/`debug/`/`traces/` survival across a staged rebuild.
 - Manual smoke: build into `<out>`, drop a foreign file into `<out>`, rebuild
   with `--fresh -o <out>`, assert the foreign file remains and the owned
   artifacts are updated.
