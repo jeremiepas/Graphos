@@ -62,7 +62,7 @@ data Command
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
   | ViewCmd ViewSubcommand
   | LServers
- | Serve FilePath FilePath Int Bool Bool
+ | Serve FilePath FilePath Int Bool Bool String
 
   | MigrateGraphCmd FilePath (Maybe FilePath)
 
@@ -277,6 +277,7 @@ serveOpts = Serve
   <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
   <*> switch (long "api-only" <> help "Serve only the query API, not static files")
   <*> switch (long "no-api" <> help "Serve only static files, not the query API")
+  <*> strOption (long "host" <> long "bind" <> value "127.0.0.1" <> help "Host/interface to bind (default: 127.0.0.1; use 0.0.0.0 to expose publicly)")
 
 pushOpts :: Parser Command
 pushOpts = PushCmd

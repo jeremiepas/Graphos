@@ -41,6 +41,6 @@ build time, exposed through `foreign import ccall`.
 
 - New Infrastructure FFI/binding module in Graphos.
 - Cabal configuration for external library linkage (NixOS `leancc` notes).
-- New OSS repository for the Lean library (bootstrap, ABI, versioning, governance).
+- New OSS repository for the Lean library (bootstrap, ABI, versioning, governance) — this is the **bridge** repository only. No new Graphos repository is created; Graphos stays in its existing repository and consumes the bridge as an external build dependency (AVI-1677-D7).
 - Docs/PRD/workflow references updated to the OSS library.
 - Non-gating: Lean verification stays report-only in CI.
