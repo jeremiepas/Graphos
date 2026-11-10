@@ -71,6 +71,38 @@ spec = do
       rendered `shouldSatisfy` T.isInfixOf "| Bridge Node | Kind | Source | Degree |"
       rendered `shouldSatisfy` T.isInfixOf "test.hs"
 
+  describe "generateReport Extraction Coverage section" $ do
+    let detectionWithCode codeFiles =
+          Detection 0 0 True Nothing (Map.fromList [(CodeFiles, codeFiles)]) Map.empty emptyExclusionCounts
+        members = ["a"]
+        ext = extractionFromLists (map testNode members) []
+        g = buildGraph False ext
+        baseAnalysis = Analysis
+          { analysisCommunities  = Map.fromList [(0, members)]
+          , analysisNullModel    = DefaultNullModel
+          , analysisCohesion     = Map.fromList [(0, 1.0)]
+          , analysisGodNodes     = []
+          , analysisSurprises    = []
+          , analysisQuestions    = []
+          , analysisArticulation = []
+          , analysisBccCount     = 0
+          }
+
+    it "reports files detected, files with structure, and the stubbed breakdown by extension" $ do
+      -- .ts is a recognized default extractor (structural); .scala has none
+      -- (#158) and routes to ExtractStub.
+      let codeFiles = replicate 8 "a.ts" ++ replicate 34 "a.scala"
+          report = generateReport g baseAnalysis defaultConfig (detectionWithCode codeFiles) Nothing
+      report `shouldSatisfy` T.isInfixOf "Files detected: 42"
+      report `shouldSatisfy` T.isInfixOf "Files with structure: 8"
+      report `shouldSatisfy` T.isInfixOf "Stubbed: 34 (.scala 34)"
+
+    it "reports zero stubbed when every code file resolves to a real extractor" $ do
+      let report = generateReport g baseAnalysis defaultConfig (detectionWithCode (replicate 5 "a.ts")) Nothing
+      report `shouldSatisfy` T.isInfixOf "Files detected: 5"
+      report `shouldSatisfy` T.isInfixOf "Files with structure: 5"
+      report `shouldSatisfy` T.isInfixOf "Stubbed: 0"
+
 -- Helpers
 pathGraph :: Int -> (Graph, [Text])
 pathGraph n =
