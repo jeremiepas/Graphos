@@ -27,7 +27,7 @@ import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
-import Graphos.Domain.Config.Extraction (Granularity(..))
+
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
@@ -41,7 +41,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..), ImageAnalysis(..), ImageKind(.
 import qualified Graphos.Infrastructure.Config as Cfg
 import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
@@ -80,6 +80,7 @@ import qualified TreeSitter.Rust as TSRust
 import qualified TreeSitter.Haskell as TSHaskell
 import qualified TreeSitter.Ruby as TSRuby
 import qualified TreeSitter.Java as TSJava
+import qualified TreeSitter.PHP as TSPhp
 import qualified TreeSitter.Language as TS_LANG
 import qualified Graphos.Infrastructure.Extract.TreeSitter.Vendored as TSVendored
 
@@ -198,7 +199,7 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
                 ) fileMap
             Left err -> pure $ Left err
         Nothing -> pure $ Left "wiring: extractWorkspaceSymbols type mismatch"
-  , epParseWithGrammar = \grammar filePath content ->
+  , epParseWithGrammar = \gran grammar filePath content ->
       case getGrammarPtr grammar of
         Nothing -> pure Nothing
         Just lang -> do
@@ -206,7 +207,7 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
           case result of
             Nothing -> pure Nothing
             Just nodes -> Just <$> withImportEdges grammar filePath nodes
-                                     (tsNodesToExtraction GranularityFunction filePath nodes)
+                                     (tsNodesToExtraction (mkSourceFile filePath "") gran defaultTruncationBudget nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
@@ -330,6 +331,12 @@ getGrammarPtr "rust"         = Just TSRust.tree_sitter_rust
 getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
 getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
 getGrammarPtr "java"         = Just TSJava.tree_sitter_java
+getGrammarPtr "php"          = Just TSPhp.tree_sitter_php
+getGrammarPtr "kotlin"       = Just TSJava.tree_sitter_java
+getGrammarPtr "perl"         = Just TSVendored.tree_sitter_perl
+getGrammarPtr "csharp"       = Just TSVendored.tree_sitter_c_sharp
+getGrammarPtr "c-sharp"      = Just TSVendored.tree_sitter_c_sharp
+getGrammarPtr "c_sharp"      = Just TSVendored.tree_sitter_c_sharp
 getGrammarPtr "cpp"          = Just TSVendored.tree_sitter_cpp
 getGrammarPtr "yaml"         = Just TSVendored.tree_sitter_yaml
 getGrammarPtr "sql"          = Just TSVendored.tree_sitter_sql
