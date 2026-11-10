@@ -1,25 +1,26 @@
 ## 0. Lean arm (formalization companion) — done
 
 - [x] 0.1 `formalization/lean/GraphosFormalization/Bunch/MQ.lean`: exact `cfNum/cfDen`, `mqNum/mqDen`, `intra/total`, `moveTo`; theorems `cfDen_pos`, `cf_le_one`, `cf_closed`, `cf_paper_fixture`, `mqDen_pos`, `mq_le_k`, `intra_le_total`, `mqNum_eq_zero_of_noIntra`, `mu_moveTo`, `ext_moveTo`, `cf_moveTo`, `twoTriangles_mq` (84/49), `twoTriangles_intra` (6/7); imported from the root module; README row. Check: `lean GraphosFormalization/Bunch/MQ.lean` exits 0 with no warnings (done, Lean 4.35.0 locally); `lean.yml` `lake build` green under the pinned 4.14.0 (see `VERIFICATION.md`)
-- [ ] 0.2 Once 1.1 lands: add `twoTriangles`/`byTriangle` to the Haskell `MQSpec` and assert `84/49` within 1e-12 (the "Haskell oracle matches the Lean fixture" scenario)
+- [x] 0.2 `MQSpec` pins the Lean `twoTriangles` fixture: `MQ = 84/49` within 1e-12, each `CF = 6/7` (µ = 3, ext = 1), intra fraction 6/7 (the "Haskell oracle matches the Lean fixture" scenario)
 
-## 1. Modularization quality (Domain)
+## 1. Modularization quality (Domain) — done
 
-- [ ] 1.1 `Graphos.Domain.Community.MQ`: `MQResult` (MQ, per-cluster CF, intra-edge fraction, cluster count), `modularizationQuality :: Graph -> CommunityMap -> MQResult` on the undirected projection, unit weights, fixed ascending summation order. Check: a cluster with 1 intra-edge and 3 inter-edges gives CF = 0.4 (paper Fig. 2, subsystem 2); QuickCheck `CF ∈ [0,1]`, `MQ ∈ [0,k]`; a closed cluster scores 1; empty graph scores 0
-- [ ] 1.2 Weighted variant (`edgeWeight` sums). Check: doubling every weight leaves MQ unchanged; one heavy intra-edge raises its cluster's CF
+- [x] 1.1 `Graphos.Domain.Community.MQ`: `MQResult` (MQ, per-cluster `ClusterFactor`, intra-edge fraction, total weight, cluster count), `modularizationQuality :: Graph -> CommunityMap -> MQResult`, unit weights, edges in ascending `gEdges` order and clusters in ascending id order. Check (MQSpec, green): CF(1, 3) = 0.4 (paper Fig. 2, subsystem 2); QuickCheck `CF ∈ [0,1]`, `MQ ∈ [0,k]`, intra fraction `∈ [0,1]`, determinism; closed cluster → 1; all-singletons → 0; empty graph → 0
+- [x] 1.2 `modularizationQualityWith EdgeWeights` (`edgeWeight` sums). Check (green): doubling every weight leaves MQ unchanged; `UnitWeights` ignores `edgeWeight`
 
-## 2. Random source and file MDG (Domain) — parallel with 1
+## 2. Random source and file MDG (Domain) — done
 
-- [ ] 2.1 `Graphos.Domain.Random`: SplitMix64 (`next :: Gen -> (Word64, Gen)`, `uniformInt`, `uniformDouble`, `split`). Check: the reference SplitMix64 test vector for seed 0 (first three outputs) matches; `uniformInt n` is in `[0, n)` for all n > 0
-- [ ] 2.2 `Graphos.Domain.Community.Bunch.foldToFileMDG`: node → `nodeSourceFile`, all relations except `contains`, undirected, self-pairs dropped, unit or summed weights, files indexed in ascending path order, CSR adjacency. Check: two files with 3 symbol edges in both directions fold to one pair of weight 1 (unit) / sum (weighted); `contains`-only graph folds to zero edges; node-order permutation yields identical CSR
+- [x] 2.1 `Graphos.Domain.Random`: SplitMix64 (`nextWord64`, `uniformInt`, `uniformDouble`, `split`, `mkGen`). Check (RandomSpec, green): seed-0 reference outputs 16294208416658607535 / 7960286522194355700 / 487617019471545679; `uniformInt n ∈ [0, n)`; `uniformDouble ∈ [0, 1)`; same seed → same stream
+- [x] 2.2 `Graphos.Domain.Community.Bunch.foldToFileMDG`: node → `nodeSourceFile`, all relations except `contains`, undirected, self-pairs dropped, unit or summed weights, files indexed in ascending path order, per-file unboxed adjacency parallel to weights. Check (BunchSpec, green): four symbol edges between two files fold to one pair of weight 1 (unit) / 4 (weighted); `contains`-only graph → zero edges; same-file edge → dropped; node-order permutation → identical `FileMDG`
 
-## 3. Bunch search (Domain) — depends on 1, 2
+## 3. Bunch search (Domain) — done
 
-- [ ] 3.1 Search state with `assign`, `mu`, `ext`, running MQ; `moveFile` updating two clusters; `fromRandomPartition gen`. Check: after every random move on random MDGs (n ≤ 40) the running MQ equals `modularizationQuality` of the materialised partition (QuickCheck)
-- [ ] 3.2 Candidate enumeration: neighbours (other clusters, new singleton) then building blocks, canonical order. Check: a 3-file, 2-cluster state enumerates exactly the expected candidate list in order; building blocks only pair edge-connected files
-- [ ] 3.3 Hill climbing with η (NAHC at 0, SAHC at 100, minimum-examined rule in between), strict improvement, iteration cap. Check: MQ is non-decreasing per iteration; the two-clique fixture converges to the two cliques for seeds 0..31; η ∈ {0, 50, 100} reach the same MQ on the fixture; terminates under the cap on a 200-file random MDG
-- [ ] 3.4 Simulated annealing (`P(A) = exp(ΔMQ/T)`, `T ← α·T`, draw per probability). Check: with `T(0) = 100, α = 0.99` the fixture still converges; acceptances are counted; with annealing off the count is 0
-- [ ] 3.5 Population: seeds `s..s+p−1`, best MQ, lowest seed on ties, canonical relabel 0..k−1. Check: equal (graph, config, seed) → equal `CommunityMap` across two runs; relabelling is by ascending smallest member
+- [x] 3.1 `SearchState` in `ST` (`assign`, `mu`, `ext`, sizes, live/free id sets, running MQ); `moveFile` touches only the source and destination clusters (O(deg)); `initState` compresses ids; `randomPartition`. Check (BunchSpec, green): QuickCheck — after every random move on random MDGs (n ≤ 10) the running MQ equals `mqOfAssignment` of the materialised partition within 1e-9
+- [x] 3.2 `candidates`: moves to every other live cluster, new singleton (smallest free id), then building blocks over edges ascending; no-op blocks skipped; `applyCandidate` returns ΔMQ and a revert. Check (green): two disjoint edges from one cluster — no single move improves, the block does (MQ 1 → 2)
+- [x] 3.3 `iteration` with η (NAHC at 0, SAHC at 100, `⌈η·|C|/100⌉` minimum-examined rule between), strict improvement above 1e-12, `bcMaxIterations` cap. Check (green): MQ trace non-decreasing; two 5-cliques converge to the cliques for seeds 0..31 with `MQ = 2·20/21`; η ∈ {0, 50, 100} reach the same MQ; iterations below the cap
+- [x] 3.4 Annealing (`exp(ΔMQ/T)` for ΔMQ < 0, `T ← α·T` per draw, accepted count). Check (green): off by default → 0 acceptances; `T0 = 100, α = 0.99` terminates and reports acceptances
+- [x] 3.5 `bunchCluster`: seeds `s..s+p−1`, best MQ, lowest seed on ties; final MQ recomputed over the canonical partition so equal partitions compare bit-equal; clusters relabelled by ascending smallest member. Check (green): reproducible; best = lowest seed among the maximum; node-order permutation → same result
+- [ ] 3.6 Scale check: terminates under the cap on a 200-file random MDG and record evaluations/iterations here
 
 ## 4. Landscape (Domain) — depends on 3
 

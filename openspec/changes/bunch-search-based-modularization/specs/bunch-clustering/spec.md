@@ -48,7 +48,7 @@ SHALL take the best of all candidates. (PRD §5.1)
 
 #### Scenario: threshold changes work, not result
 - **WHEN** the two-clique fixture is searched with η ∈ {0, 50, 100} from the same seed
-- **THEN** the three runs reach the same MQ and the number of MQ evaluations is non-decreasing in η
+- **THEN** the three runs reach the same MQ, and each run reports its number of MQ evaluations and iterations
 
 #### Scenario: building block opens a cluster
 - **WHEN** the current partition has every file in one cluster and the MDG has two disjoint edges

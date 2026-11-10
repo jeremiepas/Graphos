@@ -100,6 +100,9 @@ library
                      Graphos.Domain.Query.Cypher.Parser
                      Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
+                    Graphos.Domain.Community.MQ
+                    Graphos.Domain.Community.Bunch
+                    Graphos.Domain.Random
                    Graphos.Domain.Analysis
                     Graphos.Domain.Extraction
                      Graphos.Domain.Intent.Classifier
@@ -413,6 +416,9 @@ test-suite graphos-test
     Graphos.Domain.Community.ClusterInvarianceSpec
     Graphos.Domain.Community.DeterminismSpec
     Graphos.Domain.Community.PermutationSpec
+    Graphos.Domain.Community.MQSpec
+    Graphos.Domain.Community.BunchSpec
+    Graphos.Domain.RandomSpec
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
