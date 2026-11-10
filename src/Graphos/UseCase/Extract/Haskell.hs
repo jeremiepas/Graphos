@@ -23,6 +23,7 @@ import Control.Exception (SomeException, catch, try)
 import Control.Monad (filterM)
 import Data.Char (isAlpha, isAlphaNum)
 import Data.List (find, isPrefixOf, isSuffixOf, nub, sort)
+
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
@@ -418,7 +419,9 @@ tryIO :: IO a -> IO (Either SomeException a)
 tryIO = try
 
 isAbsolute :: FilePath -> Bool
-isAbsolute p = isPrefixOf "/" p
+isAbsolute p = case p of
+  (x:_) -> x == '/'
+  _     -> False
 
 {-# NOINLINE fileIndexCacheVar #-}
 fileIndexCacheVar :: MVar (Map.Map FilePath [FilePath])
