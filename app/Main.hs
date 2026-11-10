@@ -18,7 +18,7 @@ import System.Process (createProcess, proc, waitForProcess)
 import qualified System.Process as Process
 import System.Environment (getArgs, getExecutablePath, withArgs, lookupEnv, getEnvironment)
 import Text.Read (readMaybe)
-import System.FilePath ((</>))
+import System.FilePath ((</>), isAbsolute)
 import qualified Data.Time.Clock as TCC (getCurrentTime)
 import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
@@ -38,14 +38,14 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig, productionLLMPort)
+import Graphos.Infrastructure.Wiring (productionAppEnv, productionAppEnvWithConfig, productionLLMPort)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
 import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
 import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
 import Graphos.Domain.Config (defaultLabelingConfig)
-import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..))
+import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..), findSuggestions)
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
@@ -55,6 +55,7 @@ import Graphos.Domain.Community (computeCompositions)
 import Graphos.UseCase.Merge (mergeGraphsAndAnalyze, MergeResult(..))
 import qualified Graphos.UseCase.Merge as Merge (mrGraph)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gAdjFwd, gAdjBack, neighbors, degree)
+import Graphos.Domain.Graph.Query (shortestPath)
 import Graphos.Domain.Graph.Analysis (articulationPoints, toCachedFGL)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
@@ -305,11 +306,16 @@ main = do
                            else case cfgMetricsPort config of
                                     Just p  -> Just p
                                     Nothing -> if obsMetricsPort obsCfg > 0 then Just (obsMetricsPort obsCfg) else Nothing
-          debugDir = case cfgDebugTraceDir config of
-                       Just d  -> d
-                       Nothing -> if null (obsDebugTraceDir obsCfg)
-                                    then outputDir ++ "/traces"
-                                    else obsDebugTraceDir obsCfg
+          rawDebugDir = case cfgDebugTraceDir config of
+                          Just d  -> d
+                          Nothing -> if null (obsDebugTraceDir obsCfg)
+                                       then outputDir </> "debug"
+                                       else obsDebugTraceDir obsCfg
+          -- Relative debug trace directories resolve against the output dir so
+          -- `--no-observability` / config never drops `traces/` into cwd.
+          debugDir = if isAbsolute rawDebugDir
+                       then rawDebugDir
+                       else outputDir </> rawDebugDir
           baseCc       = gcClustering graphosCfg
           effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
           effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
@@ -336,7 +342,7 @@ main = do
       let logLevel = if cfgDebug config || obsDebug obsCfg then LogTrace
                       else if cfgVerbose config then LogDebug
                       else LogInfo
-      obsEnv <- initObservability logLevel otelCfg metricsPort debugDir
+      obsEnv <- initObservability (if cfgNoObservability config then LogError else logLevel) otelCfg metricsPort debugDir
       let _tracer = otelTracer obsEnv
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
@@ -502,27 +508,45 @@ main = do
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-              mpath = pathQueryWithIndex g idx from to
-          if cqoJson popts then putStrLn $ T.unpack $ renderPathResultJSON mpath else
-           case mpath of
-            Nothing -> putStrLn $ "No path found between '" ++ T.unpack from ++ "' and '" ++ T.unpack to ++ "'"
-            Just path -> do
-              let hops = length path - 1
-              putStrLn $ "Shortest path (" ++ show hops ++ " hops):"
-              let go []     = pure ()
-                  go (nid:ns) = do
-                    let mNext = case ns of
-                          (n':_) -> Just n'
-                          []     -> Nothing
-                        mEdge = maybe Nothing (\nxt -> Map.lookup (nid, nxt) (gEdges g)) mNext
-                    case Map.lookup nid (gNodes g) of
-                      Just n -> do
-                        let relLabel = maybe "references" (T.unpack . relationToText . edgeRelation) mEdge
-                            confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
-                        putStrLn $ "  " ++ T.unpack (toText (nodeLabel n)) ++ " --" ++ relLabel ++ "-->" ++ confLabel
-                      Nothing -> pure ()
-                    go ns
-              go path
+          case (resolveNodeArg from g idx, resolveNodeArg to g idx) of
+            (NotFound, _) -> do
+              putStrLn $ T.unpack $ renderNotFoundText from
+              mapM_ (putStrLn . T.unpack) (take 5 (findSuggestions [from] idx))
+              exitWith (ExitFailure 1)
+            (_, NotFound) -> do
+              putStrLn $ T.unpack $ renderNotFoundText to
+              mapM_ (putStrLn . T.unpack) (take 5 (findSuggestions [to] idx))
+              exitWith (ExitFailure 1)
+            (Ambiguous cands, _) -> do
+              if cqoJson popts
+                then putStrLn $ T.unpack $ renderAmbiguousJSON cands
+                else putStrLn $ T.unpack $ renderAmbiguousText cands
+            (_, Ambiguous cands) -> do
+              if cqoJson popts
+                then putStrLn $ T.unpack $ renderAmbiguousJSON cands
+                else putStrLn $ T.unpack $ renderAmbiguousText cands
+            (ResolvedSingle fromId, ResolvedSingle toId) -> do
+              let mpath = shortestPath g fromId toId
+              if cqoJson popts then putStrLn $ T.unpack $ renderPathResultJSON mpath else
+               case mpath of
+                Nothing -> putStrLn $ "No path found between '" ++ T.unpack from ++ "' and '" ++ T.unpack to ++ "'"
+                Just path -> do
+                  let hops = length path - 1
+                  putStrLn $ "Shortest path (" ++ show hops ++ " hops):"
+                  let go []     = pure ()
+                      go (nid:ns) = do
+                        let mNext = case ns of
+                              (n':_) -> Just n'
+                              []     -> Nothing
+                            mEdge = maybe Nothing (\nxt -> Map.lookup (nid, nxt) (gEdges g)) mNext
+                        case Map.lookup nid (gNodes g) of
+                          Just n -> do
+                            let relLabel = maybe "references" (T.unpack . relationToText . edgeRelation) mEdge
+                                confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
+                            putStrLn $ "  " ++ T.unpack (toText (nodeLabel n)) ++ " --" ++ relLabel ++ "-->" ++ confLabel
+                          Nothing -> pure ()
+                        go ns
+                  go path
 
     ExplainCmd node eopts -> do
       let graphPath = cqoGraphPath eopts
@@ -533,38 +557,46 @@ main = do
         Right loaded -> do
           let g = lrGraph loaded
               idx = lrIndex loaded
-              mnode = explainNodeWithIndex g idx node
-          if cqoJson eopts then putStrLn $ T.unpack $ renderExplainResultJSON mnode else
-           case mnode of
-            Nothing -> putStrLn $ "Node not found: " ++ T.unpack node
-            Just n -> do
-              putStrLn $ "NODE: " ++ T.unpack (toText (nodeLabel n))
-              putStrLn $ "  ID: " ++ T.unpack (nodeId n)
-              putStrLn $ "  Source: " ++ T.unpack (toText (nodeSourceFile n))
-              case (nodeLineStart n, nodeLineEnd n) of
-                (Just start, Just end) | start /= end -> putStrLn $ "  Location: L" ++ show start ++ "-" ++ show end
-                (Just start, _)                        -> putStrLn $ "  Location: L" ++ show start
-                _                                      -> pure ()
-              putStrLn $ "  Type: " ++ show (nodeFileType n)
-              putStrLn $ "  Degree: " ++ show (degree g (nodeId n))
-              -- Show community (O(log N) via index instead of O(C×M) scan)
-              case communityOfNode (nodeId n) idx of
-                Just cid -> putStrLn $ "  Community: " ++ show cid
-                Nothing  -> pure ()
-              -- Show neighbors
-              putStrLn ""
-              putStrLn "CONNECTIONS:"
-              let nbs = Set.toList (neighbors g (nodeId n))
-              forM_ nbs $ \nbId -> do
-                let mNb  = Map.lookup nbId (gNodes g)
-                    mEdge = asum [Map.lookup (nodeId n, nbId) (gEdges g)
-                                 ,Map.lookup (nbId, nodeId n) (gEdges g)]
-                case mNb of
-                  Just nb -> do
-                    let relLabel = maybe "related" (T.unpack . relationToText . edgeRelation) mEdge
-                        confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
-                    putStrLn $ "  --" ++ relLabel ++ "--> " ++ T.unpack (toText (nodeLabel nb)) ++ confLabel
-                  Nothing -> pure ()
+          case resolveNodeArg node g idx of
+            NotFound -> do
+              putStrLn $ "Node not found: " ++ T.unpack node
+              mapM_ (putStrLn . T.unpack) (take 5 (findSuggestions [node] idx))
+              exitWith (ExitFailure 1)
+            Ambiguous cands -> do
+              if cqoJson eopts
+                then putStrLn $ T.unpack $ renderAmbiguousJSON cands
+                else putStrLn $ T.unpack $ renderAmbiguousText cands
+            ResolvedSingle nid -> do
+              let mnode = Map.lookup nid (gNodes g)
+              if cqoJson eopts then putStrLn $ T.unpack $ renderExplainResultJSON mnode else
+               case mnode of
+                Nothing -> putStrLn $ "Node not found: " ++ T.unpack node
+                Just n -> do
+                  putStrLn $ "NODE: " ++ T.unpack (toText (nodeLabel n))
+                  putStrLn $ "  ID: " ++ T.unpack (nodeId n)
+                  putStrLn $ "  Source: " ++ T.unpack (toText (nodeSourceFile n))
+                  case (nodeLineStart n, nodeLineEnd n) of
+                    (Just start, Just end) | start /= end -> putStrLn $ "  Location: L" ++ show start ++ "-" ++ show end
+                    (Just start, _)                        -> putStrLn $ "  Location: L" ++ show start
+                    _                                      -> pure ()
+                  putStrLn $ "  Type: " ++ show (nodeFileType n)
+                  putStrLn $ "  Degree: " ++ show (degree g (nodeId n))
+                  case communityOfNode (nodeId n) idx of
+                    Just cid -> putStrLn $ "  Community: " ++ show cid
+                    Nothing  -> pure ()
+                  putStrLn ""
+                  putStrLn "CONNECTIONS:"
+                  let nbs = Set.toList (neighbors g (nodeId n))
+                  forM_ nbs $ \nbId -> do
+                    let mNb  = Map.lookup nbId (gNodes g)
+                        mEdge = asum [Map.lookup (nodeId n, nbId) (gEdges g)
+                                     ,Map.lookup (nbId, nodeId n) (gEdges g)]
+                    case mNb of
+                      Just nb -> do
+                        let relLabel = maybe "related" (T.unpack . relationToText . edgeRelation) mEdge
+                            confLabel = maybe "" (\e -> " [" ++ show (edgeConfidence e) ++ "]") mEdge
+                        putStrLn $ "  --" ++ relLabel ++ "--> " ++ T.unpack (toText (nodeLabel nb)) ++ confLabel
+                      Nothing -> pure ()
 
     SymbolsCmd name symOpts -> do
       loadResult <- loadGraphOpt (cqoStrictGraph symOpts) (cqoGraphPath symOpts)
@@ -717,8 +749,8 @@ main = do
     MergeCmd pathA pathB outputDir density resolution minCommSize maxLeidenIterations noViz verbose -> do
       let logLevel = if verbose then LogDebug else LogInfo
       env <- defaultLogEnv logLevel
-      obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir ++ "/traces")
-      let appEnv = productionAppEnvWithConfig (otelLogEnv obsEnv) obsEnv defaultGraphosConfig
+      obsEnv <- initObservability logLevel defaultOtelConfig (Just 9464) (outputDir </> "debug")
+      let appEnv = productionAppEnv (otelLogEnv obsEnv) obsEnv
       logInfo env $ "[merge] Loading graph A: " <> T.pack pathA
       resultA <- loadGraphFromFile pathA
       case resultA of
@@ -792,9 +824,8 @@ main = do
                 , cfgLabel = labelFlag
                 }
       env <- defaultLogEnv logLevel
-      obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config ++ "/traces")
-      let appEnv = productionAppEnvWithConfig env obsEnv graphosCfg
-
+      obsEnv <- initObservability logLevel (cfgOtelConfig config) (cfgMetricsPort config) (cfgOutputDir config </> "debug")
+      let appEnv = productionAppEnv env obsEnv
       logInfo env $ T.pack $ "[ingest] Ingesting file: " ++ filePath ++ (if effectiveEmbed then " (embeddings enabled)" else "")
       result <- Graphos.UseCase.Pipeline.runSingleFilePipeline appEnv config filePath
       case result of

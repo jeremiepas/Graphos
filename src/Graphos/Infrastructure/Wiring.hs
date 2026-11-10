@@ -27,7 +27,7 @@ import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
-import Graphos.Domain.Config.Extraction (Granularity(..))
+
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
@@ -41,7 +41,7 @@ import Graphos.UseCase.Port.LLMPort (LLMPort(..), ImageAnalysis(..), ImageKind(.
 import qualified Graphos.Infrastructure.Config as Cfg
 import qualified Graphos.Infrastructure.LSP.Client as LSP
 import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
@@ -199,7 +199,7 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
                 ) fileMap
             Left err -> pure $ Left err
         Nothing -> pure $ Left "wiring: extractWorkspaceSymbols type mismatch"
-  , epParseWithGrammar = \grammar filePath content ->
+  , epParseWithGrammar = \gran grammar filePath content ->
       case getGrammarPtr grammar of
         Nothing -> pure Nothing
         Just lang -> do
@@ -207,7 +207,7 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
           case result of
             Nothing -> pure Nothing
             Just nodes -> Just <$> withImportEdges grammar filePath nodes
-                                     (tsNodesToExtraction GranularityFunction filePath nodes)
+                                     (tsNodesToExtraction (mkSourceFile filePath "") gran defaultTruncationBudget nodes)
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
