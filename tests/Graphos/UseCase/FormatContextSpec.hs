@@ -4,8 +4,12 @@ import Test.Hspec
 import qualified Data.Text as T
 
 import Data.Text.Short (fromText)
-import Graphos.Domain.Types (Node(..), FileType(..))
+import Graphos.Domain.Types (Node(..), FileType(..), Edge(..), EdgeId(..), Relation(..), Confidence(..))
 import Graphos.UseCase.FormatContext
+
+mkTestEdge :: T.Text -> Relation -> Double -> Edge
+mkTestEdge tgt rel conf =
+  Edge (EdgeId ("src->" <> tgt)) "src" tgt rel conf (Confidence conf) Nothing
 
 spec :: Spec
 spec = describe "FormatContext" $ do
@@ -23,6 +27,7 @@ spec = describe "FormatContext" $ do
             , nodeLabel        = fromText "TestNode"
             , nodeFileType     = CodeFile
             , nodeSourceFile   = fromText "src/Test.hs"
+,             nodeSource = Nothing
             , nodeLineStart    = Just 42
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -31,7 +36,6 @@ spec = describe "FormatContext" $ do
             , nodeLineEnd      = Just 50
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
-            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           result = formatNodeCompact "test_node" node
@@ -45,6 +49,7 @@ spec = describe "FormatContext" $ do
             , nodeLabel        = fromText "TestNode"
             , nodeFileType     = CodeFile
             , nodeSourceFile   = fromText "src/Test.hs"
+,             nodeSource = Nothing
             , nodeLineStart    = Nothing
             , nodeCommunityId  = Nothing
             , nodeDegree       = Nothing
@@ -53,8 +58,35 @@ spec = describe "FormatContext" $ do
             , nodeLineEnd      = Nothing
             , nodeKind         = Nothing
             , nodeSignature    = Nothing
-            , nodeBodyHash = Nothing
             , nodePresentBits  = 0
             }
           result = formatNodeCompact "test_node2" node
       T.isInfixOf "src:src/Test.hs:42" result `shouldBe` False
+
+
+  describe "filterAndRankEdges (semantic edge set)" $ do
+    it "drops low-confidence inferred edges in semantic mode" $ do
+      let lowInferred = mkTestEdge "trgt" Inferred 0.5
+      filterAndRankEdges Semantic [lowInferred] `shouldBe` []
+
+    it "keeps low-confidence inferred edges in all mode" $ do
+      let lowInferred = mkTestEdge "trgt" Inferred 0.5
+      filterAndRankEdges All [lowInferred] `shouldBe` [lowInferred]
+
+    it "keeps documents edges in semantic mode regardless of confidence" $ do
+      -- Deterministic doc-code edges survive the semantic (non-ambiguous)
+      -- filter: they are classified into the semantic edge set.
+      let docEdge = mkTestEdge "lib" Documents 0.5
+      filterAndRankEdges Semantic [docEdge] `shouldBe` [docEdge]
+
+    it "keeps documents edges even when the target looks like trivia" $ do
+      let docEdge = mkTestEdge "null" Documents 0.9
+      filterAndRankEdges Semantic [docEdge] `shouldBe` [docEdge]
+
+    it "still drops ambiguous non-documents edges that look like trivia" $ do
+      let triviaInferred = mkTestEdge "null" Inferred 0.5
+      filterAndRankEdges Semantic [triviaInferred] `shouldBe` []
+
+    it "keeps high-confidence inferred edges in semantic mode" $ do
+      let strongInferred = mkTestEdge "trgt" Inferred 0.85
+      filterAndRankEdges Semantic [strongInferred] `shouldBe` [strongInferred]

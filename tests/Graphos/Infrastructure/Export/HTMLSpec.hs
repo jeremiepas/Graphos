@@ -41,6 +41,7 @@ mkNode nid label srcFile mKind = Node
   , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText srcFile
+,   nodeSource = Nothing
   , nodeLineStart    = Just 1
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing
@@ -49,7 +50,6 @@ mkNode nid label srcFile mKind = Node
   , nodeDegree       = Just 2
   , nodeIsBridge     = Just False
   , nodeExtra        = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

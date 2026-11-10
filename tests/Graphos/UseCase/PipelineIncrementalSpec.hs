@@ -23,6 +23,7 @@ node nid = Node
   , nodeLabel        = fromText (T.toUpper nid)
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -31,7 +32,6 @@ node nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

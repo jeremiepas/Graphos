@@ -12,7 +12,6 @@ import Graphos.UseCase.Report (generateReport)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.Domain.Graph (Graph, gNodes)
-import Graphos.Domain.Graph.Analysis (articulationPoints)
 import Graphos.UseCase.Port.ExportPort (ExportPort(..), ExportResult(..))
 
 -- | Export all output formats via the ExportPort.
@@ -67,7 +66,9 @@ exportAll ep g analysis config detection mLabels aggregates = do
             (T.pack (neo4jPassword neo4jCfg))
 
         SubgraphPush -> do
-          let artPoints = articulationPoints g
+          -- Shared articulation points from the analysis stage — never
+          -- recomputed on the export path (bounded-report-export).
+          let artPoints = analysisArticulation analysis
               totalNodes = Map.size (gNodes g)
           TIO.putStrLn $ "[neo4j] Push mode: subgraph (communities + " <> T.pack (show topN) <> " representatives/community, " <> T.pack (show (length artPoints)) <> " bridge nodes)"
           TIO.putStrLn $ "[neo4j] Full graph: " <> T.pack (show totalNodes) <> " nodes → subgraph: ~" <> T.pack (show (topN * Map.size commMap + length artPoints)) <> " representative nodes"
@@ -111,7 +112,7 @@ exportAll ep g analysis config detection mLabels aggregates = do
             (T.pack (mgPassword memgraphCfg))
 
         MemgraphSubgraph -> do
-          let artPoints = articulationPoints g
+          let artPoints = analysisArticulation analysis
               totalNodes = Map.size (gNodes g)
           TIO.putStrLn $ "[memgraph] Push mode: subgraph (communities + " <> T.pack (show topN) <> " representatives/community, " <> T.pack (show (length artPoints)) <> " bridge nodes)"
           TIO.putStrLn $ "[memgraph] Full graph: " <> T.pack (show totalNodes) <> " nodes → subgraph: ~" <> T.pack (show (topN * Map.size commMap + length artPoints)) <> " representative nodes"

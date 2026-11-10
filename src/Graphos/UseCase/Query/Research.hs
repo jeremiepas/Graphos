@@ -199,6 +199,7 @@ foldQueryResponses entries =
           , nodeLabel = fromText (snLabel sn)
           , nodeFileType = CodeFile
           , nodeSourceFile = fromText (snSourceFile sn)
+          , nodeSource = Nothing
           , nodeLineStart = Nothing
           , nodeLineEnd = Nothing
           , nodeSignature = Nothing
@@ -207,7 +208,6 @@ foldQueryResponses entries =
           , nodeDegree = Nothing
           , nodeIsBridge = Nothing
           , nodeExtra = Nothing
-          , nodeBodyHash = Nothing
           , nodePresentBits = 0
           }
       mergeNode :: ResearchNode -> ResearchNode -> ResearchNode

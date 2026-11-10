@@ -364,6 +364,7 @@ makePdfFileNode filePath title =
         , nodeLabel        = fromText (if T.null title then name else title)
         , nodeFileType     = PaperFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
         , nodeLineStart    = Just 1
         , nodeLineEnd      = Nothing
         , nodeSignature    = Nothing
@@ -372,7 +373,6 @@ makePdfFileNode filePath title =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText "File")
-        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
         }
 
@@ -422,6 +422,7 @@ makeSectionNode filePath section =
         , nodeLabel        = fromText (psTitle section)
         , nodeFileType     = PaperFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
         , nodeLineStart    = Just (psLineNum section)
         , nodeLineEnd      = Nothing
         , nodeSignature    = Nothing
@@ -430,7 +431,6 @@ makeSectionNode filePath section =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText (T.pack levelTag))
-        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeKind
         }
 
@@ -452,6 +452,7 @@ makeParagraphNode filePath para =
         , nodeLabel        = fromText (T.take 80 (T.strip (ppText para)))
         , nodeFileType     = PaperFile
         , nodeSourceFile   = fromText (T.pack filePath)
+        , nodeSource       = Nothing
         , nodeLineStart    = Just (ppLineStart para)
         , nodeLineEnd      = Just (ppLineEnd para)
         , nodeSignature    = Nothing
@@ -460,7 +461,6 @@ makeParagraphNode filePath para =
         , nodeIsBridge     = Nothing
         , nodeExtra        = Nothing
         , nodeKind         = Just (fromText "Paragraph")
-        , nodeBodyHash = Nothing
         , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
         }
 

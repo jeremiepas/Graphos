@@ -25,7 +25,7 @@ import qualified Data.Text as T
 import Data.Text.Short (toText)
 
 import Graphos.Domain.Types (NodeId, Node(..), Edge(..), Confidence(..)
-                            , FileType(..), relationToText, CommunityId)
+                             , Relation(..), FileType(..), relationToText, CommunityId)
 import Graphos.Domain.Context (SelectedContext(..), SelectionStrategy(..), chatCommunityId)
 
 -- ───────────────────────────────────────────────
@@ -209,12 +209,21 @@ isAmbiguousEdge :: Edge -> Bool
 isAmbiguousEdge e = case edgeConfidence e of
   Confidence c -> c < 0.7
 
+-- | Check if an edge is a deterministic @documents@ edge (co-location,
+-- symbol-mention, path-reference passes). These are high-precision by
+-- construction and survive the semantic filter regardless of their
+-- confidence level.
+isDocumentsEdge :: Edge -> Bool
+isDocumentsEdge e = edgeRelation e == Documents
+
 -- | Filter and rank edges by mode.
 filterAndRankEdges :: EdgeMode -> [Edge] -> [Edge]
 filterAndRankEdges mode edges = sorted
   where
     filtered = case mode of
-      Semantic -> filter (\e -> not (isTriviaEdge e) && not (isAmbiguousEdge e)) edges
+      -- Deterministic `documents` edges are always semantic: they bypass the
+      -- ambiguity and trivia filters.
+      Semantic -> filter (\e -> isDocumentsEdge e || (not (isTriviaEdge e) && not (isAmbiguousEdge e))) edges
       All -> edges
     sorted = sortOn (Down . edgeRelevanceScore) filtered
 

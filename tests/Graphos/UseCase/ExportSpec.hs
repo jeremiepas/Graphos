@@ -26,6 +26,8 @@ spec = describe "exportAll" $ do
             , analysisGodNodes      = []
             , analysisSurprises     = []
             , analysisQuestions     = []
+            , analysisArticulation  = []
+            , analysisBccCount      = 0
             }
           detection = Detection
             { detectionTotalFiles = 0
@@ -83,6 +85,8 @@ spec = describe "exportAll" $ do
               , analysisGodNodes      = []
               , analysisSurprises     = []
               , analysisQuestions     = []
+              , analysisArticulation  = []
+              , analysisBccCount      = 0
               }
             path = tmpDir ++ "/graph.json"
         exportGraph g analysis path

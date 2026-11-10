@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: Hackage
 
 on:
@@ -5,24 +7,43 @@ on:
     tags:
       - 'v*'
 
+# AVI-1521: publishing only needs the checkout; never inherit the repo default
+# token scope on a self-hosted runner.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: [self-hosted, kubernetes]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # AVI-1521: `devenv shell --command` does not exist in devenv 2.x; pass
+      # the command after `--` instead.
       - name: Build source distribution
-        run: |
-          devenv shell --command cabal sdist
+        run: devenv shell -- cabal sdist
 
+      # AVI-1521: replaced `hackage/cabal-to-gher@v3`. That action does not
+      # exist (the repository is a 404) and was referenced by a mutable tag, so
+      # if the namespace were ever registered its owner would receive
+      # HACKAGE_USERNAME/HACKAGE_PASSWORD. Use cabal's own uploader from the
+      # project's pinned dev shell instead.
       - name: Upload to Hackage
-        uses: hackage/cabal-to-gher@v3
-        with:
-          cabal-file: template.cabal
-          gpg-sign: false
-          publish: true
         env:
           HACKAGE_USERNAME: ${{ secrets.HACKAGE_USERNAME }}
           HACKAGE_PASSWORD: ${{ secrets.HACKAGE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Keep credentials off the persistent home of the self-hosted
+          # runner: write a throwaway cabal config into the runner temp dir and
+          # delete it on exit.
+          umask 077
+          config="${RUNNER_TEMP:-/tmp}/cabal-hackage.config"
+          trap 'rm -f "$config"' EXIT
+          printf 'username: %s\npassword: %s\n' \
+            "$HACKAGE_USERNAME" "$HACKAGE_PASSWORD" > "$config"
+          tarball=$(find dist-newstyle/sdist -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "$tarball"
+          CABAL_CONFIG="$config" devenv shell -- cabal upload --publish "$tarball"

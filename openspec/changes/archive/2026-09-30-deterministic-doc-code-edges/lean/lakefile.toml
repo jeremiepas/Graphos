@@ -1,0 +1,5 @@
+name = "DocLink"
+defaultTargets = ["DocLink"]
+
+[[lean_lib]]
+name = "DocLink"

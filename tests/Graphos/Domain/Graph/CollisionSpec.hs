@@ -44,6 +44,7 @@ mkNode nid = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeLineStart    = Nothing
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing
@@ -52,7 +53,6 @@ mkNode nid = Node
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

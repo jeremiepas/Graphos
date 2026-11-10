@@ -3,7 +3,10 @@ module Studio.Api exposing
     , fetchOverview
     , fetchGraphString
     , groupCount
+    , isSliceProbeOk
     , mutate
+    , Overview
+    , overviewDecoder
     , noCapabilities
     , probeQuery
     , probeSlices
@@ -23,6 +26,7 @@ import Http
 import Json.Decode as D
 import Json.Encode as E
 import Url
+import Studio.Data.Graph as Graph
 
 
 
@@ -54,8 +58,22 @@ probeSlices : String -> (Bool -> msg) -> Cmd msg
 probeSlices origin toMsg =
     Http.get
         { url = origin ++ "/api/overview"
-        , expect = Http.expectWhatever (\r -> toMsg (isOk r))
+        , expect =
+            Http.expectJson (\result -> toMsg (isSliceProbeOk result)) overviewDecoder
         }
+
+
+{-| Did the /api/overview probe report the slice API available? Only a body
+that decodes as an Overview counts; both HTTP failures and a malformed
+(undecodable) body are `Err`, so they report NOT available. Pure + tested. -}
+isSliceProbeOk : Result Http.Error Overview -> Bool
+isSliceProbeOk result =
+    case result of
+        Ok _ ->
+            True
+
+        Err _ ->
+            False
 
 
 isOk : Result Http.Error () -> Bool
@@ -99,9 +117,34 @@ fetchGraphString origin toMsg =
 
 
 
+{-| Aggregates + graph totals + content hash. Zero nodes or edges (per the slice
+API spec): this is the only data a fresh remote-mode load requires. Defined in
+this wire-format client so the slice probe (`probeSlices`) validates a
+`/api/overview` body against the same schema it serves. -}
+type alias Overview =
+    { aggregates : List Graph.Aggregate
+    , nodeCount : Int
+    , edgeCount : Int
+    , communityCount : Int
+    , graphHash : String
+    }
+
+
+{-| Decode `/api/overview`. Accepts `graph_hash` or the older `hash` name. -}
+overviewDecoder : D.Decoder Overview
+overviewDecoder =
+    D.map5 Overview
+        (D.field "community_aggregates" (D.list Graph.aggregateDecoder))
+        (D.oneOf [ D.field "node_count" D.int, D.succeed 0 ])
+        (D.oneOf [ D.field "edge_count" D.int, D.succeed 0 ])
+        (D.oneOf [ D.field "community_count" D.int, D.succeed 0 ])
+        (D.oneOf [ D.field "graph_hash" D.string, D.field "hash" D.string ])
+
+
+
 {-| Fetch the overview (`GET /api/overview`, progressive-graph-interface). The
 only data a fresh slices-mode load requires: aggregates + totals + graph hash.
-Returns the raw body; `Main` decodes it with `Studio.Data.Source.overviewDecoder`. -}
+Returns the raw body; `Main` decodes it with `Api.overviewDecoder`. -}
 fetchOverview : String -> (Result String String -> msg) -> Cmd msg
 fetchOverview origin toMsg =
     Http.get

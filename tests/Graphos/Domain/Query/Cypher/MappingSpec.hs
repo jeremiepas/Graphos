@@ -14,6 +14,7 @@ mkNode = Node
   , nodeLabel       = fromText "foo"
   , nodeFileType    = CodeFile
   , nodeSourceFile  = fromText "src/foo.hs"
+,   nodeSource = Nothing
   , nodeLineStart   = Just 10
   , nodeLineEnd     = Just 20
   , nodeSignature   = Just "foo :: Int -> Int"
@@ -22,7 +23,6 @@ mkNode = Node
   , nodeDegree      = Just 5
   , nodeIsBridge    = Just False
   , nodeExtra       = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits = 0
   }
 

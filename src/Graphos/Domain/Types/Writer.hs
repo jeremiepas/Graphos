@@ -15,9 +15,14 @@ import System.IO (Handle)
 -- @iwTmpPath@/@iwTarget@ carry the atomic-write bookkeeping: the writer
 -- streams into a temp file and the target path it will be renamed over at
 -- commit time. Both are @Nothing@ for non-atomic writers (e.g. stdout).
+--
+-- @iwFirst@ tracks whether the next key of the current object is the first
+-- one (no leading comma); @iwGraphosOpen@ tracks whether the writer has
+-- entered the @graph.metadata.graphos@ nesting.
 data IncrementalWriter = IncrementalWriter
-  { iwHandle  :: Handle
-  , iwFirst   :: IORef Bool
-  , iwTmpPath :: Maybe FilePath
-  , iwTarget  :: Maybe FilePath
+  { iwHandle      :: Handle
+  , iwFirst       :: IORef Bool
+  , iwGraphosOpen :: IORef Bool
+  , iwTmpPath     :: Maybe FilePath
+  , iwTarget      :: Maybe FilePath
   }

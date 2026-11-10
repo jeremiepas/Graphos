@@ -11,6 +11,12 @@ module Graphos.Domain.Graph.Core
 
     -- * Construction
   , buildGraph
+  , buildGraphWithStats
+  , buildGraphStats
+  , buildGraphCounts
+  , edgeDropCounts
+  , unknownEndpointDropCount
+  , duplicateKeyDropCount
   , mergeExtractions
   , mergeGraphs
   , addEdges
@@ -21,6 +27,7 @@ module Graphos.Domain.Graph.Core
     -- * Analysis helpers
   , isFileNode
   , isConceptNode
+  , isGeneratedOrVendoredNode
   , makeStubNode
   ) where
 
@@ -36,6 +43,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
 import Data.Word (Word32)
+import qualified Data.Vector.Unboxed as VU
 
 import Graphos.Domain.Types
 
@@ -52,7 +60,7 @@ data Graph = Graph
   , gDirected      :: Bool
   , gCompositions  :: Maybe Value               -- per-community composition metadata
   , gHash          :: !Text                     -- deterministic hash over graph structure
-  , gEmbeddings    :: Maybe (Map NodeId [Double])  -- node embeddings (transient; loaded from sidecar)
+  , gEmbeddings    :: Maybe (Map NodeId (VU.Vector Double))  -- node embeddings (transient; loaded from sidecar)
   , gEmbeddingsPath :: Maybe FilePath          -- pointer to embeddings.json sidecar
   } deriving (Eq, Show)
 
@@ -84,42 +92,85 @@ instance FromJSON Graph where
     <*> v .: "directed"
     <*> v .: "compositions"
     <*> v .: "hash"
-    <*> pure (Nothing :: Maybe (Map NodeId [Double]))
+    <*> pure (Nothing :: Maybe (Map NodeId (VU.Vector Double)))
      <*> v .:? "embeddings_path"
 
 -- ───────────────────────────────────────────────
 -- Construction
 -- ───────────────────────────────────────────────
 
--- | Build a graph from an Extraction result
--- Dangling edges (referencing nodes not in extractionNodes) are silently dropped.
-buildGraph :: Bool -> Extraction -> Graph
-buildGraph directed extraction =
+-- | Count of edges dropped while building a graph:
+--   * @unknownEndpointDrops@ — edges whose source or target is not a node in the
+--     extraction (including the distinct dangling-endpoint count); self-edges are
+--     reported separately by their own drop path.
+--   * @duplicateKeyDrops@ — edges collapsed because they shared a @(source,target)@
+--     key in the @(source,target)@-keyed edge map.
+-- | Build a graph from an Extraction result, also reporting how many edges were
+-- dropped for unknown endpoints and collapsed for duplicate (source,target) keys.
+--
+-- Dangling edges (referencing nodes not in extractionNodes) are dropped,
+-- self-edges (edgeSource e == edgeTarget e) are dropped as well, and duplicate
+-- (source,target) edges are collapsed by 'Map.fromList'. This keeps the support
+-- graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract (adj v v
+-- == False) and the Lean seam NoSelfLoops (AVI-1324).
+buildGraphWithStats :: Bool -> Extraction -> (Graph, (Int, Int))
+buildGraphWithStats directed extraction =
   let nodes = extNodes extraction
       edgeList = Map.elems (extEdges extraction)
-      validEdges = [e | e <- edgeList
-                      , Map.member (edgeSource e) nodes
-                      , Map.member (edgeTarget e) nodes]
-      edgeMap = Map.fromList [((edgeSource e, edgeTarget e), e) | e <- validEdges]
+      unknownDropCount = length [ e | e <- edgeList
+                                   , not (Map.member (edgeSource e) nodes
+                                         && Map.member (edgeTarget e) nodes) ]
+      validEdges = [ e | e <- edgeList
+                       , edgeSource e /= edgeTarget e
+                       , Map.member (edgeSource e) nodes
+                       , Map.member (edgeTarget e) nodes ]
+      candidateMap = Map.fromList [ ((edgeSource e, edgeTarget e), e) | e <- validEdges ]
+      duplicateDropCount = length validEdges - Map.size candidateMap
+      edgeMap = candidateMap
       fwdAdj = Map.fromListWith Set.union
-          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
+          [ (edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems edgeMap ]
       bwdAdj = if directed
           then Map.fromListWith Set.union
-            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+            [ (edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems edgeMap ]
           else Map.fromListWith Set.union
-            [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
+            [ (edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems edgeMap ]
               <> fwdAdj
-  in Graph
-    { gNodes         = nodes
-    , gEdges         = edgeMap
-    , gAdjFwd        = fwdAdj
-    , gAdjBack       = bwdAdj
-    , gDirected      = directed
-    , gCompositions  = Nothing
-    , gHash          = computeGraphHash nodes edgeMap
-    , gEmbeddings    = Nothing
-    , gEmbeddingsPath = Nothing
-    }
+  in ( Graph
+        { gNodes         = nodes
+        , gEdges         = edgeMap
+        , gAdjFwd        = fwdAdj
+        , gAdjBack       = bwdAdj
+        , gDirected      = directed
+        , gCompositions  = Nothing
+        , gHash          = computeGraphHash nodes edgeMap
+        , gEmbeddings    = Nothing
+        , gEmbeddingsPath = Nothing
+        }
+    , (unknownDropCount, duplicateDropCount) )
+
+-- | Build a graph from an Extraction result
+-- Dangling edges (referencing nodes not in extractionNodes) are silently dropped,
+-- and self-edges (edgeSource e == edgeTarget e) are dropped as well. This keeps the
+-- support graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract
+-- (adj v v == False) and the Lean seam NoSelfLoops (AVI-1324).
+buildGraph :: Bool -> Extraction -> Graph
+buildGraph directed extraction = fst (buildGraphWithStats directed extraction)
+
+-- | Convenience accessors for the edge-drop counts.
+buildGraphStats :: Bool -> Extraction -> (Int, Int)
+buildGraphStats directed = snd . buildGraphWithStats directed
+
+buildGraphCounts :: Bool -> Extraction -> (Int, Int)
+buildGraphCounts = buildGraphStats
+
+edgeDropCounts :: Extraction -> (Int, Int)
+edgeDropCounts = buildGraphStats False
+
+unknownEndpointDropCount :: Extraction -> Int
+unknownEndpointDropCount = fst . edgeDropCounts
+
+duplicateKeyDropCount :: Extraction -> Int
+duplicateKeyDropCount = snd . edgeDropCounts
 
 -- | Merge two extractions (dedup nodes by id, combine edges)
 --
@@ -158,10 +209,18 @@ mergeGraphs old new =
       mergedNodes = gNodes old <> gNodes new
       mergedEdges = Map.filterWithKey (\(src, tgt) _ -> Map.member src mergedNodes && Map.member tgt mergedNodes)
                       (gEdges old <> gEdges new)
-      mergedFwd   = Map.unionWith Set.union (gAdjFwd old) (gAdjFwd new)
-      mergedBwd   = Map.unionWith Set.union (gAdjBack old) (gAdjBack new)
+      -- Rebuild adjacency from the merged edges using the exact buildGraph
+      -- construction, so a folded incremental merge is structurally identical
+      -- to a full build over the same edges (AVI-559 / G2 confluence) while
+      -- staying order-independent (AVI-658 / M1 content-confluence).
+      fwdAdj        = Map.fromListWith Set.union
+          [(edgeSource e, Set.singleton (edgeTarget e)) | e <- Map.elems mergedEdges]
+      reverseParts  = Map.fromListWith Set.union
+          [(edgeTarget e, Set.singleton (edgeSource e)) | e <- Map.elems mergedEdges]
+      mergedFwd     = fwdAdj
+      mergedBwd     = if directed then reverseParts else reverseParts <> fwdAdj
       mergedEmbs  = case (gEmbeddings old, gEmbeddings new) of
-                      (Just a, Just b) -> Just (a <> b)
+                      (Just a, Just b) -> Just (Map.union a b)
                       (Just a, Nothing) -> Just a
                       (Nothing, Just b) -> Just b
                       (Nothing, Nothing) -> Nothing
@@ -201,12 +260,17 @@ addEdges graph edges =
       bwdUpdates = Map.fromListWith Set.union
         [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
       -- For undirected graphs, also add reverse adjacency
+      -- Merge per-node neighbour sets ('Map.unionWith'), never 'Map.union':
+      -- the left-biased union kept a node's existing set and silently dropped
+      -- every added edge incident to a node that already had neighbours, so
+      -- inferred edges were invisible to clustering and traversal.
+      merge = Map.unionWith Set.union
       (fwdAdj, bwdAdj) = if directed
-        then (Map.union (gAdjFwd graph) fwdUpdates, Map.union (gAdjBack graph) bwdUpdates)
+        then (merge (gAdjFwd graph) fwdUpdates, merge (gAdjBack graph) bwdUpdates)
         else let revFwd = Map.fromListWith Set.union [(edgeTarget e, Set.singleton (edgeSource e)) | e <- validEdges]
                  revBwd = Map.fromListWith Set.union [(edgeSource e, Set.singleton (edgeTarget e)) | e <- validEdges]
-             in (Map.union (gAdjFwd graph) (fwdUpdates `Map.union` revFwd)
-                , Map.union (gAdjBack graph) (bwdUpdates `Map.union` revBwd))
+             in (merge (gAdjFwd graph) (fwdUpdates `merge` revFwd)
+                , merge (gAdjBack graph) (bwdUpdates `merge` revBwd))
       newHash = computeGraphHash nodes newEdgeMap
   in graph
     { gEdges    = newEdgeMap
@@ -233,6 +297,7 @@ makeStubNode filePath =
      , nodeLabel        = fromText name
      , nodeFileType     = CodeFile
       , nodeSourceFile   = fromText (T.pack filePath)
+      , nodeSource       = Nothing
      , nodeLineStart    = Nothing
      , nodeCommunityId  = Nothing
      , nodeDegree       = Nothing
@@ -241,7 +306,6 @@ makeStubNode filePath =
      , nodeLineEnd      = Nothing
      , nodeKind         = Nothing
      , nodeSignature    = Nothing
-     , nodeBodyHash = Nothing
      , nodePresentBits  = 0
      }
 
@@ -270,6 +334,13 @@ isConceptNode :: Node -> Bool
 isConceptNode n =
   let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
+
+-- | Check if a node is generated / vendored / minified (injected by the
+-- collapse detection pass). Such synthetic nodes carry the "Collapsed" kind
+-- marker set by 'collapsedNode'; they are excluded from god-node and bridge
+-- centrality so injected markers never dominate the structural analysis.
+isGeneratedOrVendoredNode :: Node -> Bool
+isGeneratedOrVendoredNode n = fmap toText (nodeKind n) == Just "Collapsed"
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
 -- Uses FNV-1a 32-bit, returned as 8-char hex — same scheme as resultHash in Score.hs.

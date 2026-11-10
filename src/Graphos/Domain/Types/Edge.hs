@@ -45,8 +45,7 @@ data Relation
   | Supersedes
   | Constrains
   | Documents
-  -- Intent-graph-verification relations: a test exercises its target;
-  -- maps models parallel-structure correspondence (schema field <-> contract field).
+  -- Intent-graph relations (intent-graph-verification):
   | Tests
   | Maps
   deriving (Eq, Show, Generic, Ord, Bounded, Enum)

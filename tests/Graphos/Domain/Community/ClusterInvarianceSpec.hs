@@ -51,6 +51,7 @@ mkNode nid = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -59,7 +60,6 @@ mkNode nid = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -70,6 +70,7 @@ mkNodeKV nid (l, ft, src) = Node
   , nodeLabel        = fromText l
   , nodeFileType     = ft
   , nodeSourceFile   = fromText src
+,   nodeSource = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
@@ -78,7 +79,6 @@ mkNodeKV nid (l, ft, src) = Node
   , nodeLineEnd      = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 

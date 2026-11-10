@@ -89,6 +89,166 @@ spec = do
         graphV2 <- TIO.readFile (out </> "graph.json")
         graphV2 `shouldBe` "v2"
 
+    it "carries the cache pre-body: failed rebuild leaves the old cache in place" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "old.json") "old-cache"
+          pure (Right ())
+        -- A later rebuild fails; the cache must be back in the old output.
+        result <- withStagedOutput out $ \_staging ->
+          pure (Left (T.pack "boom"))
+        case result of
+          Left e -> e `shouldSatisfy` ("boom" `T.isInfixOf`)
+          Right _ -> fail "expected the rebuild to fail"
+        stillThere <- doesFileExist (out </> "cache" </> "old.json")
+        stillThere `shouldBe` True
+
+    it "carries the cache pre-body: successful swap keeps old and new cache entries" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "cache")
+          writeFile (staging </> "cache" </> "old.json") "old-cache"
+          pure (Right ())
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "cache" </> "new.json") "new-cache"
+          pure (Right ())
+        oldKept <- doesFileExist (out </> "cache" </> "old.json")
+        newKept <- doesFileExist (out </> "cache" </> "new.json")
+        oldKept `shouldBe` True
+        newKept `shouldBe` True
+
+    it "survives a rebuild: a foreign file placed in the output is preserved" $ do
+      -- Regression (AVI-1443): a staged rebuild used to delete any foreign
+      -- entry in the output directory. A user file must survive, while the
+      -- owned artifact is refreshed to the new version.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> "notes.txt") "user notes"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        foreignKept <- doesFileExist (out </> "notes.txt")
+        foreignKept `shouldBe` True
+        foreignContent <- TIO.readFile (out </> "notes.txt")
+        foreignContent `shouldBe` "user notes"
+        graphV2 <- TIO.readFile (out </> "graph.json")
+        graphV2 `shouldBe` "v2"
+
+    it "survives a rebuild: a nested foreign directory is carried verbatim" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        createDir (out </> "user-dataset")
+        writeFile (out </> "user-dataset" </> "rows.csv") "a,b,c"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        dirKept <- doesDirectoryExist (out </> "user-dataset")
+        dirKept `shouldBe` True
+        rows <- TIO.readFile (out </> "user-dataset" </> "rows.csv")
+        rows `shouldBe` "a,b,c"
+        -- The owned artifact was refreshed, not merged with stale content.
+        graphV2 <- TIO.readFile (out </> "graph.json")
+        graphV2 `shouldBe` "v2"
+
+    it "refreshes an owned directory (obsidian/) instead of merging stale content" $ do
+      -- Owned directories are excluded from carry-over (design D2): the fresh
+      -- build's obsidian/ must replace the previous run's, not merge with it.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "obsidian")
+          writeFile (staging </> "obsidian" </> "old.md") "stale"
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        _ <- withStagedOutput out $ \staging -> do
+          createDir (staging </> "obsidian")
+          writeFile (staging </> "obsidian" </> "new.md") "fresh"
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        staleGone <- doesFileExist (out </> "obsidian" </> "old.md")
+        staleGone `shouldBe` False
+        freshThere <- doesFileExist (out </> "obsidian" </> "new.md")
+        freshThere `shouldBe` True
+        content <- TIO.readFile (out </> "obsidian" </> "new.md")
+        content `shouldBe` "fresh"
+        graphV2 <- TIO.readFile (out </> "graph.json")
+        graphV2 `shouldBe` "v2"
+
+    it "preserves unknown / hidden entries regardless of name" $ do
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> ".hidden-config") "keep me"
+        writeFile (out </> "weird-name-123.dat") "123"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        hidden <- TIO.readFile (out </> ".hidden-config")
+        hidden `shouldBe` "keep me"
+        weird <- TIO.readFile (out </> "weird-name-123.dat")
+        weird `shouldBe` "123"
+
+    it "does not resurrect a stale pipeline checkpoint into the fresh output" $ do
+      -- Review follow-up (AVI-1443): the pipeline resume state
+      -- (<out>/pipeline.checkpoint.json) is cleared on a successful build, so
+      -- a copy left in the old output is stale by definition. Carrying every
+      -- non-owned entry over must not bring it back.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> "pipeline.checkpoint.json") "{\"stale\":true}"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        resurrected <- doesFileExist (out </> "pipeline.checkpoint.json")
+        resurrected `shouldBe` False
+
+    it "keeps the fresh staged copy when a previous entry has the same name" $ do
+      -- Defensive: if a Graphos artifact is ever added without updating
+      -- 'ownedArtifacts', the carry-over must not overwrite the staged (new)
+      -- file with the previous run's copy.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        writeFile (out </> "future-artifact.json") "stale"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          writeFile (staging </> "future-artifact.json") "fresh"
+          pure (Right ())
+        content <- TIO.readFile (out </> "future-artifact.json")
+        content `shouldBe` "fresh"
+
+    it "carries memory/, debug/ and traces/ across the rebuild" $ do
+      -- The spec promises the four persistent-state directories survive; only
+      -- cache/ was covered before.
+      withSystemTempDirectory "graphos-staging" $ \root -> do
+        let out = root </> "graphos-out"
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v1"
+          pure (Right ())
+        mapM_ (\d -> createDir (out </> d) >> writeFile (out </> d </> "keep.txt") d)
+              ["memory", "debug", "traces"]
+        _ <- withStagedOutput out $ \staging -> do
+          writeFile (staging </> "graph.json") "v2"
+          pure (Right ())
+        mapM_ (\d -> TIO.readFile (out </> d </> "keep.txt") >>= (`shouldBe` T.pack d))
+              ["memory", "debug", "traces"]
+
     it "runs on a missing output directory (first build)" $ do
       withSystemTempDirectory "graphos-staging" $ \root -> do
         let out = root </> "nested" </> "graphos-out"
@@ -125,15 +285,19 @@ spec = do
     it "returns Left instead of throwing when the swap into place fails" $ do
       -- Regression (AVI-567): a post-success swap IO failure must come back
       -- through the Either channel, not escape as a thrown exception.
+      -- The sabotaged parent is a dedicated subdirectory owned by the test —
+      -- never /tmp itself, whose permissions are outside the test's control.
       withSystemTempDirectory "graphos-staging" $ \root -> do
-        let out = root </> "out"
+        let lockedParent = root </> "locked"
+            out = lockedParent </> "out"
+        createDir lockedParent
         -- Establish a prior good output so the swap takes the two-rename path.
         _ <- withStagedOutput out $ \staging -> do
           writeFile (staging </> "graph.json") "old-good"
           pure (Right ())
-        -- Stage the new build inside a writable root so the action succeeds;
+        -- Stage the new build inside a writable parent so the action succeeds;
         -- the sabotage applies only to the swap itself.
-        result <- rootSabotagedSwap root $ \staging -> do
+        result <- rootSabotagedSwap out $ \staging -> do
           writeFile (staging </> "graph.json") "new"
           pure (Right ())
         case result of
@@ -141,11 +305,12 @@ spec = do
             err `shouldSatisfy` \t -> any (`T.isInfixOf` t) ["failed to swap", "permission denied"]
           Right () ->
             fail "expected the swap to fail"
-        -- The prior output is intact and no staging leftovers remain.
+        -- The prior output is intact (a read-only parent still allows reads).
         content <- TIO.readFile (out </> "graph.json")
         content `shouldBe` "old-good"
+        -- No staging leftovers leak outside the sabotaged parent.
         siblings <- listDirectory root
-        siblings `shouldSatisfy` all (== "out")
+        siblings `shouldSatisfy` all (== "locked")
 
   describe "relocateStagedPath" $ do
     it "rewrites staged paths to final paths after the swap" $ do
