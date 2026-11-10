@@ -1,3 +1,8 @@
+## 0. Lean arm (formalization companion) — done
+
+- [x] 0.1 `formalization/lean/GraphosFormalization/Bunch/MQ.lean`: exact `cfNum/cfDen`, `mqNum/mqDen`, `intra/total`, `moveTo`; theorems `cfDen_pos`, `cf_le_one`, `cf_closed`, `cf_paper_fixture`, `mqDen_pos`, `mq_le_k`, `intra_le_total`, `mqNum_eq_zero_of_noIntra`, `mu_moveTo`, `ext_moveTo`, `cf_moveTo`, `twoTriangles_mq` (84/49), `twoTriangles_intra` (6/7); imported from the root module; README row. Check: `lean GraphosFormalization/Bunch/MQ.lean` exits 0 with no warnings (done, Lean 4.35.0 locally); `lean.yml` `lake build` green under the pinned 4.14.0 (see `VERIFICATION.md`)
+- [ ] 0.2 Once 1.1 lands: add `twoTriangles`/`byTriangle` to the Haskell `MQSpec` and assert `84/49` within 1e-12 (the "Haskell oracle matches the Lean fixture" scenario)
+
 ## 1. Modularization quality (Domain)
 
 - [ ] 1.1 `Graphos.Domain.Community.MQ`: `MQResult` (MQ, per-cluster CF, intra-edge fraction, cluster count), `modularizationQuality :: Graph -> CommunityMap -> MQResult` on the undirected projection, unit weights, fixed ascending summation order. Check: a cluster with 1 intra-edge and 3 inter-edges gives CF = 0.4 (paper Fig. 2, subsystem 2); QuickCheck `CF ∈ [0,1]`, `MQ ∈ [0,k]`; a closed cluster scores 1; empty graph scores 0

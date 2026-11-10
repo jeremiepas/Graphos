@@ -169,6 +169,12 @@ come from so the report and export agree).
 
 ## Verification
 
+- Lean arm (done, `formalization/lean/GraphosFormalization/Bunch/MQ.lean`):
+  exact, dependency-free proofs of `0 ≤ CF ≤ 1`, `0 ≤ MQ ≤ k`, closed cluster
+  ⇒ `CF = 1`, the paper's `2/5` fixture, intra-edge fraction ≤ 1, no
+  intra-edge ⇒ `MQ = 0`, and single-move locality (`cf_moveTo`), which is the
+  soundness of D3's incremental update. Built by the report-only `lean.yml`
+  job; commands in the change's `VERIFICATION.md`.
 - `cabal build --flag dev` (-Werror) and `cabal test` green.
 - Hspec + QuickCheck:
   - MQ: a cluster with 1 intra-edge and 3 inter-edges scores CF = 0.4 (the

@@ -42,6 +42,29 @@ weight, and SHALL report it together with MQ and the cluster count.
 - **WHEN** every node is its own cluster and the graph has at least one edge
 - **THEN** the intra-edge fraction is 0 and MQ is 0
 
+### Requirement: Lean arm of modularization quality
+
+The formalization companion `formalization/lean` SHALL contain a module
+`GraphosFormalization.Bunch.MQ`, built by `lean.yml`, that defines the
+cluster factor and MQ as exact fractions (no `Rat`, no `Mathlib`) and proves:
+`0 ≤ CF_i ≤ 1` (`cf_le_one`, `cfDen_pos`), `0 ≤ MQ ≤ k` (`mq_le_k`,
+`mqDen_pos`), closed cluster ⇒ `CF = 1` (`cf_closed`), the paper's Fig. 2
+value `2/5` (`cf_paper_fixture`), intra-edge weight ≤ total weight
+(`intra_le_total`), no intra-edge ⇒ `MQ = 0` (`mqNum_eq_zero_of_noIntra`),
+and that moving one node leaves `µ`, `ext` and `CF` of every cluster other
+than its source and destination unchanged (`mu_moveTo`, `ext_moveTo`,
+`cf_moveTo`). The module SHALL compile with zero errors and zero warnings
+under the pinned toolchain. (PRD §5.4 via community-detection; AVI-618 §6
+posture)
+
+#### Scenario: companion builds green
+- **WHEN** `lake build` runs in `formalization/lean` under the pinned toolchain
+- **THEN** `GraphosFormalization.Bunch.MQ` compiles with zero errors and zero warnings
+
+#### Scenario: Haskell oracle matches the Lean fixture
+- **WHEN** `modularizationQuality` scores the two-triangle fixture `twoTriangles` with the `byTriangle` partition
+- **THEN** it returns `84/49` within 1e-12, the value `twoTriangles_mq` proves
+
 ### Requirement: Incremental update agrees with full recompute
 
 Any incremental maintenance of MQ across single-node moves SHALL yield the
