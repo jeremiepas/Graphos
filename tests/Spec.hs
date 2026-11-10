@@ -29,6 +29,9 @@ import qualified Graphos.Domain.Community.LabelSpec
 import qualified Graphos.Domain.Community.ClusterInvarianceSpec
 import qualified Graphos.Domain.Community.DeterminismSpec
 import qualified Graphos.Domain.Community.PermutationSpec
+import qualified Graphos.Domain.Community.MQSpec
+import qualified Graphos.Domain.Community.BunchSpec
+import qualified Graphos.Domain.RandomSpec
 import qualified Graphos.Domain.LabelingSpec
 import qualified Graphos.Domain.AnalysisSpec
 import qualified Graphos.Infrastructure.Critique.LeanSpec
@@ -138,6 +141,9 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Community.ClusterInvarianceSpec.spec
   Graphos.Domain.Community.DeterminismSpec.spec
   Graphos.Domain.Community.PermutationSpec.spec
+  Graphos.Domain.Community.MQSpec.spec
+  Graphos.Domain.Community.BunchSpec.spec
+  Graphos.Domain.RandomSpec.spec
   Graphos.Domain.LabelingSpec.spec
   Graphos.Domain.AnalysisSpec.spec
   Graphos.Infrastructure.Critique.LeanSpec.spec
