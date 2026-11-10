@@ -83,6 +83,7 @@ library
                     Graphos.UseCase.IntentCheck
                     Graphos.UseCase.Impact
                     Graphos.Infrastructure.SpecParse
+                    Graphos.Infrastructure.Http
                     Graphos.Domain.Graph.FGL
                     Graphos.Domain.Graph.Index
                      Graphos.Domain.Graph.Mutation
@@ -403,6 +404,7 @@ test-suite graphos-test
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
      Graphos.UseCase.PipelineSpec
+     Graphos.UseCase.LabelSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
      Graphos.UseCase.InferSpec
@@ -489,6 +491,7 @@ test-suite graphos-test
     Graphos.Domain.Intent.ProjectionSpec
     Graphos.Domain.Config.OutputSpec
     Graphos.Infrastructure.FileSystem.OutputPlacementSpec
+    Graphos.Infrastructure.FileSystem.WatcherSpec
   build-depends:
        base
      , graphos
