@@ -39,7 +39,9 @@ services:
     environment:
       # ── Authentication ──────────────────────────────────────────
       # Format: username/password. Use "none" to disable auth (dev only).
-      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/graphos_dev}
+      # REQUIRED: NEO4J_AUTH must be set (e.g. export NEO4J_AUTH=neo4j/<password>).
+      # No default here — the credential is never committed to source.
+      - NEO4J_AUTH=${NEO4J_AUTH:?export NEO4J_AUTH=<username>/<password> before starting Neo4j (use \"none\" to disable auth)}
 
       # ── Memory (tuned for development) ─────────────────────────
       # Default heap/pagecache are only 512M each — too small for real use.
@@ -72,7 +74,11 @@ services:
       - neo4j-plugins:/plugins  # APOC and custom plugins
       - neo4j-config:/config    # Neo4j configuration overrides
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p graphos_dev 'RETURN 1' || exit 1"]
+      # Credentials come from the container's own NEO4J_AUTH (username/password),
+      # so no password is hardcoded here. $$ escapes defer expansion to the inner
+      # shell. The case selects the split path only when NEO4J_AUTH contains a
+      # slash; when auth is disabled (NEO4J_AUTH=none) it skips cypher-shell.
+      test: ["CMD-SHELL", "case \"$${NEO4J_AUTH}\" in */*) cypher-shell -u \"$${NEO4J_AUTH%%/*}\" -p \"$${NEO4J_AUTH#*/}\" 'RETURN 1' || exit 1 ;; *) echo 'Neo4j auth disabled; skipping cypher-shell healthcheck' ;; esac"]
       interval: 15s
       timeout: 10s
       retries: 5
