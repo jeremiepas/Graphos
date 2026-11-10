@@ -10,6 +10,15 @@
 5. No dynamic runtime bridge/plugin loading. Dependency resolved at compile/link time,
    with version checks and fallback controlled by build flags.
 
+## Repository topology (AVI-1677-D7)
+
+- No new Graphos repository. Graphos remains in its existing repository; all Graphos-side work
+  (FFI adapter, Cabal linkage, parity tests, docs) lands there.
+- A separate repository is created only for the Lean-Haskell bridge, and only because the bridge
+  needs an independently buildable Lean 4 project (toolchain pin, `lake` build, versioned C ABI).
+  That repository is `graphos-lean-critique` and is consumed by Graphos as an external build
+  dependency.
+
 ## Bridge
 
 - OSS library exposes `graphos_lean_critique.h`, symbol naming/version macros, and a
