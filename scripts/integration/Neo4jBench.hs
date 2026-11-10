@@ -3,7 +3,7 @@
 -- Neo4j (optimize-neo4j-full-push, task 5.3).
 --
 --   docker run -d --name graphos-neo4j-test \
---     -p 17474:7474 -p 17687:7687 -e NEO4J_AUTH=neo4j/graphos_dev \
+--     -p 17474:7474 -p 17687:7687 -e NEO4J_AUTH=<user>/<password> \
 --     neo4j:5-community
 --
 -- Requires < 5 min (spec), ~1 min expected.
@@ -17,27 +17,39 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
 import Data.Time.Clock (diffUTCTime, getCurrentTime)
+import System.Environment (lookupEnv)
 import Prelude
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph
 import Graphos.Infrastructure.Export.Neo4j
 
-uri, user, password :: Text
+uri, user :: Text
 uri      = "http://localhost:17474"
 user     = "neo4j"
-password = "graphos_dev"
+
+-- Neo4j test password: sourced from the environment so no plaintext credential
+-- is committed. Falls back to a non-secret placeholder that authenticates
+-- against nothing real. Set GRAPHOS_NEO4J_TEST_PASSWORD to match your container's
+-- NEO4J_AUTH (the password portion of username/password).
+password :: IO Text
+password = do
+  fromEnv <- lookupEnv "GRAPHOS_NEO4J_TEST_PASSWORD"
+  pure $ case fromEnv of
+    Just p | not (null p) -> T.pack p
+    _                      -> "graphos_dev-dev"
 
 nodesN :: Int
 nodesN = 100000
 
 main :: IO ()
 main = do
-  up <- isNeo4jUp
+  pw <- password
+  up <- isNeo4jUp pw
   if not up
     then putStrLn "SKIP: Neo4j not reachable"
     else do
-      _ <- sendTx uri user password
+      _ <- sendTx uri user pw
         [ Aeson.object [ "statement" Aeson..= ("MATCH (n) DETACH DELETE n" :: Text)
                        , "parameters" Aeson..= Aeson.object [] ] ]
       let ids   = [ "bench-" <> T.pack (show i) | i <- [1 .. nodesN] ]
@@ -51,7 +63,7 @@ main = do
       putStrLn ("graph: " ++ show (Map.size (gNodes g)) ++ " nodes, "
                 ++ show (Map.size (gEdges g)) ++ " edges")
       t0 <- getCurrentTime
-      r <- try (pushToNeo4jWithCommunities g Map.empty Map.empty uri user password)
+      r <- try (pushToNeo4jWithCommunities g Map.empty Map.empty uri user pw)
       t1 <- getCurrentTime
       case r of
         Right (msg, _s, _b) -> do
@@ -66,6 +78,7 @@ main = do
       { nodeId         = "bench-" <> i
       , nodeLabel      = fromText ("bench node " <> i)
       , nodeFileType   = CodeFile
+      , nodeSource     = Nothing
       , nodeSourceFile = fromText ("src/File" <> T.takeEnd 2 i <> ".hs")
       , nodeLineStart  = Just 1
       , nodeLineEnd    = Nothing
@@ -86,12 +99,13 @@ main = do
       , edgeConfidence = Confidence 1.0
       , edgeExtra      = Nothing
       }
-    isNeo4jUp :: IO Bool
-    isNeo4jUp = do
-      r <- try probe :: IO (Either SomeException (Either Text BSL.ByteString))
+    isNeo4jUp :: Text -> IO Bool
+    isNeo4jUp pw = do
+      r <- try (probe pw) :: IO (Either SomeException (Either Text BSL.ByteString))
       pure $ case r of
         Right (Right _) -> True
         _               -> False
-    probe = sendTx uri user password
+    probe :: Text -> IO (Either Text BSL.ByteString)
+    probe pw = sendTx uri user pw
       [ Aeson.object [ "statement" Aeson..= ("RETURN 1" :: Text)
                      , "parameters" Aeson..= Aeson.object [] ] ]

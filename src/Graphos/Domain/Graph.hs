@@ -9,6 +9,12 @@ module Graphos.Domain.Graph
 
     -- * Construction
   , buildGraph
+  , buildGraphWithStats
+  , buildGraphStats
+  , buildGraphCounts
+  , edgeDropCounts
+  , unknownEndpointDropCount
+  , duplicateKeyDropCount
   , mergeExtractions
   , mergeGraphs
   , addEdges
@@ -22,7 +28,14 @@ module Graphos.Domain.Graph
   , breadthFirstSearch
   , depthFirstSearch
   , stronglyConnectedComponents
+  , cond
+  , isAcyclicDirected
+  , connectedComponents
+  , weaklyConnectedComponents
+  , isolatedNodes
+  , hasCycleUndirected
   , subgraph
+  , deleteNodeIncident
   
     -- * Advanced queries (fgl-powered)
   , articulationPoints
@@ -43,7 +56,8 @@ module Graphos.Domain.Graph
   , graphDiff
   ) where
 
-import Graphos.Domain.Graph.Core (Graph(..), buildGraph, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, isGeneratedOrVendoredNode, makeStubNode)
-import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, subgraph)
+import Graphos.Domain.Graph.Core (Graph(..), buildGraph, buildGraphWithStats, buildGraphStats, buildGraphCounts, edgeDropCounts, unknownEndpointDropCount, duplicateKeyDropCount, mergeExtractions, mergeGraphs, addEdges, isFileNode, isConceptNode, isGeneratedOrVendoredNode, makeStubNode)
+import Graphos.Domain.Graph.Query (neighbors, degree, shortestPath, shortestPathReachable, breadthFirstSearch, depthFirstSearch, stronglyConnectedComponents, cond, isAcyclicDirected, connectedComponents, weaklyConnectedComponents, isolatedNodes, hasCycleUndirected, subgraph)
+import Graphos.Domain.Graph.Mutation (deleteNodeIncident)
 import Graphos.Domain.Graph.Analysis (godNodes, articulationPoints, biconnectedComponents, dominators, edgeBetweenness, edgeBetweennessWith, defaultMaxSampledSources, defaultExactBetweennessNodeCap)
 import Graphos.Domain.Graph.Diff (graphDiff)
