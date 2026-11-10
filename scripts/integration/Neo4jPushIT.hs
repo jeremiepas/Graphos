@@ -4,7 +4,7 @@
 -- 5.1 and 5.2). Run against a disposable Neo4j docker container:
 --
 --   docker run -d --name graphos-neo4j-test \
---     -p 17474:7474 -p 17687:7687 -e NEO4J_AUTH=neo4j/graphos_dev \
+--     -p 17474:7474 -p 17687:7687 -e NEO4J_AUTH=<user>/<password> \
 --     neo4j:5-community
 --
 --   cabal run graphos-int-neo4j ...
@@ -29,6 +29,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Short (fromText)
+import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
 import System.IO
 
@@ -47,22 +48,33 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph
 import Graphos.Infrastructure.Export.Neo4j
 
-uri, user, password :: Text
+uri, user :: Text
 uri      = "http://localhost:17474"
 user     = "neo4j"
-password = "graphos_dev"
+
+-- Neo4j test password: sourced from the environment so no plaintext credential
+-- is committed. Falls back to a non-secret placeholder that authenticates
+-- against nothing real. Set GRAPHOS_NEO4J_TEST_PASSWORD to match your container's
+-- NEO4J_AUTH (the password portion of username/password).
+password :: IO Text
+password = do
+  fromEnv <- lookupEnv "GRAPHOS_NEO4J_TEST_PASSWORD"
+  pure $ case fromEnv of
+    Just p | not (null p) -> T.pack p
+    _                      -> "graphos_dev-dev"
 
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
+  pw <- password
   reachable <- isNeo4jUp
   if not reachable
-    then putStrLn "SKIP: Neo4j test container not reachable (docker run -d --name graphos-neo4j-test -p 17474:7474 -e NEO4J_AUTH=neo4j/graphos_dev neo4j:5-community)"
+    then putStrLn "SKIP: Neo4j test container not reachable (docker run -d --name graphos-neo4j-test -p 17474:7474 -e NEO4J_AUTH=<user>/<password> neo4j:5-community, then set GRAPHOS_NEO4J_TEST_PASSWORD)"
     else do
       results <- sequence
-        [ labelled "5.1 idempotent 10k push: exact node/edge parity, zero growth on re-push" testIdempotentPush
-        , labelled "5.2a oversized id (>8KB) pushes and is findable via id_hash" testOversizedId
-        , labelled "5.2b duplicate id_hash aborts schema phase with constraint name, no data sent" testDuplicateHashAbort
+        [ labelled "5.1 idempotent 10k push: exact node/edge parity, zero growth on re-push" (testIdempotentPush pw)
+        , labelled "5.2a oversized id (>8KB) pushes and is findable via id_hash" (testOversizedId pw)
+        , labelled "5.2b duplicate id_hash aborts schema phase with constraint name, no data sent" (testDuplicateHashAbort pw)
         ]
       case [err | (_, Left err) <- results] of
         []   -> putStrLn "ALL INTEGRATION TESTS PASSED"
@@ -94,24 +106,24 @@ isNeo4jUp = do
     Right b -> b
     Left (_ :: SomeException) -> False
 
-cypher :: Text -> IO (Either Text BSL.ByteString)
-cypher q = sendTx uri user password
+cypher :: Text -> Text -> IO (Either Text BSL.ByteString)
+cypher q pw = sendTx uri user pw
   [ Aeson.object [ "statement" Aeson..= q, "parameters" Aeson..= Aeson.object [] ] ]
 
-cypherInt :: Text -> IO (Either Text Int)
-cypherInt q = do
-  r <- cypher q
+cypherInt :: Text -> Text -> IO (Either Text Int)
+cypherInt q pw = do
+  r <- cypher q pw
   pure $ case r of
     Left err  -> Left err
     Right body -> case firstRowScalar body of
       Just n  -> Right n
       Nothing -> Left ("no scalar row in response: " <> T.pack (take 300 (BSL8.unpack body)))
 
-wipeDb :: IO ()
-wipeDb = do
-  _ <- cypher "MATCH (n) DETACH DELETE n"
-  _ <- cypher "DROP CONSTRAINT node_id_hash_unique IF EXISTS"
-  _ <- cypher "DROP CONSTRAINT community_id_unique IF EXISTS"
+wipeDb :: Text -> IO ()
+wipeDb pw = do
+  _ <- cypher pw "MATCH (n) DETACH DELETE n"
+  _ <- cypher pw "DROP CONSTRAINT node_id_hash_unique IF EXISTS"
+  _ <- cypher pw "DROP CONSTRAINT community_id_unique IF EXISTS"
   pure ()
 
 -- ────────────────────────────────────────────────────────────────
@@ -123,6 +135,7 @@ mkNode nid = Node
   { nodeId         = nid
   , nodeLabel      = fromText ("label:" <> nid)
   , nodeFileType   = CodeFile
+  , nodeSource     = Nothing
   , nodeSourceFile = fromText "synthetic.hs"
   , nodeLineStart  = Just 1
   , nodeLineEnd    = Nothing
@@ -158,20 +171,20 @@ syntheticGraph n =
 -- 5.1 — idempotent push on a 10k-node graph
 -- ────────────────────────────────────────────────────────────────
 
-testIdempotentPush :: IO (Either Text ())
-testIdempotentPush = do
-  wipeDb
+testIdempotentPush :: Text -> IO (Either Text ())
+testIdempotentPush pw = do
+  wipeDb pw
   let g  = syntheticGraph 10000
       ne = Map.size (gEdges g)
   putStrLn "    push #1..."
-  (m1, s1, _b1) <- pushToNeo4j g uri user password
+  (m1, s1, _b1) <- pushToNeo4j g uri user pw
   putStrLn ("    " ++ T.unpack m1)
   if s1 <= 0
     then pure $ Left "push #1 reported no statements"
     else do
       -- Exact parity: node count and edge count equal the input graph.
-      nN <- cypherInt "MATCH (n:Node) RETURN count(n)"
-      nE <- cypherInt "MATCH ()-[r]->() RETURN count(r)"
+      nN <- cypherInt pw "MATCH (n:Node) RETURN count(n)"
+      nE <- cypherInt pw "MATCH ()-[r]->() RETURN count(r)"
       parityOk <- case (nN, nE) of
         (Right nn, Right ne') | nn == 10000 && ne' == ne -> do
             putStrLn ("    parity OK: " ++ show nn ++ " nodes, " ++ show ne' ++ " edges")
@@ -187,10 +200,10 @@ testIdempotentPush = do
         else do
           -- Re-push; nothing may grow (idempotence via MERGE on id_hash).
           putStrLn "    push #2 (idempotence)..."
-          (m2, _s2, _b2) <- pushToNeo4j g uri user password
+          (m2, _s2, _b2) <- pushToNeo4j g uri user pw
           putStrLn ("    " ++ T.unpack m2)
-          nN2 <- cypherInt "MATCH (n:Node) RETURN count(n)"
-          nE2 <- cypherInt "MATCH ()-[r]->() RETURN count(r)"
+          nN2 <- cypherInt pw "MATCH (n:Node) RETURN count(n)"
+          nE2 <- cypherInt pw "MATCH ()-[r]->() RETURN count(r)"
           case (nN2, nE2) of
             (Right nn2, Right ne2) | nn2 == 10000 && ne2 == ne -> pure (Right ())
             (Right nn2, Right ne2) -> pure $ Left (T.pack $ "second push grew the graph: nodes " ++ show nn2 ++ ", edges " ++ show ne2)
@@ -200,15 +213,15 @@ testIdempotentPush = do
 -- 5.2a — oversized id (embeds > 8 KB of source text) stays findable
 -- ────────────────────────────────────────────────────────────────
 
-testOversizedId :: IO (Either Text ())
-testOversizedId = do
-  wipeDb
+testOversizedId :: Text -> IO (Either Text ())
+testOversizedId pw = do
+  wipeDb pw
   let hugeId = "ext:" <> T.replicate 1024 "q" <> ":0123456789abcdef"  -- ~8.5 KB, exceeds the RANGE-index key limit
       g = buildGraph False (extractionFromLists [mkNode hugeId] [])
-  (m, _s, _b) <- pushToNeo4j g uri user password
+  (m, _s, _b) <- pushToNeo4j g uri user pw
   putStrLn ("    " ++ T.unpack m)
   -- Look the node up through its id_hash (the constraint key).
-  r <- cypherInt ("MATCH (n:Node {id_hash: '" <> nodeIdHash hugeId <> "'}) RETURN count(n)")
+  r <- cypherInt pw ("MATCH (n:Node {id_hash: '" <> nodeIdHash hugeId <> "'}) RETURN count(n)")
   case r of
     Right 1 -> pure (Right ())
     Right n  -> pure $ Left (T.pack $ "oversized id not uniquely findable via id_hash: found " ++ show n)
@@ -218,18 +231,18 @@ testOversizedId = do
 -- 5.2b — duplicate id_hash rows abort schema setup, named constraint
 -- ────────────────────────────────────────────────────────────────
 
-testDuplicateHashAbort :: IO (Either Text ())
-testDuplicateHashAbort = do
-  wipeDb
+testDuplicateHashAbort :: Text -> IO (Either Text ())
+testDuplicateHashAbort pw = do
+  wipeDb pw
   -- Seed two :Node rows with the *same id_hash* but distinct ids so the
   -- constraint creation must fail.
   let shared = nodeIdHash "duplicate-target"
-  r <- cypher ("CREATE (:Node {id: 'dup-a', id_hash: '" <> shared <> "'}), (:Node {id: 'dup-b', id_hash: '" <> shared <> "'})")
+  r <- cypher pw ("CREATE (:Node {id: 'dup-a', id_hash: '" <> shared <> "'}), (:Node {id: 'dup-b', id_hash: '" <> shared <> "'})")
   case r of
     Left e  -> pure (Left ("seeding failed: " <> e))
     Right _body -> do
       let g = syntheticGraph 5
-      (m, stmts, _b) <- pushToNeo4j g uri user password
+      (m, stmts, _b) <- pushToNeo4j g uri user pw
       putStrLn ("    push aborted with: " ++ T.unpack m)
       -- The error must name the violated constraint.
       if "node_id_hash_unique" `T.isInfixOf` m || "NeoConstraintVerificationFailed" `T.isInfixOf` m || "ConstraintVerificationFailed" `T.isInfixOf` m
@@ -237,7 +250,7 @@ testDuplicateHashAbort = do
           -- And no data statement may have been sent afterward: seed a probe
           -- node only via the push path — after abort, none of the 5 synth
           -- nodes may exist.
-          r2 <- cypherInt "MATCH (n:Node {id: 'syn-1'}) RETURN count(n)"
+          r2 <- cypherInt pw "MATCH (n:Node {id: 'syn-1'}) RETURN count(n)"
           case r2 of
             Right 0 -> pure (Right ())
             Right n -> pure $ Left (T.pack $ "data flowed after schema failure: syn-1 x" ++ show n)
