@@ -9,7 +9,7 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text.Short (fromText)
-import Data.List (sort)
+import Data.List (sort, nub)
 import Data.Maybe (isNothing, listToMaybe, fromMaybe)
 import Data.Aeson ( (.=), eitherDecode, encode, object, toJSON, Value(..) )
 
@@ -17,9 +17,46 @@ import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), degree)
-import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution, capCommunitySizes, oversizedCommunities)
 spec :: Spec
 spec = do
+  describe "capCommunitySizes" $ do
+    let twelve = map (\i -> T.pack ("n" ++ show i)) [0 .. 11 :: Int]
+        pathEdges = [ testEdge (twelve !! i) (twelve !! (i + 1)) | i <- [0 .. 10 :: Int]]
+        buildTwelve = buildGraph False (extractionFromLists (map testNode twelve) pathEdges)
+        singleAll g = Map.singleton 1 (map fst (Map.toList (gNodes g)))
+
+    it "leaves communities already within the cap untouched" $ do
+      let g = buildTwelve
+          ids = map fst (Map.toList (gNodes g))
+          -- Two communities of six, each at (not above) the cap for frac = 0.5.
+          input = Map.fromList [ (1, take 6 ids), (2, drop 6 ids) ]
+      capCommunitySizes g input 0.5 `shouldBe` input
+
+    it "splits an oversized community so every piece respects the cap" $ do
+      let g = buildTwelve
+          capped = capCommunitySizes g (singleAll g) 0.3
+          capCount = max 1 (floor (0.3 * 12 :: Double))
+      -- No resulting community may exceed the cap.
+      forM_ (Map.elems capped) (\m -> length m `shouldSatisfy` (<= capCount))
+      -- Determinism: running it again yields an identical partition.
+      capCommunitySizes g (singleAll g) 0.3 `shouldBe` capped
+
+    it "preserves coverage: every node lands in exactly one community" $ do
+      let g = buildTwelve
+          ids = map fst (Map.toList (gNodes g))
+          capped = capCommunitySizes g (singleAll g) 0.3
+          flat = concat (Map.elems capped)
+      -- Every original node appears exactly once.
+      sort flat `shouldBe` sort ids
+      length (nub flat) `shouldBe` length flat
+
+    it "reports oversized communities as (id, count) pairs" $ do
+      let g = buildTwelve
+          ids = map fst (Map.toList (gNodes g))
+      oversizedCommunities g (Map.singleton 1 ids) 0.3
+        `shouldBe` [(1, 12)]
+
   describe "detectCommunities" $ do
     it "assigns all nodes to communities" $ do
       -- Build a simple graph and detect communities
@@ -150,6 +187,26 @@ spec = do
         Set.fromList [Set.fromList ["a","b","c","d","e"]]
 
   describe "detectCommunitiesWithResolution" $ do
+    it "partitions a directed graph like its undirected projection (sink nodes are not snowballed into one community)" $ do
+      -- Six "files": a module node containing five sink symbols (module -> sym
+      -- edges only), files linked in a chain module_i -> module_{i+1}. With the
+      -- forward-only neighbours of a directed graph every sink had no
+      -- neighbour, and the small-community merge piled them into the largest
+      -- community.
+      let files = [1 .. 6 :: Int]
+          modId i = T.pack ("m" ++ show i)
+          symId i j = T.pack ("m" ++ show i ++ "_s" ++ show j)
+          nodes = [ testNode (modId i) | i <- files ]
+               ++ [ testNode (symId i j) | i <- files, j <- [1 .. 5 :: Int] ]
+          edges = [ testEdge (modId i) (symId i j) | i <- files, j <- [1 .. 5 :: Int] ]
+               ++ [ testEdge (modId i) (modId (i + 1)) | i <- init files ]
+          ext = extractionFromLists nodes edges
+          directed = detectCommunitiesWithResolution (buildGraph True ext) defaultResolution
+          undirected = detectCommunitiesWithResolution (buildGraph False ext) defaultResolution
+          largest cm = maximum (map length (Map.elems cm))
+      sort (map sort (Map.elems directed)) `shouldBe` sort (map sort (Map.elems undirected))
+      largest directed `shouldSatisfy` (<= 12)
+
     it "respects max iterations setting" $ do
       -- With 1 iteration, the algorithm should still produce a valid community map
       let ext = extractionFromLists [testNode "a", testNode "b", testNode "c"] [testEdge "a" "b"]
