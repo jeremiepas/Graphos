@@ -49,6 +49,11 @@ flag dev
   description: Enable development mode (warnings as errors)
   default:     False
 
+flag lean-critique
+  description: Link the Lean 4 critique library (graphos-lean-critique) at build time
+  default:     False
+  manual:      True
+
 -- ───────────────────────────────────────────────
 -- Library
 -- ───────────────────────────────────────────────
@@ -249,6 +254,14 @@ library
                      -- CLI
                      Graphos.CLI.Parser
 
+  if flag(lean-critique)
+    exposed-modules: Graphos.Infrastructure.Critique.Lean
+    extra-libraries: graphoslean
+    -- The Lean library (libgraphoslean.a) and its headers are an external
+    -- build dependency (see spikes/avi-1677-lean-critique/README.md).  Supply
+    -- their location via --extra-lib-dirs / --include-dirs at configure time;
+    -- keeping them out of the .cabal file avoids non-portable relative paths.
+
   other-modules:
                     Graphos.Domain.HexColor
                     Paths_graphos
@@ -403,6 +416,7 @@ test-suite graphos-test
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
     Graphos.Domain.ContextSpec
+    Graphos.Infrastructure.Critique.LeanSpec
      Graphos.UseCase.PipelineSpec
      Graphos.UseCase.LabelSpec
      Graphos.UseCase.StagingSpec
@@ -435,10 +449,13 @@ test-suite graphos-test
      Graphos.Domain.Graph.UQIProjectionSpec
      Graphos.Domain.Graph.UQISupportSpec
      Graphos.Domain.Graph.UQIOrderSpec
+     Graphos.Domain.Graph.UQICohesionSpec
+     Graphos.Domain.Graph.UQIFreshRedetectionSpec
      Graphos.Domain.Community.UQICommunitySpec
      Graphos.Domain.Graph.MergeConfluenceSpec
      Graphos.Domain.Graph.ConflictSpec
      Graphos.Domain.Graph.MergeIdempotencySpec
+      Graphos.Domain.Graph.BoundedDeltaCommunitySpec
      Graphos.Domain.Query.Cypher.MappingSpec
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
@@ -518,6 +535,9 @@ test-suite graphos-test
      , wai                  >= 3.2
      , http-types           >= 0.12
      , yaml                 >= 0.11
+
+  if flag(lean-critique)
+    cpp-options: -DLEAN_CRITIQUE
 
 test-suite graphos-test-focus
   import:         shared
