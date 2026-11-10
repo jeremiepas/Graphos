@@ -31,6 +31,7 @@ import qualified Graphos.Domain.Community.DeterminismSpec
 import qualified Graphos.Domain.Community.PermutationSpec
 import qualified Graphos.Domain.LabelingSpec
 import qualified Graphos.Domain.AnalysisSpec
+import qualified Graphos.Infrastructure.Critique.LeanSpec
 import qualified Graphos.Domain.ContextSpec
 import qualified Graphos.UseCase.PipelineSpec
 import qualified Graphos.UseCase.StagingSpec
@@ -64,7 +65,7 @@ import qualified Graphos.Domain.Graph.ConflictSpec
 import qualified Graphos.Domain.Graph.MergeIdempotencySpec
 import qualified Graphos.Domain.Graph.UQICohesionSpec
 import qualified Graphos.Domain.Graph.UQIFreshRedetectionSpec
-import qualified Graphos.Domain.Graph.UQIMonotonicitySpec
+import qualified Graphos.Domain.Graph.BoundedDeltaCommunitySpec
 import qualified Graphos.Domain.Query.Cypher.MappingSpec
 import qualified Graphos.Domain.Query.Cypher.ParserSpec
 import qualified Graphos.Domain.Query.Cypher.EvalSpec
@@ -139,6 +140,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Community.PermutationSpec.spec
   Graphos.Domain.LabelingSpec.spec
   Graphos.Domain.AnalysisSpec.spec
+  Graphos.Infrastructure.Critique.LeanSpec.spec
   Graphos.Domain.ContextSpec.spec
   Graphos.UseCase.PipelineSpec.spec
   Graphos.UseCase.StagingSpec.spec
@@ -172,7 +174,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Graph.MergeIdempotencySpec.spec
   Graphos.Domain.Graph.UQICohesionSpec.spec
   Graphos.Domain.Graph.UQIFreshRedetectionSpec.spec
-  Graphos.Domain.Graph.UQIMonotonicitySpec.spec
+  Graphos.Domain.Graph.BoundedDeltaCommunitySpec.spec
   Graphos.Domain.Query.Cypher.MappingSpec.spec
   Graphos.Domain.Query.Cypher.ParserSpec.spec
   Graphos.Domain.Query.Cypher.EvalSpec.spec
