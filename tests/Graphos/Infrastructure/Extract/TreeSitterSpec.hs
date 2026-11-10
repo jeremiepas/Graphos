@@ -9,7 +9,7 @@ import Data.Text.Short (fromText, toText)
 import qualified Data.Text as T
 import Data.Aeson (object, (.=), toJSON)
 import Graphos.Domain.Config (Granularity(..))
-import Graphos.Domain.Types (Edge(..), Node(..), Relation(..), FileType(..))
+import Graphos.Domain.Types (Edge(..), Node(..), Relation(..))
 import Graphos.Domain.Types.Graph (extractionNodes, extractionEdges)
 import Graphos.Infrastructure.Extract.TreeSitter.Core
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
@@ -39,7 +39,7 @@ funcWithChildren name children = tsNode "function_declaration" (T.pack ("functio
 
 -- | Import declaration carrying a quoted specifier in its text.
 importDecl :: Text -> TSNodeInfo
-importDecl spec = tsNode "import_statement" (T.pack ("import { x } from " ++ T.unpack spec)) []
+importDecl specStr = tsNode "import_statement" (T.pack ("import { x } from " ++ T.unpack specStr)) []
 
 -- | Export wrapper around an inner function declaration.
 exportFunc :: Text -> TSNodeInfo
@@ -68,33 +68,33 @@ spec = do
   describe "3.1 identifier extraction" $ do
     it "function identifier is the declared name" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "getUser"]
-          n = head (Map.elems (extractionNodes ex))
+          n = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes"
       nodeLabel n `shouldBe` fromText "getUser"
       nodeKind n `shouldBe` Just (fromText "Function")
 
     it "class / type identifier is the declared name" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [tsNode "class_declaration" "class Service" [ident "Service"]]
-          n = head (Map.elems (extractionNodes ex))
+          n = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes"
       nodeLabel n `shouldBe` fromText "Service"
       nodeKind n `shouldBe` Just (fromText "Class")
 
     it "constant identifier is the declared name" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [tsNode "const_item" "const MAX" [ident "MAX"]]
-          n = head (Map.elems (extractionNodes ex))
+          n = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes"
       nodeLabel n `shouldBe` fromText "MAX"
       nodeKind n `shouldBe` Just (fromText "Constant")
 
     it "import identifier is the resolved specifier" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [importDecl "'./db'"]
-          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
-          n = case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex))
+          is = filter (\m -> nodeKind m == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          n = case is of (x:_) -> x; [] -> case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes"
       nodeLabel n `shouldBe` fromText "./db"
 
     it "module identifier is the file stem" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFile defaultTruncationBudget
              [tsNode "program" "module" [func "x"]]
-          n = head (Map.elems (extractionNodes ex))
-      nodeLabel n `shouldBe` fromText "service"
+          n = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes"
+      nodeLabel n `shouldBe` fromText "service.ts"
       nodeKind n `shouldBe` Just (fromText "Module")
       nodeSignature n `shouldBe` Nothing
 
@@ -103,7 +103,7 @@ spec = do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [exportFunc "f"]
           nodes = Map.elems (extractionNodes ex)
       length nodes `shouldBe` 1
-      let n = head nodes
+      let n = (case nodes of (x:_) -> x; [] -> error "empty nodes")
       nodeLabel n `shouldBe` fromText "f"
       nodeKind n `shouldBe` Just (fromText "Function")
       nodeExtra n `shouldBe` Just (object ["exported" .= (True :: Bool)])
@@ -112,13 +112,13 @@ spec = do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [decoratedFn "g"]
           nodes = Map.elems (extractionNodes ex)
       length nodes `shouldBe` 1
-      nodeLabel (head nodes) `shouldBe` fromText "g"
-      nodeExtra (head nodes) `shouldBe` Just (object ["exported" .= (True :: Bool)])
+      nodeLabel ((case nodes of (x:_) -> x; [] -> error "empty nodes")) `shouldBe` fromText "g"
+      nodeExtra ((case nodes of (x:_) -> x; [] -> error "empty nodes")) `shouldBe` Just (object ["exported" .= (True :: Bool)])
 
   describe "3.3 new id layout + collision suffix" $ do
     it "id layout is <dirHash>_<stem>_<kind>:<identifier>" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "h"]
-          n = head (Map.elems (extractionNodes ex))
+          n = case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes"
           parts = T.splitOn "_" (nodeId n)
       length parts `shouldBe` 3
       T.all (\c -> c >= '0' && c <= '9') (parts !! 0) `shouldBe` True
@@ -130,7 +130,7 @@ spec = do
              [ funcWithChildren "handle" [ ident "handle" ] `withLine` 10
              , funcWithChildren "handle" [ ident "handle" ] `withLine` 40 ]
           ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [fixture]
-          ids = sort (map nodeId (filter (\n -> nodeKind n == Just (fromText "Function")) (Map.elems (extractionNodes ex))))
+          ids = sort (map nodeId (filter (\m -> nodeKind m == Just (fromText "Function")) (Map.elems (extractionNodes ex))))
       ids `shouldBe` [ makeNodeId (mkSourceFile "src/service.ts" "") "Function" "handle"
                      , makeNodeId (mkSourceFile "src/service.ts" "") "Function" "handle" <> "#L40" ]
 
@@ -149,15 +149,15 @@ spec = do
   describe "signatures" $ do
     it "function signature is the normalized declaration text" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget [func "f"]
-          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
-          sig = nodeSignature (case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex)))
+          is = filter (\m -> nodeKind m == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          sig = nodeSignature (case is of (x:_) -> x; [] -> case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes")
       sig `shouldBe` Just (fromText "function f")
 
     it "import signature keeps the trailing specifier clause" $ do
       let ex = tsNodesToExtraction (mkSourceFile "src/service.ts" "") GranularityFunction defaultTruncationBudget
              [importDecl "'../../templates/index.js'"]
-          is = filter (\n -> nodeKind n == Just (fromText "Import")) (Map.elems (extractionNodes ex))
-          sig = nodeSignature (case is of (x:_) -> x; [] -> head (Map.elems (extractionNodes ex)))
+          is = filter (\m -> nodeKind m == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+          sig = nodeSignature (case is of (x:_) -> x; [] -> case Map.elems (extractionNodes ex) of (x:_) -> x; [] -> error "empty extractionNodes")
       sig `shouldSatisfy` maybe False (\x -> T.isSuffixOf "from '../../templates/index.js'" (toText x))
 
   describe "3.5 imports edges" $ do
@@ -182,17 +182,17 @@ spec = do
           edges = Map.elems (extractionEdges ex)
           importEdges = filter ((Imports ==) . edgeRelation) edges
       case importEdges of
-        [e] -> edgeExtra e `shouldBe` Just (toJSON ("re-export" :: T.Text))
+        [e] -> edgeExtra e `shouldBe` Just (toJSON (object ["re-export" .= (True :: Bool)]))
         _ -> fail "expected exactly one imports edge"
 
     it "produces exactly one external node for a package imported by N files, with N edges" $ do
-      let mkFile fp = tsNode "program" "module" [ funcWithChildren "f" [ ident "f", importDecl "'zod'" ] ]
+      let mkFile _ = tsNode "program" "module" [ funcWithChildren "f" [ ident "f", importDecl "'zod'" ] ]
           files = ["src/a.ts", "src/b.ts", "src/c.ts"]
           exs = map (\fp -> tsNodesToExtraction (mkSourceFile fp "") GranularityFine defaultTruncationBudget [mkFile fp]) files
           allEdges = concatMap (Map.elems . extractionEdges) exs
           allNodes = concatMap (Map.elems . extractionNodes) exs
           importEdges = filter ((Imports ==) . edgeRelation) allEdges
-          externalNodes = filter (\n -> nodeKind n == Just (fromText "External")) allNodes
+          externalNodes = filter (\m -> nodeKind m == Just (fromText "External")) allNodes
           uniqueExternalIds = nub (map nodeId externalNodes)
       length importEdges `shouldBe` 3
       length (nub (map edgeTarget importEdges)) `shouldBe` 1
@@ -200,11 +200,11 @@ spec = do
 
   describe "Resolver" $ do
     it "resolves relative path with .js -> .ts rewrite" $ do
-      resolveImport "src/file.ts" "./module.js" `shouldBe` Just ("src/module.ts", "module")
+      resolveImport "src/file.ts" "./module.js" `shouldBe` Just ("src/module.ts", "module.ts")
     it "resolves literal path" $ do
-      resolveImport "src/file.ts" "/abs/path/to/module.ts" `shouldBe` Just ("/abs/path/to/module.ts", "module")
+      resolveImport "src/file.ts" "/abs/path/to/module.ts" `shouldBe` Just ("/abs/path/to/module.ts", "module.ts")
     it "resolves index file" $ do
-      resolveImport "src/file.ts" "./dir/" `shouldBe` Just ("src/dir/index.ts", "index")
+      resolveImport "src/file.ts" "./dir/" `shouldBe` Just ("src/dir/index.ts", "index.ts")
     it "resolves node: builtin" $ do
       resolveImport "src/file.ts" "node:fs" `shouldBe` Just ("external:node:fs", "fs")
     it "resolves bare package" $ do

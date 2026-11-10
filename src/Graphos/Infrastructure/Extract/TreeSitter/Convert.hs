@@ -16,12 +16,14 @@
 module Graphos.Infrastructure.Extract.TreeSitter.Convert
   ( tsNodesToExtraction
   , makeNodeId
+  , makeNode
   , tsNodeLabel
   , tsNodeSignature
   , nodeIdentifier
   , definitionTypes
   , structureTypes
   , apiSurfaceTypes
+  , wrapperTypes
   , importExportTypes
   , implementationDetailTypes
   , functionBoundaryTypes
@@ -32,7 +34,7 @@ import Data.Ord (comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Aeson (object, (.=))
 import Data.Word (Word64)
 import System.FilePath (takeFileName)
@@ -48,7 +50,7 @@ import Data.Bits ((.|.))
 import Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..), SourceFile(..), mkSourceFile
   , normalizeText, sourceDirHash, sourceStem, sourceFilePathStr
-  , extractIdentifier, defaultTruncationBudget, truncateText, truncateWithElision )
+  , extractIdentifier, defaultTruncationBudget, truncateText, truncateWithElision , nodeIdentityBudget )
 import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 
 -- ───────────────────────────────────────────────
@@ -58,7 +60,7 @@ import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 -- | Tier 1 — file/module structure. Emitted at every granularity level.
 structureTypes :: [String]
 structureTypes =
-  [ "module", "program", "source_file"
+  [ "module", "program", "source_file", "translation_unit"
   , "package_clause"        -- Go
   , "mod_item"              -- Rust
   , "document"              -- JSON
@@ -84,12 +86,21 @@ apiSurfaceTypes =
   , "export_statement", "export_default_declaration"
   , "property_signature", "property_definition", "property_declaration"
   , "arrow_function", "generator_function_declaration"
-  , "abstract_class_declaration", "abstract_interface_declaration"
+
   , "constructor", "field_declaration"
   , "trait", "trait_item", "impl_block", "impl_item"
   , "data_type", "new_type", "type_synonym"
   , "decorated_definition"
+  , "namespace_definition", "namespace"
+  , "class_specifier", "struct_specifier"
+  , "method"
+  , "singleton_method"
+  , "create_table", "create_index"
+  , "create_table_stmt", "create_index_stmt"
+  , "create_table_statement", "create_index_statement"
+  , "preproc_include"
      -- Rust
+
   , "function_item", "struct_item", "use_declaration"
   , "static_item", "extern_item", "attribute_item"
      -- Haskell
@@ -111,6 +122,7 @@ implementationDetailTypes =
   , "return_statement", "parameter", "default_parameter", "typed_parameter"
   , "for_statement", "while_statement", "if_statement"
   , "with_statement", "try_statement", "except_clause"
+  , "select", "select_stmt", "select_statement"
      -- JSON values: every pair/object/array of every JSON file
   , "object", "array", "pair"
   ]
@@ -135,7 +147,7 @@ wrapperTypes = [ "export_statement", "decorated_definition" ]
 -- | AST types whose identifier is the file name rather than a declared name.
 moduleTypes :: [String]
 moduleTypes =
-  [ "module", "program", "source_file"
+  [ "module", "program", "source_file", "translation_unit"
   , "package_clause", "mod_item"
   ]
 
@@ -188,7 +200,7 @@ tsNodeLabel sf gran node =
 --   * everything else     — the normalized declaration, elided in the middle
 --                           only when it exceeds the budget
 tsNodeSignature :: SourceFile -> Granularity -> Int -> TSNodeInfo -> Maybe Text
-tsNodeSignature sf gran budget node =
+tsNodeSignature _sf _gran budget node =
   case tsnType node of
     t | t `elem` moduleTypes -> Nothing
       | t `elem` importExportTypes ->
@@ -210,8 +222,8 @@ tsNodeSignature sf gran budget node =
 extractImportTail :: Text -> Text
 extractImportTail t =
   let norm = normalizeText t
-      (_, tail) = T.breakOn "from " norm
-  in if T.null tail then "" else tail
+      (_, tailClause) = T.breakOn "from " norm
+  in if T.null tailClause then "" else tailClause
 
 -- | Resolve the module specifier carried by an import-like declaration.
 --
@@ -284,6 +296,40 @@ makeNodeId sf kind ident =
     badChars = [ '"', '\'', '`', '/', '\\', '\n', '\r' ]
 
 -- ───────────────────────────────────────────────
+makeNode :: FilePath -> TSNodeInfo -> Node
+makeNode filePath node =
+  let sf = mkSourceFile filePath ""
+      kindText = T.pack (tsTypeToKind (tsnType node))
+      kind = fromText kindText
+      line = tsnStartRow node + 1
+      rawIdent = fromMaybe (normalizeText (tsnText node)) (extractIdentifier node)
+      identText = normalizeText rawIdent
+      ident = truncateText (nodeIdentityBudget - 3) identText
+      declText = normalizeText (tsnText node)
+      isModuleNode = tsTypeToKind (tsnType node) == "Module"
+      isImportExport = tsnType node `elem` importExportTypes
+      sigText
+        | isModuleNode = Nothing
+        | isImportExport = Just (truncateWithElision defaultTruncationBudget declText (extractImportTail declText))
+        | otherwise = Just (truncateText defaultTruncationBudget declText)
+  in Node
+       { nodeId           = makeNodeId sf kindText ident
+       , nodeLabel        = fromText ident
+       , nodeFileType     = CodeFile
+       , nodeSourceFile   = fromText (T.pack filePath)
+       , nodeSource       = Nothing
+       , nodeLineStart    = Just line
+       , nodeLineEnd      = Just (tsnEndRow node + 1)
+       , nodeSignature    = fmap fromText sigText
+       , nodeCommunityId  = Nothing
+       , nodeDegree       = Nothing
+       , nodeIsBridge     = Nothing
+       , nodeExtra        = Nothing
+       , nodeKind         = Just kind
+       , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind .|.
+                             if isJust sigText then bitNodeSignature else 0
+       }
+
 -- Two-phase traversal: collect raw nodes, then resolve collisions
 -- ───────────────────────────────────────────────
 
@@ -336,7 +382,7 @@ tsNodesToExtraction sf gran budget nodes =
 -- subsequent occurrence carries `#L<line>`. Deterministic and independent of
 -- display labels.
 resolveCollisions :: SourceFile -> [RawNode] -> [(RawNode, NodeId)]
-resolveCollisions sf raws =
+resolveCollisions _sf raws =
   concatMap resolveGroup
     (groupBy (\a b -> rnBaseId a == rnBaseId b) (sortBy (comparing rnBaseId) raws))
   where
@@ -450,7 +496,7 @@ mkContainEdge src tgt =
     }
 
 mkImportEdge :: SourceFile -> NodeId -> ImportTarget -> Edge
-mkImportEdge sf src tgt =
+mkImportEdge _sf src tgt =
   Edge
     { edgeId        = EdgeId (src <> "->" <> targetId <> ":imports")
     , edgeSource    = src
@@ -469,7 +515,7 @@ mkImportEdge sf src tgt =
 -- Relative imports resolve to the target file's module node; package / builtin
 -- specifiers resolve to a single canonical external node identity.
 importTargetNodes :: SourceFile -> [ImportTarget] -> [Node]
-importTargetNodes sf targets =
+importTargetNodes _sf targets =
   [ let p = itPath t
         knd = fromText (if "external:" `T.isPrefixOf` T.pack p
                          then "External" else "Module")
@@ -530,6 +576,22 @@ tsTypeToKind t = case t of
   "class_definition" -> "Class"
   "class" -> "Class"
   "abstract_class_declaration" -> "Class"
+  "namespace_definition" -> "Namespace"
+  "namespace" -> "Namespace"
+  "class_specifier" -> "Class"
+  "struct_specifier" -> "Struct"
+  "method" -> "Method"
+  "singleton_method" -> "Method"
+  "create_table" -> "Table"
+  "create_index" -> "Index"
+  "select" -> "Query"
+  "select_statement" -> "Query"
+  "create_table_stmt" -> "Table"
+  "create_table_statement" -> "Table"
+  "create_index_stmt" -> "Index"
+  "create_index_statement" -> "Index"
+  "select_stmt" -> "Query"
+  "preproc_include" -> "Import"
   "interface_declaration" -> "Interface"
   "interface_definition" -> "Interface"
   "interface" -> "Interface"
@@ -593,6 +655,7 @@ tsTypeToKind t = case t of
   "pattern_declaration" -> "Pattern"
   "type_signature" -> "Signature"
   "module" -> "Module"
+  "translation_unit" -> "Module"
   "program" -> "Module"
   "source_file" -> "Module"
   "document" -> "Document"

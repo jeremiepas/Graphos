@@ -7,7 +7,7 @@ import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
 import Control.Monad (forM_, when)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
@@ -38,15 +38,14 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnv)
+import Graphos.Infrastructure.Wiring (productionAppEnv, productionAppEnvWithConfig, productionLLMPort)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
 import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
 import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
-import Graphos.Infrastructure.Wiring (productionLLMPort)
 import Graphos.Domain.Config (defaultLabelingConfig)
-import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, pathQueryWithIndex, explainNodeWithIndex, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..), findSuggestions)
+import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..), findSuggestions)
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
 import Graphos.Domain.Query.Cypher.AST (CypherStatement(..))
 import Graphos.Domain.Query.Cypher.Eval (evaluateStatement)
@@ -75,11 +74,12 @@ import Graphos.Infrastructure.Observability.SDK
   , defaultOtelConfig
   )
 import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ccMaxCommunityFraction, ccCommunityCapEnabled, validClusteringConfig)
 import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
 import Graphos.Infrastructure.Server.MCP (startMCPServerFromFile)
-import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, defaultGraphosWatchConfig)
+import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, defaultGraphosWatchConfig, resolveWatchPaths)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
@@ -316,12 +316,18 @@ main = do
           debugDir = if isAbsolute rawDebugDir
                        then rawDebugDir
                        else outputDir </> rawDebugDir
+          baseCc       = gcClustering graphosCfg
+          effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
+          effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
+          effCc        = ClusteringConfig effFraction effEnabled
           config' = config { cfgOutputDir    = outputDir
                            , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
                             , cfgActiveBudgetBytes = activeBudget
+                            , cfgMaxCommunityFraction = ccMaxCommunityFraction effCc
+                            , cfgCommunityCapEnabled  = ccCommunityCapEnabled effCc
                             }
       -- Fail-fast on a corrupt existing graph.json before doing any work.
       -- Strict by default; pass --no-strict-graph for tolerant loading.
@@ -340,7 +346,14 @@ main = do
       let _tracer = otelTracer obsEnv
           _metrics = otelMetrics obsEnv
           env = otelLogEnv obsEnv
-          appEnv = productionAppEnv env obsEnv
+          appEnv = productionAppEnvWithConfig env obsEnv graphosCfg
+
+      -- Validate the effective community-size-cap config; fail fast if mis-set.
+      case validClusteringConfig effCc of
+        Left err -> do
+          logError env $ "[graphos] Invalid community-size-cap config: " <> T.pack err
+          exitWith (ExitFailure 1)
+        Right _ -> pure ()
       when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
@@ -364,14 +377,26 @@ main = do
                    logInfo env $ T.pack $ "  Communities: " ++ show (prCommunities res)
                    -- Start watcher
                    shutdownVar <- newMVar ()
-                   watchDirectory (cfgInputPath config') (\changedFiles -> do
-                     let filesList = T.splitOn ", " (T.pack changedFiles)
-                     logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filesList) ++ " files"
-                     incResult <- runIncrementalPipeline appEnv config' (map T.unpack filesList)
-                     case incResult of
-                       Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
-                       Right _ -> logInfo env "[watch] Incremental update complete"
-                     ) defaultGraphosWatchConfig shutdownVar
+                   let sourceConfigs = gcSources graphosCfg
+                   if null sourceConfigs
+                     then do
+                       let onChange sp = do
+                             let filePaths = map snd sp
+                             logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
+                             incResult <- runIncrementalPipeline appEnv config' filePaths
+                             case incResult of
+                               Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                               Right _ -> logInfo env "[watch] Incremental update complete"
+                       watchDirectory (cfgInputPath config') onChange defaultGraphosWatchConfig shutdownVar
+                     else do
+                       let onChange sp = do
+                             let filePaths = resolveWatchPaths sourceConfigs sp
+                             logInfo env $ T.pack $ "[watch] Files changed: " ++ show (length filePaths) ++ " files"
+                             incResult <- runIncrementalPipeline appEnv config' filePaths
+                             case incResult of
+                               Left err' -> logError env $ T.pack $ "[watch] Incremental pipeline failed: " ++ T.unpack err'
+                               Right _ -> logInfo env "[watch] Incremental update complete"
+                       watchSources sourceConfigs onChange defaultGraphosWatchConfig shutdownVar
               else do
                 -- Normal mode: run once and exit
                 logInfo env "Starting pipeline..."
@@ -981,9 +1006,9 @@ main = do
           putStrLn $ "[graphos] Nodes: " ++ show (Map.size (gNodes g))
                      ++ ", edges: " ++ show (Map.size (gEdges g))
 
-    Serve dir graphPath port apiOnly noApi -> do
-      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
-      startServeServer dir graphPath port apiOnly noApi
+    Serve dir graphPath port apiOnly noApi host -> do
+      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port ++ " (host " ++ host ++ ")"
+      startServeServer dir graphPath port apiOnly noApi host
 
     Init agentsOpt -> do
       initConfigFile

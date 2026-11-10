@@ -27,6 +27,7 @@ module Graphos.Domain.Graph.Core
     -- * Analysis helpers
   , isFileNode
   , isConceptNode
+  , isGeneratedOrVendoredNode
   , makeStubNode
   ) where
 
@@ -104,15 +105,6 @@ instance FromJSON Graph where
 --     reported separately by their own drop path.
 --   * @duplicateKeyDrops@ — edges collapsed because they shared a @(source,target)@
 --     key in the @(source,target)@-keyed edge map.
-type EdgeDropCounts = (Int, Int)
-
-{-# INLINE unknownEndpointDropsOf #-}
-unknownEndpointDropsOf :: Extraction -> Int
-unknownEndpointDropsOf extraction =
-  let nodes = extNodes extraction
-  in length [ e | e <- Map.elems (extEdges extraction)
-               , not (Map.member (edgeSource e) nodes && Map.member (edgeTarget e) nodes) ]
-
 -- | Build a graph from an Extraction result, also reporting how many edges were
 -- dropped for unknown endpoints and collapsed for duplicate (source,target) keys.
 --
@@ -342,6 +334,13 @@ isConceptNode :: Node -> Bool
 isConceptNode n =
   let src = toText (nodeSourceFile n)
   in T.null src || (T.null $ T.takeWhileEnd (/= '.') src)
+
+-- | Check if a node is generated / vendored / minified (injected by the
+-- collapse detection pass). Such synthetic nodes carry the "Collapsed" kind
+-- marker set by 'collapsedNode'; they are excluded from god-node and bridge
+-- centrality so injected markers never dominate the structural analysis.
+isGeneratedOrVendoredNode :: Node -> Bool
+isGeneratedOrVendoredNode n = fmap toText (nodeKind n) == Just "Collapsed"
 
 -- | Deterministic hash over graph structure: sorted node ids + sorted edge tuples.
 -- Uses FNV-1a 32-bit, returned as 8-char hex — same scheme as resultHash in Score.hs.
