@@ -17,6 +17,13 @@ result
 result-*
 .tmp/
 tmp/
+# Build/test logs and pipeline sidecar outputs at repo root
+*.log
+/embeddings.json
+# Stray worktrees created outside .worktrees/
+/worktrees/
+# Local Paperclip company operations home (agent notes, company IDs) — never published
+/paperclip/
 graphos-out.staging-*/
 .worktrees/
 .paperclip/worktrees/
@@ -39,6 +46,10 @@ monitoring/grafana/data/
 opencode.json
 opencode.jsonc
 *.heapsnapshot
+# GHC profiling / heap artifacts (may carry live heap strings incl. secrets)
+*.hp
+*.prof
+*.eventlog
 __pycache__/
 .lake/
 elm-stuff/

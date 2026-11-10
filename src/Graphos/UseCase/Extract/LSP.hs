@@ -11,8 +11,10 @@ module Graphos.UseCase.Extract.LSP
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.List (stripPrefix)
 import System.Directory (canonicalizePath)
-import System.FilePath (takeExtension)
+import System.FilePath (makeRelative, takeExtension, isAbsolute)
+import System.FilePath ((</>))
 
 import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), extractionFromLists)
 import Graphos.UseCase.AppEnv (AppEnv(..))
@@ -77,8 +79,16 @@ doExtractWithSharedLSP appEnv absRoot serverCmd files = do
                 Right fileMap
                   | not (Map.null fileMap) -> do
                     logInfo $ T.pack $ "  [lsp] workspace/symbol returned symbols across " ++ show (Map.size fileMap) ++ " files"
-                    pure [extractionFromPortSymbols fp symResult | fp <- files
-                          , let symResult = Map.findWithDefault (SymbolResult [] []) fp fileMap]
+                    let fileMap' = normalizeWorkspaceFileMap absRoot fileMap
+                    mapM (\fp -> do
+                      let symResult = Map.findWithDefault (SymbolResult [] []) fp fileMap'
+                          base = extractionFromPortSymbols fp symResult
+                      if Map.null (extractionNodes base)
+                        then do
+                          logDebug $ T.pack $ "  [lsp] workspace/symbol yielded 0 nodes for " ++ fp ++ ", falling back to per-file extraction"
+                          epExtractViaLSP ep handle fp
+                        else pure base
+                      ) files
                   | otherwise -> do
                     logDebug $ T.pack $ "  [lsp] workspace/symbol returned empty — falling back to per-file extraction"
                     extractFilesWithLSP appEnv handle files
@@ -124,6 +134,28 @@ extractFilesWithLSP appEnv handle (fp:fps) = do
       pure (ext : rest)
 
 -- | Extract from a single file using LSP (standalone)
+-- | Normalize workspace URI keys to filesystem paths under @absRoot@.
+-- Inserts both the absolute URI path and its path relative to @absRoot@.
+normalizeWorkspaceFileMap :: FilePath -> Map.Map FilePath SymbolResult -> Map.Map FilePath SymbolResult
+normalizeWorkspaceFileMap absRoot fm =
+  Map.fromListWith (\_ old -> old)
+    [ (key, val)
+    | (uriKey, val) <- Map.toList fm
+    , path <- [uriToPath uriKey]
+    , absPath <- [if isAbsolute path then path else absRoot </> path]
+    , key <- [absPath, makeRelative absRoot absPath]
+    ]
+
+-- | Best-effort conversion of a @file://@ URI to a filesystem path.
+uriToPath :: String -> String
+uriToPath uri =
+  case stripPrefix "file://" uri of
+    Just rest -> rest
+    Nothing ->
+      case stripPrefix "file:/" uri of
+        Just rest -> "/" ++ rest
+        Nothing   -> uri
+
 extractFromFile :: AppEnv -> FilePath -> IO Extraction
 extractFromFile appEnv filePath = do
   let ep = extractionPort appEnv
