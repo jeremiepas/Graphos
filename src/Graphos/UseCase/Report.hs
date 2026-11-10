@@ -15,6 +15,7 @@ import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
+import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCoverage(..))
 
 -- | Generate a markdown report.
 --
@@ -23,7 +24,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
 -- clustering/analysis — never recomputed here, so rendering does no
 -- whole-graph work.
 generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Text
-generateReport g analysis _config _detection mLabels =
+generateReport g analysis config detection mLabels =
   let summaryLines =
         [ T.pack $ "Nodes: " ++ show (Map.size (gNodes g))
         , T.pack $ "Edges: " ++ show (Map.size (gEdges g))
@@ -35,6 +36,9 @@ generateReport g analysis _config _detection mLabels =
       sourceLines = case Map.toList sourceTally of
         [] -> []
         ts -> [ T.pack $ "Sources: " ++ unwords [(T.unpack k ++ "=" ++ show v) | (k, v) <- ts] ]
+      codeFiles = Map.findWithDefault [] CodeFiles (detectionFiles detection)
+      (tsFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
+      coverage = stubCoverage (tsFiles ++ lspFiles) stubFiles
   in T.unlines
      ( [ "# Graph Report"
        , ""
@@ -42,6 +46,11 @@ generateReport g analysis _config _detection mLabels =
        , ""
        ]
        ++ summaryLines ++ sourceLines
+       ++ [ ""
+          , "## Extraction Coverage"
+          , ""
+          ]
+       ++ extractionCoverageLines coverage
        ++ [ ""
           , "## Communities"
           , ""
@@ -66,6 +75,23 @@ generateReport g analysis _config _detection mLabels =
      )
   where
     artPoints = analysisArticulation analysis
+
+-- | Render the "Extraction Coverage" section lines (extraction-quality:
+-- "Extraction coverage is reported in GRAPH_REPORT.md"): files detected,
+-- files that produced structural nodes, and the stubbed count broken down by
+-- extension. Always rendered, so a near-empty extraction is self-evident
+-- from the report alone regardless of language.
+extractionCoverageLines :: StubCoverage -> [Text]
+extractionCoverageLines sc =
+  [ T.pack $ "Files detected: " ++ show (scDetected sc)
+  , T.pack $ "Files with structure: " ++ show (scStructural sc)
+  , T.pack $ "Stubbed: " ++ show totalStubbed ++ breakdown
+  ]
+  where
+    totalStubbed = sum (map snd (scStubbedByExt sc))
+    breakdown
+      | null (scStubbedByExt sc) = ""
+      | otherwise = " (" ++ intercalate ", " [ ext ++ " " ++ show n | (ext, n) <- scStubbedByExt sc ] ++ ")"
 
 -- | Format cohesion score to 2 decimal places
 fmtCohesion :: Double -> String
