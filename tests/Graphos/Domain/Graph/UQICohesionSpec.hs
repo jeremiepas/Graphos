@@ -1,16 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Graphos.Domain.Graph.UQICohesionSpec where
 
 import Data.Text (Text, pack)
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
 import Graphos.Domain.Community (cohesionScore)
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph(..), buildGraph, mergeGraphs, gNodes, gEdges, gAdjFwd, gAdjBack, degree)
+import Graphos.Domain.Graph (Graph(..), buildGraph, mergeGraphs, degree)
 import Data.Text.Short (fromText)
 
 mkNode :: Text -> Node
@@ -54,8 +54,7 @@ instance Arbitrary Graph where
 -- | Test that cohesion score is in [0,1] range for communities of size >= 2
 propCohesionRange :: Graph -> [Node] -> Bool
 propCohesionRange g members =
-  let memberIds = map nodeLabel members
-      -- Filter to members that are actually in the graph
+  let -- Filter to members that are actually in the graph
       validMembers = filter (\n -> Map.member (nodeId n) (gNodes g)) members
       coh = cohesionScore g (map nodeId validMembers)
   in coh >= 0.0 && coh <= 1.0
