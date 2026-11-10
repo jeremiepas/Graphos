@@ -1,12 +1,14 @@
 module Graphos.UseCase.ExtractSpec where
 
 import Test.Hspec
+import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
 import Data.Text.Short (fromText)
 import Graphos.Domain.Types
 import Graphos.UseCase.Extract (resolveGranularity, isStubExtraction)
+import Graphos.UseCase.Extract.Core (stubCoverage, stubCoverageWarning, dominantStubExt, StubCoverage(..))
 
 pdfStubNode :: T.Text -> Node
 pdfStubNode path = Node
@@ -108,3 +110,28 @@ spec = do
 
     it "empty extraction is not stub" $
       isStubExtraction emptyExtraction `shouldBe` False
+
+  describe "stubCoverage / stubCoverageWarning" $ do
+    -- .scala has no defaultExtractors entry (#158): a stable example of a
+    -- still-unsupported extension that genuinely routes to ExtractStub.
+    it "summarizes detected/structural/stubbed-by-extension counts" $ do
+      let sc = stubCoverage (replicate 8 "a.ts") (replicate 3 "a.scala")
+      scDetected sc `shouldBe` 11
+      scStructural sc `shouldBe` 8
+      scStubbedByExt sc `shouldBe` [(".scala", 3)]
+
+    it "warns naming the stubbed extension and count when some files are stubbed" $
+      stubCoverageWarning (stubCoverage (replicate 10 "a.ts") (replicate 3 "a.scala"))
+        `shouldBe` Just "3 code files produced stub nodes only (no structure extracted): .scala (3)"
+
+    it "is silent when every code file produced structure" $
+      stubCoverageWarning (stubCoverage (replicate 5 "a.ts") []) `shouldBe` Nothing
+
+    it "trips the dominance clause when the stubbed share exceeds the threshold, naming the dominant extension" $ do
+      let sc = stubCoverage (replicate 8 "a.ts") (replicate 34 "a.scala")
+      dominantStubExt sc `shouldBe` Just ".scala"
+      stubCoverageWarning sc `shouldSatisfy` maybe False ("under-represents this corpus; dominant stubbed type: .scala" `isInfixOf`)
+
+    it "does not trip the dominance clause for a minority-stubbed corpus" $ do
+      let sc = stubCoverage (replicate 41 "a.ts") (replicate 1 "a.scala")
+      stubCoverageWarning sc `shouldSatisfy` maybe False (not . isInfixOf "under-represents")

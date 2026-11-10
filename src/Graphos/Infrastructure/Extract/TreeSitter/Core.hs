@@ -8,10 +8,17 @@ module Graphos.Infrastructure.Extract.TreeSitter.Core
   ( TSNodeInfo(..)
   , parseWithGrammar
   , defaultTruncationBudget
+  , nodeIdentityBudget
   , normalizeText
   , truncateText
   , truncateWithElision
-  ) where
+   , SourceFile(..)
+   , mkSourceFile
+   , sourceDirHash
+   , sourceStem
+   , sourceFilePathStr
+   , extractIdentifier
+   ) where
 
 import Control.Exception (catch, SomeException(..), bracket)
 import Control.Monad (unless, void)
@@ -20,6 +27,7 @@ import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.FilePath (takeBaseName)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
 import Data.Word (Word64)
@@ -151,6 +159,17 @@ safeNodeType ptr
 defaultTruncationBudget :: Int
 defaultTruncationBudget = 200
 
+-- | Budget for node identity under AVI-1452 (bounded node ids). Shared by the
+-- id's <ident>, the node label, and the node signature so they stay consistent.
+-- Capped at 60 (not the 200 readability budget). Both 'nodeLabel' and
+-- 'nodeSignature' live in a 'ShortText', whose 63-byte ceiling comfortably holds
+-- a 60-byte identity; callers that run the identity through 'truncateText'
+-- (which appends a 3-char elision "...") reserve that space so the final
+-- identity stays <= nodeIdentityBudget. The 512-byte per-node graph.json bound
+-- (task 3.3 criterion e) is satisfied with large headroom.
+nodeIdentityBudget :: Int
+nodeIdentityBudget = 60
+
 -- | Normalize text by collapsing whitespace.
 normalizeText :: Text -> Text
 normalizeText = T.unwords . T.words
@@ -170,3 +189,45 @@ truncateWithElision maxLen t tailText
   | otherwise = 
       let headLen = max 0 (maxLen - T.length tailText - 3)
       in T.take headLen t <> "..." <> tailText
+
+-- | Logical source file: the parsed file path plus its module name.
+-- Used to (a) derive a stable id prefix and (b) label the module node.
+data SourceFile = SourceFile
+  { sourceFilePath  :: Text
+  , sourceModuleName :: Text }
+
+mkSourceFile :: FilePath -> Text -> SourceFile
+mkSourceFile fp moduleName = SourceFile (T.pack fp) moduleName
+
+-- | Stable directory hash for a file path.
+-- Derives from the directory portion so ids are stable across repos that
+-- share a relative layout, while still disambiguating same-named files in
+-- different directories. Mirrors the hash used by the LSP exporter.
+sourceDirHash :: SourceFile -> Text
+sourceDirHash (SourceFile p _) =
+  let dirPart = T.reverse (T.dropWhile (/= '/') (T.reverse p))
+      h = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPart `mod` 65536)
+  in T.pack $ show h
+
+-- | File stem without extension, used as the id prefix.
+sourceStem :: SourceFile -> Text
+sourceStem (SourceFile p _) =
+  T.pack (takeBaseName (T.unpack p))
+
+-- | The parsed file path as a plain FilePath.
+sourceFilePathStr :: SourceFile -> FilePath
+sourceFilePathStr (SourceFile p _) = T.unpack p
+
+-- | The identifier text for a node: the first named child whose type is one of
+-- the language-neutral identifier forms. Returns 'Nothing' when none exists,
+-- which callers use to suppress identifier-less wrapper nodes.
+extractIdentifier :: TSNodeInfo -> Maybe Text
+extractIdentifier info =
+  let candidates = filter (\c -> tsnIsNamed c && tsnType c `elem` identifierTypes) (tsnChildren info)
+  in case candidates of
+        (c : _) -> Just (tsnText c)
+        []      -> Nothing
+  where
+    identifierTypes = [ "identifier", "type_identifier", "property_identifier"
+                      , "field_identifier", "name" ]
+
