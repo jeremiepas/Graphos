@@ -1,0 +1,5 @@
+# AVI-1521: the haskell-lib-template targets this cluster's self-hosted K3s
+# runners, whose extra `kubernetes` label actionlint cannot know about.
+self-hosted-runner:
+  labels:
+    - kubernetes

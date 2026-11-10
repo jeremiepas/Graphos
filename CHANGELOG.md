@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Added
+- Tree-sitter grammars for PHP, Kotlin (aliased to the Java parser), Perl, and
+  C# are registered, plus vendored Perl/C# parsers and Hackage PHP; Java
+  imports of the form `a.b.C` now resolve to `source-root/a/b/C.java`.
+- **Stub extraction is now a visible, reported outcome.** Any code file that
+  falls through to stub extraction (no tree-sitter/LSP structure) is now
+  named at INFO level with a per-extension breakdown (was silent debug
+  logging), and `GRAPH_REPORT.md` gains an "Extraction Coverage" section
+  (`Files detected`, `Files with structure`, `Stubbed: N (.ext n, …)`). A
+  corpus where stubbed files exceed 50% additionally states that the graph
+  likely under-represents the corpus and names the dominant stubbed
+  extension.
+
+### Fixed
+- Java wildcard imports deduplicate source files discovered across ancestor
+  directories.
+- Apply review-driven changes from AVI-10 verdicts (AVI-11).
+
+### Changed
+- Node ids now use the `<dirHash>_<stem>_<kind>:<identifier>` layout (Group 3
+  node identity, `idScheme=2`), with a `#L<line>` suffix for in-file
+  collisions; `makeNode` labels nodes with the identifier and stores the
+  normalized declaration text as the bounded signature. Caches/checkpoints
+  built with the previous layout miss.
+
+## 0.2.0 - 2026-10-29
+
 ### Fixed
 - `--cluster-only` now persists its output: `graph.json` (with communities
   filled, written atomically), the report exports and `community_graph.json`
@@ -95,6 +122,22 @@
   `suggestions`. `traverse` field kept as `mode` echo for one release.
 
 ### Fixed
+- **Go, Rust and Ruby emit `imports` edges in tree-sitter mode** (#83). Each
+  edge has the TypeScript shape: it goes from the file's module node to a
+  placeholder whose `source_file` is the imported repo file, or
+  `external:<name>`. A Go internal package import becomes one edge per
+  non-test file of the package, with weight `1/n` and the alias kept in
+  `extra.alias`. Rust resolves `crate::`/`self::`/`super::`, workspace crates,
+  groups and globs over the module files. Ruby resolves `require_relative` and
+  in-repo `require`. Each Rust `use` now gets its own `Import` node per
+  occurrence (the id gains `#L<line>`), and a `use` inside a function body is
+  no longer dropped.
+- **`--embed` no longer sends arbitrary-length documents to `/v1/embeddings`.**
+  Each input is now truncated to `embedding.maxTokens` (default 512) before the
+  request, so a long document can no longer overflow a small encoder's context
+  window and be rejected (e.g. a 512-token model served by llama-server
+  answering HTTP 500 on oversized inputs). Set `embedding.maxTokens: 0` to
+  restore the previous unbounded behavior.
 - `mergeSmallCommunities` no longer silently drops nodes when a community that
   received members from an earlier merge is itself merged.
 - Haskell stub extraction: cross-file `imports` edges now resolve via canonical
