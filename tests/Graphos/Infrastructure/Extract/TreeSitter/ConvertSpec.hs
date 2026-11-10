@@ -10,7 +10,9 @@ import Data.Text.Short (toText, fromText)
 
 import Data.Aeson (object, (.=))
 import Graphos.Domain.Config (Granularity(..))
-import Graphos.Domain.Types.Graph (extractionNodes)
+import Graphos.Domain.Types.Graph (extractionNodes, extractionEdges)
+import Graphos.Domain.Types.Edge (edgeRelation, edgeSource, edgeTarget)
+import Graphos.Domain.Types (Relation(..))
 import Graphos.Domain.Types.Node (nodeLabel, nodeId, nodeSignature, nodeExtra, nodeKind)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert
 import Graphos.Infrastructure.Extract.TreeSitter.Core

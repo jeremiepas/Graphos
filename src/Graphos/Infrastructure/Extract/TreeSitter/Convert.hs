@@ -39,6 +39,7 @@ import Data.Aeson (object, (.=))
 import Data.Word (Word64)
 import System.FilePath (takeFileName)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 import Graphos.Domain.Config (Granularity(..))
 import Graphos.Domain.Types
@@ -372,9 +373,16 @@ tsNodesToExtraction sf gran budget nodes =
       remap x  = case Map.lookup x idAt of Just f -> f; Nothing -> x
       graphNodes = [ rnFinalNode r fid | (r, fid) <- resolved ]
                  ++ importTargetNodes sf [ t | (_src, t) <- imports ]
+      nodeIds = Set.fromList (map nodeId graphNodes)
+      callEdges = [ mkCallEdge s' t'
+                  | (s, t) <- callEdgePairs sf gran nodes
+                  , let s' = remap s
+                  , let t' = remap t
+                  , s' `Set.member` nodeIds, t' `Set.member` nodeIds ]
       edges = [ mkContainEdge (remap (ceSource e)) (remap (ceTarget e))
               | e <- contains ]
             ++ [ mkImportEdge sf (remap src) tgt | (src, tgt) <- imports ]
+            ++ callEdges
   in extractionFromLists graphNodes edges
 
 -- | Given a file's raw nodes, assign each a final id: the first occurrence
@@ -475,6 +483,133 @@ foldChildren sf gran budget parentEmitted isExported children =
   foldr (\c (ns, ce, im) ->
           let (n, c_, i_) = traverseNode sf gran budget parentEmitted isExported c
           in (ns ++ n, ce ++ c_, im ++ i_)) ([], [], []) children
+
+-- ───────────────────────────────────────────────
+-- Call edges (AVI-1447)
+-- ───────────────────────────────────────────────
+
+-- | File-wide context for best-effort, name-based `calls` resolution.
+data CallsCtx = CallsCtx
+  { callsCtxImports :: Map.Map Text NodeId  -- ^ import binding name -> import target node id
+  , callsCtxLocal   :: Map.Map Text NodeId  -- ^ top-level definition name -> base node id
+  }
+
+-- | AST types that denote a call.
+callTypes :: [String]
+callTypes = [ "call_expression", "new_expression" ]
+
+-- | Id of the node a resolved import points at (matches 'mkImportEdge' and
+-- 'importTargetNodes').
+importTargetIdOf :: SourceFile -> TSNodeInfo -> Maybe NodeId
+importTargetIdOf sf node = do
+  spec <- extractSpecifier sf node
+  let fp = sourceFilePathStr sf
+      (p, name) = case resolveImport fp (T.unpack spec) of
+        Just (rp, rn) -> (rp, rn)
+        Nothing       -> ("external:" ++ T.unpack spec, spec)
+  pure (makeNodeId (mkSourceFile p "") "Module" name)
+
+-- | Base node id of an emitted definition node.
+definitionBaseId :: SourceFile -> Granularity -> TSNodeInfo -> Maybe NodeId
+definitionBaseId sf gran node =
+  fmap (makeNodeId sf (T.pack (tsTypeToKind (tsnType node)))) (nodeIdentifier sf gran node)
+
+-- | Collect a file's import bindings and top-level definition names.
+collectCallsCtx :: SourceFile -> Granularity -> [TSNodeInfo] -> CallsCtx
+collectCallsCtx sf gran roots = CallsCtx
+  { callsCtxImports = Map.fromList (concatMap importBindings top)
+  , callsCtxLocal   = Map.fromList
+      [ (name, nid)
+      | n <- top
+      , tsnIsNamed n
+      , tsnType n `elem` typesFor gran
+      , tsnType n `notElem` importExportTypes
+      , tsnType n `notElem` wrapperTypes
+      , tsnType n `notElem` moduleTypes
+      , Just name <- [nodeIdentifier sf gran n]
+      , Just nid  <- [definitionBaseId sf gran n] ]
+  }
+  where
+    children = concatMap tsnChildren roots
+    top = children ++ [ k | c <- children, tsnType c `elem` wrapperTypes, k <- tsnChildren c ]
+
+    importBindings n
+      | tsnType n `elem` importExportTypes =
+          case importTargetIdOf sf n of
+            Just tid -> [ (b, tid) | b <- bindingNames n ]
+            Nothing  -> []
+      | otherwise = []
+
+    -- Every identifier run in the import text before `from <specifier>`.
+    bindingNames n =
+      let txt  = normalizeText (tsnText n)
+          body = T.strip (fst (T.breakOnEnd "from" (T.drop (T.length "import") txt)))
+      in identifierRuns body
+
+    identChars :: String
+    identChars = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_$"
+
+    identifierRuns t =
+      let t' = T.dropWhile (`notElem` identChars) t
+      in case T.uncons t' of
+           Just (c, rest) | c `elem` identChars ->
+             (T.cons c (T.takeWhile (`elem` identChars) rest))
+               : identifierRuns (T.dropWhile (`elem` identChars) rest)
+           _ -> []
+
+-- | (enclosing definition id, callee target id) for every resolvable top-level
+-- call. Calls nested inside a call's arguments are excluded; unresolvable
+-- callees (globals) are dropped.
+callEdgePairs :: SourceFile -> Granularity -> [TSNodeInfo] -> [(NodeId, NodeId)]
+callEdgePairs sf gran roots = concatMap (walk Nothing False) roots
+  where
+    ctx = collectCallsCtx sf gran roots
+
+    walk enc inside n =
+      let tType   = tsnType n
+          isCall  = tType `elem` callTypes
+          emitted = tsnIsNamed n && tType `elem` typesFor gran && tType `notElem` wrapperTypes
+          enc'    = if emitted && (tType `elem` functionBoundaryTypes || tType `elem` moduleTypes)
+                      then maybe enc Just (definitionBaseId sf gran n)
+                      else enc
+          here    = [ (src, tgt)
+                    | isCall, not inside
+                    , Just src <- [enc]
+                    , Just callee <- [firstIdentifierInList (tsnChildren n)]
+                    , Just tgt <- [resolveCallee callee] ]
+          kids    = if descendInto gran emitted n
+                      then concatMap (walk enc' (inside || isCall)) (tsnChildren n)
+                      else []
+      in here ++ kids
+
+    resolveCallee callee =
+      case Map.lookup callee (callsCtxImports ctx) of
+        Just i  -> Just i
+        Nothing -> Map.lookup callee (callsCtxLocal ctx)
+
+-- | First `identifier` text in a preorder walk of a list of nodes.
+firstIdentifierInList :: [TSNodeInfo] -> Maybe Text
+firstIdentifierInList [] = Nothing
+firstIdentifierInList (k : rest) =
+  case firstIdentifierIn k of
+    Just r  -> Just r
+    Nothing -> firstIdentifierInList rest
+  where
+    firstIdentifierIn n
+      | tsnType n == "identifier" && not (T.null (tsnText n)) = Just (tsnText n)
+      | otherwise = firstIdentifierInList (tsnChildren n)
+
+mkCallEdge :: NodeId -> NodeId -> Edge
+mkCallEdge src tgt =
+  Edge
+    { edgeId        = EdgeId (src <> "->call:" <> tgt)
+    , edgeSource    = src
+    , edgeTarget    = tgt
+    , edgeRelation  = Calls
+    , edgeConfidence = Confidence 0.9
+    , edgeWeight    = 0.9
+    , edgeExtra     = Nothing
+    }
 
 -- ───────────────────────────────────────────────
 -- Edge + endpoint-node construction
