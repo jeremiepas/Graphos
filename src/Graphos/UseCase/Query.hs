@@ -41,7 +41,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Short (fromText, toText)
+import Data.Text.Short (toText)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
 
@@ -257,32 +257,16 @@ pathQueryWithIndexCached _ idx cfg fromTerm toTerm =
 -- | Find shortest path between two concepts (using index for fast node lookup)
 pathQueryWithIndex :: Graph -> GraphIndex -> Text -> Text -> Maybe [NodeId]
 pathQueryWithIndex g idx fromTerm toTerm =
-  let fromNode = findBestNodeWithIndex idx fromTerm
-      toNode   = findBestNodeWithIndex idx toTerm
-  in case (fromNode, toNode) of
-       (Just f, Just t) -> shortestPath g f t
-       _ -> Nothing
+  case (resolveNodeArg fromTerm g idx, resolveNodeArg toTerm g idx) of
+    (ResolvedSingle f, ResolvedSingle t) -> shortestPath g f t
+    _ -> Nothing
 
--- | Explain a single node using the index for fast lookup
+-- | Explain a single node via exact resolution (no tokenized search).
 explainNodeWithIndex :: Graph -> GraphIndex -> Text -> Maybe Node
 explainNodeWithIndex g idx term =
-  let best = findBestNodeWithIndex idx term
-  in fmap (\nid -> Map.findWithDefault (Node
-    { nodeId           = T.pack "unknown"
-    , nodeLabel        = fromText "unknown"
-    , nodeFileType     = CodeFile
-    , nodeSourceFile   = fromText ""
-    , nodeSource       = Nothing
-  , nodeLineStart    = Nothing
-  , nodeCommunityId  = Nothing
-  , nodeDegree       = Nothing
-  , nodeIsBridge     = Nothing
-  , nodeExtra        = Nothing
-    , nodeLineEnd      = Nothing
-    , nodeKind         = Nothing
-    , nodeSignature    = Nothing
-    , nodePresentBits  = 0
-    }) nid (gNodes g)) best
+  case resolveNodeArg term g idx of
+    ResolvedSingle nid -> Map.lookup nid (gNodes g)
+    _ -> Nothing
 
 -- | Find shortest path between two concepts
 pathQuery :: Graph -> Text -> Text -> Maybe [NodeId]

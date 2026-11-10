@@ -9,12 +9,12 @@
 
 ## 2. Phase B — graphos-types (foundation)
 
-- [ ] 2.1 Scaffold repo: `scripts/create-haskell-lib.sh graphos-types "Shared types for Graphos and satellite libraries"`
-- [ ] 2.2 Copy `src/Graphos/Domain/Types.hs` + `src/Graphos/Domain/Types/*.hs` (Node, Edge, Graph, Pipeline, Analysis, Ingest, Writer, GraphFile) into `src/Graphos/Types/` (or `src/Graphos/Types.hs` single-module if simpler)
-- [ ] 2.3 Rewrite imports: replace `Graphos.Domain.Types.*` with the new module names; remove any Graphos-specific imports (Prelude, etc.) or copy minimal helpers
-- [ ] 2.4 Update `.cabal`: name `graphos-types`, exposed-modules list, build-depends (`base`, `aeson`, `text`, `containers`, `deepseq`, `time`)
-- [ ] 2.5 Copy + adapt relevant tests (`Domain/TypesSpec`, `Domain/ConfigSpec`) into `tests/`
-- [ ] 2.6 Verify: `devenv shell -c 'cabal build && cabal test'`
+- [x] 2.1 Scaffold repo: `scripts/create-haskell-lib.sh graphos-types "Shared types for Graphos and satellite libraries"`
+- [x] 2.2 Copy `src/Graphos/Domain/Types.hs` + `src/Graphos/Domain/Types/*.hs` (Node, Edge, Graph, Pipeline, Analysis, Ingest, Writer, GraphFile) into `src/Graphos/Types/` (or `src/Graphos/Types.hs` single-module if simpler)
+- [x] 2.3 Rewrite imports: replace `Graphos.Domain.Types.*` with the new module names; remove any Graphos-specific imports (Prelude, etc.) or copy minimal helpers
+- [x] 2.4 Update `.cabal`: name `graphos-types`, exposed-modules list, build-depends (`base`, `aeson`, `text`, `containers`, `deepseq`, `time`)
+- [x] 2.5 Copy + adapt relevant tests (`Domain/TypesSpec`, `Domain/ConfigSpec`) into `tests/`
+- [x] 2.6 Verify: `devenv shell -c 'cabal build && cabal test'`
 - [ ] 2.7 Tag `v0.1.0.0`, push, confirm Hackage workflow uploads; `cabal install graphos-types` in clean shell
 
 ## 3. Phase C — graphos-lsp-extract (no graphos-types dep, parallel with Phase B)
