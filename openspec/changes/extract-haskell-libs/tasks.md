@@ -15,7 +15,7 @@
 - [x] 2.4 Update `.cabal`: name `graphos-types`, exposed-modules list, build-depends (`base`, `aeson`, `text`, `containers`, `deepseq`, `time`)
 - [x] 2.5 Copy + adapt relevant tests (`Domain/TypesSpec`, `Domain/ConfigSpec`) into `tests/`
 - [x] 2.6 Verify: `devenv shell -c 'cabal build && cabal test'`
-- [ ] 2.7 Tag `v0.1.0.0`, push, confirm Hackage workflow uploads; `cabal install graphos-types` in clean shell
+- [ ] 2.7 Tag `v0.1.0.0`, push, confirm Hackage workflow uploads; `cabal install graphos-types` in clean shell (blocked: no Hackage credentials in this run; package built/tested, tag in upstream repo already exists)
 
 ## 3. Phase C — graphos-lsp-extract (no graphos-types dep, parallel with Phase B)
 
