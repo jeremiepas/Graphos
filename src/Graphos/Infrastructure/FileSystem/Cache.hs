@@ -29,6 +29,8 @@ module Graphos.Infrastructure.FileSystem.Cache
   , loadPipelineCheckpoint
   , savePipelineCheckpoint
   , clearPipelineCheckpoint
+  , loadLabelCache
+  , saveLabelCache
   ) where
 
 import Control.Exception (SomeException, catch)
@@ -55,6 +57,7 @@ import qualified Crypto.Hash.SHA256 as Hash
 
 import Graphos.Domain.Config (defaultOutputDirName)
 import Graphos.Domain.Types
+import Graphos.Domain.Labeling (LabelCacheFile(..))
 import Graphos.Domain.Types.Pipeline (PipelineCheckpoint(..))
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 
@@ -334,3 +337,33 @@ clearPipelineCheckpoint :: FilePath -> IO ()
 clearPipelineCheckpoint outputDir = do
   let path = checkpointPath outputDir
   removeFile path `catch` \(_ :: SomeException) -> pure ()
+
+-- ───────────────────────────────────────────────
+-- Label cache (multi-source-graphs 4.1)
+-- ───────────────────────────────────────────────
+
+-- | Path to the label cache file: @<outDir>/cache/label-cache.json@.
+-- Follows the port-level convention that caches live under the effective
+-- output directory (multi-source-graphs 2.2).
+labelCachePath :: FilePath -> FilePath
+labelCachePath outputDir = cacheDirIn outputDir </> "label-cache.json"
+
+-- | Save the label cache atomically (last-run snapshot).
+saveLabelCache :: FilePath -> LabelCacheFile -> IO ()
+saveLabelCache outputDir lcf = writeFileAtomic (labelCachePath outputDir) (encode lcf)
+
+-- | Load the label cache from disk.
+--
+-- Returns an empty cache on first run, missing file, or corrupt contents
+-- (never throws): a bad cache only forces re-labeling, never a wrong result.
+loadLabelCache :: FilePath -> IO LabelCacheFile
+loadLabelCache outputDir = do
+  let path = labelCachePath outputDir
+  exists <- doesFileExist path
+  if not exists
+    then pure (LabelCacheFile [])
+    else do
+      bs <- BSL.readFile path
+      case eitherDecode bs of
+        Left _  -> pure (LabelCacheFile [])
+        Right cf -> pure cf
