@@ -38,13 +38,12 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnv, productionAppEnvWithConfig)
+import Graphos.Infrastructure.Wiring (productionAppEnv, productionAppEnvWithConfig, productionLLMPort)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
 import Graphos.Infrastructure.SpecParse (parseSpecCorpus)
 import qualified Graphos.UseCase.SpecAdjudicate as SpecAdjudicate
-import Graphos.Infrastructure.Wiring (productionLLMPort)
 import Graphos.Domain.Config (defaultLabelingConfig)
 import Graphos.UseCase.Query (queryGraphWithIndexScoredScoped, symbolLookup, neighborhoodExpansion, resolveNodeArg, NodeResolution(..), QueryResponse(..), findSuggestions)
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
@@ -1007,9 +1006,9 @@ main = do
           putStrLn $ "[graphos] Nodes: " ++ show (Map.size (gNodes g))
                      ++ ", edges: " ++ show (Map.size (gEdges g))
 
-    Serve dir graphPath port apiOnly noApi -> do
-      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port
-      startServeServer dir graphPath port apiOnly noApi
+    Serve dir graphPath port apiOnly noApi host -> do
+      putStrLn $ "[graphos] Serving " ++ dir ++ " on port " ++ show port ++ " (host " ++ host ++ ")"
+      startServeServer dir graphPath port apiOnly noApi host
 
     Init agentsOpt -> do
       initConfigFile

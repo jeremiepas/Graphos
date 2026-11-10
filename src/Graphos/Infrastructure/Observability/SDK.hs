@@ -425,7 +425,7 @@ startMetricsServer ms listenPort = do
               (BSL.fromStrict $ TE.encodeUtf8 metricsText)
           _ -> respond $ responseLBS status200 [] "Graphos observability server"
   let settings = setPort listenPort
-               $ setHost "0.0.0.0"
+               $ setHost "127.0.0.1"
                $ setBeforeMainLoop (logInfo env $ T.pack $ "Metrics server listening on :" ++ show listenPort ++ "/metrics")
                $ defaultSettings
   runSettings settings app
