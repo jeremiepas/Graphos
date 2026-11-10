@@ -13,7 +13,6 @@
 -- @Import@-kind nodes when the source graph lacks real @imports@ edges.
 module Graphos.UseCase.Subgraph
   ( extractSubgraph
-  , SeedEntry(..)
   , SubgraphConfig(..)
   , SubsystemConfig(..)
   , SubgraphTier(..)
@@ -29,7 +28,7 @@ import Control.Monad (msum)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -93,45 +92,25 @@ instance FromJSON SubsystemConfig where
     <$> v .: "name"
     <*> v .:? "patterns" .!= []
 
--- | Seed entry: a pattern from --path, a line from --seeds FILE, or stdin input.
-data SeedEntry = SeedEntry
-  { seedPattern :: !Text
-  , seedSource  :: !Text -- "path", "file", or "stdin"
-  } deriving (Eq, Show, Generic)
-
-instance ToJSON SeedEntry where
-  toJSON (SeedEntry pat src) = object
-    [ "pattern" .= pat
-    , "source"  .= src
-    ]
-
-instance FromJSON SeedEntry where
-  parseJSON = withObject "SeedEntry" $ \v -> SeedEntry
-    <$> v .: "pattern"
-    <*> v .: "source"
-
 -- | Configuration for subgraph extraction.
 data SubgraphConfig = SubgraphConfig
   { scSubsystems      :: ![SubsystemConfig]
   , scMaxHops         :: !Int
   , scIncludeDerived  :: !Bool
-  , scSeedEntries     :: ![SeedEntry]
   } deriving (Eq, Show, Generic)
 
 instance ToJSON SubgraphConfig where
   toJSON c = object
-    [ "subsystems"         .= scSubsystems c
-    , "max_hops"           .= scMaxHops c
-    , "include_derived"    .= scIncludeDerived c
-    , "seed_entries"       .= scSeedEntries c
+    [ "subsystems"      .= scSubsystems c
+    , "max_hops"        .= scMaxHops c
+    , "include_derived" .= scIncludeDerived c
     ]
 
 instance FromJSON SubgraphConfig where
   parseJSON = withObject "SubgraphConfig" $ \v -> SubgraphConfig
-    <$> v .:? "subsystems"         .!= []
-    <*> v .:? "max_hops"           .!= 1
-    <*> v .:? "include_derived"    .!= False
-    <*> v .:? "seed_entries"       .!= []
+    <$> v .:? "subsystems"      .!= []
+    <*> v .:? "max_hops"        .!= 1
+    <*> v .:? "include_derived" .!= False
 
 -- | Infer an architectural layer from a source path. Heuristic, path-based:
 -- the highest-priority layer keyword found among the path segments.
@@ -309,12 +288,11 @@ deriveImports nodeMap edgeMap =
     edgeIdFor s t = EdgeId (s <> "->" <> t <> ":imports:derived")
     edgeIdToKey t = fromMaybe t (T.stripPrefix "ext:" t)
 
--- | Extracts a subgraph starting from core subsystem nodes or seed patterns.
+-- | Extracts a subgraph starting from the core subsystem nodes.
 --
--- Core nodes match a subsystem pattern against their source file; seed nodes
--- match via --path / --seeds / stdin patterns. Boundary nodes are reached over
--- @imports@ edges (in either direction) within @scMaxHops@; external nodes are
--- import targets outside core/boundary.
+-- Core nodes match a subsystem pattern against their source file; boundary
+-- nodes are reached over @imports@ edges (in either direction) within
+-- @scMaxHops@; external nodes are import targets outside core/boundary.
 -- Every kept node carries @tier@/@subsystem@/@layer@ metadata and every kept
 -- edge carries a @provenance@ marker (@source@ or @derived@).
 extractSubgraph :: LabeledGraph -> SubgraphConfig -> LabeledGraph
@@ -332,26 +310,14 @@ extractSubgraph g config =
     effEdges = allEdgesMap `Map.union` derivedEdgesMap
 
     -- 1. Core nodes: source file matches any subsystem pattern.
-    subsystemCoreNodes = Set.fromList
+    coreNodesSet = Set.fromList
       [ nid
       | (nid, n) <- Map.toList effNodes
       , any (\sub -> any (\pat -> matchPath pat n) (scSubsystemPatterns sub))
             (scSubsystems config)
       ]
 
-    -- 2. Seed nodes: source file matches any --path / --seeds / stdin pattern.
-    seedCoreNodes = case scSeedEntries config of
-      [] -> Set.empty
-      entries -> Set.fromList
-        [ nid
-        | (nid, n) <- Map.toList effNodes
-        , any (\entry -> matchPath (seedPattern entry) n) entries
-        ]
-
-    -- Combined core nodes: both subsystem and seed patterns.
-    coreNodesSet = subsystemCoreNodes `Set.union` seedCoreNodes
-
-    -- 3. Boundary nodes: BFS over @imports@ edges in both directions.
+    -- 2. Boundary nodes: BFS over @imports@ edges in both directions.
     boundaryNodesSet = bfs coreNodesSet (Set.toList coreNodesSet) 0
       where
         bfs visited [] _ = visited
@@ -377,7 +343,7 @@ extractSubgraph g config =
           , edgeRelation e == Imports
           ]
 
-    -- 4. External nodes: import targets of core/boundary, not core/boundary.
+    -- 3. External nodes: import targets of core/boundary, not core/boundary.
     coreOrBoundary = coreNodesSet `Set.union` boundaryNodesSet
     externalNodesSet = Set.fromList
       [ edgeTarget e
@@ -387,29 +353,19 @@ extractSubgraph g config =
       ]
       `Set.difference` coreOrBoundary
 
-    -- 5. Collect selected nodes with tier/subsystem/layer metadata.
+    -- 4. Collect selected nodes with tier/subsystem/layer metadata.
     allSelectedNodes = coreNodesSet `Set.union` boundaryNodesSet `Set.union` externalNodesSet
 
     findSubsystem nid = case Map.lookup nid effNodes of
       Nothing -> Nothing
       Just n  ->
-        let subFromSys = [ scSubsystemName sub
-                         | sub <- scSubsystems config
-                         , any (\pat -> matchPath pat n) (scSubsystemPatterns sub)
-                         ]
-            subFromSeed = case scSeedEntries config of
-              [] -> Nothing
-              entries ->
-                let matches = [ seedSource entry
-                              | entry <- entries
-                              , matchPath (seedPattern entry) n
-                              ]
-                in case matches of
-                     (s:_) -> Just s
-                     []    -> Nothing
-         in case subFromSys ++ maybeToList subFromSeed of
-              (m:_) -> Just m
-              []    -> Nothing
+        let matches = [ scSubsystemName sub
+                      | sub <- scSubsystems config
+                      , any (\pat -> matchPath pat n) (scSubsystemPatterns sub)
+                      ]
+        in case matches of
+             (m:_) -> Just m
+             []    -> Nothing
 
     tierOf nid
       | nid `Set.member` coreNodesSet  = CoreTier
