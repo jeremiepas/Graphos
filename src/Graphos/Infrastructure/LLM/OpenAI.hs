@@ -52,15 +52,16 @@ callLLM cfg prompt = catch (do
         , "max_tokens" Aeson..= (2000 :: Int)
         ]
   withSecureTempFile "payload" payload $ \payloadPath -> do
-    let authOpts = [("--header", "Authorization: Bearer " ++ apiKey)
+    let authOpts = [("--header", "Authorization" ++ ": " ++ "Bearer " ++ apiKey)
                    | not (null apiKey) && labelingProvider cfg /= "ollama"]
-        customHeaders = Map.toList (labelingHeaders cfg) >>= \(k, v) -> ["-H", k ++ ": " ++ resolveEnvVars v]
-        -- Custom headers override Authorization on collision (applied before the
-        -- config, so they win; ${VAR} expansion happens in resolveEnvVars).
+        customHeaderOpts = Map.toList (labelingHeaders cfg) >>= \(k, v) -> [("--header", k ++ ": " ++ resolveEnvVars v)]
+        -- All headers (including any that may carry secrets) go through the
+        -- curl config file, never the argv. Custom headers are applied after
+        -- auth so they win on collision; ${VAR} expansion happens in resolveEnvVars.
+        secretOpts = authOpts ++ customHeaderOpts
         firstArgs = [ "-s", "--max-time", "60", "-X", "POST", "-H", "Content-Type: application/json" ]
-                  ++ customHeaders
         lastArgs = [ "--data-binary", "@" ++ payloadPath, apiBase ++ "/chat/completions" ]
-    res <- runCurl firstArgs authOpts lastArgs
+    res <- runCurl firstArgs secretOpts lastArgs
     case res of
       CurlSuccess stdout -> pure $ parseResponse stdout
       CurlFailed n err   -> pure $ Left (T.pack ("LLM API call failed (curl exit " ++ show n ++ "): " ++ T.unpack (T.take 200 err)))

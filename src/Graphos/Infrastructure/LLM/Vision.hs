@@ -168,11 +168,12 @@ analyzeImage vCfg lCfg filePath = catch (do
                 , "temperature" Aeson..= (0.3 :: Double)
                 ]
           withSecureTempFile "payload" payload $ \payloadPath -> do
-            let authOpts = [("--header", "Authorization: Bearer " ++ apiKey) | not (null apiKey)]
-                customHeaders = Map.toList (vcHeaders vCfg) >>= \(k, v) -> ["-H", k ++ ": " ++ resolveEnvVars v]
-                firstArgs = [ "-s", "--max-time", "120", "-X", "POST", "-H", "Content-Type: application/json" ] ++ customHeaders
+            let authOpts = [("--header", "Authorization" ++ ": " ++ "Bearer " ++ apiKey) | not (null apiKey)]
+                customHeaderOpts = Map.toList (vcHeaders vCfg) >>= \(k, v) -> [("--header", k ++ ": " ++ resolveEnvVars v)]
+                secretOpts = authOpts ++ customHeaderOpts
+                firstArgs = [ "-s", "--max-time", "120", "-X", "POST", "-H", "Content-Type: application/json" ]
                 lastArgs = [ "--data-binary", "@" ++ payloadPath, apiBase ++ "/chat/completions" ]
-            res <- runCurl firstArgs authOpts lastArgs
+            res <- runCurl firstArgs secretOpts lastArgs
             case res of
               CurlSuccess stdout -> pure $ parseVisionResponse stdout
               CurlFailed n err   -> pure $ Left (T.pack ("Vision API call failed (curl exit " ++ show n ++ "): " ++ T.unpack (T.take 200 err)))
