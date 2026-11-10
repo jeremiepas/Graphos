@@ -30,6 +30,7 @@ tsNode ty txt children = TSNodeInfo
 ident :: T.Text -> TSNodeInfo
 ident t = tsNode "identifier" t []
 
+
 -- | Function declaration with an explicit declared name.
 func :: T.Text -> TSNodeInfo
 func name = tsNode "function_declaration" (T.pack ("function " ++ T.unpack name)) [ident name]
@@ -162,6 +163,16 @@ spec = do
           is = filter (\m -> nodeKind m == Just (fromText "Import")) (Map.elems (extractionNodes ex))
           sig = nodeSignature (case is of (x:_) -> x; [] -> case Map.elems (extractionNodes ex) of (y:_) -> y; [] -> error "empty extractionNodes")
       sig `shouldSatisfy` maybe False (\x -> T.isSuffixOf "from '../../templates/index.js'" (toText x))
+
+  describe "issue #77 — no bogus import from prose in a template literal" $ do
+    it "emits no Import node when the only 'from ' is inside a template literal" $ do
+      let prose = "## Examples by kind\npick one from the list below"
+          node = tsNode "export_statement" (T.pack ("export const help = `" ++ T.unpack prose ++ "`;"))
+                   [ tsNode "lexical_declaration" (T.pack ("const help = `" ++ T.unpack prose ++ "`;"))
+                       [ tsNode "template_string" prose [] ] ]
+          ex = tsNodesToExtraction sf GranularityFunction defaultTruncationBudget [node]
+          imports = filter (\m -> nodeKind m == Just (fromText "Import")) (Map.elems (extractionNodes ex))
+      imports `shouldBe` []
 
 -- | Attach a start row to a fixture node for collision ordering.
 withLine :: TSNodeInfo -> Int -> TSNodeInfo
