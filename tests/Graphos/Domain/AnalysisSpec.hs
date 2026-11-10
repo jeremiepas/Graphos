@@ -15,10 +15,28 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Graph.Analysis (biconnectedComponents, biconnectedComponentCount, articulationPoints, godNodes)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion)
-import Graphos.Domain.Analysis (analyze, selectTopNOn, suggestQuestions, surprisingConnections)
+import Graphos.Domain.Analysis (analyze, selectTopNOn, suggestQuestions, surprisingConnections, surpriseScore)
 
 spec :: Spec
 spec = do
+  describe "surpriseScore numeric arm parity (AVI-1677)" $ do
+    it "fixture 6: low conf + cross-filetype + cross-community" $ do
+      let edge = Edge (EdgeId "e") "u" "v" Calls 1.0 (Confidence 0.1) Nothing
+          nodeComm = Map.fromList [("u" :: NodeId, 1), ("v", 2)]
+          (score, _) = surpriseScore undefined edge nodeComm "a.py" "b.pdf" "u" "v"
+      score `shouldBe` 6
+
+    it "fixture 10: inferred" $ do
+      let edge = Edge (EdgeId "e") "u" "v" Inferred 1.0 (Confidence 0.1) Nothing
+          nodeComm = Map.fromList [("u" :: NodeId, 1), ("v", 2)]
+          (score, _) = surpriseScore undefined edge nodeComm "a.py" "b.pdf" "u" "v"
+      score `shouldBe` 10
+
+    it "fixture 1: high conf, same file type and community" $ do
+      let edge = Edge (EdgeId "e") "u" "v" Calls 1.0 (Confidence 0.9) Nothing
+          nodeComm = Map.fromList [("u" :: NodeId, 1), ("v", 1)]
+          (score, _) = surpriseScore undefined edge nodeComm "a.py" "a.py" "u" "v"
+      score `shouldBe` 1
   describe "godNodes excludes generated/vendored nodes" $ do
     it "ignores a high-degree 'Collapsed' node in favor of real code" $ do
       -- A synthetic 'Collapsed' node outranks every real node by degree, yet
@@ -190,6 +208,7 @@ spec = do
                     ]
             g = buildGraph False (extractionFromLists (map testNode names) (backbone ++ extra))
         in biconnectedComponentCount g === length (biconnectedComponents g)
+
 
 -- Helpers
 edgeIdFrom :: Text -> Text -> EdgeId
