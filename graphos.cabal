@@ -449,6 +449,8 @@ test-suite graphos-test
      Graphos.Domain.Graph.UQIProjectionSpec
      Graphos.Domain.Graph.UQISupportSpec
      Graphos.Domain.Graph.UQIOrderSpec
+     Graphos.Domain.Graph.UQICohesionSpec
+     Graphos.Domain.Graph.UQIFreshRedetectionSpec
      Graphos.Domain.Community.UQICommunitySpec
      Graphos.Domain.Graph.MergeConfluenceSpec
      Graphos.Domain.Graph.ConflictSpec
