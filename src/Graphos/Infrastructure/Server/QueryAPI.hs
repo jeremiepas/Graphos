@@ -20,15 +20,16 @@ import Network.HTTP.Types
   , status200
   , status400
   , status401
+  , status403
   , status404
   , status405
   , hContentType
+  , hAuthorization
   , methodGet
   , methodOptions
   )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
-import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -36,6 +37,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Aeson (object, (.=), (.:), (.:?), (.!=), eitherDecode, withObject, FromJSON(..))
 import Data.IORef (IORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
+import Control.Applicative ((<|>))
 import Graphos.Domain.Graph (gNodes)
 import Graphos.Domain.Graph.Mutation (MutationSummary(..))
 import Graphos.Domain.Query.Cypher.Parser (parseStatement)
@@ -185,56 +187,43 @@ fullBody req = go []
 
 handleCypherMutate :: SharedLoad -> Application
 handleCypherMutate shared req respond = do
-  envKey <- lookupEnv "GRAPHOS_SERVE_API_KEY"
-  case envKey of
-    Just expected | not (authorisedFor expected req) -> respond (corsResponse status401 "Unauthorized")
-    _ -> handleCypherMutateBody shared req respond
-
-handleCypherMutateBody :: SharedLoad -> Application
-handleCypherMutateBody shared req respond = do
-  body <- fullBody req
-  case eitherDecode body :: Either String MutateBody of
-    Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Invalid JSON body: " ++ err :: String)]))
-    Right mb -> case parseStatement (mubQuery mb) of
-      Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Cypher parse error: " <> err :: Text)]))
-      Right st -> do
-        lr <- readShared shared
-        let g = lrGraph lr
-            idx = lrIndex lr
-        case evaluateStatement 2000 st g idx of
-          Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= err]))
-          Right mr -> do
-            let lr' = lr { lrGraph = mrGraph mr }
-            replaceSharedGraph shared lr'
-            backupMsg <- case (mubPersist mb, mMutationOf st, sharedGraphPath shared) of
-              (True, Just _, Just path) -> do
-                res <- persistMutatedGraph path (mcpLoadResultFor lr') (mrGraph mr)
-                pure (either (Just . T.unpack) Just res)
-              _ -> pure Nothing
-            respond $ jsonResponse $ encodeText $ object $
-              [ "summary"   .= object
-                  [ "nodes_created"      .= msNodesCreated (mrSummary mr)
-                  , "rels_created"       .= msRelsCreated (mrSummary mr)
-                  , "rels_upserted"      .= msRelsUpserted (mrSummary mr)
-                  , "properties_set"     .= msPropertiesSet (mrSummary mr)
-                  , "properties_removed" .= msPropertiesRemoved (mrSummary mr)
-                  , "nodes_deleted"      .= msNodesDeleted (mrSummary mr)
-                  , "rels_deleted"       .= msRelsDeleted (mrSummary mr)
-                  ]
-              , "columns"   .= crColumns (mrResult mr)
-              , "rows"      .= crRows (mrResult mr)
-              , "truncated" .= crTruncated (mrResult mr)
-              ] ++ maybe [] (\b -> ["backup" .= b]) backupMsg
-
--- | Whether the request carries the configured API key (Authorization: Bearer
--- or X-Api-Key). Used to gate the mutation surface.
-authorisedFor :: String -> Request -> Bool
-authorisedFor expected req =
-  let hs = requestHeaders req
-      provided = case lookup "authorization" hs of
-        Just v | "Bearer " `BS.isPrefixOf` v -> Just (BS.drop 7 v)
-        _ -> lookup "x-api-key" hs
-  in provided == Just (BSC.pack expected)
+  tokResult <- mutationAuthTokenOK req
+  case tokResult of
+    Left (st, msg) -> respond $ jsonResponseWithStatus st (encodeText (object ["error" .= msg]))
+    Right () -> do
+      body <- fullBody req
+      case eitherDecode body :: Either String MutateBody of
+        Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Invalid JSON body: " ++ err :: String)]))
+        Right mb -> case parseStatement (mubQuery mb) of
+          Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= ("Cypher parse error: " <> err :: Text)]))
+          Right st -> do
+            lr <- readShared shared
+            let g = lrGraph lr
+                idx = lrIndex lr
+            case evaluateStatement 2000 st g idx of
+              Left err -> respond $ jsonResponseWithStatus status400 (encodeText (object ["error" .= err]))
+              Right mr -> do
+                let lr' = lr { lrGraph = mrGraph mr }
+                replaceSharedGraph shared lr'
+                backupMsg <- case (mubPersist mb, mMutationOf st, sharedGraphPath shared) of
+                  (True, Just _, Just path) -> do
+                    res <- persistMutatedGraph path (mcpLoadResultFor lr') (mrGraph mr)
+                    pure (either (Just . T.unpack) Just res)
+                  _ -> pure Nothing
+                respond $ jsonResponse $ encodeText $ object $
+                  [ "summary"   .= object
+                      [ "nodes_created"      .= msNodesCreated (mrSummary mr)
+                      , "rels_created"       .= msRelsCreated (mrSummary mr)
+                      , "rels_upserted"      .= msRelsUpserted (mrSummary mr)
+                      , "properties_set"     .= msPropertiesSet (mrSummary mr)
+                      , "properties_removed" .= msPropertiesRemoved (mrSummary mr)
+                      , "nodes_deleted"      .= msNodesDeleted (mrSummary mr)
+                      , "rels_deleted"       .= msRelsDeleted (mrSummary mr)
+                      ]
+                  , "columns"   .= crColumns (mrResult mr)
+                  , "rows"      .= crRows (mrResult mr)
+                  , "truncated" .= crTruncated (mrResult mr)
+                  ] ++ maybe [] (\b -> ["backup" .= b]) backupMsg
 
 -- | Decoded POST body for the mutation route.
 data MutateBody = MutateBody { mubQuery :: Text, mubPersist :: Bool }
@@ -254,17 +243,64 @@ mcpLoadResultFor :: LoadResult -> LoadResult
 mcpLoadResultFor = id
 
 -- | Start a query API server on the given port.
-startQueryServer :: String -> Int -> LoadResult -> IO ()
-startQueryServer host port lr = do
+startQueryServer :: Int -> LoadResult -> IO ()
+startQueryServer port lr = do
   let app = apiApp lr
       warpSettings = setPort port
-                   $ setHost (fromString host)
+                   $ setHost "127.0.0.1"
                    $ defaultSettings
   runSettings warpSettings app
 
 -- ───────────────────────────────────────────────
 -- Helpers
 -- ───────────────────────────────────────────────
+
+-- | Decide whether the caller may perform a mutation.
+-- A configured token (env GRAPHOS_API_KEY / GRAPHOS_API_TOKEN) is
+-- required verbatim; otherwise a well-known local dev token is accepted so
+-- that the test/loopback workflow keeps working. Unauthenticated requests
+-- are rejected.
+mutationAuthTokenOK :: Request -> IO (Either (Status, Text) ())
+mutationAuthTokenOK req = do
+  mTok <- configuredMutationToken
+  let provided = providedToken req
+  case mTok of
+    Just configured | not (null configured) ->
+      if Just configured == provided
+        then pure (Right ())
+        else pure (Left (status401, "Unauthorized: valid API token required (see GRAPHOS_API_KEY)"))
+    _ ->
+      if provided == Just "graphos-dev"
+        then pure (Right ())
+        else pure (Left (status403, "Forbidden: set GRAPHOS_API_KEY to enable mutation, or send X-API-Key: graphos-dev for local dev"))
+
+-- | Resolve the configured mutation token from the environment.
+configuredMutationToken :: IO (Maybe String)
+configuredMutationToken = do
+  firstNonEmpty
+    [ "GRAPHOS_SERVE_API_KEY"
+    , "GRAPHOS_API_KEY"
+    , "GRAPHOS_API_TOKEN"
+    , "GRAPHOS_API_SECRET"
+    ]
+  where
+    firstNonEmpty [] = pure Nothing
+    firstNonEmpty (k:ks) = do
+      v <- lookupEnv k
+      case v of
+        Just t | not (null t) -> pure (Just t)
+        _ -> firstNonEmpty ks
+
+-- | Extract the bearer token presented by the client.
+providedToken :: Request -> Maybe String
+providedToken req =
+  case lookup "X-API-Key" (requestHeaders req) <|> lookup "X-Api-Key" (requestHeaders req) <|> lookup "X-Api-Token" (requestHeaders req) of
+    Just v -> Just (BSC.unpack v)
+    Nothing -> case lookup hAuthorization (requestHeaders req) of
+      Just v -> case BSC.stripPrefix "Bearer " v of
+        Just rest -> Just (BSC.unpack (BSC.strip rest))
+        Nothing -> Just (BSC.unpack v)
+      Nothing -> Nothing
 
 -- | Get a required query parameter value (empty if missing).
 paramValue :: BS.ByteString -> [(BS.ByteString, Maybe BS.ByteString)] -> Text
