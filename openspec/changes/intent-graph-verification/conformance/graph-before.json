@@ -1,0 +1,19 @@
+{
+  "nodes": [
+    { "id": "1", "label": "POST /orders", "file_type": "code", "source_file": "src/Orders.hs", "line_start": 10, "line_end": 20, "signature": "(Req) -> Res", "community_id": 1, "kind": "handler", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "2", "label": "validateOrder", "file_type": "code", "source_file": "src/Orders.hs", "line_start": 30, "line_end": 60, "signature": "(Order) -> Result", "community_id": 1, "kind": "validator", "degree": 1, "is_bridge": false, "extra": { "body_hash": "h1" } },
+    { "id": "3", "label": "orders.spec", "file_type": "code", "source_file": "src/Orders.hs", "line_start": 70, "line_end": 90, "signature": null, "community_id": 1, "kind": "test", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "4", "label": "orders.total", "file_type": "code", "source_file": "src/Orders.hs", "line_start": 5, "line_end": 6, "signature": null, "community_id": 1, "kind": "schemaField", "degree": 1, "is_bridge": false, "extra": null },
+    { "id": "5", "label": "Order.total", "file_type": "code", "source_file": "src/Orders.hs", "line_start": 7, "line_end": 8, "signature": null, "community_id": 1, "kind": "contractField", "degree": 1, "is_bridge": false, "extra": null }
+  ],
+  "edges": [
+    { "id": "e1", "source": "1", "target": "2", "relation": "calls", "weight": 1.0, "confidence": 0.95 },
+    { "id": "e2", "source": "3", "target": "1", "relation": "tests", "weight": 1.0, "confidence": 0.95 },
+    { "id": "e3", "source": "4", "target": "5", "relation": "maps", "weight": 1.0, "confidence": 0.95 }
+  ],
+  "community_aggregates": [],
+  "communities": {},
+  "cohesion": {},
+  "god_nodes": [],
+  "community_labels": {}
+}

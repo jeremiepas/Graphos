@@ -39,6 +39,7 @@ import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObse
 import qualified Graphos.Domain.Config.Output
 import Graphos.Domain.Config.Vision
 import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), defaultClusteringConfig, mergeClusteringConfig)
 import Graphos.Domain.Config.Source (SourceConfig(..))
 
 -- ───────────────────────────────────────────────
@@ -63,6 +64,7 @@ data GraphosConfig = GraphosConfig
   , gcVision           :: VisionConfig                  -- ^ Vision analysis settings
    , gcIngest           :: IngestConfig                  -- ^ Single-file ingest settings
    , gcDetection        :: DetectionConfig               -- ^ Generated/vendored/minified code detection settings
+    , gcClustering       :: ClusteringConfig               -- ^ Post-Leiden community size-cap settings
    , gcMemory           :: MemoryConfig                  -- ^ Memory budget settings (memory.budget: auto|off|<size>)
    , gcCache            :: CacheConfig                   -- ^ Content-cache eviction policy (cache.max_mb; 0 = unlimited)
    , gcSources          :: [SourceConfig]                -- ^ Named multi-source roots ([] = single positional path)
@@ -87,6 +89,7 @@ defaultGraphosConfig = GraphosConfig
    , gcVision           = defaultVisionConfig
    , gcIngest           = defaultIngestConfig
    , gcDetection        = defaultDetectionConfig
+    , gcClustering       = defaultClusteringConfig
    , gcMemory           = defaultMemoryConfig
    , gcCache            = defaultCacheConfig
    , gcSources          = []
@@ -142,6 +145,7 @@ mergeGraphosConfig global project = GraphosConfig
    , gcDetection = if gcDetection project == defaultDetectionConfig
                      then gcDetection global
                      else gcDetection project
+    , gcClustering = mergeClusteringConfig (gcClustering project) (gcClustering global)
    , gcMemory = if gcMemory project == defaultMemoryConfig
                    then gcMemory global
                    else gcMemory project
@@ -174,9 +178,9 @@ effectiveOutputDir cfg = case gcOutput cfg of
 -- | The config-as-YAML key layout for @graphos init@ (multi-source-graphs
 -- 2.3). Every key matches what the FromJSON parsers read back (ConfigFile's
 -- section keys in Infrastructure.Config; each section's own field keys), so a
--- written file reloads to an Equal config. 'gcDetection' is omitted: it has
--- no ToJSON instance and its FromJSON default-fills everything the loader
--- needs.
+-- written file reloads to an Equal config. 'gcDetection' and 'gcClustering'
+-- are omitted: they have no ToJSON instance and their FromJSON default-fills
+-- everything the loader needs.
 instance ToJSON GraphosConfig where
   toJSON cfg = object
     [ "lsp"             .= gcLsp cfg
