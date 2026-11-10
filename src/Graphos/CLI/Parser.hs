@@ -32,6 +32,7 @@ import Options.Applicative
 import Data.Text (Text)
 import Data.Char (toLower)
 import GHC.Conc (numCapabilities)
+import Text.Read (readMaybe)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
@@ -61,7 +62,7 @@ data Command
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
   | ViewCmd ViewSubcommand
   | LServers
- | Serve FilePath FilePath Int Bool Bool
+ | Serve FilePath FilePath Int Bool Bool String
 
   | MigrateGraphCmd FilePath (Maybe FilePath)
 
@@ -142,6 +143,10 @@ pipelineOpts = PipelineConfig
       <*> switch (long "fail-on-low-memory" <> help "Abort before any stage (exit 1) when available memory is below the heap budget (default: warn only)")
       <*> switch (long "no-memory-budget" <> help "Disable the machine-derived default heap budget (run uncapped; --max-heap still applies when given)")
       <*> pure Nothing
+      <*> pure 0.05                          -- cfgMaxCommunityFraction: placeholder; Main resolves from config+CLI
+      <*> pure True                          -- cfgCommunityCapEnabled: placeholder; Main resolves from config+CLI
+      <*> optional (option fractionReader (long "max-community-fraction" <> metavar "FRAC" <> help "Post-Leiden community-size cap as a fraction of total nodes (0,1]; supersedes the config file"))
+      <*> switch (long "no-community-cap" <> help "Disable the post-Leiden community-size cap (keep raw Leiden communities)")
 
 
 granularityReader :: ReadM Granularity
@@ -151,6 +156,15 @@ granularityReader = eitherReader $ \s -> case s of
   "file"     -> Right GranularityFile
   other      -> Left $ "Unknown granularity: " ++ other ++ ". Expected fine, function, or file"
 
+-- | Reader for the @--max-community-fraction@ fraction. Rejects non-numeric
+-- input and anything outside the validated @(0,1]@ range accepted by
+-- 'Graphos.Domain.Config.Clustering.validClusteringConfig'.
+fractionReader :: ReadM Double
+fractionReader = eitherReader $ \s ->
+  case readMaybe s of
+    Just v | v > 0 && v <= 1 -> Right v
+           | otherwise      -> Left (unwords ["--max-community-fraction out of range (0,1]:", s])
+    Nothing                -> Left (unwords ["not a valid number:", s])
 detectModeReader :: ReadM DetectionMode
 detectModeReader = eitherReader $ \s -> case map toLower s of
   "exclude"  -> Right Exclude
@@ -263,6 +277,7 @@ serveOpts = Serve
   <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
   <*> switch (long "api-only" <> help "Serve only the query API, not static files")
   <*> switch (long "no-api" <> help "Serve only static files, not the query API")
+  <*> strOption (long "host" <> long "bind" <> value "127.0.0.1" <> help "Host/interface to bind (default: 127.0.0.1; use 0.0.0.0 to expose publicly)")
 
 pushOpts :: Parser Command
 pushOpts = PushCmd
