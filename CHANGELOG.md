@@ -18,6 +18,7 @@
 ### Fixed
 - Java wildcard imports deduplicate source files discovered across ancestor
   directories.
+- Apply review-driven changes from AVI-10 verdicts (AVI-11).
 
 ### Changed
 - Node ids now use the `<dirHash>_<stem>_<kind>:<identifier>` layout (Group 3

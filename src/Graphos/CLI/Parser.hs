@@ -20,12 +20,7 @@ module Graphos.CLI.Parser
   , ingestOpts
   , subgraphOpts
   , migrateGraphOpts
-  , speccheckOpts
-  , intentcheckOpts
-  , impactOpts
   , commandOpts
-  , initOpts
-  , installSkillOpts
   , granularityReader
     -- * Install-skill target
   , InstallSkillTarget(..)
@@ -41,7 +36,7 @@ import Text.Read (readMaybe)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Query.Refine (EdgeMode(..))
-import Graphos.UseCase.Query.Render (CommonQueryOpts(..), FormatOpt(..))
+import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Domain.Config.Detection (DetectionMode(..))
@@ -61,7 +56,7 @@ data Command
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
    | IngestCmd FilePath (Maybe Bool) FilePath Bool
-  | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool [Text] (Maybe FilePath)
+  | SubgraphCmd FilePath (Maybe FilePath) FilePath Int Bool
   | SpeccheckCmd FilePath Bool Bool [Text] Bool (Maybe FilePath) Bool
   | IntentcheckCmd FilePath FilePath [Text] Bool
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
@@ -191,20 +186,13 @@ heapSizeReader s = case span (`notElem` ['G','g','M','m']) s of
     [(n, "")] -> Right (round (n :: Double))
     _ -> Left $ "Cannot parse heap size: " ++ s ++ ". Expected a number with optional G/M suffix (e.g. 1G, 512M, 2048)"
 
-formatOptReader :: String -> Either String FormatOpt
-formatOptReader s = case map toLower s of
-  "json"   -> Right FormatJson
-  "csv"    -> Right FormatCsv
-  "tsv"    -> Right FormatTsv
-  other    -> Left $ "Unknown format: " ++ other ++ ". Expected json, csv, or tsv."
-
 edgeModeReader :: ReadM EdgeMode
 edgeModeReader = eitherReader $ \s -> case s of
   "semantic" -> Right Semantic
   "all"      -> Right All
   other      -> Left $ "Unknown edge mode: " ++ other ++ ". Expected semantic or all"
 
--- | Shared query-family flags: --graph, --budget, --json, --format, --label-width, --edges.
+-- | Shared query-family flags: --graph, --budget, --json, --label-width, --edges.
 -- Reused by query/path/explain/symbols/neighbors so every command in the family
 -- accepts the same machine-readable flag surface (query-cli-contract).
 commonQueryOptsP :: Parser CommonQueryOpts
@@ -212,8 +200,6 @@ commonQueryOptsP = CommonQueryOpts
   <$> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json file")
   <*> option auto (long "budget" <> value 2000 <> help "Token budget for output")
   <*> switch (long "json" <> help "Output as JSON")
-  -- | Select output format: json, csv, or tsv. --json is equivalent to --format json.
-  <*> option (eitherReader formatOptReader) (long "format" <> value FormatTsv <> help "Output format: json|csv|tsv (default: tsv)")
   <*> option auto (long "label-width" <> value 120 <> help "Max label width before elision")
   <*> option edgeModeReader (long "edges" <> value Semantic <> metavar "MODE" <> help "Edge mode: semantic|all (default: semantic)")
   <*> switch (long "strict-graph" <> help "Fail-fast on unknown enum values or missing top-level keys (default: tolerant)")
@@ -244,7 +230,6 @@ researchOpts =
         { cqoGraphPath   = graphPath
         , cqoBudget      = 2000
         , cqoJson        = False
-        , cqoFormat      = FormatTsv
         , cqoLabelWidth  = 120
         , cqoEdges       = Semantic
         , cqoStrictGraph = False
@@ -339,8 +324,6 @@ subgraphOpts = SubgraphCmd
   <*> strOption (long "out" <> short 'o' <> value "graphos-out/subgraph.json" <> help "Output graph.json path (default: graphos-out/subgraph.json)")
   <*> option auto (long "boundary-hops" <> value 1 <> help "Boundary expansion hops over imports edges (default: 1)")
   <*> switch (long "no-derive" <> help "Disable deriving imports edges from Import nodes")
-  <*> many (strOption (long "path" <> metavar "PATTERN" <> help "Path pattern for subsystem selection (repeatable)"))
-  <*> optional (strOption (long "seeds" <> metavar "FILE" <> help "File containing seed terms, one per line"))
 
 speccheckOpts :: Parser Command
 speccheckOpts = SpeccheckCmd
