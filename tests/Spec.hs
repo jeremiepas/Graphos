@@ -100,6 +100,7 @@ import qualified Graphos.UseCase.PipelineIncrementalSpec
 import qualified Graphos.UseCase.InferBetweennessWiringSpec
 import qualified Graphos.UseCase.IngestSpec
 import qualified Graphos.Infrastructure.FileSystem.CacheSpec
+import qualified Graphos.UseCase.LabelCacheSpec
 import qualified OpenSpecView.ChangeListSpec
 import qualified OpenSpecView.ArtifactViewSpec
 import qualified OpenSpecView.SpecDiffSpec
@@ -111,6 +112,7 @@ import qualified Graphos.Domain.Intent.ClassifierSpec
 import qualified Graphos.Domain.Intent.ProjectionSpec
 import qualified Graphos.Domain.Config.OutputSpec
 import qualified Graphos.Infrastructure.FileSystem.OutputPlacementSpec
+import qualified Graphos.Infrastructure.FileSystem.WatcherSpec
 
 main :: IO ()
 main = Test.Hspec.hspec $ do
@@ -203,6 +205,7 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.InferBetweennessWiringSpec.spec
   Graphos.UseCase.IngestSpec.spec
   Graphos.Infrastructure.FileSystem.CacheSpec.spec
+  Graphos.UseCase.LabelCacheSpec.spec
   OpenSpecView.ChangeListSpec.spec
   OpenSpecView.ArtifactViewSpec.spec
   OpenSpecView.SpecDiffSpec.spec
@@ -214,4 +217,5 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Intent.ProjectionSpec.spec
   Graphos.Domain.Config.OutputSpec.spec
   Graphos.Infrastructure.FileSystem.OutputPlacementSpec.spec
+  Graphos.Infrastructure.FileSystem.WatcherSpec.spec
 
