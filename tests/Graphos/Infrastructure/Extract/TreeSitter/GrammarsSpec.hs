@@ -19,7 +19,7 @@ import Data.Text.Short (toText)
 import Graphos.Domain.Config (Granularity(..), ExtractorConfig(..), defaultExtractors)
 import Graphos.Domain.Types (Node(..))
 import Graphos.Domain.Types.Graph (extractionNodes)
-import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Wiring (getGrammarPtr)
 
@@ -34,7 +34,7 @@ extract grammar gran path src =
         Nothing -> expectationFailure ("parse failed for " ++ grammar) >> pure []
         Just ts -> pure
           [ (maybe "" toText (nodeKind n), toText (nodeLabel n))
-          | n <- Map.elems (extractionNodes (tsNodesToExtraction gran path ts)) ]
+          | n <- Map.elems (extractionNodes (tsNodesToExtraction (mkSourceFile path "") gran defaultTruncationBudget ts)) ]
 
 -- | Assert that some node has @kind@ and a label containing @needle@.
 hasNode :: [(Text, Text)] -> Text -> Text -> Expectation
@@ -74,45 +74,45 @@ spec = describe "tree-sitter grammars" $ do
   it "Ruby: modules, classes, instance and singleton methods" $ do
     ns <- extract "ruby" GranularityFunction "a.rb" $
       "module Shop\n  class Cart\n    def total; 1; end\n    def self.build; new; end\n  end\nend\n"
-    hasNode ns "Class" "class Cart"
-    hasNode ns "Method" "def total"
-    hasNode ns "Method" "def self.build"
+    hasNode ns "Class" "Cart"
+    hasNode ns "Method" "total"
+    hasNode ns "Method" "build"
 
   it "Go: package, types, functions and methods" $ do
     ns <- extract "go" GranularityFunction "a.go" $
       "package shop\n\ntype Cart struct{ n int }\n\nfunc New() *Cart { return &Cart{} }\n\nfunc (c *Cart) Total() int { return c.n }\n"
-    hasNode ns "Module" "package shop"
-    hasNode ns "Function" "func New()"
-    hasNode ns "Method" "Total()"
+    hasNode ns "Module" "a.go"
+    hasNode ns "Function" "New"
+    hasNode ns "Method" "Total"
 
   it "C++: namespaces, classes, structs and functions" $ do
     ns <- extract "cpp" GranularityFunction "a.cpp" $
       "#include <vector>\nnamespace shop {\nclass Cart { public: int total() const { return 1; } };\nstruct Item { int n; };\nint helper(int x) { return x; }\n}\n"
-    hasNode ns "Module" "namespace shop"
-    hasNode ns "Namespace" "namespace shop"
-    hasNode ns "Class" "class Cart"
-    hasNode ns "Struct" "struct Item"
-    hasNode ns "Function" "int helper"
+    hasNode ns "Module" "a.cpp"
+    hasNode ns "Namespace" "shop"
+    hasNode ns "Class" "Cart"
+    hasNode ns "Struct" "Item"
+    hasNode ns "Function" "helper"
     hasNode ns "Import" "#include <vector>"
 
   it "Python: classes and functions" $ do
     ns <- extract "python" GranularityFunction "a.py" $
       "import os\n\nclass Cart:\n    def total(self):\n        return 1\n\ndef helper():\n    pass\n"
-    hasNode ns "Class" "class Cart"
-    hasNode ns "Function" "def helper"
+    hasNode ns "Class" "Cart"
+    hasNode ns "Function" "helper"
 
   it "Rust: structs, impls and functions" $ do
     ns <- extract "rust" GranularityFunction "a.rs" $
       "struct Cart { n: i32 }\nimpl Cart { fn total(&self) -> i32 { self.n } }\nfn helper() {}\n"
-    hasNode ns "Struct" "struct Cart"
-    hasNode ns "Impl" "impl Cart"
-    hasNode ns "Function" "fn helper"
+    hasNode ns "Struct" "Cart"
+    hasNode ns "Impl" "Cart"
+    hasNode ns "Function" "helper"
 
   it "SQL: tables, functions and indexes" $ do
     ns <- extract "sql" GranularityFunction "a.sql" $
       "CREATE TABLE cart (id INT PRIMARY KEY, total INT);\nCREATE INDEX cart_total ON cart (total);\nSELECT id FROM cart;\n"
-    hasNode ns "Module" "CREATE TABLE cart"
-    hasNode ns "Table" "CREATE TABLE cart"
+    hasNode ns "Module" "a.sql"
+    hasNode ns "Table" "cart"
     hasNode ns "Index" "cart_total"
     -- DML is implementation detail: absent at function granularity
     kinds ns `shouldNotContain` ["Query"]
@@ -133,10 +133,10 @@ spec = describe "tree-sitter grammars" $ do
     src <- readFixture "example/ts-lsp-test/src/types.ts"
     ns <- extract "typescript" GranularityFunction "types.ts" src
     -- Declared declarations survive with their real kinds
-    hasNode ns "Interface" "interface User"
-    hasNode ns "Interface" "interface CreateUserRequest"
-    hasNode ns "Enum" "enum UserRole"
-    hasNode ns "Type" "type UserId"
+    hasNode ns "Interface" "User"
+    hasNode ns "Interface" "CreateUserRequest"
+    hasNode ns "Enum" "UserRole"
+    hasNode ns "Type" "UserId"
     -- Only the `type UserId = number` alias yields kind "Type"; every bare type
     -- reference (the dropped `type_identifier`) would previously have too, so
     -- exactly one Type node must remain.
