@@ -28,11 +28,11 @@ grammarForFile config fp =
 extractViaTreeSitterFFI :: AppEnv -> Granularity -> String -> FilePath -> IO Extraction
 extractViaTreeSitterFFI appEnv _ "markdown" filePath = epExtractDocFile (extractionPort appEnv) filePath
 extractViaTreeSitterFFI appEnv _ "haskell"  filePath = epExtractHaskellStub (extractionPort appEnv) filePath
-extractViaTreeSitterFFI appEnv _gran grammar filePath = do
+extractViaTreeSitterFFI appEnv gran grammar filePath = do
   let ep = extractionPort appEnv
       lp = loggingPort appEnv
   content <- BS.readFile filePath
-  result <- epParseWithGrammar ep grammar filePath content
+  result <- epParseWithGrammar ep gran grammar filePath content
   case result of
     Nothing -> do
       lpLogWarn lp $ T.pack $ "  [tree-sitter] No grammar for " ++ grammar ++ " or parse failed for " ++ filePath
