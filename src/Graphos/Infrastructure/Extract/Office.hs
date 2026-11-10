@@ -55,6 +55,7 @@ officeStubNode fp = Node
   , nodeLabel = fromText (T.pack (takeFileName fp))
   , nodeFileType = OfficeFile
   , nodeSourceFile = fromText (T.pack fp)
+  , nodeSource = Nothing
   , nodeLineStart = Nothing
   , nodeLineEnd = Nothing
   , nodeSignature = Nothing
@@ -63,6 +64,5 @@ officeStubNode fp = Node
   , nodeDegree = Nothing
   , nodeIsBridge = Nothing
   , nodeExtra = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits = bitNodeKind
   }

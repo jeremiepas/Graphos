@@ -30,6 +30,13 @@ module Studio.Data.Graph exposing
 `Graphos.Domain.Types.Edge`): 12-field nodes, 7-field edges, plus the
 `community_aggregates` dataset from `html-lod-viewer` (synthesized client-side
 when the export predates it). One decoder for file mode and connected mode.
+
+Two wire shapes decode through `decoder`: the hand-written contract fixture
+(flat top-level `nodes` / `edges` lists) and real graphos binary output — the
+JGF envelope (`graphos.code-knowledge-graph`), whose nodes/edges carry their
+data under `metadata` and whose analysis sections live under
+`graph.metadata.graphos`. The studio contract test (AVI-1071) decodes the
+real binary output; the flat shape stays for the offline unit tests.
 -}
 
 import Bitwise
@@ -180,21 +187,64 @@ optField name d =
     D.oneOf [ D.field name (D.nullable d), D.succeed Nothing ]
 
 
+optAt : List String -> D.Decoder a -> D.Decoder (Maybe a)
+optAt path d =
+    D.oneOf [ D.at path (D.nullable d), D.succeed Nothing ]
+
+
+fileTypeField : D.Decoder FileType
+fileTypeField =
+    D.string
+        |> D.andThen
+            (\s ->
+                case fileTypeFromString s of
+                    Just ft ->
+                        D.succeed ft
+
+                    Nothing ->
+                        D.fail ("Unknown file type: " ++ s)
+            )
+
+
+{-| Aggregate / community ids arrive as JSON ints in the hand-written
+contract fixture and as JSON strings in real binary output (JGF encodes
+map keys and aggregate ids as strings). Accept both.
+-}
+flexibleInt : D.Decoder Int
+flexibleInt =
+    D.oneOf
+        [ D.int
+        , D.string
+            |> D.andThen
+                (\s ->
+                    case String.toInt s of
+                        Just v ->
+                            D.succeed v
+
+                        Nothing ->
+                            D.fail ("Not an int: " ++ s)
+                )
+        ]
+
+
+nodeTail : List String -> Node -> D.Decoder Node
+nodeTail prefix n =
+    let
+        at name =
+            optAt (prefix ++ [ name ])
+    in
+    D.map4
+        (\kind degree isBridge extra ->
+            { n | kind = kind, degree = degree, isBridge = isBridge, extra = extra }
+        )
+        (at "kind" D.string)
+        (at "degree" D.int)
+        (at "is_bridge" D.bool)
+        (at "extra" D.value)
+
+
 nodeDecoder : D.Decoder Node
 nodeDecoder =
-    let
-        fileType =
-            D.string
-                |> D.andThen
-                    (\s ->
-                        case fileTypeFromString s of
-                            Just ft ->
-                                D.succeed ft
-
-                            Nothing ->
-                                D.fail ("Unknown file type: " ++ s)
-                    )
-    in
     D.map8
         (\id label ft sf ls le sig cid ->
             { id = id
@@ -213,23 +263,47 @@ nodeDecoder =
         )
         (D.field "id" D.string)
         (D.field "label" D.string)
-        (D.field "file_type" fileType)
+        (D.field "file_type" fileTypeField)
         (D.field "source_file" D.string)
         (optField "line_start" D.int)
         (optField "line_end" D.int)
         (optField "signature" D.string)
         (optField "community_id" D.int)
-        |> D.andThen
-            (\n ->
-                D.map4
-                    (\kind degree isBridge extra ->
-                        { n | kind = kind, degree = degree, isBridge = isBridge, extra = extra }
-                    )
-                    (optField "kind" D.string)
-                    (optField "degree" D.int)
-                    (optField "is_bridge" D.bool)
-                    (optField "extra" D.value)
-            )
+        |> D.andThen (nodeTail [])
+
+
+{-| JGF envelope node (`graphos.code-knowledge-graph`): `id` and `label`
+top-level, every other field under `metadata` (see
+`Graphos.Domain.Types.JGF`). `file_type` and `source_file` are always
+written by the binary; the rest are optional.
+-}
+jgfNodeDecoder : D.Decoder Node
+jgfNodeDecoder =
+    D.map8
+        (\id label ft sf ls le sig cid ->
+            { id = id
+            , label = label
+            , fileType = ft
+            , sourceFile = sf
+            , lineStart = ls
+            , lineEnd = le
+            , signature = sig
+            , communityId = cid
+            , kind = Nothing
+            , degree = Nothing
+            , isBridge = Nothing
+            , extra = Nothing
+            }
+        )
+        (D.field "id" D.string)
+        (D.field "label" D.string)
+        (D.at [ "metadata", "file_type" ] fileTypeField)
+        (D.at [ "metadata", "source_file" ] D.string)
+        (optAt [ "metadata", "line_start" ] D.int)
+        (optAt [ "metadata", "line_end" ] D.int)
+        (optAt [ "metadata", "signature" ] D.string)
+        (optAt [ "metadata", "community_id" ] D.int)
+        |> D.andThen (nodeTail [ "metadata" ])
 
 
 edgeDecoder : D.Decoder Edge
@@ -244,10 +318,25 @@ edgeDecoder =
         (optField "extra" D.value)
 
 
+{-| JGF envelope edge: `source` / `relation` / `target` top-level, `id`,
+`weight`, `confidence` and `extra` under `metadata`.
+-}
+jgfEdgeDecoder : D.Decoder Edge
+jgfEdgeDecoder =
+    D.map7 Edge
+        (D.at [ "metadata", "id" ] D.string)
+        (D.field "source" D.string)
+        (D.field "target" D.string)
+        (D.field "relation" D.string)
+        (optAt [ "metadata", "weight" ] D.float)
+        (optAt [ "metadata", "confidence" ] D.float)
+        (optAt [ "metadata", "extra" ] D.value)
+
+
 aggregateDecoder : D.Decoder Aggregate
 aggregateDecoder =
     D.map7 Aggregate
-        (D.field "id" D.int)
+        (D.field "id" flexibleInt)
         (D.field "member_count" D.int)
         (D.oneOf [ D.field "cohesion" D.float, D.succeed 0 ])
         (D.oneOf [ D.field "bridge_count" D.int, D.succeed 0 ])
@@ -266,31 +355,61 @@ communityLabelsDecoder =
             )
 
 
-{-| Decode a full graph.json. `community_aggregates` and `community_labels`
-are optional; aggregates are synthesized when absent.
+{-| Build the graph record shared by both wire shapes: nodes/edges keyed by
+id, with aggregate synthesis when the export predates `community_aggregates`.
+-}
+assembleGraph : List Node -> List Edge -> List Aggregate -> Dict Int String -> Graph
+assembleGraph nodes edges aggregates labels =
+    let
+        g =
+            { nodes = Dict.fromList (List.map (\n -> ( n.id, n )) nodes)
+            , edges = Dict.fromList (List.map (\e -> ( e.id, e )) edges)
+            , aggregates = aggregates
+            , communityLabels = labels
+            }
+    in
+    if List.isEmpty aggregates then
+        { g | aggregates = synthesizeAggregates g }
+
+    else
+        g
+
+
+{-| Decode a full graph.json. Two wire shapes are accepted:
+
+  - the hand-written contract fixture (top-level `nodes` / `edges` lists,
+    optional `community_aggregates` / `community_labels`), and
+  - real graphos binary output — the JGF envelope
+    (`graphos.code-knowledge-graph`: `nodes` object keyed by id under
+    `graph`, graphos analysis data under `graph.metadata.graphos`).
+
+  `community_aggregates` and `community_labels` are optional in both;
+  aggregates are synthesized when absent.
 -}
 decoder : D.Decoder Graph
 decoder =
-    D.map4
-        (\nodes edges aggregates labels ->
-            let
-                g =
-                    { nodes = Dict.fromList (List.map (\n -> ( n.id, n )) nodes)
-                    , edges = Dict.fromList (List.map (\e -> ( e.id, e )) edges)
-                    , aggregates = aggregates
-                    , communityLabels = labels
-                    }
-            in
-            if List.isEmpty aggregates then
-                { g | aggregates = synthesizeAggregates g }
+    D.oneOf
+        [ D.map4 assembleGraph
+            (D.field "nodes" (D.list nodeDecoder))
+            (D.field "edges" (D.list edgeDecoder))
+            (D.oneOf [ D.field "community_aggregates" (D.list aggregateDecoder), D.succeed [] ])
+            (D.oneOf [ D.field "community_labels" communityLabelsDecoder, D.succeed Dict.empty ])
+        , jgfDecoder
+        ]
 
-            else
-                g
+
+{-| Real graphos binary output (the `graphos-fixture` CI artifact): the JGF
+envelope written by `Graphos.Infrastructure.Export.IncrementalJSON`.
+-}
+jgfDecoder : D.Decoder Graph
+jgfDecoder =
+    D.map4 assembleGraph
+        (D.at [ "graph", "nodes" ] (D.keyValuePairs jgfNodeDecoder)
+            |> D.map (List.map (\( _, n ) -> n))
         )
-        (D.field "nodes" (D.list nodeDecoder))
-        (D.field "edges" (D.list edgeDecoder))
-        (D.oneOf [ D.field "community_aggregates" (D.list aggregateDecoder), D.succeed [] ])
-        (D.oneOf [ D.field "community_labels" communityLabelsDecoder, D.succeed Dict.empty ])
+        (D.at [ "graph", "edges" ] (D.list jgfEdgeDecoder))
+        (D.oneOf [ D.at [ "graph", "metadata", "graphos", "community_aggregates" ] (D.list aggregateDecoder), D.succeed [] ])
+        (D.oneOf [ D.at [ "graph", "metadata", "graphos", "community_labels" ] communityLabelsDecoder, D.succeed Dict.empty ])
 
 
 

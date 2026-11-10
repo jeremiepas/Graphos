@@ -23,6 +23,7 @@ mkNode i label = Node
   , nodeLabel        = fromText label
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "src/Test.hs"
+,   nodeSource = Nothing
   , nodeLineStart    = Just i
   , nodeLineEnd      = Nothing
   , nodeCommunityId  = Just (if i == 1 then 1 else 2)
@@ -31,7 +32,6 @@ mkNode i label = Node
   , nodeExtra        = Nothing
   , nodeKind         = Nothing
   , nodeSignature    = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -67,6 +67,8 @@ parserAnalysis = Analysis
   , analysisGodNodes    = [GodNode "n3" "Main" 246]
   , analysisSurprises   = []
   , analysisQuestions   = []
+  , analysisArticulation = []
+  , analysisBccCount    = 0
   }
 
 budget :: ContextBudget

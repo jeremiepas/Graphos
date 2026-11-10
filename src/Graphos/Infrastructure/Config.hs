@@ -6,13 +6,22 @@
 module Graphos.Infrastructure.Config
   ( -- * Loading
     loadConfig
+  , loadConfigSilent
   , loadConfigFrom
   , loadConfigWithGlobal
   , globalConfigPath
 
     -- * Resolution helpers
   , findLSPServerFromConfig
+  , resolveLSPServer
+  , effectiveLSPServerCommands
   , languageIdFromConfig
+
+    -- * Init / writing
+  , generateDefaultConfig
+  , writeConfigYaml
+  , configDocComments
+  , fullInitTemplate
 
     -- * Re-export domain types
   , module Graphos.Domain.Config
@@ -24,12 +33,17 @@ import qualified Data.ByteString as BS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Yaml (FromJSON(..), withObject, (.:?))
-import System.Directory (doesFileExist, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
+import System.Directory (doesFileExist, findExecutable, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
 import System.Exit (exitWith, ExitCode(..))
-import System.IO (hPutStrLn, stderr)
 import System.FilePath ((</>))
+import System.IO (hPutStrLn, stderr)
 import qualified Data.Yaml as Yaml
+
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeStringFileAtomic)
+import qualified Graphos.Infrastructure.LSP.ServerMap as ServerMap
 
 import Graphos.Domain.Config ( PdfExtractionMode(..)
                              , GraphosConfig(..)
@@ -46,12 +60,16 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                                , Granularity(..)
                                , LSPServerConfig(..)
                                , IngestConfig(..)
+                               , MemoryConfig(..)
+                               , SourceConfig(..)
+                               , CacheConfig(..)
                                , validateEmbeddingConfig
    , defaultGraphosConfig
    , mergeGraphosConfig
    )
 
 import Graphos.Domain.Config.Detection (DetectionConfig(..))
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..))
 
 -- ───────────────────────────────────────────────
 -- Configuration file format (YAML)
@@ -75,6 +93,11 @@ data ConfigFile = ConfigFile
   , cfVision            :: Maybe VisionConfig
    , cfIngest            :: Maybe IngestConfig
    , cfDetection         :: Maybe DetectionConfig
+    , cfClustering        :: Maybe ClusteringConfig
+   , cfMemory            :: Maybe MemoryConfig
+   , cfSources           :: Maybe [SourceConfig]
+   , cfOutput            :: Maybe FilePath
+   , cfCache             :: Maybe CacheConfig
    } deriving (Eq, Show)
 
 instance FromJSON ConfigFile where
@@ -94,6 +117,11 @@ instance FromJSON ConfigFile where
      <*> v .:? "vision"
      <*> v .:? "ingest"
      <*> v .:? "detection"
+      <*> v .:? "clustering"
+     <*> v .:? "memory"
+     <*> v .:? "sources"
+     <*> v .:? "output"
+     <*> v .:? "cache"
 
 -- ───────────────────────────────────────────────
 -- Loading
@@ -116,11 +144,20 @@ globalConfigPath = do
 -- Project values override global; global values fill in defaults.
 -- This is the main entry point used by the CLI.
 loadConfig :: IO GraphosConfig
-loadConfig = loadConfigWithGlobal "graphos.yaml"
+loadConfig = loadConfigWithGlobal' True "graphos.yaml"
+
+-- | Like 'loadConfig' but without the "[config] ..." provenance lines.
+-- Used before the RTS re-exec, where the child process loads (and reports)
+-- the same config again moments later.
+loadConfigSilent :: IO GraphosConfig
+loadConfigSilent = loadConfigWithGlobal' False "graphos.yaml"
 
 -- | Load with a custom project config path (e.g. for testing).
 loadConfigWithGlobal :: FilePath -> IO GraphosConfig
-loadConfigWithGlobal projectPath = do
+loadConfigWithGlobal = loadConfigWithGlobal' True
+
+loadConfigWithGlobal' :: Bool -> FilePath -> IO GraphosConfig
+loadConfigWithGlobal' verbose projectPath = do
   globalPath <- globalConfigPath
   globalCfg <- loadConfigFrom globalPath
   projectCfg <- loadConfigFrom projectPath
@@ -128,9 +165,9 @@ loadConfigWithGlobal projectPath = do
     then pure defaultGraphosConfig
     else do
       let merged = mergeGraphosConfig globalCfg projectCfg
-      when (globalCfg /= defaultGraphosConfig) $
+      when (verbose && globalCfg /= defaultGraphosConfig) $
         putStrLn $ "[config] Global: " ++ globalPath
-      when (projectCfg /= defaultGraphosConfig) $
+      when (verbose && projectCfg /= defaultGraphosConfig) $
         putStrLn $ "[config] Project: " ++ projectPath
       pure merged
 
@@ -215,7 +252,77 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcDetection = case cfDetection cfgFile of
       Just det -> det
       Nothing   -> gcDetection defaults
+   , gcClustering = case cfClustering cfgFile of
+       Just cl -> cl
+       Nothing  -> gcClustering defaults
+  , gcMemory = case cfMemory cfgFile of
+      Just mem -> mem
+      Nothing  -> gcMemory defaults
+  , gcSources = case cfSources cfgFile of
+      Just srcs -> srcs
+      Nothing   -> gcSources defaults
+  , gcOutput = case cfOutput cfgFile of
+      Just out -> Just out
+      Nothing  -> gcOutput defaults
+  , gcCache = case cfCache cfgFile of
+      Just c  -> c
+      Nothing -> gcCache defaults
   }
+
+-- ───────────────────────────────────────────────
+-- Init: generate and write a default config file (multi-source-graphs 2.3)
+-- ───────────────────────────────────────────────
+
+-- | Build the default 'GraphosConfig' (the same defaults the loader produces
+-- when no graphos.yaml exists). The @init@ workflow and tests use this as the
+-- round-trip baseline.
+generateDefaultConfig :: IO GraphosConfig
+generateDefaultConfig = pure defaultGraphosConfig
+
+-- | Serialize a config as YAML and write it atomically at the given path.
+-- The template's YAML key names intentionally mirror the documented sections
+-- in the generated @graphos.yaml@ (camelCase per ToJSON field names).
+writeConfigYaml :: FilePath -> GraphosConfig -> IO ()
+writeConfigYaml path cfg =
+  writeStringFileAtomic path (renderedYaml cfg <> "\n")
+
+-- | YAML rendering of a config (ByteString → strict UTF-8 Text, with
+-- trailing whitespace stripped so the file ends in exactly one newline).
+renderedYaml :: GraphosConfig -> String
+renderedYaml cfg = T.unpack (T.strip (TE.decodeUtf8 (Yaml.encode cfg)))
+
+-- | Commented documentation appended to the machine-rendered defaults by
+-- @graphos init@ (multi-source-graphs 2.3 / workflow 15). Every line is a
+-- comment so the generated file still parses exactly as the rendered config;
+-- the comments document the optional sections — including the multi-source
+-- @sources:@ example and the @output:@ key.
+configDocComments :: String
+configDocComments = unlines
+  [ ""
+  , "# ──── Multi-source (named roots) ─────────────"
+  , "# Graph multiple filesystem roots into ONE graph. Each source gets a name;"
+  , "# every node is tagged with its source and node ids stay distinct across"
+  , "# sources even for identical relative paths. Without `sources:`, Graphos"
+  , "# graphs the single positional PATH argument as before."
+  , "# sources:"
+  , "#   - name: repoA              # unique, non-empty"
+  , "#     path: ~/code/repoA       # must exist (~ and ${VAR} are expanded)"
+  , "#     ignore: [\"vendor\", \"dist\"]  # extra ignores scoped to this source"
+  , "#   - name: repoB"
+  , "#     path: ~/code/repoB"
+  , ""
+  , "# ──── Output directory ────────────────────────"
+  , "# Where graph.json, the HTML view, cache, manifest, and conversations are"
+  , "# written. Default: graphos-out/. The CLI flag -o/--output overrides this."
+  , "# output: my-graph-out"
+  ]
+
+-- | The full documented init template: the rendered default config followed
+-- by 'configDocComments'. Pure so tests can assert on the exact template
+-- content; @graphos init@ writes exactly this via 'writeConfigYaml' +
+-- an append of 'configDocComments'.
+fullInitTemplate :: GraphosConfig -> String
+fullInitTemplate cfg = renderedYaml cfg <> "\n" <> configDocComments
 
 -- ───────────────────────────────────────────────
 -- Resolution helpers (replace hardcoded lookups)
@@ -238,3 +345,30 @@ findLSPServerFromConfig config ext =
 languageIdFromConfig :: GraphosConfig -> String -> Text
 languageIdFromConfig config ext =
   Map.findWithDefault "plaintext" ext (gcLanguageIds config)
+
+-- | Resolve an LSP server for @ext@ honoring the merged config.
+--
+-- If @ext@ is present in 'gcLsp':
+--   * an empty 'lspCommand' means explicitly disabled -> 'Nothing';
+--   * otherwise resolve the command via 'findExecutable' (when possible,
+--     matching legacy 'ServerMap.findLSPServer') and return @('cmd', 'lspArgs')@.
+-- Otherwise fall back to 'ServerMap.findLSPServer'.
+resolveLSPServer :: GraphosConfig -> String -> IO (Maybe (String, [String]))
+resolveLSPServer config ext =
+  case Map.lookup ext (gcLsp config) of
+    Just server -> do
+      let cmd = lspCommand server
+      if null cmd
+        then pure Nothing
+        else do
+          found <- findExecutable cmd
+          pure $ Just (maybe cmd id found, lspArgs server)
+    Nothing -> ServerMap.findLSPServer ext
+
+-- | Effective (extension -> (command, args)) map merging config (winning)
+-- over the built-in 'ServerMap.languageServerCommands'.
+effectiveLSPServerCommands :: GraphosConfig -> Map String (String, [String])
+effectiveLSPServerCommands config =
+  Map.union
+    (Map.map (\s -> (lspCommand s, lspArgs s)) (gcLsp config))
+    ServerMap.languageServerCommands

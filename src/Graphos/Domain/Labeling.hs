@@ -4,15 +4,30 @@ module Graphos.Domain.Labeling
   ( LabelingResult(..)
   , labelPrompt
   , batchCommunities
+
+    -- * Label cache
+  , LabelCacheEntry(..)
+  , LabelCacheFile(..)
+  , MatchKind(..)
+  , fingerprintOf
+  , containmentRatio
+  , matchCommunity
   ) where
 
-import Data.List (sortOn, partition)
+import Data.List (sortOn, partition, sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Text.Short (toText)
-import Data.Aeson (Value, eitherDecode, encode)
+import Data.Aeson (Value, eitherDecode, encode, ToJSON(..), FromJSON(..), object, (.=), (.:), withObject)
+import qualified Data.Set as Set
+import Data.Set (Set)
+import qualified Data.ByteString as BS
+import Crypto.Hash.SHA256 (hash)
+import Numeric (showHex)
+import Data.Word (Word8)
 
 import Graphos.Domain.Types (CommunityId, Node(..), CommunityMap, FileType(..))
 import Graphos.Domain.Types.Node (NodeId)
@@ -21,10 +36,13 @@ import Graphos.Domain.Community (CommunityComposition(..))
 
 -- | Result of LLM community labeling.
 data LabelingResult = LabelingResult
-  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → LLM-generated label
+  { lrLabels        :: Map CommunityId Text    -- ^ Community ID → effective label (cache-served or LLM)
   , lrTokensIn     :: Int                     -- ^ Total input tokens used
   , lrTokensOut    :: Int                     -- ^ Total output tokens used
   , llmRawResponses :: [Text]                 -- ^ Raw LLM responses for debugging
+  , lrExactHits    :: Int                     -- ^ Communities served by an exact cache match
+  , lrFuzzyHits    :: Int                     -- ^ Communities served by a fuzzy cache match
+  , lrLlmLabeled   :: Int                     -- ^ Communities freshly labeled by the LLM this run
   } deriving (Eq, Show)
 
 -- | Build a labeling prompt for a batch of communities.
@@ -111,3 +129,129 @@ batchCommunities :: [CommunityId] -> Int -> [[CommunityId]]
 batchCommunities _ 0 = []
 batchCommunities [] _ = []
 batchCommunities cids size = take size cids : batchCommunities (drop size cids) size
+
+-- | A persisted label-cache entry for a single community.
+--
+-- The cache is a last-run snapshot keyed by model: only entries whose
+-- 'lceModel' equals the current labeling model are consulted, so a model
+-- change invalidates every entry. 'lceFingerprint' and 'lceMembers' together
+-- address the community's member set; 'lceLabeledAt' records when the label
+-- was produced (ISO-8601 text).
+data LabelCacheEntry = LabelCacheEntry
+  { lceFingerprint :: !Text          -- ^ SHA-256 (hex) of sorted member NodeIds
+  , lceMembers     :: ![NodeId]      -- ^ The community's member NodeIds
+  , lceLabel       :: !Text          -- ^ The LLM-generated label
+  , lceModel       :: !Text          -- ^ The labeling model that produced the label
+  , lceLabeledAt   :: !Text          -- ^ ISO-8601 timestamp of labeling
+  } deriving (Eq, Show)
+
+-- | How a cached entry matched a new community.
+data MatchKind
+  = ExactMatch   -- ^ Sorted member set equals a cached entry exactly.
+  | FuzzyMatch   -- ^ Bidirectional containment >= 0.8 against a cached entry.
+  deriving (Eq, Show)
+
+-- | The persisted label cache: a flat list of per-community entries.
+--
+-- Serialized as @<output>/cache/label-cache.json@ by the Infrastructure layer
+-- (task 4.1). The UseCase treats this as a last-run snapshot: after a labeling
+-- pass it is rewritten to contain exactly the current run's communities.
+data LabelCacheFile = LabelCacheFile
+  { lcfEntries :: [LabelCacheEntry]
+  } deriving (Eq, Show)
+
+instance ToJSON LabelCacheEntry where
+  toJSON e = object
+    [ "fingerprint" .= lceFingerprint e
+    , "members"     .= lceMembers e
+    , "label"       .= lceLabel e
+    , "model"       .= lceModel e
+    , "labeledAt"   .= lceLabeledAt e
+    ]
+
+instance FromJSON LabelCacheEntry where
+  parseJSON = withObject "LabelCacheEntry" $ \v -> LabelCacheEntry
+    <$> v .: "fingerprint"
+    <*> v .: "members"
+    <*> v .: "label"
+    <*> v .: "model"
+    <*> v .: "labeledAt"
+
+instance ToJSON LabelCacheFile where
+  toJSON (LabelCacheFile entries) = object ["entries" .= entries]
+
+instance FromJSON LabelCacheFile where
+  parseJSON = withObject "LabelCacheFile" $ \v -> LabelCacheFile <$> v .: "entries"
+
+-- | SHA-256 (hex) of a community's sorted member NodeIds.
+--
+-- 'Set.toList' returns elements in ascending order, so the members are hashed
+-- deterministically regardless of insertion order. A newline delimiter keeps
+-- two members from merging across their boundary.
+fingerprintOf :: Set NodeId -> Text
+fingerprintOf members =
+  T.pack (concatMap byteToHex (BS.unpack digest))
+  where
+    digest = hash (TE.encodeUtf8 (T.intercalate "\n" (Set.toList members))) :: BS.ByteString
+
+-- | Hex-encode a single byte, zero-padding to two digits.
+byteToHex :: Word8 -> String
+byteToHex w =
+  let s = showHex (fromIntegral w :: Integer) ""
+  in if length s == 1 then '0' : s else s
+
+-- | Containment ratio @|new ∩ old| / denom@, guarding divide-by-zero.
+containmentRatio :: Int -> Int -> Double
+containmentRatio _ 0 = 0.0
+containmentRatio n d = fromIntegral n / fromIntegral d
+
+-- | Size of the intersection between the new community and a cached entry's
+-- members.
+intersectionSizeOf :: Set NodeId -> LabelCacheEntry -> Int
+intersectionSizeOf newMembers e =
+  Set.size (Set.intersection newMembers (Set.fromList (lceMembers e)))
+
+-- | Resolve a cached label for a new community.
+--
+-- The pipeline consults only entries recorded under the current model. An exact
+-- fingerprint match short-circuits and wins over any fuzzy match. Otherwise the
+-- best fuzzy candidate is chosen: the entry whose members satisfy the
+-- bidirectional containment rule (both ratios >= 0.8) with the largest
+-- intersection, tie-broken by the lowest community id.
+--
+-- 'LabelCacheEntry' carries no community id, so the caller passes entries in
+-- ascending community-id order and this function treats the earliest matching
+-- entry (lowest list position) as the lowest community id for the final
+-- tie-break.
+matchCommunity :: [LabelCacheEntry] -> Text -> Set NodeId -> Maybe (LabelCacheEntry, MatchKind)
+matchCommunity entries model newMembers =
+  let sameModel = filter (\e -> lceModel e == model) entries
+      newFp     = fingerprintOf newMembers
+  in case lookup newFp [(fingerprintOf (Set.fromList (lceMembers e)), e) | e <- sameModel] of
+        Just e -> Just (e, ExactMatch)
+        Nothing ->
+          let indexed = zip [0 ..] sameModel
+              scored  = map toScored indexed
+              kept    = filter keep scored
+          in case kept of
+                [] -> Nothing
+                _  -> case sortBy cmp kept of
+                          ((_, _, e) :_) -> Just (e, FuzzyMatch)
+                          []              -> Nothing
+          where
+            toScored :: (Int, LabelCacheEntry) -> (Int, Int, LabelCacheEntry)
+            toScored (position, e) =
+              let inter = intersectionSizeOf newMembers e
+              in (inter, position, e)
+
+            keep :: (Int, Int, LabelCacheEntry) -> Bool
+            keep (inter, _, e) =
+              let newSize = Set.size newMembers
+                  oldSize = Set.size (Set.fromList (lceMembers e))
+              in containmentRatio inter newSize >= 0.8
+              && containmentRatio inter oldSize >= 0.8
+
+            cmp :: (Int, Int, LabelCacheEntry) -> (Int, Int, LabelCacheEntry) -> Ordering
+            cmp (i1, p1, _) (i2, p2, _)
+              | i1 /= i2 = compare i2 i1
+              | otherwise = compare p1 p2

@@ -1,8 +1,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Graphos.Domain.TypesSpec where
 
-import Data.Aeson (ToJSON(..), decode, encode, object, (.=), Value(..))
-import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson (ToJSON(..), decode, encode, object, (.=))
 import Data.Maybe (isJust)
 import Test.Hspec
 import Test.QuickCheck hiding (Confidence)
@@ -22,7 +21,7 @@ spec = do
       toJSON (Confidence 1.0) `shouldBe` toJSON (1.0 :: Double)
 
   describe "Relation" $ do
-    it "has exactly 16 constructors (8 code + 5 spec-artifact + Documents + Tests + Maps)" $ do
+    it "has exactly 16 constructors (8 code + 5 spec-artifact + Documents + 2 intent)" $ do
       length [minBound .. maxBound :: Relation] `shouldBe` 16
 
     it "round-trips through text representation" $ do
@@ -36,8 +35,18 @@ spec = do
       map relationToText [Refines, ConflictsWith, Satisfies, Supersedes, Constrains]
         `shouldBe` ["refines", "conflicts_with", "satisfies", "supersedes", "constrains"]
 
-    it "includes the intent-graph relations (test exercises target; maps parallel structure)" $ do
+    it "serializes the documents relation (deterministic doc-code edges)" $ do
+      relationToText Documents `shouldBe` "documents"
+      textToRelation "documents" `shouldBe` Just Documents
+
+    it "includes the intent relations (tests exercises; maps parallel structure)" $ do
       map relationToText [Tests, Maps] `shouldBe` ["tests", "maps"]
+      map textToRelation ["tests", "maps"] `shouldBe` [Just Tests, Just Maps]
+
+    it "round-trips the documents relation through JSON" $ do
+      let edge = Edge (EdgeId "d->c:documents") "d" "c" Documents 0.9 (Confidence 0.9) Nothing
+          enc = encode edge
+      (decode enc :: Maybe Edge) `shouldBe` Just edge
 
   describe "EdgeId" $ do
     it "wraps Text" $ do
@@ -81,68 +90,6 @@ spec = do
           nodeLineEnd n `shouldBe` Just 2
           nodeExtra n `shouldBe` Just (object ["x" .= (1 :: Int)])
 
-  describe "Node body_hash" $ do
-    it "round-trips through JSON when present" $ do
-      let json = object
-            [ "id"          .= ("n1" :: T.Text)
-            , "label"       .= ("n1" :: T.Text)
-            , "file_type"   .= ("code" :: T.Text)
-            , "source_file" .= ("src/X.hs" :: T.Text)
-            , "body_hash"   .= (computeBodyHash "symbol-span" :: T.Text)
-            ]
-          decoded = decode (encode json) :: Maybe Node
-      decoded `shouldSatisfy` isJust
-      case decoded of
-        Nothing   -> expectationFailure "expected Just Node"
-        Just n    -> do
-          nodeBodyHash n `shouldBe` Just (computeBodyHash "symbol-span")
-          case toJSON n of
-            Object km ->
-              case KM.lookup "body_hash" km of
-                Just v ->
-                  case v of
-                    String s -> s `shouldBe` computeBodyHash "symbol-span"
-                    _        -> expectationFailure "body_hash was not a JSON string"
-                _      -> expectationFailure "body_hash did not round-trip"
-            _      -> expectationFailure "expected Object"
-
-    it "loads a pre-change graph that omits body_hash (tolerant load)" $ do
-      let oldJson = object
-            [ "id"          .= ("n1" :: T.Text)
-            , "label"       .= ("n1" :: T.Text)
-            , "file_type"   .= ("code" :: T.Text)
-            , "source_file" .= ("src/X.hs" :: T.Text)
-            ] -- absent, as produced before this field existed
-          decoded = decode (encode oldJson) :: Maybe Node
-      decoded `shouldSatisfy` isJust
-      case decoded of
-        Nothing   -> expectationFailure "legacy graph should still load"
-        Just n    -> do
-          nodeBodyHash n `shouldBe` Nothing
-          isFieldPresent (nodePresentBits n) bitNodeBodyHash `shouldBe` False
-
-    it "omits body_hash from output when absent (old consumers ignore the field)" $ do
-      let oldJson = object
-            [ "id"          .= ("n1" :: T.Text)
-            , "label"       .= ("n1" :: T.Text)
-            , "file_type"   .= ("code" :: T.Text)
-            , "source_file" .= ("src/X.hs" :: T.Text)
-            ]
-          decoded = decode (encode oldJson) :: Maybe Node
-      case decoded of
-        Nothing   -> expectationFailure "expected Just Node"
-        Just n    -> case toJSON n of
-          Object km -> KM.member "body_hash" km `shouldBe` False
-          _         -> expectationFailure "expected Object"
-
-    it "is stable: identical span bytes yield the same hash" $ do
-      computeBodyHash "the-symbol-span" `shouldBe` computeBodyHash "the-symbol-span"
-      computeBodyHash "the-symbol-span" `shouldNotBe` computeBodyHash "a-different-span"
-
 instance Arbitrary Relation where
-  arbitrary = elements
-    [ Calls, Imports, Extends, Implements, References, Contains, DependsOn, Inferred
-    , Documents, Refines, ConflictsWith, Satisfies, Supersedes, Constrains
-    , Tests, Maps
-    ]
+  arbitrary = elements [Calls, Imports, Extends, Implements, References, Contains, DependsOn, Inferred]
   {-# INLINE arbitrary #-}

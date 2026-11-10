@@ -423,6 +423,7 @@ symbolToNodes filePath symbols =
     , nodeLabel        = fromText (safeLabel (dsrName sym))
     , nodeFileType     = CodeFile
     , nodeSourceFile   = fromText (T.pack filePath)
+    , nodeSource       = Nothing
     , nodeLineStart    = Just $ posLine (rangeStart (dsrRange sym))
     , nodeCommunityId  = Nothing
     , nodeDegree       = Nothing
@@ -431,7 +432,6 @@ symbolToNodes filePath symbols =
     , nodeLineEnd      = Just $ posLine (rangeEnd (dsrRange sym))
     , nodeKind         = Just (fromText $ symbolKindToText (dsrKind sym))
     , nodeSignature    = Nothing
-    , nodeBodyHash = Nothing
     , nodePresentBits  = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeKind
     }
   | sym <- symbols
@@ -522,6 +522,7 @@ makeStubNode filePath =
     , nodeLabel        = fromText name
     , nodeFileType     = CodeFile
     , nodeSourceFile   = fromText (T.pack filePath)
+    , nodeSource       = Nothing
   , nodeLineStart    = Nothing
   , nodeCommunityId  = Nothing
   , nodeDegree       = Nothing
@@ -530,7 +531,6 @@ makeStubNode filePath =
     , nodeLineEnd      = Nothing
     , nodeKind         = Nothing
     , nodeSignature    = Nothing
-    , nodeBodyHash = Nothing
     , nodePresentBits  = 0
     }
 

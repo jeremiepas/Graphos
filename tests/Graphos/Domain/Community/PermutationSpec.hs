@@ -44,8 +44,8 @@ import Graphos.Domain.Community
 -- | A fresh code node keyed by an unique id.
 testNode :: Text -> Node
 testNode nid =
-  Node nid (fromText nid) CodeFile (fromText "test.hs")
-    (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
+  Node nid (fromText nid) CodeFile (fromText "test.hs") Nothing
+    (Just 1) Nothing Nothing Nothing Nothing Nothing Nothing Nothing 0
 
 -- | A directed edge between two ids.
 testEdge :: Text -> Text -> Edge

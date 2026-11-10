@@ -23,6 +23,7 @@ import Data.Maybe (isJust)
 import Data.Char (chr)
 import Data.Text (Text)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -62,6 +63,7 @@ mkNode nid = Node
   , nodeLabel        = fromText nid
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText "test.hs"
+,   nodeSource = Nothing
   , nodeLineStart    = Nothing
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing
@@ -70,7 +72,6 @@ mkNode nid = Node
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Nothing
-  , nodeBodyHash = Nothing
   , nodePresentBits  = 0
   }
 
@@ -128,6 +129,17 @@ decodeIdx gr i =
   case [ nid | (j, (nid, _)) <- FGL.labNodes gr, j == i ] of
     (nid : _) -> nid
     []        -> error ("NaturTransformationSpec: unknown fgl index " ++ show i)
+
+-- | Pull the @rows@ parameter out of an UNWIND batch statement (empty for
+-- any other statement shape). Used by the AC-4 rows-commute property.
+statementRowsOf :: Aeson.Value -> [Aeson.Value]
+statementRowsOf stmt = case stmt of
+  Aeson.Object o -> case KM.lookup "parameters" o of
+    Just (Aeson.Object po) -> case KM.lookup "rows" po of
+      Just (Aeson.Array a)  -> foldr (:) [] a
+      _                     -> []
+    _ -> []
+  _ -> []
 
 -- | The bijection condition: @nidToInt@ is injective over the given ids iff
 -- no two distinct ids share an fgl index.
@@ -314,12 +326,18 @@ spec = do
                 length mems <= 3 + Map.findWithDefault 0 cid artCount)
               (Map.toList reps)
 
-    it "generateParameterizedStatements commutes with graph merge" $ property $ \g ->
-      let g2   = mkGraph True [mkNode "disjoint-extra"] []
+    it "parameterized statement rows commute with graph merge" $ property $ \g ->
+      -- With UNWIND batch generation (optimize-neo4j-full-push), statements
+      -- group rows by entity kind per chunk, so set-of-statements no longer
+      -- commutes with merge (chunk boundaries differ between operands and
+      -- merged graphs). Naturality holds one level down: the flattened set
+      -- of pushed rows is identical.
+      let g2    = mkGraph True [mkNode "disjoint-extra"] []
           merged = mergeGraphs g g2
-          s1     = Set.fromList (generateParameterizedStatements g)
-          s2     = Set.fromList (generateParameterizedStatements g2)
-          sM     = Set.fromList (generateParameterizedStatements merged)
+          rowsOf = Set.fromList . concatMap statementRowsOf . generateParameterizedStatements
+          s1     = rowsOf g
+          s2     = rowsOf g2
+          sM     = rowsOf merged
       in sM `shouldBe` Set.union s1 s2
 
   describe "AC-5 integrator : naturality holds by construction" $ do

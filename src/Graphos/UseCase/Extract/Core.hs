@@ -8,47 +8,69 @@ module Graphos.UseCase.Extract.Core
   , resolveGranularity
   , granularityForFile
   , granularityName
+  , extractionConfigFingerprint
   , isStubExtraction
+  , StubCoverage(..)
+  , stubCoverage
+  , stubDominanceThreshold
+  , dominantStubExt
+  , stubCoverageWarning
   , concatMapM
   , chunkList
   , ImageSource(..)
   , extractImageSource
   , collectEmbeddedImages
   , collapseDetectedFiles
+  , applyTaggingSources
   ) where
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Exception (bracket_, evaluate)
-import Control.Monad (unless, void, when)
-import Data.List (nubBy, sortBy)
+import Control.Monad (forM, unless, void, when)
+import Data.List (nubBy, sortBy, intercalate, maximumBy)
 import Data.Ord (comparing)
 import Data.Bits ((.|.))
 import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
 import qualified Data.Text as T
+import Data.Text (Text)
+import Data.Map (Map)
 import Data.Text.Short (fromText, toText)
 import System.Directory (canonicalizePath)
 import System.FilePath (takeExtension, takeFileName)
 import Data.Char (toLower)
 import System.Mem (performGC)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, Granularity(..), VisionConfig(..), NodeId, Node(..), Edge(..), EdgeId, FileType(..), bitNodeKind, bitNodeExtra)
+import Graphos.Domain.Config (PdfExtractionMode(..))
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, gcPdfExtraction, Granularity(..), VisionConfig(..)  , NodeId, Node(..), Edge(..), EdgeId(..), FileType(..)  , bitNodeKind, bitNodeExtra, bitNodeSource, relationToText, setFieldPresent)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
+import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
+import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
 import Data.Aeson (object, (.=))
 
 -- | Extract entities from all detected files.
-extractAll :: AppEnv -> PipelineConfig -> Detection -> IO Extraction
-extractAll appEnv config detection = do
+--
+-- When @mProvenance@ is 'Just', this applies a multi-source tagging post-pass
+-- over the merged extraction: each node whose source file was attributed to a
+-- source is recomputed under that source's qualified path, tagged with its
+-- source name on 'nodeSource'/'nodeSourceFile', and edges are remapped so
+-- their endpoints (and ids) follow. When @mProvenance@ is 'Nothing' (the
+-- single-source case) the extraction is returned unchanged, preserving prior
+-- behavior byte-for-byte.
+extractAll :: AppEnv -> PipelineConfig -> Detection -> Maybe (Map Text (Text, Text)) -> IO Extraction
+extractAll appEnv config detection mProvenance = do
   let ep = extractionPort appEnv
       lp = loggingPort appEnv
+      fsp = fileSystemPort appEnv
       logInfo  = lpLogInfo lp
       logDebug = lpLogDebug lp
 
@@ -69,6 +91,28 @@ extractAll appEnv config detection = do
 
   let (treeSitterFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
 
+  -- Extraction cache (wire-incremental-update 4.2, D1): code files consult the
+  -- persistent content+config cache before any extractor runs. `--fresh`
+  -- bypasses the consult (cold rebuild); misses and fresh runs still write
+  -- through (cache writes remain permitted under --fresh per the spec).
+  -- LSP extraction is a live-server query (not per-file deterministic across
+  -- runs), so only the tree-sitter and stub paths participate for now; their
+  -- results are the deterministic parse tree products the cache soundness
+  -- theorem covers.
+  let cacheEnabled = not (cfgFresh config)
+      fingerprint  = extractionConfigFingerprint config
+  cachedTS <- if cacheEnabled
+    then do
+      results <- forM treeSitterFiles $ \fp -> do
+        mExt <- fspLoadCachedExtraction fsp fingerprint fp (cfgOutputDir config)
+        pure (fp, mExt)
+      let hits = [(fp, ext) | (fp, Just ext) <- results]
+          misses = [fp | (fp, Nothing) <- results]
+      pure (Just (hits, misses))
+    else pure Nothing
+  let (cachedTSHits, treeSitterFiles') = case cachedTS of
+        Just (hits, misses) -> (hits, misses)
+        Nothing             -> ([], treeSitterFiles)
   let hasSpecialHandler g = g == "markdown" || g == "haskell"
       grammarAvailable g = hasSpecialHandler g || epHasTreeSitterGrammar ep g
       missingGrammars = nubBy (\(g1, _) (g2, _) -> g1 == g2)
@@ -84,8 +128,8 @@ extractAll appEnv config detection = do
     logInfo $ T.pack $ "  tree-sitter: " ++ show (length treeSitterFiles) ++ " files"
   unless (null lspFiles) $
     logInfo $ T.pack $ "  LSP: " ++ show (length lspFiles) ++ " files"
-  unless (null stubFiles) $
-    logDebug $ T.pack $ "  stub: " ++ show (length stubFiles) ++ " files"
+  mapM_ (\msg -> logInfo $ T.pack $ "  [extract] WARNING: " ++ msg)
+    (stubCoverageWarning (stubCoverage (treeSitterFiles ++ lspFiles) stubFiles))
 
   let docThreads = min 8 (max 1 numThreads)
 
@@ -143,17 +187,33 @@ extractAll appEnv config detection = do
 
   let allImageSources = map StandaloneImage imageFiles ++ map (uncurry EmbeddedImage) embeddedImagesList
 
+  let
+    -- Accumulate, push, and persist one extraction (shared by cache hits and
+    -- fresh extractions). Write-through happens for fresh extractions and for
+    -- `--fresh` cold runs alike.
+    produce ext = do
+      epPushExtractionStreaming ep config ext
+      accumulate codeNodeMapRef codeEdgeAccRef ext
+      mergeIntoRunning ext
+
+    extractTS :: FilePath -> IO ()
+    extractTS fp = do
+      ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
+      fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+      produce ext
+
   void $ concurrently
     (void $ concurrently
       (do
-        let tsChunks = chunkList 500 treeSitterFiles
+        -- Serve cached extractions first (wire-incremental-update 4.2): no
+        -- parse is invoked for them.
+        mapM_ (\ext -> produce ext >> logProgress) (map snd cachedTSHits)
+
+        let tsChunks = chunkList 500 treeSitterFiles'
         mapM_ (\chunk -> do
           if numThreads <= 1
             then mapM_ (\fp -> do
-              ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
-              epPushExtractionStreaming ep config ext
-              accumulate codeNodeMapRef codeEdgeAccRef ext
-              mergeIntoRunning ext
+              extractTS fp
               logProgress
               ) chunk
             else do
@@ -161,10 +221,7 @@ extractAll appEnv config detection = do
               mapM_ (\fp -> bracket_
                 (waitQSemN sem 1)
                 (signalQSemN sem 1)
-                (do ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
-                    epPushExtractionStreaming ep config ext
-                    accumulate codeNodeMapRef codeEdgeAccRef ext
-                    mergeIntoRunning ext
+                (do extractTS fp
                     logProgress
                 )) chunk
           n <- readIORef codeNodeMapRef >>= evaluate . Map.size
@@ -195,9 +252,8 @@ extractAll appEnv config detection = do
         mapM_ (\fp -> do
           logDebug $ T.pack $ "  [stub] " ++ fp
           let ext = extractionFromLists [makeStubNode fp] []
-          epPushExtractionStreaming ep config ext
-          accumulate codeNodeMapRef codeEdgeAccRef ext
-          mergeIntoRunning ext
+          fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+          produce ext
           logProgress
           ) stubFiles
       )
@@ -322,8 +378,55 @@ extractAll appEnv config detection = do
   running <- readIORef runningRef
   let merged = running
 
+  -- Cache hit/miss report (wire-incremental-update 4.3): how much of the code
+  -- stage was served from the persistent extraction cache.
+  let cacheHits = length cachedTSHits
+      cacheMisses = length treeSitterFiles'
+  when cacheEnabled $ unless (cacheHits == 0 && cacheMisses == 0) $
+    logInfo $ T.pack $ "  [cache] reused " ++ show cacheHits ++ " file extraction(s), re-extracted "
+                       ++ show cacheMisses
+
   logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges"
-  pure merged
+  pure (applyTaggingSources mProvenance merged)
+
+-- | Tag an extraction with multi-source provenance.
+--
+-- For every node whose 'nodeSourceFile' is a key in @prov@ (a real path ->
+-- (sourceName, qualifiedPath) map), recompute its nodeId from the qualified
+-- path so files with identical relative paths in different sources get
+-- distinct identifiers, record the source on 'nodeSource'/'nodeSourceFile',
+-- and rebuild edges so their endpoints and ids follow the resulting remap.
+-- Nodes absent from @prov@ are left untouched. When @mProv@ is 'Nothing' the
+-- extraction is returned unchanged, preserving single-source behavior.
+applyTaggingSources
+  :: Maybe (Map Text (Text, Text))
+  -> Extraction
+  -> Extraction
+applyTaggingSources Nothing ext = ext
+applyTaggingSources (Just prov) ext =
+    let pairs  = map tagNode (Map.elems (extractionNodes ext))
+        remap  = Map.fromList [(oldId, nodeId node) | (oldId, node) <- pairs, oldId /= nodeId node]
+        nodes' = map snd pairs
+        edges' = map (remapEdge remap) (Map.elems (extractionEdges ext))
+    in ext { extractionNodes = Map.fromList (map (\n -> (nodeId n, n)) nodes')
+           , extractionEdges = Map.fromList (map (\e -> (edgeId e, e)) edges') }
+  where
+    tagNode n = case Map.lookup (toText (nodeSourceFile n)) prov of
+      Just (srcName, qPath) ->
+        let kindText = case nodeKind n of
+              Just k  -> toText k
+              Nothing -> ""
+            newNid = makeNodeId (mkSourceFile (T.unpack qPath) "") kindText (toText (nodeLabel n))
+            tagged  = n { nodeId           = newNid
+                      , nodeSource       = Just (fromText srcName)
+                      , nodeSourceFile   = fromText qPath
+                      , nodePresentBits  = setFieldPresent bitNodeSource (nodePresentBits n) }
+        in (nodeId n, tagged)
+      Nothing -> (nodeId n, n)
+    remapEdge remap e =
+      let s = Map.findWithDefault (edgeSource e) (edgeSource e) remap
+          t = Map.findWithDefault (edgeTarget e) (edgeTarget e) remap
+      in e { edgeSource = s, edgeTarget = t, edgeId = EdgeId (s <> "->" <> t <> ":" <> relationToText (edgeRelation e)) }
 
 -- | Push a single extraction to Neo4j if streaming is configured.
 pushExtractionStreaming :: ExtractionPort -> PipelineConfig -> Extraction -> IO ()
@@ -376,6 +479,7 @@ extractImageSource appEnv config (EmbeddedImage archivePath mediaPath) = do
       , nodeLabel = fromText (T.pack (takeFileName fp))
       , nodeFileType = ImageFile
       , nodeSourceFile = fromText (T.pack fp)
+      , nodeSource = Nothing
       , nodeLineStart = Nothing
       , nodeLineEnd = Nothing
       , nodeSignature = Nothing
@@ -384,7 +488,6 @@ extractImageSource appEnv config (EmbeddedImage archivePath mediaPath) = do
       , nodeDegree = Nothing
       , nodeIsBridge = Nothing
       , nodeExtra = Nothing
-      , nodeBodyHash = Nothing
       , nodePresentBits = bitNodeKind
       }
 
@@ -429,6 +532,89 @@ granularityName GranularityFine     = "fine"
 granularityName GranularityFunction = "function"
 granularityName GranularityFile     = "file"
 
+-- | Coverage summary for a 'partitionByExtractor' split of code files: how
+-- many were routed to a real extractor (tree-sitter or LSP) versus fell
+-- through to 'ExtractStub' because no 'defaultExtractors'/config entry
+-- matched their extension, broken down by extension for the stubbed half.
+data StubCoverage = StubCoverage
+  { scDetected     :: Int
+  , scStructural   :: Int
+  , scStubbedByExt :: [(String, Int)]
+  } deriving (Eq, Show)
+
+-- | Build a 'StubCoverage' from the structural (tree-sitter ++ LSP) and
+-- 'ExtractStub' file lists 'partitionByExtractor' already produces.
+stubCoverage :: [FilePath] -> [FilePath] -> StubCoverage
+stubCoverage structuralFiles stubFiles = StubCoverage
+  { scDetected     = length structuralFiles + length stubFiles
+  , scStructural   = length structuralFiles
+  , scStubbedByExt = Map.toAscList $ Map.fromListWith (+)
+      [ (takeExtension fp, 1 :: Int) | fp <- stubFiles ]
+  }
+
+-- | Fraction of stubbed code files above which 'stubCoverageWarning' states
+-- that the graph likely under-represents the corpus.
+stubDominanceThreshold :: Double
+stubDominanceThreshold = 0.5
+
+-- | The extension responsible for the most stubbed files, if any were.
+dominantStubExt :: StubCoverage -> Maybe String
+dominantStubExt sc = case scStubbedByExt sc of
+  []  -> Nothing
+  xs  -> Just . fst $ maximumBy (comparing snd) xs
+
+-- | Render the INFO-level stub-coverage warning (extraction-quality:
+-- "Stub extraction is a visible, reported outcome"), or 'Nothing' when no
+-- code file was stubbed. Appends a dominance clause when the stubbed share
+-- exceeds 'stubDominanceThreshold'.
+stubCoverageWarning :: StubCoverage -> Maybe String
+stubCoverageWarning sc
+  | null (scStubbedByExt sc) = Nothing
+  | otherwise = Just $
+      show totalStubbed ++ " code files produced stub nodes only (no structure extracted): "
+        ++ intercalate ", " [ ext ++ " (" ++ show n ++ ")" | (ext, n) <- scStubbedByExt sc ]
+        ++ dominanceSuffix
+  where
+    totalStubbed = sum (map snd (scStubbedByExt sc))
+    dominanceSuffix
+      | scDetected sc > 0
+      , fromIntegral totalStubbed / fromIntegral (scDetected sc) > stubDominanceThreshold
+      , Just dom <- dominantStubExt sc
+      = " -- the graph likely under-represents this corpus; dominant stubbed type: " ++ dom
+      | otherwise = ""
+
+-- | Canonical fingerprint text of every extraction-affecting configuration
+-- value: the effective per-extension granularity under the CLI override, the
+-- extractor mode per extension, and the pdf extraction level. The key-sorting
+-- makes the serialization canonical so identical configs always fingerprint
+-- identically.
+--
+-- INV-CACHE-SOUND (AVI-521 §1.2): any future extraction-affecting config value
+-- MUST be added here — an unfingerprinted config change would serve stale
+-- cached extractions. Documented in the cache module header contract.
+extractionConfigFingerprint :: PipelineConfig -> Text
+extractionConfigFingerprint config = T.pack . unwords $
+  concat
+    [ [ "granularity=" ++ show (gcGranularity gcfg)
+      , "cliGranularity=" ++ maybe "none" show (cfgGranularity config)
+      , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
+        -- bump when tree-sitter extraction output changes for unchanged files
+      , "treesitter-imports=go,rust,ruby:1"
+        -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
+      , "nodeIdentity=av1452-bounded-ids"
+      , "idScheme=2"
+      ]
+    , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
+            ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)
+      | (ext, ec) <- Map.toAscList (gcExtractors gcfg)
+      ]
+    ]
+  where
+    gcfg = cfgGraphosConfig config
+    pdfLevelName PdfSmall  = "small"
+    pdfLevelName PdfMedium = "medium"
+    pdfLevelName PdfLarge  = "large"
+
 -- | Classify whether an Extraction represents a stub (single file node, no edges).
 isStubExtraction :: Extraction -> Bool
 isStubExtraction ext =
@@ -441,17 +627,26 @@ isStubExtraction ext =
           Nothing        -> False
 
 -- | Extract only a list of changed files (for --watch mode).
+--
+-- Wire-incremental-update 5.1: every changed file's extraction is written
+-- through to the persistent extraction cache under the fingerprinted key, so
+-- a subsequent @--update@ run over the same content is a cache hit.
 extractChangedFiles :: AppEnv -> PipelineConfig -> [FilePath] -> IO Extraction
 extractChangedFiles appEnv config changedFiles = do
   let ep = extractionPort appEnv
       lp = loggingPort appEnv
+      fsp = fileSystemPort appEnv
       logInfo  = lpLogInfo lp
       logDebug = lpLogDebug lp
 
   absRoot <- canonicalizePath (cfgInputPath config)
-  let (tsFiles, lspFiles, stubFiles) = partitionByExtractor config changedFiles
+  let fingerprint = extractionConfigFingerprint config
+      (tsFiles, lspFiles, stubFiles) = partitionByExtractor config changedFiles
 
-  tsExtractions <- mapM (\fp -> extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp) tsFiles
+  tsExtractions <- mapM (\fp -> do
+    ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
+    fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+    pure ext) tsFiles
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) tsExtractions
 
   let fileGroups = groupByLSPServer (epLanguageServerCommands ep) lspFiles
@@ -460,7 +655,9 @@ extractChangedFiles appEnv config changedFiles = do
 
   stubExtractions <- mapM (\fp -> do
     logDebug $ T.pack $ "  [stub] " ++ fp
-    pure (extractionFromLists [makeStubNode fp] [])
+    let ext = extractionFromLists [makeStubNode fp] []
+    fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+    pure ext
     ) stubFiles
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) stubExtractions
 
@@ -516,6 +713,7 @@ collapsedNode fp count = Node
   , nodeLabel        = fromText (T.pack (takeFileName fp))
   , nodeFileType     = CodeFile
   , nodeSourceFile   = fromText (T.pack fp)
+  , nodeSource       = Nothing
   , nodeLineStart    = Nothing
   , nodeLineEnd      = Nothing
   , nodeSignature    = Nothing
@@ -524,7 +722,6 @@ collapsedNode fp count = Node
   , nodeDegree       = Nothing
   , nodeIsBridge     = Nothing
   , nodeExtra        = Just collapsedNodeExtra
-  , nodeBodyHash = Nothing
   , nodePresentBits  = bitNodeKind .|. bitNodeExtra
   }
   where

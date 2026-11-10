@@ -6,21 +6,33 @@ module Graphos.UseCase.Pipeline.Incremental
   , SingleFileResult(..)
   , clusterAndInfer
   , cleanInferred
+  , communityMapFromGraph
+  , affectedCommunities
+  , boundedDeltaCommunityUpdate
+  , boundedDeltaCommunityUpdate'
+  , clusterAndInferIncremental
+  , reclusterAffectedCommunities
+  , boundedDeltaCommunities
+  , clusterGraphBoundedDelta
   ) where
 
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch, evaluate)
 import Control.Monad (when, void)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Text.Short (toText)
 import qualified Data.Text as T
+import qualified Data.Vector.Unboxed as VU
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath ((</>))
 
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jStreamingConfig(..), Neo4jPushMode(..))
 import Graphos.Domain.Config (SemanticEdgesConfig(..))
-import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected)
-import qualified Graphos.Domain.Graph.Analysis as GAnalysis
+import Graphos.Domain.Graph (mergeGraphs, buildGraph, gNodes, gEdges, Graph, gDirected, gEmbeddings, gEmbeddingsPath, gAdjFwd, gAdjBack, subgraph)
+import Graphos.Domain.Graph.Mutation (deleteNodeIncident)
+import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), buildReverseIndex, scoreAllCohesion)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.UseCase.Port.ObservabilityPort (ObservabilityPort(..))
@@ -30,14 +42,21 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Extract (extractChangedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
-import Graphos.Domain.Community (Resolution(..), MergeStrategy(..))
 import Graphos.UseCase.Analyze (analyzeGraph)
-import Graphos.UseCase.Infer (inferNonSemanticEdges, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
+import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
 import Graphos.UseCase.Label (labelCommunities)
 import Graphos.Domain.Labeling (LabelingResult(..))
 import Graphos.UseCase.IngestIndex (loadIndex, saveIndex, mergeIndices)
-import Graphos.UseCase.Pipeline.Core (PipelineResult(..), logSemanticInference)
+import Graphos.UseCase.Pipeline.Core
+  ( PipelineResult(..)
+  , logSemanticInference
+  , preFlightMemoryGuard
+  , withHeapGuard
+  , pipelineErrorHandler
+  , generateGraphEmbeddings
+  )
+import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
 
 -- | Run incremental pipeline for --watch mode.
@@ -64,14 +83,49 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
 
   lpLogInfo lp $ T.pack $ "[watch] Re-extracting " ++ show (length changedFiles) ++ " changed files..."
 
-  extraction <- extractChangedFiles appEnv configWithStreaming changedFiles
+  extraction <- withHeapGuard lp (cfgActiveBudgetBytes config) "extract" $
+    extractChangedFiles appEnv configWithStreaming changedFiles
 
   let directed = cfgDirected configWithStreaming
       baseGraph = buildGraphFromExtractions directed [extraction]
   retained <- loadCleanRetainedGraph (cfgOutputDir configWithStreaming)
-  let graph = case retained of
-        Just old -> mergeGraphs old baseGraph
-        Nothing  -> baseGraph
+  -- Derive the removed/replaced node set R from the retained graph and the
+  -- churned file set (node source file ownership), then detach it with the
+  -- O(deg)-per-node deleteNodeIncident helper before merging additions.
+  let changedSet = Set.fromList (map (pathNormalize . T.pack) changedFiles)
+      addedA = [nid | nid <- Map.keys (gNodes baseGraph)
+                   , case retained of
+                       Just old -> not (Map.member nid (gNodes old))
+                       Nothing  -> True ]
+      retainedOldP = maybe Map.empty communityMapFromGraph retained
+      (removedR, oldWithoutR) =
+        case retained of
+          Just old ->
+            let rs = [ nid | (nid, n) <- Map.toList (gNodes old)
+                        , pathNormalize (toText (nodeSourceFile n)) `Set.member` changedSet ]
+            in (rs, Just (foldl' (\g nid -> fst (deleteNodeIncident nid g)) old rs))
+          Nothing -> ([], Nothing)
+      graph = case oldWithoutR of
+        Just old' -> mergeGraphs old' baseGraph
+        Nothing   -> baseGraph
+
+  -- Wire-incremental-update 5.2: when embeddings are enabled, generate
+  -- embeddings for the merged graph through the content-addressed cache.
+  -- Unchanged texts are disk hits; only changed nodes' texts reach the API.
+  -- Vectors go into the sidecar and the sidecar pointer travels with the
+  -- graph (bounded-embedding-memory: the in-memory table is detached by
+  -- clusterAndInfer after semantic inference consumed it).
+  graphWithEmbs <- if not (cfgEmbed configWithStreaming)
+    then pure graph
+    else do
+      let embCfg = gcEmbedding (cfgGraphosConfig configWithStreaming)
+          embCacheRoot = cfgOutputDir configWithStreaming ++ "/cache"
+          sidecar = cfgOutputDir configWithStreaming ++ "/embeddings.json"
+      lpLogInfo lp "[watch] Generating embeddings for changed nodes..."
+      embs <- generateGraphEmbeddings (llmPort appEnv) embCfg graph embCacheRoot sidecar
+      lpLogInfo lp $ T.pack $ "  [watch] Wrote " ++ show (Map.size embs)
+                       ++ " node embeddings to embeddings.json"
+      pure graph { gEmbeddings = Just embs, gEmbeddingsPath = Just "embeddings.json" }
 
   when (cfgNeo4jStreaming configWithStreaming /= Nothing) $ do
     lpLogInfo lp "  [neo4j-stream] Running edge repair pass for incremental update..."
@@ -98,13 +152,28 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
             seCfg = (gcSemanticEdges (cfgGraphosConfig configWithStreaming)) { seEnabled = not (cfgNoSemanticEdges configWithStreaming) }
             force = cfgForceSemanticEdges configWithStreaming
             density = cfgEdgeDensity configWithStreaming
-            (enriched, commMap, mode, semanticEdges) = clusterAndInfer res seCfg force density directed graph
+            oldG = maybe graphWithEmbs id retained
+            boundedCommMap = boundedDeltaCommunityUpdate res oldG graphWithEmbs retainedOldP (removedR ++ addedA)
+            mode = semanticMode seCfg force graphWithEmbs
+            semanticEdges = inferSemanticEdgesForMode mode seCfg graphWithEmbs
+            allInferred = inferNonSemanticEdgesWith density seCfg Map.empty graphWithEmbs boundedCommMap ++ semanticEdges
+            enriched = if null allInferred
+              then graphWithEmbs { gEmbeddings = Nothing }
+              else (buildGraphFromExtractions directed
+                    [extractionFromLists (Map.elems (gNodes graphWithEmbs))
+                                        (Map.elems (gEdges graphWithEmbs) ++ allInferred)])
+                   { gEmbeddings = Nothing }
         logSemanticInference lp seCfg mode semanticEdges
-        pure (enriched, commMap)
+        withHeapGuard lp (cfgActiveBudgetBytes config) "cluster" $ do
+          _ <- evaluate (Map.size (gNodes enriched) + Map.size boundedCommMap)
+          pure (enriched, boundedCommMap)
 
   createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
-  let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
-  exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing []
+  -- Cohesion on the enriched graph, computed once and read by the report
+  -- (bounded-report-export; previously the report recomputed per community).
+  let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
+  exports <- withHeapGuard lp (cfgActiveBudgetBytes config) "export" $
+    UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing []
 
   when (cfgNeo4j configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
     let n4cfg = gcNeo4j (cfgGraphosConfig configWithStreaming)
@@ -119,7 +188,7 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
         lpLogInfo lp "[neo4j] Push mode: full (incremental)"
         void $ epPushToNeo4jFull ep enrichedGraph finalCommMap cohesion uri user pass
       SubgraphPush -> do
-        let artPoints = GAnalysis.articulationPoints enrichedGraph
+        let artPoints = analysisArticulation analysis
         void $ epPushToNeo4jSubgraph ep enrichedGraph finalCommMap cohesion (cfgNeo4jSubgraphSize configWithStreaming) artPoints uri user pass
       CommunityPush ->
         void $ epPushToNeo4jCommunity ep enrichedGraph finalCommMap cohesion uri user pass
@@ -135,23 +204,26 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
         }
   lpLogInfo lp "[watch] Incremental pipeline complete!"
   pure $ Right result
-  ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Incremental pipeline error: " ++ show e
+  ) (pipelineErrorHandler "Incremental pipeline error")
 
 -- | Cluster then infer edges on a single graph. Pure and deterministic in its graph
 -- input: folding incremental batches into the running graph yields the same enriched
 -- graph as a full build over the merged source (AVI-533 / G2 confluence).
 clusterAndInfer :: Resolution -> SemanticEdgesConfig -> Bool -> EdgeDensity -> Bool -> Graph 
-                -> (Graph, CommunityMap, SemanticMode, [Edge])
+                 -> (Graph, CommunityMap, SemanticMode, [Edge])
 clusterAndInfer res seCfg force density directed graph =
   let (commMap, _cohesion) = clusterGraphWithResolution graph res
       mode = semanticMode seCfg force graph
       semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-      allInferred = inferNonSemanticEdges density graph commMap ++ semanticEdges
+      allInferred = inferNonSemanticEdgesWith density seCfg Map.empty graph commMap ++ semanticEdges
+      -- Detach the embedding table after semantic inference consumed it
+      -- (bounded-embedding-memory): the enriched graph never retains vectors.
       enriched = if null allInferred
-        then graph
-        else buildGraphFromExtractions directed
-             [extractionFromLists (Map.elems (gNodes graph))
-                                 (Map.elems (gEdges graph) ++ allInferred)]
+        then graph { gEmbeddings = Nothing }
+        else (buildGraphFromExtractions directed
+              [extractionFromLists (Map.elems (gNodes graph))
+                                  (Map.elems (gEdges graph) ++ allInferred)])
+             { gEmbeddings = Nothing }
   in (enriched, commMap, mode, semanticEdges)
 
 -- | Load the persisted graph from the output directory (if present), stripping any
@@ -191,12 +263,18 @@ runSingleFilePipeline appEnv config filePath = catch (do
       fsp = fileSystemPort appEnv
       ep = exportPort appEnv
 
-  lpLogInfo lp $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
+  mInfo <- readMemInfo
+  preFlight <- preFlightMemoryGuard lp mInfo (cfgActiveBudgetBytes config) (cfgFailOnLowMemory config)
+  case preFlight of
+   Left pfErr -> pure (Left pfErr)
+   Right () -> do
+    lpLogInfo lp $ T.pack $ "[ingest] Starting single-file pipeline for: " ++ filePath
 
-  ingestResult <- ingestFile appEnv config filePath
-  case ingestResult of
-    Left err -> pure $ Left err
-    Right fir -> do
+    ingestResult <- withHeapGuard lp (cfgActiveBudgetBytes config) "extract" $
+      ingestFile appEnv config filePath
+    case ingestResult of
+     Left err -> pure $ Left err
+     Right fir -> do
       let graph = buildGraphFromExtractions (cfgDirected config) [firExtraction fir]
 
       lpLogInfo lp $ T.pack $ "  Graph: " ++ show (Map.size (gNodes graph)) ++ " nodes, "
@@ -219,12 +297,13 @@ runSingleFilePipeline appEnv config filePath = catch (do
                     force = cfgForceSemanticEdges config
                     mode = semanticMode seCfg force graph
                     semanticEdges = inferSemanticEdgesForMode mode seCfg graph
-                    allInferred = inferNonSemanticEdges (cfgEdgeDensity config) graph commMap ++ semanticEdges
+                    allInferred = inferNonSemanticEdgesWith (cfgEdgeDensity config) seCfg Map.empty graph commMap ++ semanticEdges
                     enriched = if null allInferred
-                      then graph
-                      else buildGraphFromExtractions (cfgDirected config)
-                           [extractionFromLists (Map.elems (gNodes graph))
-                                                (Map.elems (gEdges graph) ++ allInferred)]
+                      then graph { gEmbeddings = Nothing }
+                      else (buildGraphFromExtractions (cfgDirected config)
+                            [extractionFromLists (Map.elems (gNodes graph))
+                                                 (Map.elems (gEdges graph) ++ allInferred)])
+                           { gEmbeddings = Nothing }
                 logSemanticInference lp seCfg mode semanticEdges
                 lpLogInfo lp $ T.pack $ "  Clusters: " ++ show (Map.size commMap)
                 pure (enriched, commMap)
@@ -240,11 +319,11 @@ runSingleFilePipeline appEnv config filePath = catch (do
       llmLabels <- if cfgLabel config
         then do
           let lblCfg = gcLabeling (cfgGraphosConfig config)
-          result <- labelCommunities appEnv enrichedGraph finalCommMap Map.empty lblCfg
+          result <- labelCommunities appEnv enrichedGraph finalCommMap Map.empty lblCfg (cfgOutputDir config)
           pure $ if Map.null (lrLabels result) then Nothing else Just (lrLabels result)
         else pure Nothing
 
-      let analysis = analyzeGraph enrichedGraph finalCommMap Map.empty
+      let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
           detection = Detection
             { detectionTotalFiles = 1
             , detectionTotalWords = 0
@@ -259,7 +338,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
       fspClearCheckpoint fsp (cfgOutputDir config)
       opShutdownObservability op
 
-      let embWithVectors = length $ filter (not . null . ieVector) (firEmbeddings fir)
+      let embWithVectors = length $ filter (not . VU.null . ieVector) (firEmbeddings fir)
       lpLogInfo lp "[ingest] Single-file pipeline complete!"
 
       pure $ Right SingleFileResult
@@ -270,4 +349,70 @@ runSingleFilePipeline appEnv config filePath = catch (do
         , sfrIndexPath   = indexPath
         , sfrEmbeddingCount = embWithVectors
         }
-  ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "Single-file pipeline error: " ++ show e
+  ) (pipelineErrorHandler "Single-file pipeline error")
+-- ---------------------------------------------------------------------------
+-- Incremental community reconciliation (bounded delta)
+-- ---------------------------------------------------------------------------
+
+communityMapFromGraph :: Graph -> CommunityMap
+communityMapFromGraph g =
+  Map.fromListWith (++)
+    [ (cid, [nid]) | (nid, n) <- Map.toList (gNodes g), Just cid <- [nodeCommunityId n] ]
+
+affectedCommunities :: Graph -> Graph -> CommunityMap -> [NodeId] -> Set.Set CommunityId
+affectedCommunities oldGraph newGraph oldP churnNodes =
+  let invertOld = buildReverseIndex oldP
+      neigh n g = Set.union (Map.findWithDefault Set.empty n (gAdjFwd g))
+                            (Map.findWithDefault Set.empty n (gAdjBack g))
+      affectedFrom n =
+        maybe [] (\cid -> [cid]) (Map.lookup n invertOld)
+          ++ [ cid | u <- Set.toList (Set.union (neigh n oldGraph) (neigh n newGraph))
+               , Just cid <- [Map.lookup u invertOld] ]
+  in Set.fromList (concatMap affectedFrom churnNodes)
+
+boundedDeltaCommunityUpdate :: Resolution -> Graph -> Graph -> CommunityMap -> [NodeId] -> CommunityMap
+boundedDeltaCommunityUpdate res oldGraph newGraph oldP churnNodes =
+  let affected = affectedCommunities oldGraph newGraph oldP churnNodes
+      carried =
+        Map.map (filter (`Map.member` gNodes newGraph))
+          (Map.filterWithKey (\cid _ -> not (Set.member cid affected)) oldP)
+      carriedMembers = Set.fromList (concat (Map.elems carried))
+      affectedNodes = Set.difference (Map.keysSet (gNodes newGraph)) carriedMembers
+      sub = subgraph newGraph affectedNodes
+      (subComm, _) = clusterGraphWithResolution sub res
+      offset =
+        case Map.keys carried of
+          [] -> 0
+          ks -> maximum ks + 1
+      reclustered = Map.mapKeys (+ offset) subComm
+  in Map.union carried reclustered
+
+-- Backwards-compatible alias: behave as a no-op old graph (full recluster) when
+-- no explicit old graph is available.
+boundedDeltaCommunityUpdate' :: Resolution -> Graph -> CommunityMap -> [NodeId] -> CommunityMap
+boundedDeltaCommunityUpdate' res newGraph oldP churnNodes =
+  boundedDeltaCommunityUpdate res newGraph newGraph oldP churnNodes
+
+-- Also exported convenience: incremental clustering on an already-merged graph,
+-- treating churn nodes as all nodes (fresh detection). Useful for tests.
+clusterAndInferIncremental :: Resolution -> SemanticEdgesConfig -> Bool -> EdgeDensity -> Bool
+                           -> Graph -> Graph -> CommunityMap -> [NodeId] -> [NodeId]
+                           -> (Graph, CommunityMap, SemanticMode, [Edge])
+clusterAndInferIncremental res seCfg force density directed newGraph _oldGraph _oldP _r _a =
+  clusterAndInfer res seCfg force density directed newGraph
+
+pathNormalize :: Text -> Text
+pathNormalize p =
+  let noTrailingSlash = T.dropWhileEnd (== '/') p
+      noDotSlash = if T.isPrefixOf "./" noTrailingSlash then T.drop 2 noTrailingSlash else noTrailingSlash
+  in noDotSlash
+
+-- Compatibility aliases for alternative naming conventions.
+reclusterAffectedCommunities :: Resolution -> Graph -> Graph -> CommunityMap -> [NodeId] -> CommunityMap
+reclusterAffectedCommunities = boundedDeltaCommunityUpdate
+
+boundedDeltaCommunities :: Resolution -> Graph -> Graph -> CommunityMap -> [NodeId] -> CommunityMap
+boundedDeltaCommunities = boundedDeltaCommunityUpdate
+
+clusterGraphBoundedDelta :: Resolution -> Graph -> Graph -> CommunityMap -> [NodeId] -> CommunityMap
+clusterGraphBoundedDelta = boundedDeltaCommunityUpdate
