@@ -126,23 +126,23 @@ spec = do
 
   describe "serveOpts" $ do
     it "parses default serve command" $ do
-      parseServe [] `shouldBe` Right (Serve "graphos-out" "graphos-out/graph.json" 8080 False False)
+      parseServe [] `shouldBe` Right (Serve "graphos-out" "graphos-out/graph.json" 8080 False False "127.0.0.1")
 
     it "parses --graph" $ do
       parseServe ["--graph", "other/graph.json"] `shouldBe`
-        Right (Serve "graphos-out" "other/graph.json" 8080 False False)
+        Right (Serve "graphos-out" "other/graph.json" 8080 False False "127.0.0.1")
 
     it "parses --api-only" $ do
       parseServe ["--api-only"] `shouldBe`
-        Right (Serve "graphos-out" "graphos-out/graph.json" 8080 True False)
+        Right (Serve "graphos-out" "graphos-out/graph.json" 8080 True False "127.0.0.1")
 
     it "parses --no-api" $ do
       parseServe ["--no-api"] `shouldBe`
-        Right (Serve "graphos-out" "graphos-out/graph.json" 8080 False True)
+        Right (Serve "graphos-out" "graphos-out/graph.json" 8080 False True "127.0.0.1")
 
     it "parses combined flags" $ do
       parseServe ["--dir", "static", "--graph", "g.json", "--port", "9090", "--api-only"] `shouldBe`
-        Right (Serve "static" "g.json" 9090 True False)
+        Right (Serve "static" "g.json" 9090 True False "127.0.0.1")
 
   describe "pipelineOpts semantic-edges flags" $ do
     it "defaults both flags to False" $ do
@@ -195,3 +195,31 @@ spec = do
       parsePipeline ["--no-cluster"] `shouldSatisfy` \case
         Right cfg -> cfgNoCluster cfg == True
         Left _    -> False
+
+  describe "pipelineOpts community-cap flags" $ do
+    it "defaults the fraction, enabled switch and overrides" $ do
+      parsePipeline [] `shouldSatisfy` \case
+        Right cfg -> cfgMaxCommunityFraction cfg == 0.05
+               && cfgCommunityCapEnabled cfg == True
+               && cfgMaxCommunityFractionOverride cfg == Nothing
+               && cfgCommunityCapDisabled cfg == False
+        Left _    -> False
+
+    it "--max-community-fraction records the override" $ do
+      parsePipeline ["--max-community-fraction", "0.1"] `shouldSatisfy` \case
+        Right cfg -> cfgMaxCommunityFractionOverride cfg == Just 0.1
+        Left _    -> False
+
+    it "--no-community-cap disables the cap" $ do
+      parsePipeline ["--no-community-cap"] `shouldSatisfy` \case
+        Right cfg -> cfgCommunityCapDisabled cfg == True
+        Left _    -> False
+
+    it "accepts the closed-open boundary (0,1]" $ do
+      parsePipeline ["--max-community-fraction", "1"] `shouldSatisfy` isRight
+      parsePipeline ["--max-community-fraction", "0.05"] `shouldSatisfy` isRight
+
+    it "rejects a fraction outside (0,1]" $ do
+      parsePipeline ["--max-community-fraction", "0"]   `shouldSatisfy` isLeft
+      parsePipeline ["--max-community-fraction", "1.5"] `shouldSatisfy` isLeft
+      parsePipeline ["--max-community-fraction", "-0.1"] `shouldSatisfy` isLeft
