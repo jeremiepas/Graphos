@@ -405,6 +405,21 @@ mutationSpec = describe "Cypher Mutation Parser" $ do
     it "rejects empty input" $ do
       parseStatement "" `shouldSatisfy` isLeftSt
 
+  describe "named-path rejection" $ do
+    it "rejects MATCH p = ... in parseQuery" $ do
+      case parseQuery "MATCH p = (a)-[:R]->(b) RETURN *" of
+        Left err -> err `shouldSatisfy`
+          (\e -> T.isInfixOf "named path variables are not supported" e
+             && T.isInfixOf "graphos path" e)
+        Right _  -> expectationFailure "expected named-path rejection"
+
+    it "rejects MATCH p = ... in parseStatement" $ do
+      case parseStatement "MATCH p = (a)-[:R]->(b) RETURN *" of
+        Left err -> err `shouldSatisfy`
+          (\e -> T.isInfixOf "named path variables are not supported" e
+             && T.isInfixOf "graphos path" e)
+        Right _  -> expectationFailure "expected named-path rejection"
+
   where
     isLeftSt :: Either Text CypherStatement -> Bool
     isLeftSt (Left _)  = True
