@@ -75,7 +75,7 @@ apiSurfaceTypes =
   , "class_declaration", "class_definition", "class"
   , "interface_declaration", "interface_definition", "interface"
   , "type_declaration", "type_alias_declaration", "type_definition"
-  , "type_alias", "type_item"
+  , "type_alias", "type_item", "type_identifier"
   , "enum_declaration", "enum_definition", "enum"
   , "enum_item"
   , "variable_declaration", "lexical_declaration", "variable_declarator"
@@ -646,7 +646,14 @@ tsTypeToKind t = case t of
   "try_statement" -> "Try"
   "except_clause" -> "Except"
   "package_clause" -> "Module"
-  "type_identifier" -> "Type"
+  -- `type_identifier` is intentionally *not* mapped here (AVI-1440). A bare
+  -- type reference — the `type_identifier` node under a field annotation like
+  -- `role: UserRole`, or the declared name of an `interface`/`type`/`enum` —
+  -- is a *reference*, not a declaration, so it produces no node. Only declared
+  -- types yield `kind: "Type"`: `type_declaration`, `type_alias_declaration`,
+  -- `type_definition`, `type_alias`, `type_item`, `type_synonym`,
+  -- `data_type`, `new_type`, and (C++) `alias_declaration`.
+  -- Rust-specific
   "extern_item" -> "Extern"
   "attribute_item" -> "Attribute"
   "mod_item" -> "Module"
