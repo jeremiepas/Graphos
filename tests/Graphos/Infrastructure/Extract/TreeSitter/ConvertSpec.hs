@@ -2,8 +2,6 @@
 module Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec (spec) where
 
 import Test.Hspec
-import Data.List (sort)
-import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Text.Short (toText, fromText)
@@ -175,6 +173,32 @@ spec = do
           ex = tsNodesToExtraction sf GranularityFunction defaultTruncationBudget [node]
           imports = filter (\m -> nodeKind m == Just (fromText "Import")) (Map.elems (extractionNodes ex))
       imports `shouldBe` []
+
+  describe "AVI-1447 calls edges" $ do
+    let callsOf ex = [ (edgeSource e, edgeTarget e) | e <- Map.elems (extractionEdges ex), edgeRelation e == Calls ]
+        callNode ty callee = tsNode ty (T.pack (T.unpack callee ++ "()")) [ident callee]
+        fnWith name body = tsNode "function_declaration" (T.pack ("function " ++ T.unpack name))
+                             [ident name, tsNode "statement_block" "{}" body]
+        run ns = tsNodesToExtraction sf GranularityFine defaultTruncationBudget [tsNode "program" "module" ns]
+
+    it "same-file call emits an edge from the enclosing function to the callee" $ do
+      let ex = run [ func "a", fnWith "b" [callNode "call_expression" "a"] ]
+      callsOf ex `shouldBe` [ (makeNodeId sf "Function" "b", makeNodeId sf "Function" "a") ]
+
+    it "unresolvable callee (a global) emits no edge" $ do
+      let ex = run [ fnWith "b" [callNode "new_expression" "Date"] ]
+      callsOf ex `shouldBe` []
+
+    it "only the top-level call of a nested call emits an edge" $ do
+      let inner = callNode "call_expression" "a"
+          outer = tsNode "call_expression" "c(a())" [ident "c", tsNode "arguments" "(a())" [inner]]
+          ex = run [ func "a", func "c", fnWith "b" [outer] ]
+      callsOf ex `shouldBe` [ (makeNodeId sf "Function" "b", makeNodeId sf "Function" "c") ]
+
+    it "an imported callee targets the import's target node" $ do
+      let imp = tsNode "import_statement" "import { Foo } from './foo'" [tsNode "string" "'./foo'" []]
+          ex = run [ imp, fnWith "b" [callNode "new_expression" "Foo"] ]
+      length (callsOf ex) `shouldBe` 1
 
 -- | Attach a start row to a fixture node for collision ordering.
 withLine :: TSNodeInfo -> Int -> TSNodeInfo
