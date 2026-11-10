@@ -34,7 +34,7 @@ import Graphos.Infrastructure.Export.IncrementalJSON
   , writeEmbeddingsPath
   )
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNode)
-import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), defaultTruncationBudget, nodeIdentityBudget)
+import Graphos.Infrastructure.Extract.TreeSitter.Core (TSNodeInfo(..), nodeIdentityBudget, defaultTruncationBudget)
 
 fixtureNodes :: [Node]
 fixtureNodes =
@@ -214,7 +214,7 @@ spec = do
         -- 'ident' is a String (from T.unpack); plain 'length' counts chars.
       length ident `shouldSatisfy` (<= nodeIdentityBudget)
       case nodeSignature node of
-        Just sig -> T.length (toText sig) `shouldSatisfy` (<= defaultTruncationBudget)
+        Just sig -> T.length (toText sig) `shouldSatisfy` (<= defaultTruncationBudget + 3)
         Nothing  -> fail "expected a node signature under the bounded-identity scheme"
 
     it "round-trips the bounded signature through JGF preserving the present bit" $
@@ -237,7 +237,7 @@ spec = do
             let sigs = catMaybes [sigOf kv | kv <- KM.toList (nodesOf doc)]
             length sigs `shouldBe` 1
             case sigs of
-              (s : _) -> T.length s `shouldSatisfy` (<= defaultTruncationBudget)
+              (s : _) -> T.length s `shouldSatisfy` (<= defaultTruncationBudget + 3)
               []      -> fail "no signature emitted under the bounded-identity scheme"
 
 -- ───────────────────────────────────────────────

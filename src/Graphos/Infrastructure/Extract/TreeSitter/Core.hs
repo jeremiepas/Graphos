@@ -12,9 +12,13 @@ module Graphos.Infrastructure.Extract.TreeSitter.Core
   , normalizeText
   , truncateText
   , truncateWithElision
-  , SourceFile(..)
-  , mkSourceFile
-  ) where
+   , SourceFile(..)
+   , mkSourceFile
+   , sourceDirHash
+   , sourceStem
+   , sourceFilePathStr
+   , extractIdentifier
+   ) where
 
 import Control.Exception (catch, SomeException(..), bracket)
 import Control.Monad (unless, void)
@@ -22,8 +26,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
-import System.FilePath (takeExtension)
 import qualified Data.Text as T
+import System.FilePath (takeBaseName)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TEE
 import Data.Word (Word64)
@@ -186,45 +190,44 @@ truncateWithElision maxLen t tailText
       let headLen = max 0 (maxLen - T.length tailText - 3)
       in T.take headLen t <> "..." <> tailText
 
--- | Source file identity (Group 3 node-identity scheme, AVI-984/AVI-973).
--- Carries a stable directory hash, file stem, and file name so node ids do not
--- embed the full path.
+-- | Logical source file: the parsed file path plus its module name.
+-- Used to (a) derive a stable id prefix and (b) label the module node.
 data SourceFile = SourceFile
-  { sourcePath     :: !Text
-  , sourceDirHash  :: !Int
-  , sourceStem     :: !Text
-  , sourceFileName :: !Text
-  } deriving (Eq, Show)
+  { sourceFilePath  :: Text
+  , sourceModuleName :: Text }
 
--- | Create a 'SourceFile' from a path. The second argument is reserved for
--- future metadata (currently ignored) so callers may pass a content hash.
 mkSourceFile :: FilePath -> Text -> SourceFile
-mkSourceFile filePath _meta =
-  let dirPart = takeDirectory' filePath
-      stem    = takeBaseName' filePath
-      name    = takeFileName' filePath
-      dirPartT = T.pack dirPart
-      dirHash = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPartT) `mod` 65536
-  in SourceFile
-       { sourcePath     = T.pack filePath
-       , sourceDirHash  = dirHash
-       , sourceStem     = T.pack stem
-       , sourceFileName = T.pack name
-       }
+mkSourceFile fp moduleName = SourceFile (T.pack fp) moduleName
 
-takeDirectory' :: FilePath -> FilePath
-takeDirectory' p =
-  case break (== '/') (reverse p) of
-    (_, '/' : dirRest) -> reverse dirRest
-    _                  -> ""
+-- | Stable directory hash for a file path.
+-- Derives from the directory portion so ids are stable across repos that
+-- share a relative layout, while still disambiguating same-named files in
+-- different directories. Mirrors the hash used by the LSP exporter.
+sourceDirHash :: SourceFile -> Text
+sourceDirHash (SourceFile p _) =
+  let dirPart = T.reverse (T.dropWhile (/= '/') (T.reverse p))
+      h = abs (T.foldl' (\acc c -> acc * 31 + fromEnum c) (0 :: Int) dirPart `mod` 65536)
+  in T.pack $ show h
 
-takeFileName' :: FilePath -> FilePath
-takeFileName' p = reverse (fst (break (== '/') (reverse p)))
+-- | File stem without extension, used as the id prefix.
+sourceStem :: SourceFile -> Text
+sourceStem (SourceFile p _) =
+  T.pack (takeBaseName (T.unpack p))
 
-takeBaseName' :: FilePath -> FilePath
-takeBaseName' f =
-  let fn  = takeFileName' f
-      ext = takeExtension fn
-  in if null ext then fn
-       else let stem = take (length fn - length ext) fn
-            in if null stem then fn else stem
+-- | The parsed file path as a plain FilePath.
+sourceFilePathStr :: SourceFile -> FilePath
+sourceFilePathStr (SourceFile p _) = T.unpack p
+
+-- | The identifier text for a node: the first named child whose type is one of
+-- the language-neutral identifier forms. Returns 'Nothing' when none exists,
+-- which callers use to suppress identifier-less wrapper nodes.
+extractIdentifier :: TSNodeInfo -> Maybe Text
+extractIdentifier info =
+  let candidates = filter (\c -> tsnIsNamed c && tsnType c `elem` identifierTypes) (tsnChildren info)
+  in case candidates of
+        (c : _) -> Just (tsnText c)
+        []      -> Nothing
+  where
+    identifierTypes = [ "identifier", "type_identifier", "property_identifier"
+                      , "field_identifier", "name" ]
+
