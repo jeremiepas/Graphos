@@ -1,3 +1,5 @@
+# AVI-1521: actions are pinned to full commit SHAs and perms are least-privilege; see scripts/check-workflow-pinning.sh.
+
 name: OpenSpec Archive Check
 
 on:
@@ -17,7 +19,7 @@ jobs:
     if: github.actor == 'jeremiepas'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
