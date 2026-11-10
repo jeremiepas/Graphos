@@ -23,7 +23,7 @@ import Control.Concurrent.STM
 import Control.Concurrent.Async (mapConcurrently)
 import Control.DeepSeq (deepseq)
 import Control.Exception (catch, SomeException, evaluate, bracket, AsyncException(..), fromException, throwIO)
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import System.Exit (exitWith, ExitCode(..))
 import Data.Maybe (isJust, fromJust)
 import qualified Data.Set as Set
@@ -56,7 +56,7 @@ import Graphos.Domain.Config.Memory
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Domain.Embedding (prepare)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
-import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..))
+import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..), capCommunitySizes, oversizedCommunities)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -80,7 +80,7 @@ import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiSources)
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
-import Graphos.UseCase.Build (buildGraphFromExtractions)
+import Graphos.UseCase.Build (buildGraphFromExtractions, buildGraphFromExtractionsWithStats)
 import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
@@ -640,10 +640,10 @@ runPipelineStages appEnv config = do
 
       lpLogInfo lp "Step 3: Building graph..."
       buildStart <- getCurrentTime
-      builtGraph <- withHeapGuard lp mBudget "build" $ do
-        let g = buildGraphFromExtractions (cfgDirected configWithStreaming) [collapsedExtraction]
+      (builtGraph, (unknownEndpointDrops, duplicateKeyDrops)) <- withHeapGuard lp mBudget "build" $ do
+        let (g, drops) = buildGraphFromExtractionsWithStats (cfgDirected configWithStreaming) [collapsedExtraction]
         _ <- evaluate (Map.size (gNodes g) + Map.size (gEdges g))
-        g `deepseq` pure g
+        g `deepseq` pure (g, drops)
       buildEnd <- getCurrentTime
       opRecordHistogram op "graphos_build_duration_seconds" (realToFrac (diffUTCTime buildEnd buildStart) :: Double)
       opIncCounter op "graphos_pipeline_steps_total" 1
@@ -651,6 +651,7 @@ runPipelineStages appEnv config = do
       opSetGauge op "graphos_graph_edges" (fromIntegral $ Map.size (gEdges builtGraph))
       opDebugTraceSpan op "build" (StartTime buildStart) (EndTime buildEnd) (Map.fromList [("nodes", T.pack $ show $ Map.size (gNodes builtGraph)), ("edges", T.pack $ show $ Map.size (gEdges builtGraph))])
       lpLogInfo lp $ T.pack $ "  Graph: " ++ show (Map.size (gNodes builtGraph)) ++ " nodes, " ++ show (Map.size (gEdges builtGraph)) ++ " edges"
+      lpLogInfo lp $ T.pack $ "  Build drops: " ++ show unknownEndpointDrops ++ " edges with unknown endpoints, " ++ show duplicateKeyDrops ++ " collapsed duplicate (source,target) keys"
 
       let codeFiles = length $ Map.findWithDefault [] CodeFiles (detectionFiles detection)
           nonCodeFiles = detectionTotalFiles detection - codeFiles
@@ -816,8 +817,15 @@ clusterGraph appEnv graph config _embeddingsPath = do
 
       lpLogInfo lp "Step 5: Re-clustering and analyzing..."
       step5Start <- getCurrentTime
-      let (finalComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
+      let (rawComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
+          frac = cfgMaxCommunityFraction config
+          finalComm = if cfgCommunityCapEnabled config
+                      then capCommunitySizes enrichedGraph' rawComm frac
+                      else rawComm
           anal = analyzeGraph enrichedGraph' finalComm finalCohes
+      when (cfgCommunityCapEnabled config) $
+        forM_ (oversizedCommunities enrichedGraph' rawComm frac) $ \(cid, cnt) ->
+          lpLogWarn lp $ T.pack $ "Oversized community " ++ show cid ++ " (" ++ show cnt ++ " nodes) exceeds cap " ++ show frac ++ " of graph; splitting into sub-communities"
       withHeapGuard lp mBudget "analyze" $ do
         _ <- evaluate (Map.size finalComm + sum (map length (Map.elems finalComm)))
         -- Full evaluation of the analysis record — god nodes, surprises,
@@ -843,7 +851,7 @@ clusterGraph appEnv graph config _embeddingsPath = do
                                  ++ " baseUrl=" ++ labelingBaseUrl lblCfg
                                  ++ " batchSize=" ++ show (labelingBatchSize lblCfg)
           labelingStart <- getCurrentTime
-          result <- labelCommunities appEnv enrichedGraph' finalComm finalCohes lblCfg
+          result <- labelCommunities appEnv enrichedGraph' finalComm finalCohes lblCfg (cfgOutputDir config)
           labelingEnd <- getCurrentTime
           lpLogInfo lp $ T.pack $ "  Labeled " ++ show (Map.size (lrLabels result)) ++ " communities in "
                                  ++ show (diffUTCTime labelingEnd labelingStart) ++ "s"
