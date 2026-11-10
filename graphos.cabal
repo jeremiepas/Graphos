@@ -439,6 +439,7 @@ test-suite graphos-test
      Graphos.Domain.Graph.MergeConfluenceSpec
      Graphos.Domain.Graph.ConflictSpec
      Graphos.Domain.Graph.MergeIdempotencySpec
+      Graphos.Domain.Graph.BoundedDeltaCommunitySpec
      Graphos.Domain.Query.Cypher.MappingSpec
     Graphos.Domain.Query.Cypher.ParserSpec
     Graphos.Domain.Query.Cypher.EvalSpec
