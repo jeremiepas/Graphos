@@ -56,11 +56,11 @@ SHALL take the best of all candidates. (PRD §5.1)
 
 ### Requirement: Simulated annealing option
 
-With `--bunch-sa T0,alpha` (defaults `T0 = 100`, `alpha = 0.99`) the system
-SHALL accept a non-improving candidate with probability `exp(ΔMQ / T)` for
-`ΔMQ < 0`, SHALL set `T ← alpha · T` after every probability draw, and SHALL
-count the accepted non-improving candidates. With annealing disabled the
-count SHALL be 0.
+The system SHALL, when `--bunch-sa T0,alpha` is set (defaults `T0 = 100`,
+`alpha = 0.99`), accept a non-improving candidate with probability
+`exp(ΔMQ / T)` for `ΔMQ < 0`, SHALL set `T ← alpha · T` after every
+probability draw, and SHALL count the accepted non-improving candidates. With
+annealing disabled the count SHALL be 0.
 
 #### Scenario: annealing off
 - **WHEN** the search runs without `--bunch-sa`
