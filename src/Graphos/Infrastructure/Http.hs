@@ -25,7 +25,8 @@ import qualified Data.Text as T
 import System.Directory
   (createDirectoryIfMissing, getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode(..))
-import System.FilePath (joinPath)
+import System.FilePath (joinPath, takeFileName)
+import System.IO (openTempFile, hClose)
 import System.Process (readProcessWithExitCode)
 import System.Posix.Files (setFileMode)
 import System.Posix.Process (getProcessID)
@@ -44,7 +45,7 @@ data CurlResult
 --   * 'first' - non-secret options applied before the config (@-s@, @--max-time@,
 --     @-X POST@, non-sensitive @-H@ headers such as the content-type).
 --   * 'secrets' - @(option, value)@ pairs whose values carry sensitive material
---     (@--header \"Authorization: Bearer ...\"@, @-u@ basic-auth). These are
+--     @(auth header), @-u@ basic-auth). These are
 --     written to the temporary @--config@ file rather than passed on the command
 --     line, so they never appear in @/proc/<pid>/cmdline@.
 --   * 'trailing' - non-secret options applied after the config (@--data-binary@,
@@ -86,10 +87,17 @@ withSecureTempFile :: FilePath -> BSL8.ByteString -> (FilePath -> IO a) -> IO a
 withSecureTempFile label content cont = do
   tmp <- getTemporaryDirectory
   pid <- getProcessID
-  let dir  = joinPath [tmp, "graphos-" ++ show pid]
-      path = joinPath [dir, label]
+  -- Private per-process directory: never followable for an unprivileged user.
+  let dir = joinPath [tmp, "graphos-" ++ show pid]
   createDirectoryIfMissing True dir
   setFileMode dir (0o700 :: FileMode)
+  -- Unique name (O_EXCL) defeats symlink-following and concurrent races.
+  let safeLabel = takeFileName label
+  (path, h) <- openTempFile dir ("graphos-" ++ safeLabel ++ "-XXXXXX")
+  -- Lock the mode down before writing anything, so even a briefly-live file
+  -- is never world-readable (CWE-377).
+  setFileMode path (0o600 :: FileMode)
+  hClose h
   bracket
     (do BSL8.writeFile path content
         setFileMode path (0o600 :: FileMode)

@@ -18,6 +18,7 @@ import Control.Exception (catch, SomeException)
 import Data.Time.Clock (getCurrentTime)
 
 import Graphos.Infrastructure.Http (runCurl, CurlResult(..), withSecureTempFile)
+
 import Graphos.Domain.Types (CommunityId, CommunityMap, CohesionMap)
 import Graphos.Domain.Graph (Graph)
 import Graphos.Domain.Config (LabelingConfig(..), Neo4jConfig(..))
@@ -140,7 +141,7 @@ pushLabelsToNeo4j neoCfg labels
         let endpoint = uri ++ "/db/neo4j/tx/commit"
             secretOpts = [("--header", "Content-Type: application/json")
                           , ("--header", "Accept: application/json")
-                          , ("-u", user ++ ":" ++ password) ]
+                          , ("--user", user ++ ":" ++ password) ]
             firstArgs = [ "-s", "--max-time", "60", "-X", "POST" ]
             lastArgs = [ "--data-binary", "@" ++ payloadPath, endpoint ]
         res <- runCurl firstArgs secretOpts lastArgs
