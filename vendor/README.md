@@ -7,14 +7,32 @@ their sources are vendored here at an ABI-11-compatible revision and compiled
 into the `graphos` library (`c-sources` / `cxx-sources` in `graphos.cabal`).
 FFI symbols are bound in `Graphos.Infrastructure.Extract.TreeSitter.Vendored`.
 
-| Grammar | Upstream | Revision | ABI | Notes |
-| ------- | -------- | -------- | --- | ----- |
-| `tree-sitter-cpp` | <https://github.com/tree-sitter/tree-sitter-cpp> | `fb8250e` (2020-11-02) | 11 | upstream `src/` copied as-is |
-| `tree-sitter-yaml` | <https://github.com/ikatyang/tree-sitter-yaml> | `v0.3.1` | 11 | upstream `src/` copied as-is |
-| `tree-sitter-sql` | <https://github.com/m-novikov/tree-sitter-sql> | `148b442` (2022-06-19) | 11 | `parser.c` regenerated from `grammar.js` with tree-sitter CLI **0.16.9** |
+| Grammar | Upstream | Revision | ABI | License | Notes |
+| ------- | -------- | -------- | --- | ------- | ----- |
+| `tree-sitter-cpp` | <https://github.com/tree-sitter/tree-sitter-cpp> | `fb8250e` (2020-11-02) | 11 | MIT | upstream `src/` copied as-is |
+| `tree-sitter-yaml` | <https://github.com/ikatyang/tree-sitter-yaml> | `v0.3.1` | 11 | MIT | upstream `src/` copied as-is |
+| `tree-sitter-sql` | <https://github.com/m-novikov/tree-sitter-sql> | `148b442` (2022-06-19) | 11 | MIT | `parser.c` regenerated from `grammar.js` with tree-sitter CLI **0.16.9** |
+| `tree-sitter-c-sharp` | <https://github.com/tree-sitter/tree-sitter-c-sharp> | vendored 2026-10-31 (AVI-1716) | 11 | MIT | revision predates C# 9 records; `record_declaration` is not a node at this ABI |
+| `tree-sitter-perl` | <https://github.com/tree-sitter/tree-sitter-perl> | vendored 2026-10-31 (AVI-1716) | 11 | MIT | `use` forms are `use_constant_statement` / `use_parent_statement`; `use_statement` is not a node |
 
-Every grammar ships a byte-identical `src/tree_sitter/parser.h`, so a single
-`include-dirs` entry serves all three.
+`tree-sitter-php` is **not** vendored: it is provided by `tree-sitter-php >= 0.5` on Hackage (ABI 11, `LANGUAGE_VERSION 11` verified in vendor `src/parser.c`).
+
+## PHP node-type note
+
+`tree-sitter-php 0.5.0.2` (vendor `src/parser.c`) exposes imports as
+`include_expression`, `require_expression`, `include_once_expression`,
+`require_once_expression` — not `include_statement` / `require_statement`.
+`Convert.hs` maps the `*_expression` names (plus `namespace_use_declaration` for
+`use Foo\Bar;`).
+
+## Kotlin note
+
+No `tree-sitter-kotlin` package exists at ABI 9–11. `getGrammarPtr "kotlin"` is
+an intentional alias for `tree-sitter-java` (see `Wiring.hs:335`) and is
+documented as Java-alias-only.
+
+Every vendored grammar ships a byte-identical `src/tree_sitter/parser.h`, so a single
+`include-dirs` entry serves all grammars.
 
 ## Upgrading
 
