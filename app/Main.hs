@@ -18,7 +18,7 @@ import System.Process (createProcess, proc, waitForProcess)
 import qualified System.Process as Process
 import System.Environment (getArgs, getExecutablePath, withArgs, lookupEnv, getEnvironment)
 import Text.Read (readMaybe)
-import System.FilePath ((</>), isAbsolute)
+import System.FilePath ((</>), isAbsolute, takeDirectory)
 import qualified Data.Time.Clock as TCC (getCurrentTime)
 import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
@@ -62,6 +62,9 @@ import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
+import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig)
+import Graphos.Domain.Community.Landscape (parseRandomGraphSpec)
+import Graphos.UseCase.ClusterEval (LandscapeInput(..), landscapeReport, landscapeSummary, landscapeJSON)
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, LogEnv(..), logInfo, logDebug, logError)
 import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGraphToNeo4j, pushToNeo4jWithCommunities)
@@ -74,7 +77,7 @@ import Graphos.Infrastructure.Observability.SDK
   , defaultOtelConfig
   )
 import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
-import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ccMaxCommunityFraction, ccCommunityCapEnabled, validClusteringConfig)
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), defaultClusteringConfig, ccMaxCommunityFraction, ccCommunityCapEnabled, validClusteringConfig)
 import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
@@ -83,7 +86,7 @@ import Graphos.Infrastructure.FileSystem.Watcher (watchDirectory, watchSources, 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
-import System.Directory (doesFileExist, createDirectoryIfMissing)
+import System.Directory (doesFileExist, createDirectoryIfMissing, renameFile)
 import System.Timeout (timeout)
 
 import qualified Graphos.UseCase.Export as Export
@@ -268,6 +271,75 @@ runClusterOnlyMode appEnv env obsEnv config' = do
       _ <- timeout shutdownMicros (shutdownObservability obsEnv)
       exitSuccess
 
+-- | @graphos clustereval landscape@: run the seeded search landscape on a
+-- graph's file MDG or on a generated control MDG, write @landscape.json@
+-- atomically and print the markdown summary (or the JSON document with
+-- @--json@).
+runLandscapeCmd :: LandscapeCli -> IO ()
+runLandscapeCmd lc = do
+  graphosCfg <- loadConfigSilent
+  mSpec <- case lcRandomGraph lc of
+    Nothing -> pure Nothing
+    Just t  -> case parseRandomGraphSpec t of
+      Left err -> do
+        hPutStrLn stderr ("[clustereval] " ++ err)
+        exitWith (ExitFailure 1)
+      Right spec -> pure (Just spec)
+
+  mGraph <- case (mSpec, lcGraph lc) of
+    (Just _, _)             -> pure Nothing
+    (Nothing, Nothing)      -> do
+      hPutStrLn stderr "[clustereval] landscape needs --graph G or --random-graph rnd:N:D|bip:N:D"
+      exitWith (ExitFailure 1)
+    (Nothing, Just gPath)   -> do
+      r <- loadGraphFromFile gPath
+      case r of
+        Left err -> do
+          hPutStrLn stderr ("[clustereval] " ++ T.unpack err)
+          exitWith (ExitFailure 1)
+        Right loaded -> pure (Just (lrGraph loaded))
+
+  let cc = gcClustering graphosCfg
+      seed = lcSeed lc
+      bunch = defaultBunchConfig
+        { bcSeed          = seed
+        , bcPopulation    = fromMaybe (ccBunchPopulation cc) (lcBunchPopulation lc)
+        , bcThreshold     = fromMaybe (ccBunchThreshold cc) (lcBunchThreshold lc)
+        , bcAnnealing     = case lcBunchSA lc of
+            Just t  -> Just t
+            Nothing -> if ccBunchAnnealing cc then Just (ccBunchT0 cc, ccBunchAlpha cc) else Nothing
+        , bcMaxIterations = fromMaybe (ccBunchMaxIterations cc) (lcBunchMaxIterations lc)
+        }
+      input = LandscapeInput
+        { liBunch            = bunch
+        , liSeed             = seed
+        , liRuns             = lcRuns lc
+        , liRandomPartitions = lcRandomPartitions lc
+        , liWeighted         = fromMaybe (ccBunchWeighted cc) (lcBunchWeighted lc)
+        , liControl          = mSpec
+        , liBasinMinShare    = 0.05
+        }
+      rep = landscapeReport input mGraph
+      doc = encode (landscapeJSON input rep)
+      outDir = case lcOut lc of
+        Just d  -> d
+        Nothing -> case (mSpec, lcGraph lc) of
+          (Nothing, Just gPath) ->
+            let d = takeDirectory gPath in if null d then "." else d
+          _ -> "."
+      outPath = outDir </> "landscape.json"
+      tmpPath = outPath ++ ".tmp"
+
+  createDirectoryIfMissing True outDir
+  BL.writeFile tmpPath doc
+  renameFile tmpPath outPath
+
+  if lcJson lc
+    then BL.putStr doc >> putStrLn ""
+    else do
+      TIO.putStrLn (landscapeSummary rep)
+      putStrLn ("[clustereval] landscape.json written to " ++ outPath)
+
 main :: IO ()
 main = do
   rawArgs <- getArgs
@@ -319,7 +391,7 @@ main = do
           baseCc       = gcClustering graphosCfg
           effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
           effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
-          effCc        = ClusteringConfig effFraction effEnabled
+          effCc        = defaultClusteringConfig { ccMaxCommunityFraction = effFraction, ccCommunityCapEnabled = effEnabled }
           config' = config { cfgOutputDir    = outputDir
                            , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
                             , cfgOtelConfig     = otelCfg
@@ -348,12 +420,16 @@ main = do
           env = otelLogEnv obsEnv
           appEnv = productionAppEnvWithConfig env obsEnv graphosCfg
 
-      -- Validate the effective community-size-cap config; fail fast if mis-set.
-      case validClusteringConfig effCc of
-        Left err -> do
+      -- Validate the config-file clustering block and the resolved size-cap
+      -- config; fail fast if mis-set (bad algorithm or Bunch range, bad cap).
+      case (validClusteringConfig baseCc, validClusteringConfig effCc) of
+        (Left err, _) -> do
+          logError env $ "[graphos] Invalid clustering config: " <> T.pack err
+          exitWith (ExitFailure 1)
+        (_, Left err) -> do
           logError env $ "[graphos] Invalid community-size-cap config: " <> T.pack err
           exitWith (ExitFailure 1)
-        Right _ -> pure ()
+        (Right _, Right _) -> pure ()
       when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
       -- MCP mode: start MCP server and exit
       case cfgMCP config' of
@@ -955,6 +1031,9 @@ main = do
               if asGate && not admissible
                 then exitWith (ExitFailure 1)
                 else exitSuccess
+
+    ClusterEvalCmd sub -> case sub of
+      ClusterEvalLandscape lc -> runLandscapeCmd lc
 
     SubgraphCmd graphPath mConfigPath outPath boundaryHops noDerive -> do
       case mConfigPath of

@@ -25,8 +25,10 @@ module Graphos.UseCase.ClusterEval
   , landscapeReport
   , foldCommunitiesToFiles
   , landscapeSummary
+  , landscapeJSON
   ) where
 
+import Data.Aeson (Value, object, toJSON, (.=))
 import Data.List (nub, sort, sortOn)
 import Data.Ord (Down(..))
 import qualified Data.Map.Strict as Map
@@ -45,6 +47,7 @@ import Graphos.Domain.Community.Bunch
   , defaultBunchConfig
   , FileMDG(..)
   , foldToFileMDG
+  , mdgEdgeCount
   , mdgFileCount
   , mdgTotalWeight
   , intraOfAssignment
@@ -129,7 +132,7 @@ foldCommunitiesToFiles mdg g =
       nodeComm = Map.fromList
         [ (nodeId n, c) | n <- Map.elems (gNodes g), Just c <- [nodeCommunityId n] ]
       nodesByFile = Map.fromListWith (flip (++))
-        [ (nodeSourceFile n, nodeId n) | n <- Map.elems (gNodes g) ]
+        [ (nodeSourceFile n, [nodeId n]) | n <- Map.elems (gNodes g) ]
       fileComm = Map.fromList
         [ (f, majority cids)
         | f <- files
@@ -145,7 +148,7 @@ foldCommunitiesToFiles mdg g =
       idxOf = Map.fromList (zip grouped [0 :: Int ..])
       singletons = zip [length grouped ..]
                        [ f | f <- files, case fileComm Map.! f of Nothing -> True; _ -> False ]
-      singletonIdx = Map.fromList singletons
+      singletonIdx = Map.fromList [ (f, i) | (i, f) <- singletons ]
       fullAssign = VU.fromList
         [ case fileComm Map.! f of
             Just c  -> idxOf Map.! c
@@ -189,7 +192,7 @@ basinsTable bs =
 
 similarityTable :: SimilarityDistribution -> [Text]
 similarityTable d =
-  ["| Bucket | P_uv | Edges | Share of \|E\| |"
+  ["| Bucket | P_uv | Edges | Share of \\|E\\| |"
   , "|--------|------|-------|---------------|"]
   ++ [ T.pack ("| " ++ name ++ " | " ++ range ++ " | " ++ show (countOf b)
         ++ " | " ++ showDouble (similarityShare d b) ++ "% |")
@@ -219,3 +222,95 @@ leidenLines (Just p) =
 -- | Fixed-notation double rendering for the summary tables.
 showDouble :: Double -> String
 showDouble x = showFFloat (Just 4) x ""
+
+-- | The machine-readable landscape document (keys @config@, @mdg@, @runs@,
+-- @basins@, @similarity@, @random_baseline@ and, when present, @leiden@).
+-- This is what @landscape.json@ contains and what @--json@ prints.
+landscapeJSON :: LandscapeInput -> LandscapeReport -> Value
+landscapeJSON input rep = object (base ++ leidenField)
+  where
+    res = lrResult rep
+    m = lrmdg rep
+    bc = liBunch input
+
+    base =
+      [ "config" .= object
+          [ "seed" .= liSeed input
+          , "runs" .= liRuns input
+          , "random_partitions" .= liRandomPartitions input
+          , "weighted" .= liWeighted input
+          , "basin_min_share" .= liBasinMinShare input
+          , "control" .= fmap renderRandomGraphSpec (liControl input)
+          , "bunch" .= object
+              [ "population" .= bcPopulation bc
+              , "threshold" .= bcThreshold bc
+              , "annealing" .= case bcAnnealing bc of
+                  Nothing     -> toJSON (Nothing :: Maybe (Double, Double))
+                  Just (t0, a) -> object ["t0" .= t0, "alpha" .= a]
+              , "max_iterations" .= bcMaxIterations bc
+              ]
+          ]
+      , "mdg" .= object
+          [ "files" .= mdgFileCount m
+          , "edges" .= mdgEdgeCount m
+          , "total_weight" .= mdgTotalWeight m
+          ]
+      , "runs" .= map runJson (lrRuns res)
+      , "basins" .= map basinJson (lrBasins res)
+      , "similarity" .= similarityJson (lrSimilarity res)
+      , "random_baseline" .= baselineJson (lrBaseline res)
+      ]
+
+    leidenField = maybe [] (\p -> ["leiden" .= leidenJson p]) (lrLeiden rep)
+
+runJson :: RunRecord -> Value
+runJson r = object
+  [ "seed" .= rrSeed r
+  , "start_mq" .= rrStartMQ r
+  , "start_clusters" .= rrStartClusters r
+  , "final_mq" .= rrFinalMQ r
+  , "final_clusters" .= rrFinalClusters r
+  , "intra_fraction" .= rrIntraFraction r
+  , "evaluations" .= rrEvaluations r
+  , "iterations" .= rrIterations r
+  , "annealing_accepts" .= rrAnnealingAccepts r
+  ]
+
+basinJson :: Basin -> Value
+basinJson b = object
+  [ "mq_bin" .= basinKey b
+  , "runs" .= basinRuns b
+  , "share" .= basinShare b
+  , "mq_range" .= [fst (basinMQRange b), snd (basinMQRange b)]
+  , "clusters_range" .= [fst (basinClusterRange b), snd (basinClusterRange b)]
+  ]
+
+similarityJson :: SimilarityDistribution -> Value
+similarityJson d = object
+  [ "edges" .= simEdges d
+  , "runs" .= simRuns d
+  , "zero" .= bucketJson BucketZero
+  , "low" .= bucketJson BucketLow
+  , "medium" .= bucketJson BucketMedium
+  , "high" .= bucketJson BucketHigh
+  ]
+  where
+    bucketJson b = object
+      [ "edges" .= Map.findWithDefault 0 b (simCounts d)
+      , "share" .= similarityShare d b
+      ]
+
+baselineJson :: RandomBaseline -> Value
+baselineJson b = object
+  [ "count" .= rbCount b
+  , "min" .= rbMin b
+  , "median" .= rbMedian b
+  , "max" .= rbMax b
+  ]
+
+leidenJson :: LeidenPoint -> Value
+leidenJson p = object
+  [ "mq" .= lpMQ p
+  , "clusters" .= lpClusters p
+  , "intra_fraction" .= lpIntraFraction p
+  ]

@@ -12,6 +12,7 @@ import Test.Hspec
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, Graph)
 import Graphos.UseCase.Report (generateReport, bridgeNodesSection, bridgeTableCap)
+import Graphos.UseCase.Cluster (ClusterQuality(..))
 
 spec :: Spec
 spec = do
@@ -30,7 +31,7 @@ spec = do
           , analysisArticulation = ["b"]
           , analysisBccCount     = 7
           }
-        report = generateReport g baseAnalysis defaultConfig detection Nothing
+        report = generateReport g baseAnalysis defaultConfig detection Nothing Nothing
 
     it "prints the cohesion value from the analysis map (no recomputation)" $
       -- 0.42 is deliberately NOT the structural cohesion of the fixture
@@ -50,7 +51,7 @@ spec = do
 
     it "renders the no-articulation message when the shared list is empty" $ do
       let analysis' = baseAnalysis { analysisArticulation = [] }
-          report' = generateReport g analysis' defaultConfig detection Nothing
+          report' = generateReport g analysis' defaultConfig detection Nothing Nothing
       report' `shouldSatisfy` T.isInfixOf "No articulation points found"
 
     it "caps the bridge table at bridgeTableCap, drops degree ≤ 1, and totals the rest" $ do
@@ -70,6 +71,41 @@ spec = do
       -- the new columns render label | kind | source | degree
       rendered `shouldSatisfy` T.isInfixOf "| Bridge Node | Kind | Source | Degree |"
       rendered `shouldSatisfy` T.isInfixOf "test.hs"
+
+  describe "Partition quality line (report-consistency)" $ do
+    it "renders the precomputed algorithm, MQ, modularity and intra fraction" $ do
+      let g = buildGraph False (extractionFromLists (map testNode ["a", "b"]) [testEdge "a" "b"])
+          detection = Detection 0 0 True Nothing Map.empty Map.empty emptyExclusionCounts
+          analysis = Analysis
+            { analysisCommunities  = Map.fromList [(0, ["a", "b"])]
+            , analysisNullModel    = DefaultNullModel
+            , analysisCohesion     = Map.fromList [(0, 1.0)]
+            , analysisGodNodes     = []
+            , analysisSurprises    = []
+            , analysisQuestions    = []
+            , analysisArticulation = []
+            , analysisBccCount     = 0
+            }
+          q = ClusterQuality
+            { cqAlgorithm = "bunch"
+            , cqMQ = 1.25
+            , cqModularity = 0.5
+            , cqIntraFraction = 0.75
+            , cqClusters = 1
+            , cqSkip = Nothing
+            }
+          report = generateReport g analysis defaultConfig detection Nothing (Just q)
+      report `shouldSatisfy` T.isInfixOf "Partition quality: algorithm=bunch"
+      report `shouldSatisfy` T.isInfixOf "MQ=1.25"
+      report `shouldSatisfy` T.isInfixOf "modularity=0.5"
+      report `shouldSatisfy` T.isInfixOf "intra-edge fraction=0.75"
+
+    it "omits the line when no quality record is supplied" $
+      let g = buildGraph False (extractionFromLists [] [])
+          detection = Detection 0 0 True Nothing Map.empty Map.empty emptyExclusionCounts
+          analysis = Analysis Map.empty DefaultNullModel Map.empty [] [] [] [] 0
+          report = generateReport g analysis defaultConfig detection Nothing Nothing
+      in report `shouldSatisfy` (not . T.isInfixOf "Partition quality")
 
   describe "generateReport Extraction Coverage section" $ do
     let detectionWithCode codeFiles =
@@ -92,13 +128,13 @@ spec = do
       -- .ts is a recognized default extractor (structural); .scala has none
       -- (#158) and routes to ExtractStub.
       let codeFiles = replicate 8 "a.ts" ++ replicate 34 "a.scala"
-          report = generateReport g baseAnalysis defaultConfig (detectionWithCode codeFiles) Nothing
+          report = generateReport g baseAnalysis defaultConfig (detectionWithCode codeFiles) Nothing Nothing
       report `shouldSatisfy` T.isInfixOf "Files detected: 42"
       report `shouldSatisfy` T.isInfixOf "Files with structure: 8"
       report `shouldSatisfy` T.isInfixOf "Stubbed: 34 (.scala 34)"
 
     it "reports zero stubbed when every code file resolves to a real extractor" $ do
-      let report = generateReport g baseAnalysis defaultConfig (detectionWithCode (replicate 5 "a.ts")) Nothing
+      let report = generateReport g baseAnalysis defaultConfig (detectionWithCode (replicate 5 "a.ts")) Nothing Nothing
       report `shouldSatisfy` T.isInfixOf "Files detected: 5"
       report `shouldSatisfy` T.isInfixOf "Files with structure: 5"
       report `shouldSatisfy` T.isInfixOf "Stubbed: 0"

@@ -7,9 +7,11 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), defaultClusteringConfig, validClusteringConfig)
 
 spec :: Spec
 spec = do
+  clusteringSpec
   describe "EmbeddingConfig batchSize/concurrency (streaming-embeddings)" $ do
     it "defaults batchSize to 64 and concurrency to 1 when keys are absent" $ do
       decode "{\"enabled\": true}" `shouldBe` Just
@@ -161,3 +163,36 @@ spec = do
 
     it "fills partial keys with defaults" $ do
       decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5 4 defaultPathExtensions)
+
+clusteringSpec :: Spec
+clusteringSpec = describe "ClusteringConfig (bunch-search-based-modularization 6.1)" $ do
+  it "defaults the algorithm to leiden and the Bunch search to the paper defaults" $ do
+    ccAlgorithm defaultClusteringConfig `shouldBe` "leiden"
+    ccSeed defaultClusteringConfig `shouldBe` 0
+    ccBunchPopulation defaultClusteringConfig `shouldBe` 8
+    ccBunchThreshold defaultClusteringConfig `shouldBe` 0
+    ccBunchAnnealing defaultClusteringConfig `shouldBe` False
+    ccBunchMaxIterations defaultClusteringConfig `shouldBe` 10000
+    ccBunchMaxFiles defaultClusteringConfig `shouldBe` 5000
+    ccBunchWeighted defaultClusteringConfig `shouldBe` False
+
+  it "parses clustering.algorithm / seed / bunch.* from YAML-style JSON" $
+    (decode "{\"algorithm\":\"bunch\",\"seed\":7,\"bunch\":{\"population\":4,\"threshold\":50,\"annealing\":{\"enabled\":true,\"t0\":80,\"alpha\":0.9},\"maxIterations\":200,\"maxFiles\":10,\"weighted\":true}}" :: Maybe ClusteringConfig)
+      `shouldBe` Just defaultClusteringConfig
+        { ccAlgorithm = "bunch", ccSeed = 7, ccBunchPopulation = 4
+        , ccBunchThreshold = 50, ccBunchAnnealing = True
+        , ccBunchT0 = 80, ccBunchAlpha = 0.9
+        , ccBunchMaxIterations = 200, ccBunchMaxFiles = 10
+        , ccBunchWeighted = True }
+
+  it "round-trips through JSON" $ do
+    let c = defaultClusteringConfig { ccAlgorithm = "bunch", ccBunchThreshold = 50, ccBunchAnnealing = True }
+    (decode (encode c) :: Maybe ClusteringConfig) `shouldBe` Just c
+
+  it "rejects an out-of-range threshold in validation" $
+    validClusteringConfig defaultClusteringConfig { ccBunchThreshold = 101 }
+      `shouldSatisfy` \case Left _ -> True; _ -> False
+
+  it "rejects an unknown algorithm in validation" $
+    validClusteringConfig defaultClusteringConfig { ccAlgorithm = "louvain" }
+      `shouldSatisfy` \case Left _ -> True; _ -> False

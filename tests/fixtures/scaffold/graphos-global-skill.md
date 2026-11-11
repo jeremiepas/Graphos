@@ -93,6 +93,8 @@ graphos init                    Generate graphos.yaml
 graphos push [opts]             Push to Neo4j
 graphos push-memgraph [opts]    Push to Memgraph
 graphos merge A B               Merge graph files
+graphos clustereval landscape   Search landscape (basins, similarity, baseline)
+  --graph FILE / --runs N / --seed S / --random-graph SPEC / --json
 graphos serve [opts]            Serve HTML + query API
   --dir DIR / --graph FILE / --port N
   --api-only / --no-api

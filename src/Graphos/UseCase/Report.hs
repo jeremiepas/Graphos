@@ -15,6 +15,7 @@ import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
+import Graphos.UseCase.Cluster (ClusterQuality(..))
 import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCoverage(..))
 
 -- | Generate a markdown report.
@@ -23,15 +24,15 @@ import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCov
 -- come from the 'Analysis' record — the values computed once during
 -- clustering/analysis — never recomputed here, so rendering does no
 -- whole-graph work.
-generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Text
-generateReport g analysis config detection mLabels =
+generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Maybe ClusterQuality -> Text
+generateReport g analysis config detection mLabels mQuality =
   let summaryLines =
         [ T.pack $ "Nodes: " ++ show (Map.size (gNodes g))
         , T.pack $ "Edges: " ++ show (Map.size (gEdges g))
         , T.pack $ "Communities: " ++ show (Map.size (analysisCommunities analysis))
         , T.pack $ "Articulation points: " ++ show (length artPoints)
         , T.pack $ "Biconnected components: " ++ show (analysisBccCount analysis)
-        ]
+        ] ++ partitionQualityLines mQuality
       sourceTally = Map.fromListWith (+) [ (toText s, 1 :: Int) | n <- Map.elems (gNodes g), Just s <- [nodeSource n] ]
       sourceLines = case Map.toList sourceTally of
         [] -> []
@@ -92,6 +93,19 @@ extractionCoverageLines sc =
     breakdown
       | null (scStubbedByExt sc) = ""
       | otherwise = " (" ++ intercalate ", " [ ext ++ " " ++ show n | (ext, n) <- scStubbedByExt sc ] ++ ")"
+
+-- | The @Partition quality@ line (report-consistency capability). The
+-- quality record is computed by the clustering stage from the final
+-- 'CommunityMap' — the same one the export writes — and rendered here
+-- without recomputation (bounded-report-export).
+partitionQualityLines :: Maybe ClusterQuality -> [Text]
+partitionQualityLines Nothing = []
+partitionQualityLines (Just q) =
+  [ T.pack $ "Partition quality: algorithm=" ++ T.unpack (cqAlgorithm q)
+      ++ ", MQ=" ++ show (cqMQ q)
+      ++ ", modularity=" ++ show (cqModularity q)
+      ++ ", intra-edge fraction=" ++ show (cqIntraFraction q)
+  ]
 
 -- | Format cohesion score to 2 decimal places
 fmtCohesion :: Double -> String

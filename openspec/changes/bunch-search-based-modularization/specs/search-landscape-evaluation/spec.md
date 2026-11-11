@@ -3,13 +3,11 @@
 ### Requirement: Structural search landscape
 
 `graphos clustereval landscape` SHALL run the Bunch search `--runs N` times
-(default 100) with seeds `s..s+N−1` on the file MDG of `--graph` and SHALL
-record per run: seed, MQ and cluster count of the random starting partition,
-final MQ, final cluster count, intra-edge fraction, number of MQ evaluations,
-iterations and annealing acceptances. Runs SHALL be reported sorted by final
-MQ ascending. The system SHALL group runs into basins by rounding final MQ to
-the nearest 0.05 and SHALL list every basin holding at least 5% of runs with
-its MQ range and cluster-count range. (PRD §5.1)
+(default 100, seeds `s..s+N−1`) on the file MDG of `--graph` and record per
+run: seed, start/final MQ and cluster count, intra-edge fraction, MQ
+evaluations, iterations and annealing acceptances, sorted by final MQ. It
+SHALL group runs into basins by rounding final MQ to 0.05 and list every
+basin holding at least 5% of runs with its MQ and cluster-count ranges.
 
 #### Scenario: record count and order
 - **WHEN** `graphos clustereval landscape --graph g.json --runs 20 --seed 3` runs

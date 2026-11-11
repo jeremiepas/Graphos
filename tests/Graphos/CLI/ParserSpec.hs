@@ -16,7 +16,7 @@ parseServe args =
     Failure f   -> Left $ fst $ renderFailure f "serve"
     CompletionInvoked _ -> Left "completion"
 
-parseWith :: Parser Command -> [String] -> Either String Command
+parseWith :: Parser a -> [String] -> Either String a
 parseWith p args =
   case execParserPure defaultPrefs (info p idm) args of
     Success cmd -> Right cmd
@@ -223,3 +223,82 @@ spec = do
       parsePipeline ["--max-community-fraction", "0"]   `shouldSatisfy` isLeft
       parsePipeline ["--max-community-fraction", "1.5"] `shouldSatisfy` isLeft
       parsePipeline ["--max-community-fraction", "-0.1"] `shouldSatisfy` isLeft
+  describe "pipelineOpts bunch flags (bunch-search-based-modularization 6.1)" $ do
+    it "defaults every Bunch override to Nothing" $
+      parsePipeline [] `shouldSatisfy` \case
+        Right cfg -> cfgClusterAlgorithm cfg == Nothing
+               && cfgClusterSeed cfg == Nothing
+               && cfgBunchPopulation cfg == Nothing
+               && cfgBunchThreshold cfg == Nothing
+               && cfgBunchSA cfg == Nothing
+               && cfgBunchMaxIterations cfg == Nothing
+               && cfgBunchMaxFiles cfg == Nothing
+               && cfgBunchWeighted cfg == Nothing
+        Left _ -> False
+
+    it "parses the full Bunch flag surface" $
+      parsePipeline
+        [ "--cluster-algorithm", "bunch", "--seed", "7"
+        , "--bunch-population", "4", "--bunch-threshold", "50"
+        , "--bunch-sa", "100,0.99", "--bunch-max-iterations", "200"
+        , "--bunch-max-files", "10", "--bunch-weighted"
+        ] `shouldSatisfy` \case
+        Right cfg -> cfgClusterAlgorithm cfg == Just "bunch"
+               && cfgClusterSeed cfg == Just 7
+               && cfgBunchPopulation cfg == Just 4
+               && cfgBunchThreshold cfg == Just 50
+               && cfgBunchSA cfg == Just (100, 0.99)
+               && cfgBunchMaxIterations cfg == Just 200
+               && cfgBunchMaxFiles cfg == Just 10
+               && cfgBunchWeighted cfg == Just True
+        Left _ -> False
+
+    it "rejects --bunch-threshold outside 0..100" $ do
+      parsePipeline ["--bunch-threshold", "101"] `shouldSatisfy` isLeft
+      parsePipeline ["--bunch-threshold", "-1"]  `shouldSatisfy` isLeft
+
+    it "rejects an unknown --cluster-algorithm" $
+      parsePipeline ["--cluster-algorithm", "louvain"] `shouldSatisfy` isLeft
+
+    it "rejects malformed --bunch-sa" $ do
+      parsePipeline ["--bunch-sa", "100"]        `shouldSatisfy` isLeft
+      parsePipeline ["--bunch-sa", "100,1.5"]    `shouldSatisfy` isLeft
+      parsePipeline ["--bunch-sa", "0,0.99"]     `shouldSatisfy` isLeft
+
+  describe "clustereval landscape parsing (6.2)" $ do
+    it "parses the documented flags with defaults" $
+      parseWith clusterevalOpts ["landscape", "--graph", "graphos-out/graph.json"] `shouldSatisfy` \case
+        Right (ClusterEvalLandscape lc) ->
+          lcGraph lc == Just "graphos-out/graph.json"
+          && lcRuns lc == 100
+          && lcSeed lc == 0
+          && lcRandomPartitions lc == 1000
+          && lcRandomGraph lc == Nothing
+          && lcJson lc == False
+          && lcOut lc == Nothing
+        _ -> False
+
+    it "parses --runs / --seed / --random-graph / --json / --out" $
+      parseWith clusterevalOpts
+        [ "landscape", "--random-graph", "rnd:100:0.05", "--runs", "20"
+        , "--seed", "3", "--random-partitions", "50", "--json", "--out", "out"
+        ] `shouldSatisfy` \case
+        Right (ClusterEvalLandscape lc) ->
+          lcRandomGraph lc == Just "rnd:100:0.05"
+          && lcRuns lc == 20
+          && lcSeed lc == 3
+          && lcRandomPartitions lc == 50
+          && lcJson lc == True
+          && lcOut lc == Just "out"
+        _ -> False
+
+    it "accepts the Bunch knob overrides used by the smoke (η / annealing)" $
+      parseWith clusterevalOpts
+        [ "landscape", "--graph", "g.json", "--bunch-threshold", "50"
+        , "--bunch-sa", "100,0.99", "--bunch-weighted"
+        ] `shouldSatisfy` \case
+        Right (ClusterEvalLandscape lc) ->
+          lcBunchThreshold lc == Just 50
+          && lcBunchSA lc == Just (100, 0.99)
+          && lcBunchWeighted lc == Just True
+        _ -> False
