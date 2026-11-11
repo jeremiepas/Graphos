@@ -22,6 +22,9 @@ module Graphos.CLI.Parser
   , migrateGraphOpts
   , commandOpts
   , granularityReader
+  , clusterevalOpts
+  , ClusterEvalCommand(..)
+  , LandscapeCli(..)
     -- * Install-skill target
   , InstallSkillTarget(..)
     -- * Command reference rendering
@@ -31,6 +34,7 @@ module Graphos.CLI.Parser
 import Options.Applicative
 import Data.Text (Text)
 import Data.Char (toLower)
+import Data.Word (Word64)
 import GHC.Conc (numCapabilities)
 import Text.Read (readMaybe)
 import Graphos.Domain.Types (PipelineConfig(..), EdgeDensity(..))
@@ -68,7 +72,31 @@ data Command
 
   | Init (Maybe String)
   | InstallSkill InstallSkillTarget
+  | ClusterEvalCmd ClusterEvalCommand
   deriving (Show, Eq)
+
+-- | @graphos clustereval@ subcommands.
+data ClusterEvalCommand
+  = ClusterEvalLandscape LandscapeCli
+  deriving (Show, Eq)
+
+-- | Parsed arguments of @graphos clustereval landscape@. The Bunch knobs are
+-- optional overrides; absent values fall back to @graphos.yaml@
+-- @clustering.bunch.*@ and then to the search defaults.
+data LandscapeCli = LandscapeCli
+  { lcGraph            :: Maybe FilePath
+  , lcRuns             :: Int
+  , lcSeed             :: Word64
+  , lcRandomPartitions :: Int
+  , lcRandomGraph      :: Maybe Text
+  , lcJson             :: Bool
+  , lcOut              :: Maybe FilePath
+  , lcBunchPopulation  :: Maybe Int
+  , lcBunchThreshold   :: Maybe Int
+  , lcBunchSA          :: Maybe (Double, Double)
+  , lcBunchMaxIterations :: Maybe Int
+  , lcBunchWeighted    :: Maybe Bool
+  } deriving (Show, Eq)
 
 -- | Subcommands for the OpenSpec artifact viewer.
 data ViewSubcommand
@@ -147,6 +175,14 @@ pipelineOpts = PipelineConfig
       <*> pure True                          -- cfgCommunityCapEnabled: placeholder; Main resolves from config+CLI
       <*> optional (option fractionReader (long "max-community-fraction" <> metavar "FRAC" <> help "Post-Leiden community-size cap as a fraction of total nodes (0,1]; supersedes the config file"))
       <*> switch (long "no-community-cap" <> help "Disable the post-Leiden community-size cap (keep raw Leiden communities)")
+      <*> optional (option clusterAlgorithmReader (long "cluster-algorithm" <> metavar "ALGO" <> help "Clustering algorithm: leiden|bunch (default: leiden; overrides clustering.algorithm)"))
+      <*> optional (option auto (long "seed" <> metavar "N" <> help "First seed of the Bunch population (default: 0; overrides clustering.seed)"))
+      <*> optional (option auto (long "bunch-population" <> metavar "P" <> help "Independent Bunch searches (default: 8)"))
+      <*> optional (option thresholdReader (long "bunch-threshold" <> metavar "ETA" <> help "Bunch threshold η in percent, 0..100 (default: 0)"))
+      <*> optional (option saReader (long "bunch-sa" <> metavar "T0,ALPHA" <> help "Enable simulated annealing with initial temperature and cooling factor (e.g. 100,0.99)"))
+      <*> optional (option auto (long "bunch-max-iterations" <> metavar "N" <> help "Bunch iteration cap (default: 10000)"))
+      <*> optional (option auto (long "bunch-max-files" <> metavar "N" <> help "File count above which Bunch falls back to Leiden (default: 5000)"))
+      <*> optional (flag' True (long "bunch-weighted" <> help "Weight the file MDG by edge weights instead of unit weights"))
 
 
 granularityReader :: ReadM Granularity
@@ -165,6 +201,42 @@ fractionReader = eitherReader $ \s ->
     Just v | v > 0 && v <= 1 -> Right v
            | otherwise      -> Left (unwords ["--max-community-fraction out of range (0,1]:", s])
     Nothing                -> Left (unwords ["not a valid number:", s])
+-- | Reader for @--cluster-algorithm@: only @leiden@ and @bunch@ are valid.
+clusterAlgorithmReader :: ReadM Text
+clusterAlgorithmReader = eitherReader $ \s ->
+  case map toLower (trim s) of
+    "leiden" -> Right "leiden"
+    "bunch"  -> Right "bunch"
+    _        -> Left $ "Unknown cluster algorithm: " ++ s ++ ". Expected leiden or bunch"
+
+-- | Reader for @--bunch-threshold η@: an integer percent in the closed range
+-- @0..100@. Values outside it are rejected before any clustering runs.
+thresholdReader :: ReadM Int
+thresholdReader = eitherReader $ \s ->
+  case readMaybe (trim s) of
+    Just n | n >= 0 && n <= 100 -> Right n
+    _ -> Left $ "--bunch-threshold must be an integer in 0..100, got: " ++ s
+
+-- | Reader for @--bunch-sa T0,ALPHA@. Requires a positive initial
+-- temperature and a cooling factor in @(0,1]@.
+saReader :: ReadM (Double, Double)
+saReader = eitherReader $ \s ->
+  case map trim (splitComma s) of
+    [t0S, alphaS] ->
+      case (readMaybe t0S :: Maybe Double, readMaybe alphaS :: Maybe Double) of
+        (Just t0, Just alpha)
+          | t0 > 0 && alpha > 0 && alpha <= 1 -> Right (t0, alpha)
+          | otherwise -> Left $ "--bunch-sa needs T0 > 0 and ALPHA in (0,1], got: " ++ s
+        _ -> Left $ "--bunch-sa expects T0,ALPHA as numbers, got: " ++ s
+    _ -> Left $ "--bunch-sa expects T0,ALPHA (e.g. 100,0.99), got: " ++ s
+  where
+    splitComma input = case break (== ',') input of
+      (a, [])      -> [a]
+      (a, _:rest)  -> a : splitComma rest
+
+trim :: String -> String
+trim = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
+
 detectModeReader :: ReadM DetectionMode
 detectModeReader = eitherReader $ \s -> case map toLower s of
   "exclude"  -> Right Exclude
@@ -407,8 +479,33 @@ commandOpts = subparser
     <> command "init" (info (initOpts <**> helper) (progDesc "Generate a graphos.yaml config file"))
     <> command "install-skill" (info (installSkillOpts <**> helper) (progDesc "Install user-level AI assistant skills (e.g., opencode)"))
     <> command "research" (info (researchOpts <**> helper) (progDesc "Multi-query knowledge research with subgraph extraction"))
+    <> command "clustereval" (info (fmap ClusterEvalCmd clusterevalOpts <**> helper) (progDesc "Evaluate the Bunch search landscape (basins, similarity, random baseline)"))
     )
   <|> Run <$> pipelineOpts
+
+-- | @graphos clustereval@ subcommands.
+clusterevalOpts :: Parser ClusterEvalCommand
+clusterevalOpts = subparser
+  ( command "landscape" (info (fmap ClusterEvalLandscape landscapeOpts <**> helper)
+      (progDesc "Run the Bunch search N times from random starts and report the landscape"
+       <> footer "Example: graphos clustereval landscape --graph graphos-out/graph.json --runs 100"))
+  )
+
+-- | @graphos clustereval landscape@ arguments (design D6).
+landscapeOpts :: Parser LandscapeCli
+landscapeOpts = LandscapeCli
+  <$> optional (strOption (long "graph" <> short 'g' <> metavar "GRAPH" <> help "graph.json to evaluate (file MDG); omit with --random-graph"))
+  <*> option auto (long "runs" <> metavar "N" <> value 100 <> help "Independent searches from seeds s..s+N-1 (default: 100)")
+  <*> option auto (long "seed" <> metavar "S" <> value 0 <> help "First seed (default: 0)")
+  <*> option auto (long "random-partitions" <> metavar "M" <> value 1000 <> help "Random partitions for the baseline (default: 1000)")
+  <*> optional (strOption (long "random-graph" <> metavar "rnd:N:D|bip:N:D" <> help "Run on a generated control MDG instead of a graph file"))
+  <*> switch (long "json" <> help "Emit the landscape JSON document on stdout (still writes landscape.json)")
+  <*> optional (strOption (long "out" <> short 'o' <> metavar "DIR" <> help "Directory for landscape.json (default: the graph's directory, else .)"))
+  <*> optional (option auto (long "bunch-population" <> metavar "P" <> help "Independent Bunch searches per run (default: 8)"))
+  <*> optional (option thresholdReader (long "bunch-threshold" <> metavar "ETA" <> help "Bunch threshold η in percent, 0..100 (default: 0)"))
+  <*> optional (option saReader (long "bunch-sa" <> metavar "T0,ALPHA" <> help "Enable simulated annealing (e.g. 100,0.99)"))
+  <*> optional (option auto (long "bunch-max-iterations" <> metavar "N" <> help "Bunch iteration cap (default: 10000)"))
+  <*> optional (flag' True (long "bunch-weighted" <> help "Weight the file MDG by edge weights"))
 
 initOpts :: Parser Command
 initOpts = Init <$> optional (strOption (long "agents" <> metavar "TARGETS" <> help "Scaffold agent integration files. Comma-separated targets: opencode,claude,generic. Use 'auto' to auto-detect from .opencode/ and .claude/ dirs."))
@@ -490,6 +587,8 @@ renderCommandReference = unlines $
   , "graphos push [opts]             Push to Neo4j"
   , "graphos push-memgraph [opts]    Push to Memgraph"
   , "graphos merge A B               Merge graph files"
+  , "graphos clustereval landscape   Search landscape (basins, similarity, baseline)"
+  , "  --graph FILE / --runs N / --seed S / --random-graph SPEC / --json"
   , "graphos serve [opts]            Serve HTML + query API"
   , "  --dir DIR / --graph FILE / --port N"
   , "  --api-only / --no-api"

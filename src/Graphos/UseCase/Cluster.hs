@@ -26,9 +26,12 @@ module Graphos.UseCase.Cluster
   , ClusterQuality(..)
   , BunchSkip(..)
   , runClustering
+  , clusterAlgorithmOf
+  , clusterQualityFor
   , defaultBunchFileCap
   ) where
 
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
@@ -36,7 +39,9 @@ import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Ord (comparing)
 
-import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..))
+import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), PipelineConfig(..))
+import Graphos.Domain.Config (GraphosConfig(..))
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), normalizeClusterAlgorithm)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
 import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity)
@@ -223,6 +228,50 @@ defaultBunchFileCap = 5000
 defaultBunchSettings :: BunchSettings
 defaultBunchSettings = BunchSettings defaultBunchConfig defaultBunchFileCap False
 
+-- | Resolve the stage's algorithm from the config file and the CLI overrides
+-- carried by 'PipelineConfig'. CLI values win over @clustering.*@; an absent
+-- CLI value falls back to the config file, then to Leiden. This is the single
+-- place the precedence rule lives, so both the initial and the step-5
+-- re-clustering pass dispatch identically.
+clusterAlgorithmOf :: PipelineConfig -> ClusterAlgorithm
+clusterAlgorithmOf c
+  | algorithmName == "bunch" = BunchAlgorithm settings
+  | otherwise                = Leiden
+  where
+    cc = gcClustering (cfgGraphosConfig c)
+    algorithmName = normalizeClusterAlgorithm
+      (fromMaybe (ccAlgorithm cc) (cfgClusterAlgorithm c))
+    annealing = case cfgBunchSA c of
+      Just t  -> Just t
+      Nothing -> if ccBunchAnnealing cc then Just (ccBunchT0 cc, ccBunchAlpha cc) else Nothing
+    config = defaultBunchConfig
+      { bcSeed          = fromMaybe (ccSeed cc) (cfgClusterSeed c)
+      , bcPopulation    = fromMaybe (ccBunchPopulation cc) (cfgBunchPopulation c)
+      , bcThreshold     = fromMaybe (ccBunchThreshold cc) (cfgBunchThreshold c)
+      , bcAnnealing     = annealing
+      , bcMaxIterations = fromMaybe (ccBunchMaxIterations cc) (cfgBunchMaxIterations c)
+      }
+    settings = BunchSettings
+      { bsConfig   = config
+      , bsMaxFiles = fromMaybe (ccBunchMaxFiles cc) (cfgBunchMaxFiles c)
+      , bsWeighted = fromMaybe (ccBunchWeighted cc) (cfgBunchWeighted c)
+      }
+
+-- | Score an already-computed partition in the algorithm-independent
+-- coordinates. Used after the community-size cap so the report describes the
+-- same 'CommunityMap' the export writes, not the pre-cap Bunch result.
+clusterQualityFor :: Text -> Graph -> CommunityMap -> Maybe BunchSkip -> ClusterQuality
+clusterQualityFor name gg cm skip =
+  let mq = modularizationQuality gg cm
+  in ClusterQuality
+       { cqAlgorithm     = name
+       , cqMQ            = mqValue mq
+       , cqModularity    = modularity gg cm
+       , cqIntraFraction = mqIntraFraction mq
+       , cqClusters      = Map.size cm
+       , cqSkip          = skip
+       }
+
 -- | Why Bunch did not run: the MDG's file count against the cap.
 data BunchSkip = BunchSkip
   { skipFiles :: Int
@@ -262,7 +311,7 @@ runClustering algo res g = case algo of
 
     leidenRun skip =
       let (comm, coh) = clusterGraphWithResolution g res
-      in (comm, coh, qualityOf "leiden" g comm skip)
+      in (comm, coh, clusterQualityFor "leiden" g comm skip)
 
     bunchRun bs mdg0 =
       let best  = bresBest (bunchCluster (bsConfig bs) mdg0)
@@ -272,19 +321,8 @@ runClustering algo res g = case algo of
             [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
                               (map (mdgFiles mdg0 V.!) members))
             | (cid, members) <- zip [0 :: Int ..] (brPartition best) ]
-      in (comm, scoreAllCohesion (undirectedView g) comm, qualityOf "bunch" g comm Nothing)
+      in (comm, scoreAllCohesion (undirectedView g) comm, clusterQualityFor "bunch" g comm Nothing)
       -- Cohesion is scored on the same undirected projection as for Leiden
       -- (per-community intra-edge density), so the analysis and aggregates
       -- downstream stay uniform across algorithms.
-
-    qualityOf name gg cm skip =
-      let mq = modularizationQuality gg cm
-      in ClusterQuality
-           { cqAlgorithm     = name
-           , cqMQ            = mqValue mq
-           , cqModularity    = modularity gg cm
-           , cqIntraFraction = mqIntraFraction mq
-           , cqClusters      = Map.size cm
-           , cqSkip          = skip
-           }
 

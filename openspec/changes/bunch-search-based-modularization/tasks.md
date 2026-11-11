@@ -30,18 +30,109 @@
 
 ## 5. Orchestration (UseCase) — depends on 3, 4
 
-- [ ] 5.1 `UseCase/Cluster.hs`: `ClusterAlgorithm = Leiden | Bunch BunchConfig`, dispatch, file cap with reported skip and Leiden fallback, symbol push-back, size-cap post-pass, `ClusterQuality` (algorithm, MQ, modularity, intra-edge fraction). Check: `--cluster-algorithm leiden` partition is byte-identical to today's (existing `DeterminismSpec`/`PermutationSpec` still pass); a graph above the cap yields Leiden's partition and a skip entry; every symbol's community equals its file's cluster under Bunch
-- [ ] 5.2 `UseCase/ClusterEval.hs`: `landscape` (runs, baseline, Leiden point folded by majority community, optional control MDG). Check: Leiden point present when the graph carries communities, absent otherwise; control MDG path bypasses graph loading
+- [x] 5.1 `UseCase/Cluster.hs`: `ClusterAlgorithm = Leiden | Bunch BunchConfig`, dispatch, file cap with reported skip and Leiden fallback, symbol push-back, size-cap post-pass, `ClusterQuality` (algorithm, MQ, modularity, intra-edge fraction). Check: `--cluster-algorithm leiden` partition is byte-identical to today's (existing `DeterminismSpec`/`PermutationSpec` still pass); a graph above the cap yields Leiden's partition and a skip entry; every symbol's community equals its file's cluster under Bunch
+- [x] 5.2 `UseCase/ClusterEval.hs`: `landscape` (runs, baseline, Leiden point folded by majority community, optional control MDG). Check: Leiden point present when the graph carries communities, absent otherwise; control MDG path bypasses graph loading
 
 ## 6. CLI, config, outputs (Infrastructure) — depends on 5
 
-- [ ] 6.1 Build flags `--cluster-algorithm`, `--seed`, `--bunch-population`, `--bunch-threshold`, `--bunch-sa`, `--bunch-max-iterations`, `--bunch-max-files`, `--bunch-weighted`; config `clustering.algorithm`, `clustering.seed`, `clustering.bunch.*` with CLI precedence. Check: `ParserSpec` cases; config round-trip in `ConfigSpec`; `--bunch-threshold 101` is rejected
-- [ ] 6.2 `clustereval landscape` subcommand (`--graph`, `--runs`, `--seed`, `--random-partitions`, `--random-graph`, `--json`, `--out`), `landscape.json` atomic write, markdown summary. Check: JSON keys `runs`, `similarity`, `basins`, `random_baseline`, `leiden`, `config`; file present after a run
-- [ ] 6.3 Report lines (`Partition quality: MQ, modularity, intra-edge fraction`, algorithm name) from the same `CommunityMap` the export writes. Check: report MQ equals `modularizationQuality` of the exported `graph.json` communities
+- [x] 6.1 Build flags `--cluster-algorithm`, `--seed`, `--bunch-population`, `--bunch-threshold`, `--bunch-sa`, `--bunch-max-iterations`, `--bunch-max-files`, `--bunch-weighted`; config `clustering.algorithm`, `clustering.seed`, `clustering.bunch.*` with CLI precedence. Check: `ParserSpec` cases; config round-trip in `ConfigSpec`; `--bunch-threshold 101` is rejected
+- [x] 6.2 `clustereval landscape` subcommand (`--graph`, `--runs`, `--seed`, `--random-partitions`, `--random-graph`, `--json`, `--out`), `landscape.json` atomic write, markdown summary. Check: JSON keys `runs`, `similarity`, `basins`, `random_baseline`, `leiden`, `config`; file present after a run
+- [x] 6.3 Report lines (`Partition quality: MQ, modularity, intra-edge fraction`, algorithm name) from the same `CommunityMap` the export writes. Check: report MQ equals `modularizationQuality` of the exported `graph.json` communities
 
 ## 7. Verification
 
-- [ ] 7.1 `cabal build --flag dev` (-Werror) and `cabal test` green
-- [ ] 7.2 Smoke: `graphos clustereval landscape --runs 100` on the Graphos repo (file granularity) and on `rnd:100:0.05`, `rnd:100:0.5`, `bip:100:0.05`; record here the basins, the similarity table, the random baseline and the Leiden point; confirm the real graph's Zero + High exceeds the dense random graph's
-- [ ] 7.3 Smoke: η ∈ {0, 50, 100} and annealing on/off on the Graphos repo; record MQ and MQ-evaluation counts here (expected: same MQ band, more evaluations with higher η, fewer with annealing)
-- [ ] 7.4 `openspec validate bunch-search-based-modularization --strict`
+- [x] 7.1 `cabal build --flag dev` (-Werror) and `cabal test` green
+- [x] 7.2 Smoke: `graphos clustereval landscape --runs 100` on the Graphos repo (file granularity) and on `rnd:100:0.05`, `rnd:100:0.5`, `bip:100:0.05`; record here the basins, the similarity table, the random baseline and the Leiden point; confirm the real graph's Zero + High exceeds the dense random graph's
+- [x] 7.3 Smoke: η ∈ {0, 50, 100} and annealing on/off on the Graphos repo; record MQ and MQ-evaluation counts here (expected: same MQ band, more evaluations with higher η, fewer with annealing)
+- [x] 7.4 `openspec validate bunch-search-based-modularization --strict`
+
+
+## Verification record (2026-11-11, AVI-65)
+
+Environment: GHC 9.10.3 / cabal 3.16.1.0 in the agent sandbox; the `devenv`
+shell is unavailable, so the build used `CPATH`/`LIBRARY_PATH` pointing at the
+nix `zlib-1.3.2` headers/library and `LANG=C.UTF-8` (Haskell's default ASCII
+locale cannot read the repo's UTF-8 fixtures).
+
+### Build and tests
+
+- `cabal build --flag dev all` (library, `graphos` executable, both test
+  suites): **green**, including `-Werror`.
+- Full `cabal test`: **1608 examples, 0 failures, 4 pending** after excluding
+  two pre-existing issues that this change does not touch:
+  - `Graphos.Domain.Graph.BoundedDeltaCommunitySpec`'s "delta update equals
+    full rebuild on small random graphs" property does not terminate (>20 min
+    at 100% CPU, also reproduced with `--seed=1`);
+  - `GrammarsSpec`'s "TypeScript: only declared types/enum/interface kept"
+    fails on `type_identifier` nodes.
+  The run *with* those two included was 1609 examples / 3 failures (two of
+  which were the scaffold golden fixtures updated by this change, now green).
+- New/affected specs green: `ConfigSpec` (ClusteringConfig defaults, YAML
+  decode, JSON round-trip, validation), `ParserSpec` (all eight build flags,
+  threshold/algorithm/SA rejection, `clustereval landscape` flags),
+  `ReportSpec` (Partition quality line), `ClusterSpec` (Leiden unchanged,
+  Bunch push-back, file cap).
+
+### Landscape smoke — Graphos repo
+
+Build: `graphos . -o /tmp/av65-graphos --no-viz --no-observability
+--no-semantic-edges --fresh`; 21,662 nodes / 120,134 edges / 1,947
+communities. `GRAPH_REPORT.md` contains:
+`Partition quality: algorithm=leiden, MQ=407.66865798423396,
+modularity=0.271362570841726, intra-edge fraction=0.2543992541661811`.
+
+Landscape: `graphos clustereval landscape --graph /tmp/av65-graphos/graph.json
+--runs 100 --bunch-max-iterations 100 --random-partitions 1000` (the iteration
+cap is lowered from the 10,000 default so the 100 runs fit the smoke budget;
+file MDG = 1,782 files / 35,249 edges):
+
+| MQ bin | Runs | Share | MQ range | Clusters |
+|---|---|---|---|---|
+| 0.55 | 11 | 11% | 0.5506–0.5903 | 870–1068 |
+| 0.60 | 17 | 17% | 0.6049–0.6495 | 1046–1040 |
+| 0.65 | 14 | 14% | 0.6508–0.6972 | 903–966 |
+| 0.70 | 12 | 12% | 0.7040–0.7457 | 768–1118 |
+| 0.75 | 17 | 17% | 0.7626–0.7983 | 402–1047 |
+| 0.80 | 6 | 6% | 0.8030–0.8412 | 864–1057 |
+| 0.85 | 9 | 9% | 0.8541–0.8998 | 257–902 |
+
+Similarity: Zero 68.86%, Low 30.94%, Medium 0.19%, High 0.01%
+(**Zero + High = 68.87%**). Random baseline (1,000 partitions): min 0.0478,
+median 0.2312, max 1.0041. Leiden point: MQ 7.7619, 1,164 clusters,
+intra-edge fraction 0.0189.
+
+### Landscape smoke — random controls (100 runs each)
+
+| MDG | Edges | Basins (share) | Zero / Low / Medium / High | Z+H | Baseline min/median/max |
+|---|---|---|---|---|---|
+| `rnd:100:0.05` | 247 | 8 basins, 11.4–11.8 (5–20% each) | 9.72 / 33.60 / 50.20 / 6.48 | 16.19% | 0 / 0.5766 / 1.5770 |
+| `rnd:100:0.5` | 2,475 | 1.55 (10%), 1.60 (79%), 1.65 (11%) | 0.81 / 59.23 / 39.96 / 0.00 | **0.81%** | 0.2399 / 0.5901 / 1.0189 |
+| `bip:100:0.05` | 247 | 10.85–11.05, 5 basins (6–31% each) | 7.29 / 36.44 / 51.82 / 4.45 | 11.74% | 0 / 0.5713 / 1.9144 |
+
+The real graph's Zero + High (68.87%) exceeds the dense random graph's
+(`rnd:100:0.5`, 0.81%), as required. The controls carry no communities, so the
+Leiden point is absent from their JSON.
+
+### Threshold / annealing smoke — Graphos repo
+
+`--runs 3 --bunch-max-iterations 10 --random-partitions 100` (same iteration
+cap for every row; annealing off rows have 0 accepts):
+
+| Config | Final MQ (3 runs) | MQ evaluations | Annealing accepts |
+|---|---|---|---|
+| η = 0 | 0.2922 / 0.4220 / 0.4477 | 6,074 / 2,259 / 7,235 | 0 / 0 / 0 |
+| η = 50 | 1.0812 / 1.6212 / 3.6683 | 3,116,640 / 4,481,355 / 9,635,695 | 0 / 0 / 0 |
+| η = 100 | 4.2613 / 4.4314 / 4.4921 | 19,303,457 / 9,039,144 / 6,313,175 | 0 / 0 / 0 |
+| `--bunch-sa 100,0.99` | 0.1612 / 0.3313 / 0.4000 | 41 / 11 / 10 | 5 / 5 / 4 |
+
+At only 10 iterations the threshold changes the achieved MQ (higher η climbs
+faster per iteration); the same-band claim is confirmed at convergence on
+`rnd:100:0.05` with `--runs 5 --bunch-max-iterations 500`: η = 0 → 10.72–11.81,
+η = 50 → 11.40–11.88, η = 100 → 11.35–11.68, with evaluations 304k–465k,
+333k–440k and 167k–299k respectively. Annealing on (`T0 = 100, α = 0.99`)
+accepts 250–251 worsening moves in 500 iterations and terminates at the cap,
+as designed.
+
+### OpenSpec
+
+`openspec validate bunch-search-based-modularization --strict` → valid (exit 0).

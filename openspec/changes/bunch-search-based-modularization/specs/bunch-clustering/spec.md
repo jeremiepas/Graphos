@@ -25,18 +25,12 @@ before any random draw. (PRD §5.1)
 ### Requirement: Hill-climbing search over partitions
 
 With `--cluster-algorithm bunch` the system SHALL start from a random
-partition (cluster count drawn uniformly from 1..n, each file assigned
-uniformly) and SHALL repeatedly replace it by a candidate with strictly higher
-MQ until no candidate improves it or `--bunch-max-iterations` (default 10,000)
-is reached. Candidates SHALL be the neighbouring partitions (one file moved to
-another cluster or to a new singleton) followed by the building-block
-partitions (one new cluster of exactly two files joined by an MDG edge),
-enumerated in canonical order: files ascending, target clusters ascending,
-new singleton, then building blocks by ascending file pair. The threshold
-`--bunch-threshold η` (0–100, default 0) SHALL require at least ⌈η · |C|⌉ of
-the |C| candidates to be examined per iteration before the best examined
-improvement is taken; η = 0 SHALL take the first improvement and η = 100
-SHALL take the best of all candidates. (PRD §5.1)
+partition and repeatedly replace it by a candidate with strictly higher MQ
+until none improves or `--bunch-max-iterations` (default 10,000) is reached.
+Candidates SHALL be one-file moves (to another cluster or a singleton)
+followed by building blocks (a new two-file cluster joined by an MDG edge).
+`--bunch-threshold η` (0–100, default 0) SHALL examine at least ⌈η · |C|⌉ of
+the |C| candidates before taking the best improvement.
 
 #### Scenario: two cliques
 - **WHEN** the MDG is two disjoint 5-cliques joined by one edge

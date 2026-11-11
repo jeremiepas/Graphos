@@ -2,15 +2,12 @@
 
 ### Requirement: Cluster factor and modularization quality
 
-The system SHALL compute, for a graph and a `CommunityMap`, the modularization
-quality of Mitchell & Mancoridis (2008) on the undirected projection of the
-graph: for each cluster i with intra-edge weight `µ_i` and external weight
-`ext_i = Σ_{j≠i}(ε_ij + ε_ji)`, the cluster factor is `CF_i = 0` when
-`µ_i = 0` and `CF_i = 2µ_i / (2µ_i + ext_i)` otherwise, and
-`MQ = Σ_i CF_i`. Edge weights SHALL default to 1 and SHALL use `edgeWeight`
-when weighting is requested. Clusters SHALL be summed in ascending cluster id
-so the result is a deterministic function of its inputs. (PRD §5.4 via
-community-detection)
+The system SHALL compute the modularization quality of Mitchell & Mancoridis
+(2008) on the undirected projection of a graph and a `CommunityMap`, summing
+cluster factors in ascending cluster id. For cluster i with intra-edge weight
+`µ_i` and external weight `ext_i`, `CF_i = 0` when `µ_i = 0` and
+`CF_i = 2µ_i / (2µ_i + ext_i)` otherwise, and `MQ = Σ_i CF_i`. Edge weights
+default to 1 and use `edgeWeight` when requested.
 
 #### Scenario: paper fixture
 - **WHEN** an 8-module MDG partitioned into 3 subsystems, in which subsystem 2 has 1 intra-edge and 3 inter-edges, is scored
@@ -44,18 +41,13 @@ weight, and SHALL report it together with MQ and the cluster count.
 
 ### Requirement: Lean arm of modularization quality
 
-The formalization companion `formalization/lean` SHALL contain a module
-`GraphosFormalization.Bunch.MQ`, built by `lean.yml`, that defines the
-cluster factor and MQ as exact fractions (no `Rat`, no `Mathlib`) and proves:
-`0 ≤ CF_i ≤ 1` (`cf_le_one`, `cfDen_pos`), `0 ≤ MQ ≤ k` (`mq_le_k`,
-`mqDen_pos`), closed cluster ⇒ `CF = 1` (`cf_closed`), the paper's Fig. 2
-value `2/5` (`cf_paper_fixture`), intra-edge weight ≤ total weight
-(`intra_le_total`), no intra-edge ⇒ `MQ = 0` (`mqNum_eq_zero_of_noIntra`),
-and that moving one node leaves `µ`, `ext` and `CF` of every cluster other
-than its source and destination unchanged (`mu_moveTo`, `ext_moveTo`,
-`cf_moveTo`). The module SHALL compile with zero errors and zero warnings
-under the pinned toolchain. (PRD §5.4 via community-detection; AVI-618 §6
-posture)
+The formalization companion `formalization/lean` SHALL contain
+`GraphosFormalization.Bunch.MQ`, built by `lean.yml`, defining the cluster
+factor and MQ as exact fractions (no `Rat`, no `Mathlib`) and proving the
+ranges, the closed-cluster case, the paper's `2/5` fixture, the intra/total
+bound, the no-intra zero case, and the move locality of `CF`, `µ` and `ext`.
+It SHALL compile with zero errors and zero warnings under the pinned
+toolchain.
 
 #### Scenario: companion builds green
 - **WHEN** `lake build` runs in `formalization/lean` under the pinned toolchain

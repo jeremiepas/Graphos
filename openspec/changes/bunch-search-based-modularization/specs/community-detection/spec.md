@@ -4,14 +4,11 @@
 
 The cluster stage SHALL accept `--cluster-algorithm leiden|bunch` and config
 key `clustering.algorithm`, defaulting to `leiden`. With `leiden` the
-partition SHALL be identical to the partition produced before this option
-existed. With `bunch` the stage SHALL run the Bunch search of the
-`bunch-clustering` capability with `--seed`, `--bunch-population`,
+partition SHALL equal the pre-existing partition. With `bunch` the stage SHALL
+run the Bunch search with `--seed`, `--bunch-population`,
 `--bunch-threshold`, `--bunch-sa`, `--bunch-max-iterations`,
-`--bunch-max-files` and `--bunch-weighted`, CLI values overriding
-`clustering.bunch.*`. The stage SHALL return, next to the partition, a
-`ClusterQuality` holding the algorithm name, MQ, modularity and intra-edge
-fraction of the final partition. (PRD §5.1)
+`--bunch-max-files` and `--bunch-weighted`, CLI overriding
+`clustering.bunch.*`. It SHALL also return the final `ClusterQuality`.
 
 #### Scenario: default unchanged
 - **WHEN** a build runs without `--cluster-algorithm`

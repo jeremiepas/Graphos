@@ -35,6 +35,7 @@ import Data.Map.Strict (Map)
 import Control.DeepSeq (NFData(..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Word (Word64)
 import GHC.Conc (numCapabilities)
 import GHC.Generics (Generic)
 
@@ -112,6 +113,14 @@ data PipelineConfig = PipelineConfig
 , cfgCommunityCapEnabled  :: Bool                    -- ^ Effective switch: apply the post-Leiden community-size cap (--no-community-cap disables it)
 , cfgMaxCommunityFractionOverride :: Maybe Double     -- ^ CLI --max-community-fraction override (Nothing = unset; config file wins). Resolved by Main into cfgMaxCommunityFraction
 , cfgCommunityCapDisabled   :: Bool                    -- ^ CLI --no-community-cap flag (default False). Combined with config-file enable in Main
+, cfgClusterAlgorithm       :: Maybe Text              -- ^ CLI --cluster-algorithm override (leiden|bunch); Nothing = config file
+, cfgClusterSeed            :: Maybe Word64            -- ^ CLI --seed override; Nothing = config file
+, cfgBunchPopulation        :: Maybe Int               -- ^ CLI --bunch-population override
+, cfgBunchThreshold         :: Maybe Int               -- ^ CLI --bunch-threshold (η, 0..100) override
+, cfgBunchSA                :: Maybe (Double, Double)  -- ^ CLI --bunch-sa T0,ALPHA override
+, cfgBunchMaxIterations     :: Maybe Int               -- ^ CLI --bunch-max-iterations override
+, cfgBunchMaxFiles          :: Maybe Int               -- ^ CLI --bunch-max-files override
+, cfgBunchWeighted          :: Maybe Bool              -- ^ CLI --bunch-weighted override
      } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -208,6 +217,14 @@ defaultConfig = PipelineConfig
 , cfgCommunityCapEnabled = True
 , cfgMaxCommunityFractionOverride = Nothing
 , cfgCommunityCapDisabled = False
+, cfgClusterAlgorithm = Nothing
+, cfgClusterSeed = Nothing
+, cfgBunchPopulation = Nothing
+, cfgBunchThreshold = Nothing
+, cfgBunchSA = Nothing
+, cfgBunchMaxIterations = Nothing
+, cfgBunchMaxFiles = Nothing
+, cfgBunchWeighted = Nothing
     }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.

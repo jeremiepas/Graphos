@@ -9,6 +9,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Map.Strict as Map
 
 import Graphos.UseCase.Report (generateReport)
+import Graphos.UseCase.Cluster (ClusterAlgorithm(..), clusterAlgorithmOf, clusterQualityFor)
 import Graphos.Domain.Types hiding (PushMode(..))
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.Domain.Graph (Graph, gNodes)
@@ -26,7 +27,14 @@ exportAll ep g analysis config detection mLabels aggregates = do
   let jsonPath = cfgOutputDir config ++ "/graph.json"
 
   let reportPath = cfgOutputDir config ++ "/GRAPH_REPORT.md"
-  let reportContent = generateReport g analysis config detection mLabels
+      -- Partition quality of the communities written to graph.json: the same
+      -- 'CommunityMap' the export uses (analysisCommunities), scored once here
+      -- so the report renders a precomputed value (bounded-report-export).
+      algorithmName = case clusterAlgorithmOf config of
+        Leiden             -> "leiden"
+        BunchAlgorithm _   -> "bunch"
+      quality = clusterQualityFor algorithmName g (analysisCommunities analysis) Nothing
+      reportContent = generateReport g analysis config detection mLabels (Just quality)
   epExportReport ep reportContent reportPath
 
   htmlPath <- if cfgNoViz config
