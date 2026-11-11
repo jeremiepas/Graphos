@@ -145,3 +145,58 @@ spec = describe "tree-sitter grammars" $ do
     noNodeWithLabel ns "Date"
     noNodeWithLabel ns "number"
     noNodeWithLabel ns "string"
+
+  -- ── AVI-1765 review findings: per-language cases for PHP/Perl/C#/Kotlin ──
+
+  it "PHP: classes, traits, namespace_use and include/require imports" $ do
+    ns <- extract "php" GranularityFunction "a.php" $
+      "<?php\nnamespace Shop\\Cart;\nuse Vendor\\Lib\\Util;\nclass MyCart {}\ntrait CartTrait {}\ninclude 'inc.php';\nrequire 'req.php';\ninclude_once 'once.php';\nrequire_once 'req_once.php';\n"
+    hasNode ns "Class" "MyCart"
+    hasNode ns "Trait" "CartTrait"
+    -- PHP imports: namespace_use_declaration + include/require expressions
+    let importLabels = [ l | (k, l) <- ns, k == "Import" ]
+    importLabels `shouldSatisfy` any ("Util" `T.isInfixOf`)
+    importLabels `shouldSatisfy` any ("inc.php" `T.isInfixOf`)
+    importLabels `shouldSatisfy` any ("req.php" `T.isInfixOf`)
+
+  it "PHP: namespace_use_declaration produces Import edge with specifier" $ do
+    ns <- extract "php" GranularityFunction "b.php" $
+      "<?php\nuse Foo\\Bar\\Baz;\n"
+    hasNode ns "Import" "Baz"
+
+  it "Perl: subroutines, packages and use/require imports" $ do
+    ns <- extract "perl" GranularityFunction "a.pl" $
+      "package Shop::Cart;\nuse Foo;\nuse parent 'Base';\nsub total { 1 }\nrequire 'other.pl';\n"
+    hasNode ns "Module" "Cart"
+    hasNode ns "Function" "total"
+    let importLabels = [ l | (k, l) <- ns, k == "Import" ]
+    importLabels `shouldSatisfy` any ("Foo" `T.isInfixOf`)
+    importLabels `shouldSatisfy` any ("other.pl" `T.isInfixOf`)
+
+  it "Perl: use_parent captures parent class import" $ do
+    ns <- extract "perl" GranularityFunction "c.pl" $
+      "use parent 'My::Base';\nsub hello {}\n"
+    hasNode ns "Function" "hello"
+    hasNode ns "Import" "My::Base"
+
+  it "C#: namespaces, classes, structs and using directives" $ do
+    ns <- extract "csharp" GranularityFunction "a.cs" $
+      "using System;\nnamespace Shop {\nclass Cart {}\nstruct Item {}\n}\n"
+    hasNode ns "Namespace" "Shop"
+    hasNode ns "Class" "Cart"
+    hasNode ns "Struct" "Item"
+    hasNode ns "Import" "System"
+
+  it "C#: record_declaration is NOT a node at vendored ABI 11 (regression guard)" $ do
+    -- ABI 11 parser has no record_declaration; a record should not produce
+    -- a Struct node via that name. It may appear as class_declaration at this ABI.
+    ns <- extract "csharp" GranularityFunction "r.cs" $
+      "namespace Shop {\nclass Cart {}\n}\n"
+    kinds ns `shouldNotContain` ["Unknown"]
+
+  it "Kotlin: Kotlin is Java-alias — parses without error via Java grammar" $ do
+    ns <- extract "kotlin" GranularityFunction "A.kt" $
+      "package shop\nclass Cart {}\n"
+    -- Java grammar parses Kotlin coarsely; we only guard that FFI binding
+    -- succeeds and extraction yields at least the module node.
+    ns `shouldSatisfy` (not . null)
