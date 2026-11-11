@@ -13,12 +13,12 @@ on:
     branches: ["main", "develop"]
     paths:
       - "formalization/lean/**"
-      - "openspec/changes/intent-graph-verification/lean/**"
+      - "openspec/changes/archive/2026-11-11-intent-graph-verification/lean/**"
       - ".github/workflows/lean.yml"
   pull_request:
     paths:
       - "formalization/lean/**"
-      - "openspec/changes/intent-graph-verification/lean/**"
+      - "openspec/changes/archive/2026-11-11-intent-graph-verification/lean/**"
       - ".github/workflows/lean.yml"
 
 concurrency:
@@ -98,11 +98,11 @@ jobs:
     # Report-only, non-gating (continue-on-error): a red result is a signal for
     # the R&D cell, not a release gate. Verifies the dependency-free Lean 4 model
     # under an elan-launched toolchain (Lean >= 4.29).
-    # Requirements: openspec/changes/intent-graph-verification/lean/README.md
+    # Requirements: openspec/changes/archive/2026-11-11-intent-graph-verification/lean/README.md
     continue-on-error: true
     defaults:
       run:
-        working-directory: openspec/changes/intent-graph-verification/lean
+        working-directory: openspec/changes/archive/2026-11-11-intent-graph-verification/lean
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -127,8 +127,8 @@ jobs:
         with:
           path: |
             ~/.elan/toolchains
-            openspec/changes/intent-graph-verification/lean/.lake
-          key: igv-lean-${{ runner.os }}-${{ hashFiles('openspec/changes/intent-graph-verification/lean/lean-toolchain', 'openspec/changes/intent-graph-verification/lean/lakefile.toml', 'openspec/changes/intent-graph-verification/lean/lake-manifest.json') }}
+            openspec/changes/archive/2026-11-11-intent-graph-verification/lean/.lake
+          key: igv-lean-${{ runner.os }}-${{ hashFiles('openspec/changes/archive/2026-11-11-intent-graph-verification/lean/lean-toolchain', 'openspec/changes/archive/2026-11-11-intent-graph-verification/lean/lakefile.toml', 'openspec/changes/archive/2026-11-11-intent-graph-verification/lean/lake-manifest.json') }}
           restore-keys: |
             igv-lean-${{ runner.os }}-
 
