@@ -106,22 +106,23 @@ apiSurfaceTypes =
   , "static_item", "extern_item", "attribute_item"
      -- Haskell
   , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
-     -- C# / PHP / Perl / Kotlin (AVI-1765)
-  , "namespace_declaration"       -- C#: namespace N { }
-  , "using_directive"             -- C#: using System;
-  , "constructor_declaration"     -- C#: ctor
-  , "destructor_declaration"      -- C#: ~T()
-  , "struct_declaration"          -- C#: struct S { }
-  , "record_declaration"          -- C# 9+: record R
-  , "delegate_declaration"        -- C#
-  , "enum_member_declaration"     -- C# enum member
-  , "trait_declaration"           -- PHP: trait T { }
-  , "subroutine"                  -- Perl: sub foo { }
-  , "subroutine_declaration"      -- Perl alternate
-  , "subroutine_declaration_statement" -- Perl alternate
-  , "package_statement"           -- Perl: package Foo;
-  , "use_statement"               -- Perl: use Foo;
-  , "require_statement"           -- Perl/PHP: require
+     -- C# / PHP / Perl (AVI-1765) — node names verified against
+     -- vendored parser.c (ABI 11) and tree-sitter-php 0.5.0.2 vendor/src/parser.c.
+     -- C#: record_declaration does NOT exist in ABI 11 grammar (grep 0 hits);
+     --      records were added after vendored revision. Not claimed.
+  , "namespace_declaration"       -- C#: namespace N { } (parser.c: "namespace_declaration")
+  , "using_directive"             -- C#: using System;   (parser.c: "using_directive")
+  , "constructor_declaration"     -- C#: ctor            (parser.c: "constructor_declaration")
+  , "destructor_declaration"      -- C#: ~T()            (parser.c: "destructor_declaration")
+  , "struct_declaration"          -- C#: struct S { }    (parser.c: "struct_declaration")
+  , "delegate_declaration"        -- C#                  (parser.c: "delegate_declaration")
+  , "enum_member_declaration"     -- C# enum member      (parser.c: "enum_member_declaration")
+  , "trait_declaration"           -- PHP: trait T { }    (tree-sitter-php: "trait_declaration")
+  , "subroutine"                  -- Perl: sub foo { }   (parser.c: only "subroutine", no "subroutine_declaration")
+  , "package_statement"           -- Perl: package Foo;  (parser.c: "package_statement")
+  , "use_constant_statement"      -- Perl: use Foo; / use constant (parser.c: "use_constant_statement")
+  , "use_parent_statement"        -- Perl: use parent 'Base'; (parser.c: "use_parent_statement")
+  , "require_statement"           -- Perl: require 'x';  (parser.c: "require_statement")
   ]
 
 importExportTypes :: [String]
@@ -129,9 +130,13 @@ importExportTypes =
   [ "import_declaration", "import_statement", "import_from_statement"
   , "export_statement", "export_default_declaration"
   , "using_directive"             -- C#: using System;
-  , "use_statement"               -- Perl: use Foo;
-  , "require_statement"           -- Perl/PHP: require
-  , "include_statement"           -- PHP: include
+  , "use_constant_statement"      -- Perl: use Foo; (see apiSurfaceTypes comment)
+  , "use_parent_statement"        -- Perl: use parent 'Base';
+  , "require_statement"           -- Perl: require 'x';
+  , "include_expression"          -- PHP: include 'file.php' (tree-sitter-php: "include_expression")
+  , "include_once_expression"     -- PHP: include_once 'file.php'
+  , "require_expression"          -- PHP: require 'file.php' (tree-sitter-php: "require_expression")
+  , "require_once_expression"     -- PHP: require_once 'file.php'
   , "namespace_use_declaration"   -- PHP: use Foo\Bar;
   ]
 
@@ -158,8 +163,10 @@ functionBoundaryTypes =
   , "arrow_function", "generator_function_declaration"
   , "constructor"
   , "function_item"       -- Rust
-  , "subroutine"                  -- Perl
-  , "subroutine_declaration"      -- Perl
+  , "subroutine"                  -- Perl: parser.c "subroutine"
+  , "use_constant_statement"      -- Perl
+  , "use_parent_statement"        -- Perl
+  , "require_statement"           -- Perl
   , "constructor_declaration"     -- C#
   ]
 
@@ -828,22 +835,23 @@ tsTypeToKind t = case t of
   "object" -> "Object"
   "array" -> "Array"
   "pair" -> "Property"
-  -- C# / PHP / Perl (AVI-1765)
+  -- C# / PHP / Perl (AVI-1765) — verified node names (see apiSurfaceTypes)
   "namespace_declaration" -> "Namespace"
   "using_directive" -> "Import"
   "constructor_declaration" -> "Constructor"
   "destructor_declaration" -> "Destructor"
   "struct_declaration" -> "Struct"
-  "record_declaration" -> "Struct"
   "delegate_declaration" -> "Delegate"
   "enum_member_declaration" -> "EnumMember"
   "trait_declaration" -> "Trait"
   "subroutine" -> "Function"
-  "subroutine_declaration" -> "Function"
-  "subroutine_declaration_statement" -> "Function"
   "package_statement" -> "Module"
-  "use_statement" -> "Import"
+  "use_constant_statement" -> "Import"
+  "use_parent_statement" -> "Import"
   "require_statement" -> "Import"
-  "include_statement" -> "Import"
+  "include_expression" -> "Import"
+  "include_once_expression" -> "Import"
+  "require_expression" -> "Import"
+  "require_once_expression" -> "Import"
   "namespace_use_declaration" -> "Import"
   _ -> t
