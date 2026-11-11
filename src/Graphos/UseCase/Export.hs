@@ -9,8 +9,8 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Map.Strict as Map
 
 import Graphos.UseCase.Report (generateReport)
-import Graphos.UseCase.Cluster (ClusterAlgorithm(..), clusterAlgorithmOf, clusterQualityFor)
 import Graphos.Domain.Types hiding (PushMode(..))
+import Graphos.Domain.Community.Quality (ClusterQuality)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.Domain.Graph (Graph, gNodes)
 import Graphos.UseCase.Port.ExportPort (ExportPort(..), ExportResult(..))
@@ -20,20 +20,17 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..), ExportResult(..))
 -- Note: graph.json is written incrementally by the Pipeline's IncrementalJSON writer,
 --       so we don't rewrite it here. This avoids holding the full graph in memory
 --       as a JSON AST during export, reducing peak memory by ~1x graph size.
-exportAll :: ExportPort -> Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId T.Text) -> [CommunityAggregate] -> IO ExportResult
-exportAll ep g analysis config detection mLabels aggregates = do
+exportAll :: ExportPort -> Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId T.Text) -> [CommunityAggregate] -> ClusterQuality -> IO ExportResult
+exportAll ep g analysis config detection mLabels aggregates quality = do
   -- graph.json is already written incrementally by the Pipeline's IncrementalJSON writer.
   -- No need to rewrite it here — that would double memory usage during export.
   let jsonPath = cfgOutputDir config ++ "/graph.json"
 
   let reportPath = cfgOutputDir config ++ "/GRAPH_REPORT.md"
-      -- Partition quality of the communities written to graph.json: the same
-      -- 'CommunityMap' the export uses (analysisCommunities), scored once here
-      -- so the report renders a precomputed value (bounded-report-export).
-      algorithmName = case clusterAlgorithmOf config of
-        Leiden             -> "leiden"
-        BunchAlgorithm _   -> "bunch"
-      quality = clusterQualityFor algorithmName g (analysisCommunities analysis) Nothing
+      -- Partition quality of the communities written to graph.json: computed
+      -- once by the clustering stage from that same 'CommunityMap' (including
+      -- the Bunch->Leiden fallback's algorithm and skip) and only rendered
+      -- here (bounded-report-export).
       reportContent = generateReport g analysis config detection mLabels (Just quality)
   epExportReport ep reportContent reportPath
 

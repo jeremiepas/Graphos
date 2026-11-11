@@ -46,6 +46,7 @@ import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
 import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity)
 import Graphos.Domain.Community.MQ (Weighting(..), modularizationQuality, mqValue, mqIntraFraction)
+import Graphos.Domain.Community.Quality (ClusterQuality(..), BunchSkip(..))
 import Graphos.Domain.Community.Bunch
   ( BunchConfig(..)
   , BunchResult(..)
@@ -273,20 +274,8 @@ clusterQualityFor name gg cm skip =
        }
 
 -- | Why Bunch did not run: the MDG's file count against the cap.
-data BunchSkip = BunchSkip
-  { skipFiles :: Int
-  , skipCap   :: Int
-  } deriving (Eq, Show)
-
--- | Quality of the stage's final partition, algorithm-independent.
-data ClusterQuality = ClusterQuality
-  { cqAlgorithm     :: Text             -- ^ @"leiden"@ or @"bunch"@
-  , cqMQ            :: Double           -- ^ modularization quality (unit weights)
-  , cqModularity    :: Double           -- ^ global modularity Q
-  , cqIntraFraction :: Double           -- ^ intra-edge fraction of the partition
-  , cqClusters      :: Int              -- ^ cluster count
-  , cqSkip          :: Maybe BunchSkip  -- ^ Bunch skipped above the file cap
-  } deriving (Eq, Show)
+-- 'BunchSkip' and 'ClusterQuality' are defined in
+-- "Graphos.Domain.Community.Quality" and re-exported here.
 
 -- | Run the stage for the selected algorithm. Pure and deterministic: the
 -- Leiden path is exactly 'clusterGraphWithResolution'; the Bunch path folds

@@ -41,7 +41,7 @@ import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Extract (extractChangedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions)
-import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle)
+import Graphos.UseCase.Cluster (clusterGraphWithResolution, clusterSingle, clusterQualityFor)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, SemanticMode(..))
 import Graphos.UseCase.Ingest (ingestFile, FileIngestResult(..))
@@ -172,8 +172,12 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
   -- Cohesion on the enriched graph, computed once and read by the report
   -- (bounded-report-export; previously the report recomputed per community).
   let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
+      -- The incremental reconcile path runs Leiden (bounded delta) or leaves
+      -- the graph unclustered; score the partition once and hand the same
+      -- record to the report instead of letting export derive it from config.
+      quality = clusterQualityFor "leiden" enrichedGraph finalCommMap Nothing
   exports <- withHeapGuard lp (cfgActiveBudgetBytes config) "export" $
-    UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing []
+    UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing [] quality
 
   when (cfgNeo4j configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
     let n4cfg = gcNeo4j (cfgGraphosConfig configWithStreaming)
@@ -324,6 +328,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
         else pure Nothing
 
       let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
+          quality = clusterQualityFor "leiden" enrichedGraph finalCommMap Nothing
           detection = Detection
             { detectionTotalFiles = 1
             , detectionTotalWords = 0
@@ -333,7 +338,7 @@ runSingleFilePipeline appEnv config filePath = catch (do
             , detectionClassification = Map.empty
             , detectionExclusions = emptyExclusionCounts
             }
-      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection llmLabels []
+      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection llmLabels [] quality
 
       fspClearCheckpoint fsp (cfgOutputDir config)
       opShutdownObservability op
