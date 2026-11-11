@@ -4,6 +4,14 @@
 --   1. Full Leiden clustering on the entire graph (existing)
 --   2. Fast single-node clustering: extract a bounded subgraph around a node,
 --      then run Leiden only on that subgraph. Much faster for incremental ingestion.
+--
+-- The stage also dispatches on a selectable clustering algorithm
+-- (openspec change @bunch-search-based-modularization@): 'Leiden' (the
+-- default, byte-identical to the pre-existing path) or 'BunchAlgorithm',
+-- which folds the graph to its file-level MDG, runs the seeded hill-climbing
+-- search of "Graphos.Domain.Community.Bunch", and pushes the file partition
+-- back to every symbol node. Above the file cap the stage skips Bunch,
+-- reports the skip and runs Leiden instead.
 module Graphos.UseCase.Cluster
   ( clusterGraph
   , clusterGraphWithResolution
@@ -11,6 +19,14 @@ module Graphos.UseCase.Cluster
   , joinCommunitiesToNodes
   , computeCommunityAggregates
   , colorForCommunity
+    -- * Selectable clustering algorithm
+  , ClusterAlgorithm(..)
+  , BunchSettings(..)
+  , defaultBunchSettings
+  , ClusterQuality(..)
+  , BunchSkip(..)
+  , runClustering
+  , defaultBunchFileCap
   ) where
 
 import Data.Text (Text)
@@ -23,8 +39,20 @@ import Data.Ord (comparing)
 import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
-import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView)
+import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity)
+import Graphos.Domain.Community.MQ (Weighting(..), modularizationQuality, mqValue, mqIntraFraction)
+import Graphos.Domain.Community.Bunch
+  ( BunchConfig(..)
+  , BunchResult(..)
+  , BunchRun(..)
+  , FileMDG(..)
+  , bunchCluster
+  , defaultBunchConfig
+  , foldToFileMDG
+  , mdgFileCount
+  )
 import qualified Data.Set as Set
+import qualified Data.Vector as V
 
 -- | Run community detection with default resolution and compute cohesion scores
 clusterGraph :: Graph -> (CommunityMap, CohesionMap)
@@ -167,3 +195,96 @@ computeCommunityAggregates graph commMap cohesionMap artPoints mLabels =
           , caCodeDocEdges           = 0
           }
         ) (Map.toList commMap)
+
+-- ───────────────────────────────────────────────
+-- Selectable clustering algorithm (bunch-search-based-modularization)
+-- ───────────────────────────────────────────────
+
+-- | The clustering algorithm of the build stage. 'Leiden' is the default and
+-- is byte-identical to the pre-existing path; 'BunchAlgorithm' runs the
+-- seeded search over the file-level MDG and pushes the file partition back
+-- to every symbol node.
+data ClusterAlgorithm = Leiden | BunchAlgorithm BunchSettings
+  deriving (Eq, Show)
+
+-- | Stage-level Bunch settings: the Domain search configuration plus the
+-- two knobs that live above the search — the file cap and the weighting of
+-- the MDG fold.
+data BunchSettings = BunchSettings
+  { bsConfig   :: BunchConfig -- ^ seed, population, η, annealing, iteration cap
+  , bsMaxFiles :: Int         -- ^ file count above which Leiden is run instead
+  , bsWeighted :: Bool        -- ^ fold the MDG with 'EdgeWeights' instead of unit weights
+  } deriving (Eq, Show)
+
+-- | Default file cap (design D2): 5,000 files.
+defaultBunchFileCap :: Int
+defaultBunchFileCap = 5000
+
+defaultBunchSettings :: BunchSettings
+defaultBunchSettings = BunchSettings defaultBunchConfig defaultBunchFileCap False
+
+-- | Why Bunch did not run: the MDG's file count against the cap.
+data BunchSkip = BunchSkip
+  { skipFiles :: Int
+  , skipCap   :: Int
+  } deriving (Eq, Show)
+
+-- | Quality of the stage's final partition, algorithm-independent.
+data ClusterQuality = ClusterQuality
+  { cqAlgorithm     :: Text             -- ^ @"leiden"@ or @"bunch"@
+  , cqMQ            :: Double           -- ^ modularization quality (unit weights)
+  , cqModularity    :: Double           -- ^ global modularity Q
+  , cqIntraFraction :: Double           -- ^ intra-edge fraction of the partition
+  , cqClusters      :: Int              -- ^ cluster count
+  , cqSkip          :: Maybe BunchSkip  -- ^ Bunch skipped above the file cap
+  } deriving (Eq, Show)
+
+-- | Run the stage for the selected algorithm. Pure and deterministic: the
+-- Leiden path is exactly 'clusterGraphWithResolution'; the Bunch path folds
+-- the file MDG, checks the cap (falling back to Leiden with a skip entry)
+-- and runs the population search. The returned partition is the Bunch
+-- result pushed back to symbols, *without* the community-size cap — the
+-- caller applies 'capCommunitySizes' to it exactly as it does for Leiden,
+-- and never 'mergeSmallCommunities' (MQ already penalises singletons).
+runClustering :: ClusterAlgorithm -> Resolution -> Graph
+              -> (CommunityMap, CohesionMap, ClusterQuality)
+runClustering algo res g = case algo of
+  Leiden -> leidenRun Nothing
+  BunchAlgorithm bs
+    | n > bsMaxFiles bs -> leidenRun (Just (BunchSkip n (bsMaxFiles bs)))
+    | otherwise         -> bunchRun bs mdg
+  where
+    weighting = case algo of
+      BunchAlgorithm bs | bsWeighted bs -> EdgeWeights
+      _ -> UnitWeights
+    mdg = foldToFileMDG weighting g
+    n   = mdgFileCount mdg
+
+    leidenRun skip =
+      let (comm, coh) = clusterGraphWithResolution g res
+      in (comm, coh, qualityOf "leiden" g comm skip)
+
+    bunchRun bs mdg0 =
+      let best  = bresBest (bunchCluster (bsConfig bs) mdg0)
+          nodesByFile = Map.fromListWith (flip (++))
+            [ (nodeSourceFile nd, [nodeId nd]) | nd <- Map.elems (gNodes g) ]
+          comm = Map.fromList
+            [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
+                              (map (mdgFiles mdg0 V.!) members))
+            | (cid, members) <- zip [0 :: Int ..] (brPartition best) ]
+      in (comm, scoreAllCohesion (undirectedView g) comm, qualityOf "bunch" g comm Nothing)
+      -- Cohesion is scored on the same undirected projection as for Leiden
+      -- (per-community intra-edge density), so the analysis and aggregates
+      -- downstream stay uniform across algorithms.
+
+    qualityOf name gg cm skip =
+      let mq = modularizationQuality gg cm
+      in ClusterQuality
+           { cqAlgorithm     = name
+           , cqMQ            = mqValue mq
+           , cqModularity    = modularity gg cm
+           , cqIntraFraction = mqIntraFraction mq
+           , cqClusters      = Map.size cm
+           , cqSkip          = skip
+           }
+
