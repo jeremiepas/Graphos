@@ -102,6 +102,7 @@ library
                     Graphos.Domain.Community
                     Graphos.Domain.Community.MQ
                     Graphos.Domain.Community.Bunch
+                    Graphos.Domain.Community.Landscape
                     Graphos.Domain.Random
                    Graphos.Domain.Analysis
                     Graphos.Domain.Extraction
@@ -123,6 +124,7 @@ library
                       Graphos.UseCase.Extract.TreeSitter
                     Graphos.UseCase.Build
                     Graphos.UseCase.Cluster
+                    Graphos.UseCase.ClusterEval
                      Graphos.UseCase.Analyze
                      Graphos.UseCase.Report
                      Graphos.UseCase.Export
@@ -418,6 +420,7 @@ test-suite graphos-test
     Graphos.Domain.Community.PermutationSpec
     Graphos.Domain.Community.MQSpec
     Graphos.Domain.Community.BunchSpec
+    Graphos.Domain.Community.LandscapeSpec
     Graphos.Domain.RandomSpec
     Graphos.Domain.LabelingSpec
     Graphos.Domain.AnalysisSpec
@@ -433,6 +436,7 @@ test-suite graphos-test
      Graphos.UseCase.Extract.HaskellSpec
     Graphos.UseCase.Extract.ImageSpec
     Graphos.UseCase.QuerySpec
+    Graphos.UseCase.ClusterSpec
     Graphos.UseCase.Query.RefineSpec
     Graphos.UseCase.Query.RenderSpec
     Graphos.UseCase.SelectContextSpec
