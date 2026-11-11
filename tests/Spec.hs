@@ -29,6 +29,10 @@ import qualified Graphos.Domain.Community.LabelSpec
 import qualified Graphos.Domain.Community.ClusterInvarianceSpec
 import qualified Graphos.Domain.Community.DeterminismSpec
 import qualified Graphos.Domain.Community.PermutationSpec
+import qualified Graphos.Domain.Community.MQSpec
+import qualified Graphos.Domain.Community.BunchSpec
+import qualified Graphos.Domain.Community.LandscapeSpec
+import qualified Graphos.Domain.RandomSpec
 import qualified Graphos.Domain.LabelingSpec
 import qualified Graphos.Domain.AnalysisSpec
 import qualified Graphos.Infrastructure.Critique.LeanSpec
@@ -42,6 +46,7 @@ import qualified Graphos.UseCase.DocLinkParitySpec
 import qualified Graphos.UseCase.Extract.HaskellSpec
 import qualified Graphos.UseCase.Extract.ImageSpec
 import qualified Graphos.UseCase.QuerySpec
+import qualified Graphos.UseCase.ClusterSpec
 import qualified Graphos.UseCase.Query.RefineSpec
 import qualified Graphos.UseCase.Query.RenderSpec
 import qualified Graphos.UseCase.SelectContextSpec
@@ -138,6 +143,10 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Community.ClusterInvarianceSpec.spec
   Graphos.Domain.Community.DeterminismSpec.spec
   Graphos.Domain.Community.PermutationSpec.spec
+  Graphos.Domain.Community.MQSpec.spec
+  Graphos.Domain.Community.BunchSpec.spec
+  Graphos.Domain.Community.LandscapeSpec.spec
+  Graphos.Domain.RandomSpec.spec
   Graphos.Domain.LabelingSpec.spec
   Graphos.Domain.AnalysisSpec.spec
   Graphos.Infrastructure.Critique.LeanSpec.spec
@@ -151,6 +160,7 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.Extract.HaskellSpec.spec
   Graphos.UseCase.Extract.ImageSpec.spec
   Graphos.UseCase.QuerySpec.spec
+  Graphos.UseCase.ClusterSpec.spec
   Graphos.UseCase.Query.RefineSpec.spec
   Graphos.UseCase.Query.RenderSpec.spec
   Graphos.UseCase.SelectContextSpec.spec
