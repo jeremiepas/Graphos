@@ -50,28 +50,64 @@
 ## Verification record (2026-11-11, AVI-65)
 
 Environment: GHC 9.10.3 / cabal 3.16.1.0 in the agent sandbox; the `devenv`
-shell is unavailable, so the build used `CPATH`/`LIBRARY_PATH` pointing at the
-nix `zlib-1.3.2` headers/library and `LANG=C.UTF-8` (Haskell's default ASCII
-locale cannot read the repo's UTF-8 fixtures).
+shell is unavailable there. The final run resolved the missing system zlib with
+`--constraint="zlib +bundled-c-zlib"` and used `LANG=C.UTF-8` (Haskell's
+default ASCII locale cannot read the repo's UTF-8 fixtures).
 
 ### Build and tests
 
-- `cabal build --flag dev all` (library, `graphos` executable, both test
-  suites): **green**, including `-Werror`.
-- Full `cabal test`: **1608 examples, 0 failures, 4 pending** after excluding
-  two pre-existing issues that this change does not touch:
+- `cabal build --flag dev --constraint="zlib +bundled-c-zlib" all`
+  (library + `graphos` executable): **green**, including `-Werror`.
+  (System zlib headers are absent in this sandbox; CI/devenv supplies zlib.)
+- Full `cabal test --enable-tests --flag dev` with two pre-existing
+  exclusions this change does not touch: **1616 examples, 4 failures,
+  4 pending** (200 s). The 4 failures are all `GrammarsSpec`
+  (PHP/Perl/C# vendored-grammar extraction) — files untouched by this
+  change; they were not independently re-run on `main`. The two excluded
+  issues are:
   - `Graphos.Domain.Graph.BoundedDeltaCommunitySpec`'s "delta update equals
     full rebuild on small random graphs" property does not terminate (>20 min
     at 100% CPU, also reproduced with `--seed=1`);
   - `GrammarsSpec`'s "TypeScript: only declared types/enum/interface kept"
     fails on `type_identifier` nodes.
-  The run *with* those two included was 1609 examples / 3 failures (two of
-  which were the scaffold golden fixtures updated by this change, now green).
+  An earlier draft of this record said "1608 examples, 0 failures"; that run
+  did not surface the four `GrammarsSpec` cases and conflicted with the PR
+  brief's 4-failure figure. This corrected record is the authoritative one
+  for head `ab6df99` + the review fix.
 - New/affected specs green: `ConfigSpec` (ClusteringConfig defaults, YAML
   decode, JSON round-trip, validation), `ParserSpec` (all eight build flags,
   threshold/algorithm/SA rejection, `clustereval landscape` flags),
   `ReportSpec` (Partition quality line), `ClusterSpec` (Leiden unchanged,
-  Bunch push-back, file cap).
+  Bunch push-back, file cap), `ExportSpec` (including the new
+  Bunch→Leiden fallback regression below).
+
+### Review fix (AVI-95, changes requested)
+
+- `GRAPH_REPORT.md` now renders the `ClusterQuality` computed by the
+  clustering stage instead of re-deriving the algorithm name from config.
+  `ClusterQuality`/`BunchSkip` moved to `Graphos.Domain.Community.Quality`;
+  `exportAll`/`epExportAll` take the stage's record and the pipeline passes
+  `coQuality` on the full and `--cluster-only` paths. On a
+  `--bunch-max-files` fallback the line now reads e.g.
+  `algorithm=leiden, ..., bunch skipped: 12 files > --bunch-max-files 10
+  (ran Leiden fallback)`.
+- Regression test: `ExportSpec` "renders the passed quality, including a
+  Bunch->Leiden fallback" (config says Bunch; the passed record says Leiden +
+  skip; the report must describe what actually ran).
+
+### Deferred non-blocking review observations
+
+The AVI-95 reviewer marked these non-blocking and they are not addressed in
+this PR:
+
+- YAML `clustering.algorithm` unknown values are normalised to `leiden` at
+  decode time (`Domain/Config/Clustering.hs:104`), so
+  `validClusteringConfig`'s unknown-name arm is unreachable from YAML. Decode
+  should preserve the raw value and let validation reject it.
+- CLI `--bunch-population` / `--bunch-max-iterations` / `--bunch-max-files`
+  use bare `option auto`, and CLI overrides are not re-validated
+  (`app/Main.hs`); `--bunch-max-files -1` silently always skips.
+- Report doubles print at full precision (cosmetic).
 
 ### Landscape smoke — Graphos repo
 

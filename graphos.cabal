@@ -101,6 +101,7 @@ library
                      Graphos.Domain.Query.Cypher.Eval
                     Graphos.Domain.Community
                     Graphos.Domain.Community.MQ
+                    Graphos.Domain.Community.Quality
                     Graphos.Domain.Community.Bunch
                     Graphos.Domain.Community.Landscape
                     Graphos.Domain.Random

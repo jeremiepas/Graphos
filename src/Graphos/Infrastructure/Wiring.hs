@@ -263,8 +263,8 @@ productionExportPort _logEnv _obsEnv =
         , UEP.epExportCommunityGraph = CommunityGraph.exportCommunityGraph
         , UEP.epSaveCheckpoint = ExportJSON.saveCheckpoint
         , UEP.epLoadCheckpoint = loadCheckpointFromPath
-        , UEP.epExportAll = \g _outputDir analysis config detection mLabels aggregates ->
-            UE.exportAll ep g analysis config detection mLabels aggregates
+        , UEP.epExportAll = \g _outputDir analysis config detection mLabels aggregates quality ->
+            UE.exportAll ep g analysis config detection mLabels aggregates quality
         }
   in ep
 

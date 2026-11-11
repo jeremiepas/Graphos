@@ -15,7 +15,7 @@ import Data.Text.Short (toText)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
-import Graphos.UseCase.Cluster (ClusterQuality(..))
+import Graphos.UseCase.Cluster (ClusterQuality(..), BunchSkip(..))
 import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCoverage(..))
 
 -- | Generate a markdown report.
@@ -105,7 +105,13 @@ partitionQualityLines (Just q) =
       ++ ", MQ=" ++ show (cqMQ q)
       ++ ", modularity=" ++ show (cqModularity q)
       ++ ", intra-edge fraction=" ++ show (cqIntraFraction q)
+      ++ skipNote (cqSkip q)
   ]
+  where
+    skipNote Nothing = ""
+    skipNote (Just (BunchSkip files cap)) =
+      ", bunch skipped: " ++ show files ++ " files > --bunch-max-files "
+        ++ show cap ++ " (ran Leiden fallback)"
 
 -- | Format cohesion score to 2 decimal places
 fmtCohesion :: Double -> String

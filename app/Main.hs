@@ -65,6 +65,7 @@ import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig)
 import Graphos.Domain.Community.Landscape (parseRandomGraphSpec)
 import Graphos.UseCase.ClusterEval (LandscapeInput(..), landscapeReport, landscapeSummary, landscapeJSON)
+import Graphos.UseCase.Cluster (clusterQualityFor)
 import Graphos.Infrastructure.LSP.Capabilities (LanguageServerInfo(..), discoverLanguageServers)
 import Graphos.Infrastructure.Logging (LogLevel(..), defaultLogEnv, LogEnv(..), logInfo, logDebug, logError)
 import Graphos.Infrastructure.Export.Neo4j (pushSubgraphToNeo4j, pushCommunityGraphToNeo4j, pushToNeo4jWithCommunities)
@@ -857,6 +858,7 @@ main = do
               -- Export
               createDirectoryIfMissing True outputDir
               let analysis = mrAnalysis mergeResult
+                  quality = clusterQualityFor "leiden" mergedGraph (mrCommunities mergeResult) Nothing
                   graphosCfg = defaultGraphosConfig
                   config = defaultConfig
                         { cfgOutputDir = outputDir
@@ -877,7 +879,7 @@ main = do
                         , detectionExclusions = emptyExclusionCounts
                         }
               logInfo env "[merge] Exporting..."
-              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing []
+              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing [] quality
               logInfo env "[merge] Merge complete!"
               logInfo env $ T.pack $ "  Nodes: " ++ show (Map.size (gNodes mergedGraph))
               logInfo env $ T.pack $ "  Edges: " ++ show (Map.size (gEdges mergedGraph))
