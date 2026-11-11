@@ -106,12 +106,33 @@ apiSurfaceTypes =
   , "static_item", "extern_item", "attribute_item"
      -- Haskell
   , "declarations", "instance_declaration", "pattern_declaration", "type_signature"
+     -- C# / PHP / Perl / Kotlin (AVI-1765)
+  , "namespace_declaration"       -- C#: namespace N { }
+  , "using_directive"             -- C#: using System;
+  , "constructor_declaration"     -- C#: ctor
+  , "destructor_declaration"      -- C#: ~T()
+  , "struct_declaration"          -- C#: struct S { }
+  , "record_declaration"          -- C# 9+: record R
+  , "delegate_declaration"        -- C#
+  , "enum_member_declaration"     -- C# enum member
+  , "trait_declaration"           -- PHP: trait T { }
+  , "subroutine"                  -- Perl: sub foo { }
+  , "subroutine_declaration"      -- Perl alternate
+  , "subroutine_declaration_statement" -- Perl alternate
+  , "package_statement"           -- Perl: package Foo;
+  , "use_statement"               -- Perl: use Foo;
+  , "require_statement"           -- Perl/PHP: require
   ]
 
 importExportTypes :: [String]
 importExportTypes =
   [ "import_declaration", "import_statement", "import_from_statement"
   , "export_statement", "export_default_declaration"
+  , "using_directive"             -- C#: using System;
+  , "use_statement"               -- Perl: use Foo;
+  , "require_statement"           -- Perl/PHP: require
+  , "include_statement"           -- PHP: include
+  , "namespace_use_declaration"   -- PHP: use Foo\Bar;
   ]
 
 -- | Tier 3 — implementation detail: statements, parameters, locals, JSON
@@ -137,6 +158,9 @@ functionBoundaryTypes =
   , "arrow_function", "generator_function_declaration"
   , "constructor"
   , "function_item"       -- Rust
+  , "subroutine"                  -- Perl
+  , "subroutine_declaration"      -- Perl
+  , "constructor_declaration"     -- C#
   ]
 
 -- | AST types that carry no identifier of their own and must never be emitted
@@ -804,4 +828,22 @@ tsTypeToKind t = case t of
   "object" -> "Object"
   "array" -> "Array"
   "pair" -> "Property"
+  -- C# / PHP / Perl (AVI-1765)
+  "namespace_declaration" -> "Namespace"
+  "using_directive" -> "Import"
+  "constructor_declaration" -> "Constructor"
+  "destructor_declaration" -> "Destructor"
+  "struct_declaration" -> "Struct"
+  "record_declaration" -> "Struct"
+  "delegate_declaration" -> "Delegate"
+  "enum_member_declaration" -> "EnumMember"
+  "trait_declaration" -> "Trait"
+  "subroutine" -> "Function"
+  "subroutine_declaration" -> "Function"
+  "subroutine_declaration_statement" -> "Function"
+  "package_statement" -> "Module"
+  "use_statement" -> "Import"
+  "require_statement" -> "Import"
+  "include_statement" -> "Import"
+  "namespace_use_declaration" -> "Import"
   _ -> t
