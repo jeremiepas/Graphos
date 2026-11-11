@@ -332,6 +332,10 @@ getGrammarPtr "haskell"      = Just TSHaskell.tree_sitter_haskell
 getGrammarPtr "ruby"         = Just TSRuby.tree_sitter_ruby
 getGrammarPtr "java"         = Just TSJava.tree_sitter_java
 getGrammarPtr "php"          = Just TSPhp.tree_sitter_php
+-- Kotlin is intentionally an alias for the Java grammar: no dedicated
+-- tree-sitter-kotlin Hackage package exists at ABI 9–11 and Kotlin's
+-- syntax overlaps Java sufficiently for coarse extraction. This is
+-- tree-sitter-only; no separate Kotlin vendoring is performed.
 getGrammarPtr "kotlin"       = Just TSJava.tree_sitter_java
 getGrammarPtr "perl"         = Just TSVendored.tree_sitter_perl
 getGrammarPtr "csharp"       = Just TSVendored.tree_sitter_c_sharp
