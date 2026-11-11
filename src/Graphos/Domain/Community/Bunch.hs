@@ -55,6 +55,7 @@ module Graphos.Domain.Community.Bunch
   , intraOfAssignment
   , replayMoves
   , canonicalPartition
+  , assignmentOf
   ) where
 
 import Control.Monad (forM_, when)

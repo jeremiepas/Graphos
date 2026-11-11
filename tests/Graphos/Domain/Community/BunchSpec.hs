@@ -18,6 +18,7 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph)
 import Graphos.Domain.Community.MQ (Weighting(..))
 import Graphos.Domain.Community.Bunch
+import Graphos.Domain.Community.Landscape (RandomGraphSpec(..), generateRandomMDG)
 import Graphos.Domain.Random (mkGen)
 
 spec :: Spec
@@ -123,6 +124,14 @@ searchSpec = describe "bunchSearch (hill climbing over partitions)" $ do
 
   it "canonicalPartition orders clusters by smallest member" $
     canonicalPartition (VU.fromList [1, 0, 1, 2]) `shouldBe` [[0, 2], [1], [3]]
+
+  describe "scale check (task 3.6)" $ do
+    it "terminates under the iteration cap on a 200-file random MDG" $ do
+      let m = generateRandomMDG (RndSpec 200 0.05) 0
+          r = bunchSearch cfg 0 m
+      brIterations r `shouldSatisfy` (< bcMaxIterations cfg)
+      brFinalMQ r `shouldSatisfy` (> 0)
+      brFinalClusters r `shouldSatisfy` (\k -> k >= 1 && k <= 200)
 
 -- | Files f0..f4 and f5..f9 as two 5-cliques, bridged by the edge 4–5.
 twoCliques :: FileMDG
