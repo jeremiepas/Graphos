@@ -7,6 +7,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config
+import Graphos.Domain.Config.Clustering
 
 spec :: Spec
 spec = do
@@ -161,3 +162,43 @@ spec = do
 
     it "fills partial keys with defaults" $ do
       decode "{\"enabled\":false}" `shouldBe` Just (SemanticEdgesConfig False 50 0.5 4 defaultPathExtensions)
+
+  describe "ClusteringConfig algorithm keys (bunch-search-based-modularization 6.1)" $ do
+    it "defaults to leiden, seed 0 and the default Bunch block" $
+      decode "{}" `shouldBe` Just defaultClusteringConfig
+
+    it "decodes clustering.algorithm, clustering.seed and clustering.bunch.*" $
+      decode "{\"algorithm\":\"bunch\",\"seed\":3,\"bunch\":{\"population\":4,\"threshold\":50,\
+             \\"annealing\":{\"enabled\":true,\"t0\":50,\"alpha\":0.9},\"max_iterations\":200,\
+             \\"max_files\":1000,\"weighted\":true}}"
+        `shouldBe` Just defaultClusteringConfig
+          { ccAlgorithm = AlgoBunch, ccSeed = 3
+          , ccBunch = BunchFileConfig 4 50 (Just (50, 0.9)) 200 1000 True }
+
+    it "accepts camelCase multi-word keys and defaults the annealing schedule" $
+      fmap ccBunch (decode "{\"bunch\":{\"maxIterations\":7,\"maxFiles\":9,\"annealing\":{\"enabled\":true}}}")
+        `shouldBe` Just defaultBunchFileConfig
+          { bfMaxIterations = 7, bfMaxFiles = 9, bfAnnealing = Just defaultAnnealing }
+
+    it "rejects an unknown algorithm" $
+      (eitherDecode "{\"algorithm\":\"louvain\"}" :: Either String ClusteringConfig)
+        `shouldSatisfy` either (const True) (const False)
+
+    it "lets the CLI override the config (threshold 50 in yaml, --bunch-threshold 0)" $ do
+      let yaml = defaultClusteringConfig { ccBunch = defaultBunchFileConfig { bfThreshold = 50 } }
+          eff  = applyClusteringOverrides noClusteringOverrides { covThreshold = Just 0 } yaml
+      bfThreshold (ccBunch eff) `shouldBe` 0
+      bfThreshold (ccBunch (applyClusteringOverrides noClusteringOverrides yaml)) `shouldBe` 50
+
+    it "validates the Bunch ranges" $ do
+      let withB f = defaultClusteringConfig { ccBunch = f defaultBunchFileConfig }
+      validClusteringConfig (withB (\b -> b { bfThreshold = 101 })) `shouldSatisfy` either (const True) (const False)
+      validClusteringConfig (withB (\b -> b { bfPopulation = 0 })) `shouldSatisfy` either (const True) (const False)
+      validClusteringConfig (withB (\b -> b { bfAnnealing = Just (100, 1) })) `shouldSatisfy` either (const True) (const False)
+      validClusteringConfig defaultClusteringConfig `shouldBe` Right defaultClusteringConfig
+
+    it "merges a non-default project algorithm over the global one" $ do
+      let project = defaultClusteringConfig { ccAlgorithm = AlgoBunch }
+          global  = defaultClusteringConfig { ccSeed = 5 }
+          merged  = mergeClusteringConfig project global
+      (ccAlgorithm merged, ccSeed merged) `shouldBe` (AlgoBunch, 5)

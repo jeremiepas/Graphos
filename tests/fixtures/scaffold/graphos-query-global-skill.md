@@ -38,6 +38,7 @@ graphos [PATH]                  Build the knowledge graph (default: .)
   --threads, -j N / --edge-density MODE
   --resolution FLOAT / --mcp GRAPH_JSON
   --ignore GLOB                 Additional ignore pattern (repeatable)
+  --cluster-algorithm leiden|bunch / --seed N / --bunch-* (see --help)
 
 graphos query QUESTION          Query the knowledge graph
   --dfs / --budget N / --graph FILE
@@ -72,6 +73,8 @@ graphos subgraph                Extract a path-driven subgraph
 
 graphos migrate-graph GRAPH      Upgrade a legacy graph.json to the JGF format
   --output, -o PATH              (default: overwrite in place)
+
+graphos clustereval landscape   Bunch search landscape (--graph/--runs/--random-graph/--json)
 
 graphos init                    Generate graphos.yaml
 

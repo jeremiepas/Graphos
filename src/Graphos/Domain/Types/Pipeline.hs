@@ -40,6 +40,7 @@ import GHC.Generics (Generic)
 
 import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig, Granularity, OtelConfig(..), defaultOtelConfig, IngestConfig, defaultIngestConfig)
 import Graphos.Domain.Config.Detection (DetectionMode(..))
+import Graphos.Domain.Config.Clustering (ClusteringOverrides, noClusteringOverrides)
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
 
 -- | Pipeline configuration
@@ -112,6 +113,7 @@ data PipelineConfig = PipelineConfig
 , cfgCommunityCapEnabled  :: Bool                    -- ^ Effective switch: apply the post-Leiden community-size cap (--no-community-cap disables it)
 , cfgMaxCommunityFractionOverride :: Maybe Double     -- ^ CLI --max-community-fraction override (Nothing = unset; config file wins). Resolved by Main into cfgMaxCommunityFraction
 , cfgCommunityCapDisabled   :: Bool                    -- ^ CLI --no-community-cap flag (default False). Combined with config-file enable in Main
+, cfgClusteringOverrides    :: ClusteringOverrides     -- ^ CLI --cluster-algorithm / --seed / --bunch-* overrides; Main applies them to gcClustering
      } deriving (Eq, Show)
 
 -- | Edge density level for inference
@@ -208,6 +210,7 @@ defaultConfig = PipelineConfig
 , cfgCommunityCapEnabled = True
 , cfgMaxCommunityFractionOverride = Nothing
 , cfgCommunityCapDisabled = False
+, cfgClusteringOverrides = noClusteringOverrides
     }
 
 -- | Neo4j streaming push configuration — pushed node-by-node during extraction.
