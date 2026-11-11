@@ -29,6 +29,7 @@ spec = do
           , analysisQuestions    = []
           , analysisArticulation = ["b"]
           , analysisBccCount     = 7
+          , analysisPartitionQuality = Nothing
           }
         report = generateReport g baseAnalysis defaultConfig detection Nothing
 
@@ -47,6 +48,23 @@ spec = do
       -- 7 is deliberately not the fixture's real count (2): the rendered
       -- figure proves the report reads the precomputed value.
       report `shouldSatisfy` T.isInfixOf "Biconnected components: 7"
+
+    it "prints the Partition quality line naming the algorithm (report-consistency)" $ do
+      let q = ClusterQuality { cqAlgorithm = "bunch", cqMQ = 1.25, cqModularity = 0.5
+                             , cqIntraFraction = 0.75, cqClusters = 1, cqSkip = Nothing }
+          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection Nothing
+      r `shouldSatisfy` T.isInfixOf "Partition quality (bunch): MQ = 1.2500, modularity = 0.5000, intra-edge fraction = 0.7500"
+      r `shouldNotSatisfy` T.isInfixOf "Bunch skipped"
+
+    it "names a Bunch skip next to the Leiden quality line" $ do
+      let q = ClusterQuality { cqAlgorithm = "leiden", cqMQ = 1, cqModularity = 0.5
+                             , cqIntraFraction = 0.75, cqClusters = 1, cqSkip = Just (BunchSkip 6000 5000) }
+          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection Nothing
+      r `shouldSatisfy` T.isInfixOf "Partition quality (leiden)"
+      r `shouldSatisfy` T.isInfixOf "Bunch skipped: 6000 files exceed the cap of 5000"
+
+    it "omits the Partition quality line for an unclustered analysis" $
+      report `shouldNotSatisfy` T.isInfixOf "Partition quality"
 
     it "renders the no-articulation message when the shared list is empty" $ do
       let analysis' = baseAnalysis { analysisArticulation = [] }
@@ -86,6 +104,7 @@ spec = do
           , analysisQuestions    = []
           , analysisArticulation = []
           , analysisBccCount     = 0
+          , analysisPartitionQuality = Nothing
           }
 
     it "reports files detected, files with structure, and the stubbed breakdown by extension" $ do

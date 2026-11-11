@@ -260,6 +260,7 @@ analysis = Analysis
   , analysisQuestions   = []
   , analysisArticulation = []
   , analysisBccCount    = 0
+  , analysisPartitionQuality = Nothing
   }
 
 aggFixture :: CommunityAggregate

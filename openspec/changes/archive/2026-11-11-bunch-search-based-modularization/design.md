@@ -133,7 +133,7 @@ search is Domain-pure and tests need to pin the stream).
 | Basins | Runs grouped by rounding MQ to 0.05; the report lists the groups holding ≥ 5% of runs with their MQ range and cluster-count range (the paper's "one or two basins") |
 | Random-partition baseline | M random partitions (default 1,000) scored with MQ; min/median/max reported next to the runs (Fig. 7) |
 | Leiden point | The build's Leiden partition folded to files by majority community, scored in the same coordinates |
-| Control MDGs | `--random-graph rnd:N:D` and `bip:N:D`: N nodes, `round(D · N(N−1)/2)` distinct pairs chosen uniformly without replacement, bipartite across two halves of ⌊N/2⌋ and ⌈N/2⌉ for `bip`; seeded; the landscape then runs on that MDG instead of a graph file |
+| Control MDGs | `--random-graph rnd:N:D` and `bip:N:D`: N nodes, `⌊D · N(N−1)/2⌋` distinct pairs chosen uniformly without replacement, bipartite across two halves of ⌊N/2⌋ and ⌈N/2⌉ for `bip`; seeded; the landscape then runs on that MDG instead of a graph file |
 
 Alternatives: MoJo between runs (rejected — the paper reports it misbehaves
 on isomorphic modules and uses the edge distribution instead); clustering the
@@ -186,7 +186,7 @@ come from so the report and export agree).
     permutation → equal partition; the two-clique fixture converges to the
     two cliques from every seed in 0..31.
   - Landscape: bucket shares sum to 100% of |E|; `Rnd` and `Bip` generators
-    produce exactly `round(D·N(N−1)/2)` pairs and `Bip` has no intra-half
+    produce exactly `⌊D·N(N−1)/2⌋` pairs and `Bip` has no intra-half
     edge; similarity of N identical partitions is 100% High.
 - Smoke, recorded in `tasks.md`: `graphos clustereval landscape` with 100
   runs on the Graphos repo at file granularity and on `rnd:100:0.05`,

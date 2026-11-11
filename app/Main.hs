@@ -24,6 +24,10 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
+import Graphos.UseCase.ClusterEval (LandscapeInput(..), defaultLandscapeInput, landscapeReport, landscapeJSON, landscapeSummary)
+import Graphos.UseCase.Cluster (joinCommunitiesToNodes)
+import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig)
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
 import OpenSpecView.ChangeList (readAllChangeInfos, ChangeInfo(..))
 import OpenSpecView.ArtifactView (displayChangeArtifacts)
 import OpenSpecView.SpecDiff (diffPaths, renderSpecDiff)
@@ -74,7 +78,7 @@ import Graphos.Infrastructure.Observability.SDK
   , defaultOtelConfig
   )
 import Graphos.Domain.Config (defaultGraphosConfig, GraphosConfig(..), ObservabilityConfig(..), gcObservability, VisionConfig(..), vcEnabled, gcVision, gcIngest, icEmbed, gcSemanticEdges, gcMemory, MemoryConfig(..), MemoryBudgetSetting(..), MemInfo(..), deriveBudget, memorySafetyReserve, formatBytes, effectiveOutputDir)
-import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ccMaxCommunityFraction, ccCommunityCapEnabled, validClusteringConfig)
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), validClusteringConfig, applyClusteringOverrides)
 import Graphos.Infrastructure.Config (loadConfig, loadConfigSilent, generateDefaultConfig, writeConfigYaml, configDocComments)
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Infrastructure.Server.Static (startServeServer)
@@ -118,6 +122,7 @@ emptyAnalysisForMigrate lr = Analysis
   , analysisQuestions     = []
   , analysisArticulation  = []
   , analysisBccCount      = 0
+  , analysisPartitionQuality = Nothing
   }
 
 parseHeapSize :: String -> Maybe Int
@@ -319,9 +324,12 @@ main = do
           baseCc       = gcClustering graphosCfg
           effEnabled   = ccCommunityCapEnabled baseCc && not (cfgCommunityCapDisabled config)
           effFraction  = fromMaybe (ccMaxCommunityFraction baseCc) (cfgMaxCommunityFractionOverride config)
-          effCc        = ClusteringConfig effFraction effEnabled
+          effCc        = applyClusteringOverrides (cfgClusteringOverrides config)
+                           baseCc { ccMaxCommunityFraction = effFraction
+                                  , ccCommunityCapEnabled  = effEnabled }
           config' = config { cfgOutputDir    = outputDir
-                           , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) } }
+                           , cfgGraphosConfig = graphosCfg { gcVision = (gcVision graphosCfg) { vcEnabled = cfgVision config || vcEnabled (gcVision graphosCfg) }
+                                                           , gcClustering = effCc }
                             , cfgOtelConfig     = otelCfg
                             , cfgMetricsPort    = metricsPort
                             , cfgDebugTraceDir  = Just debugDir
@@ -351,7 +359,7 @@ main = do
       -- Validate the effective community-size-cap config; fail fast if mis-set.
       case validClusteringConfig effCc of
         Left err -> do
-          logError env $ "[graphos] Invalid community-size-cap config: " <> T.pack err
+          logError env $ "[graphos] Invalid clustering config: " <> T.pack err
           exitWith (ExitFailure 1)
         Right _ -> pure ()
       when (cfgClusterOnly config') $ runClusterOnlyMode appEnv env obsEnv config'
@@ -1047,6 +1055,40 @@ main = do
       let ref = CommandReference renderCommandReference
       runInstallSkill "0.1.0.0" target ref
 
+    ClusterEvalLandscapeCmd lo -> do
+      let input = defaultLandscapeInput
+            { liBunch = defaultBunchConfig
+                { bcThreshold     = lsoThreshold lo
+                , bcAnnealing     = lsoAnnealing lo
+                , bcMaxIterations = lsoMaxIterations lo
+                }
+            , liSeed             = fromIntegral (lsoSeed lo)
+            , liRuns             = lsoRuns lo
+            , liRandomPartitions = lsoRandomPartitions lo
+            , liWeighted         = lsoWeighted lo
+            , liControl          = lsoRandomGraph lo
+            }
+      -- A control MDG bypasses graph loading entirely.
+      mGraph <- case lsoRandomGraph lo of
+        Just _  -> pure Nothing
+        Nothing -> do
+          hPutStrLn stderr $ "[graphos] clustereval: loading " ++ lsoGraph lo
+          loadGraphFromFile (lsoGraph lo) >>= \case
+            Left err -> do
+              hPutStrLn stderr $ "[graphos] clustereval: " ++ T.unpack err
+              exitWith (ExitFailure 1)
+            Right loaded ->
+              pure (Just (joinCommunitiesToNodes (lrGraph loaded) (lrCommunities loaded)))
+      let rep = landscapeReport input mGraph
+          json = encode (landscapeJSON input rep)
+      if lsoJson lo
+        then BL.putStr json >> putStrLn ""
+        else do
+          let outPath = lsoOut lo </> "landscape.json"
+          createDirectoryIfMissing True (lsoOut lo)
+          writeFileAtomic outPath json
+          TIO.putStr (landscapeSummary rep)
+          putStrLn $ "[graphos] clustereval: landscape written to " ++ outPath
     ViewCmd sub -> do
       case sub of
         ViewChanges root -> do

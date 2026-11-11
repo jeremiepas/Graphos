@@ -81,7 +81,7 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiSources)
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions, buildGraphFromExtractionsWithStats)
-import Graphos.UseCase.Cluster (clusterGraphWithResolution, joinCommunitiesToNodes, computeCommunityAggregates)
+import Graphos.UseCase.Cluster (joinCommunitiesToNodes, computeCommunityAggregates, runClustering, partitionQuality, clusterAlgorithmFromConfig)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
 import Graphos.UseCase.Label (labelCommunities)
@@ -788,7 +788,8 @@ clusterGraph appEnv graph config _embeddingsPath = do
                            , resMinSize = cfgMinCommSize config
                            , resMergeInto = MergeToNeighbor
                            , resMaxIterations = cfgMaxLeidenIterations config }
-          (commMap, cohesion) = clusterGraphWithResolution graph res
+          algo = clusterAlgorithmFromConfig (gcClustering (cfgGraphosConfig config))
+          (commMap, cohesion, _) = runClustering algo res graph
       withHeapGuard lp mBudget "cluster" $ do
         _ <- evaluate (Map.size commMap + sum (map length (Map.elems commMap)))
         (commMap, cohesion) `deepseq` pure ()
@@ -817,12 +818,19 @@ clusterGraph appEnv graph config _embeddingsPath = do
 
       lpLogInfo lp "Step 5: Re-clustering and analyzing..."
       step5Start <- getCurrentTime
-      let (rawComm, finalCohes) = clusterGraphWithResolution enrichedGraph' res
+      let (rawComm, finalCohes, rawQuality) = runClustering algo res enrichedGraph'
           frac = cfgMaxCommunityFraction config
           finalComm = if cfgCommunityCapEnabled config
                       then capCommunitySizes enrichedGraph' rawComm frac
                       else rawComm
-          anal = analyzeGraph enrichedGraph' finalComm finalCohes
+          -- Re-scored after the size cap so the report's partition quality
+          -- describes exactly the communities the export writes.
+          quality = partitionQuality (cqAlgorithm rawQuality) enrichedGraph' finalComm (cqSkip rawQuality)
+          anal = (analyzeGraph enrichedGraph' finalComm finalCohes)
+                   { analysisPartitionQuality = Just quality }
+      forM_ (cqSkip quality) $ \sk ->
+        lpLogWarn lp $ T.pack $ "Bunch skipped: " ++ show (skipFiles sk) ++ " files exceed --bunch-max-files "
+                             ++ show (skipCap sk) ++ "; running Leiden instead"
       when (cfgCommunityCapEnabled config) $
         forM_ (oversizedCommunities enrichedGraph' rawComm frac) $ \(cid, cnt) ->
           lpLogWarn lp $ T.pack $ "Oversized community " ++ show cid ++ " (" ++ show cnt ++ " nodes) exceeds cap " ++ show frac ++ " of graph; splitting into sub-communities"
@@ -837,6 +845,9 @@ clusterGraph appEnv graph config _embeddingsPath = do
       opRecordHistogram op "graphos_cluster_step5_duration_seconds" (realToFrac (diffUTCTime step5End step5Start) :: Double)
       opDebugTraceSpan op "cluster_step5" (StartTime step5Start) (EndTime step5End) (Map.fromList [("communities", T.pack $ show $ Map.size finalComm)])
       lpLogInfo lp $ T.pack $ "  Re-cluster: " ++ show (Map.size finalComm) ++ " communities"
+      lpLogInfo lp $ T.pack $ "  Partition quality (" ++ T.unpack (cqAlgorithm quality) ++ "): MQ = " ++ show (cqMQ quality)
+                           ++ ", modularity = " ++ show (cqModularity quality)
+                           ++ ", intra-edge fraction = " ++ show (cqIntraFraction quality)
 
       let compMap = computeCompositions enrichedGraph' finalComm
           graphWithComps = enrichedGraph' { gCompositions = Just (toJSON compMap) }

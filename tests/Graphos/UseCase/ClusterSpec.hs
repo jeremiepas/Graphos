@@ -16,12 +16,15 @@ import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig, foldToFileMDG, mdgFileCount, mdgEdgeCount, bunchCluster, BunchResult(..), BunchRun(..))
 import Graphos.Domain.Community.MQ (Weighting(..))
 import Graphos.UseCase.Cluster
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..), defaultClusteringConfig, defaultBunchFileConfig)
+import Graphos.Domain.Community.MQ (modularizationQuality, mqValue)
 
 spec :: Spec
 spec = do
   leidenSpec
   bunchSpec
   capSpec
+  configSpec
 
 -- ───────────────────────────────────────────────
 -- Fixtures
@@ -153,3 +156,31 @@ capSpec = describe "file cap" $ do
         (_, _, q) = runClustering (BunchAlgorithm settingsAtCap) res chainGraph
     cqAlgorithm q `shouldBe` "bunch"
     cqSkip q `shouldBe` Nothing
+
+-- ───────────────────────────────────────────────
+-- Config bridge and report/export agreement (6.1, 6.3)
+-- ───────────────────────────────────────────────
+
+configSpec :: Spec
+configSpec = describe "clusterAlgorithmFromConfig / partitionQuality" $ do
+  it "maps the default config to Leiden" $
+    clusterAlgorithmFromConfig defaultClusteringConfig `shouldBe` Leiden
+
+  it "maps clustering.algorithm bunch and its block to BunchSettings" $
+    clusterAlgorithmFromConfig defaultClusteringConfig
+      { ccAlgorithm = AlgoBunch, ccSeed = 7
+      , ccBunch = defaultBunchFileConfig
+          { bfPopulation = 3, bfThreshold = 50, bfAnnealing = Just (100, 0.99)
+          , bfMaxIterations = 42, bfMaxFiles = 9, bfWeighted = True } }
+      `shouldBe` BunchAlgorithm BunchSettings
+        { bsConfig = defaultBunchConfig
+            { bcSeed = 7, bcPopulation = 3, bcThreshold = 50
+            , bcAnnealing = Just (100, 0.99), bcMaxIterations = 42 }
+        , bsMaxFiles = 9, bsWeighted = True }
+
+  it "scores the partition it is given: MQ equals modularizationQuality of those communities" $ do
+    let (comm, _, q0) = runClustering (BunchAlgorithm defaultBunchSettings) res chainGraph
+        q = partitionQuality (cqAlgorithm q0) chainGraph comm (cqSkip q0)
+    cqMQ q `shouldBe` mqValue (modularizationQuality chainGraph comm)
+    cqAlgorithm q `shouldBe` "bunch"
+    q `shouldBe` q0

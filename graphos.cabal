@@ -437,6 +437,7 @@ test-suite graphos-test
     Graphos.UseCase.Extract.ImageSpec
     Graphos.UseCase.QuerySpec
     Graphos.UseCase.ClusterSpec
+    Graphos.UseCase.ClusterEvalSpec
     Graphos.UseCase.Query.RefineSpec
     Graphos.UseCase.Query.RenderSpec
     Graphos.UseCase.SelectContextSpec
