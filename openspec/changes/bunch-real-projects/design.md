@@ -100,13 +100,39 @@ belongs after extraction, where the full set of extracted file paths is known.
 | `src/a/foo` (relative, no extension) | `src/a/foo.<ext>` for the source language's extensions, then `src/a/foo/index.<ext>` |
 | `external:@/x`, `~/x`, `#/x`, `$lib/x` | strip the alias root, then unique path-suffix match |
 | `external:app/config` with tsconfig `paths` `app/*` → `src/main/webapp/app/*` | apply `paths` when a `tsconfig.json`/`jsconfig.json` is in the corpus; otherwise unique path-suffix match |
-| `external:io.spring.core.Article` (JVM) | dots → `/`, unique suffix match on `.java/.kt/.scala`; a trailing member or `*` is dropped |
 | anything matching zero or several files | unchanged |
+
+Java imports are not handled here: `avi-1765` resolves `import a.b.C;` through
+source roots (`src/main/java`, `src/test/java`, package-consistent ancestors),
+which is more precise than suffix matching. Rules 2–3 are registered as
+built-in resolver kinds (`path-alias`, `tsconfig-paths`) of `avi-1766`'s
+`resolve:` framework, so its precedence rule applies: a user `resolve:` entry
+for the same extension wins, with a warning.
 
 Scoped npm packages (`@scope/pkg`), `node:` builtins and bare package names
 whose first segment matches no corpus directory stay external. The rewritten
 edge keeps its `EdgeId`; the dangling `External` node is dropped when nothing
 references it any more.
+
+## Order of work
+
+```mermaid
+flowchart LR
+  A["#253 archived<br/>cap, leiden, imports-go-rust-ruby"] --> D1[D1 no cap on Bunch]
+  A --> D2[D2 allowlist + Step-5 reuse]
+  D1 --> D3[D3 partitioned search + refinement]
+  D2 --> D3
+  U[usable-graph-for-code-review] --> D4[D4 corpus-aware resolution]
+  J[avi-1765 Java imports] --> D4
+  C[avi-1766 resolve: framework] -. aligned .-> D4
+  T[avi-1440 + 1765 tests green<br/>BoundedDelta hang fixed] --> V[validation 5.x]
+  M[modularity-undirected-view] --> V
+  D3 --> V
+  D4 --> V
+```
+
+D1–D3 depend only on what is already archived and can start now. D4 waits
+for `usable-graph-for-code-review` and `avi-1765`.
 
 ## Risks
 

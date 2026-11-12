@@ -3,9 +3,15 @@
 ### Requirement: Corpus-aware import target resolution
 
 After extraction and before graph build, the system SHALL resolve every
-`imports` target that per-file resolution (`resolveImport`) left as an
-extension-less path, a directory, or an `external:` specifier, against the set
-of extracted file paths of the corpus. It SHALL apply, in order:
+`imports` target that per-file resolution left as an extension-less path, a
+directory, or an `external:` specifier, against the set of extracted file paths
+of the corpus. Per-file resolution is `resolveImport`, plus the canonical
+target identity of `usable-graph-for-code-review`, which rewrites `.js` to the
+source extension and resolves `/index`. These rules run after it, as built-in
+resolvers of the `resolve:` framework of `avi-1766-custom-extractors`, so a
+`resolve:` entry for the same extension overrides them. Java imports are out of
+scope here: `avi-1765` resolves them through source roots. The system SHALL
+apply, in order:
 
 1. **Extension-less and directory targets.** `p` resolves to `p.<ext>` for the
    extensions of the importing file's language family (TS/JS:
@@ -18,9 +24,6 @@ of extracted file paths of the corpus. It SHALL apply, in order:
    with `compilerOptions.paths` is in the corpus, a specifier matching one of
    its patterns resolves through the mapped location. Otherwise a specifier
    containing `/` resolves by a unique path-suffix match.
-4. **JVM fully-qualified names.** For `.java`, `.kt` and `.scala` importers,
-   `a.b.C` resolves by a unique suffix match of `a/b/C`. A trailing member
-   name or `*` is dropped first.
 
 A target SHALL resolve only when exactly one corpus file matches. A target with
 zero or several matches SHALL stay unchanged. Scoped package specifiers
@@ -45,10 +48,6 @@ nothing. (PRD §3.2, §3.3)
 #### Scenario: Angular tsconfig paths
 - **WHEN** `tsconfig.json` maps `app/*` to `src/main/webapp/app/*` and a file imports `app/config/error.constants`
 - **THEN** the edge targets `src/main/webapp/app/config/error.constants.ts`
-
-#### Scenario: JVM class import
-- **WHEN** `ArticleApi.java` imports `io.spring.core.article.Article` and the corpus has `src/main/java/io/spring/core/article/Article.java`
-- **THEN** the edge targets that file; `org.springframework.web.bind.annotation.RestController` stays external
 
 #### Scenario: ambiguous suffix stays external
 - **WHEN** a specifier `utils` would match both `src/a/utils.ts` and `src/b/utils.ts`
