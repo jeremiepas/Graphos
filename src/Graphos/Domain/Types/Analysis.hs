@@ -5,6 +5,7 @@ module Graphos.Domain.Types.Analysis
     Analysis(..)
   , ClusterQuality(..)
   , BunchSkip(..)
+  , BunchRunInfo(..)
   , GodNode(..)
   , SurprisingConnection(..)
   , SuggestedQuestion(..)
@@ -51,6 +52,17 @@ data BunchSkip = BunchSkip
 
 instance NFData BunchSkip
 
+-- | How a Bunch partition was obtained (bunch-real-projects D3): the file
+-- count of each search run (one entry when the MDG was not split) and the
+-- global refinement that followed.
+data BunchRunInfo = BunchRunInfo
+  { briRuns   :: ![Int]  -- ^ files per search run, in run order
+  , briMoves  :: !Int    -- ^ refinement moves applied
+  , briPasses :: !Int    -- ^ refinement passes run
+  } deriving (Eq, Show, Generic)
+
+instance NFData BunchRunInfo
+
 -- | Quality of the cluster stage's final partition, algorithm-independent.
 data ClusterQuality = ClusterQuality
   { cqAlgorithm     :: !Text             -- ^ @"leiden"@ or @"bunch"@
@@ -59,6 +71,9 @@ data ClusterQuality = ClusterQuality
   , cqIntraFraction :: !Double           -- ^ intra-edge fraction of the partition
   , cqClusters      :: !Int              -- ^ cluster count
   , cqSkip          :: !(Maybe BunchSkip) -- ^ Bunch skipped above the file cap
+  , cqBunchRuns     :: !(Maybe BunchRunInfo) -- ^ Bunch runs and refinement; 'Nothing' for Leiden
+  , cqScoredRelations :: !(Maybe [Text])    -- ^ relations MQ / modularity / intra fraction were scored over;
+                                            --   'Nothing' = every edge of the graph (Leiden)
   } deriving (Eq, Show, Generic)
 
 instance NFData ClusterQuality

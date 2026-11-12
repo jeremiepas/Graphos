@@ -36,6 +36,9 @@ module Graphos.Domain.Community.Bunch
   ( -- * File-level MDG
     FileMDG(..)
   , foldToFileMDG
+  , foldToFileMDGWith
+  , defaultMDGRelations
+  , forbiddenMDGRelations
   , mdgFromPairs
   , mdgFileCount
   , mdgEdgeCount
@@ -50,6 +53,12 @@ module Graphos.Domain.Community.Bunch
   , bunchSearch
   , bunchSearchFrom
   , randomPartition
+    -- * Real repositories (bunch-real-projects D3)
+  , PartitionedResult(..)
+  , bunchClusterPartitioned
+  , splitBySubtree
+  , refinePartition
+  , maxRefinePasses
     -- * Scoring helpers (tests, landscape)
   , mqOfAssignment
   , intraOfAssignment
@@ -58,13 +67,14 @@ module Graphos.Domain.Community.Bunch
   , assignmentOf
   ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (foldM, forM_, when)
 import Control.Monad.ST (ST, runST)
-import Data.List (sortOn)
+import Data.List (sortOn, partition)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.STRef
 import Data.Text.Short (ShortText)
+import qualified Data.Text.Short as TS
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
@@ -123,10 +133,28 @@ mdgFromPairs files rawPairs =
        , mdgAdjW  = V.fromList [ VU.fromList (map snd l) | l <- adjLists ]
        }
 
--- | Fold a graph to its file-level MDG.
+-- | Relations folded into the MDG by default (bunch-real-projects D2): the
+-- code's dependency relations, the paper's module dependency graph.
+defaultMDGRelations :: [Relation]
+defaultMDGRelations = [Imports, Calls, References, Extends, Implements]
+
+-- | Relations never folded, whatever the configuration: file structure
+-- ('Contains'), documentation links ('Documents') and edge-inference output
+-- ('DependsOn', 'Inferred'), which inference derives from a previous
+-- partition and would let Bunch re-cluster its own result.
+forbiddenMDGRelations :: [Relation]
+forbiddenMDGRelations = [Contains, Documents, DependsOn, Inferred]
+
+-- | Fold a graph to its file-level MDG over 'defaultMDGRelations'.
 foldToFileMDG :: Weighting -> Graph -> FileMDG
-foldToFileMDG weighting g =
-  let fileOf = Map.map nodeSourceFile (gNodes g)
+foldToFileMDG = foldToFileMDGWith defaultMDGRelations
+
+-- | Fold a graph to its file-level MDG over the given relations, minus
+-- 'forbiddenMDGRelations'.
+foldToFileMDGWith :: [Relation] -> Weighting -> Graph -> FileMDG
+foldToFileMDGWith rels weighting g =
+  let allowed = Set.fromList rels `Set.difference` Set.fromList forbiddenMDGRelations
+      fileOf = Map.map nodeSourceFile (gNodes g)
       files  = Map.keys (Map.fromList [ (f, ()) | f <- Map.elems fileOf ])
       idx    = Map.fromList (zip files [0 :: Int ..])
 
@@ -135,7 +163,7 @@ foldToFileMDG weighting g =
       -- Unit weighting: one per pair whatever the edge count, so collapse
       -- duplicates before 'mdgFromPairs' sums them.
       pairOf e
-        | edgeRelation e == Contains = Nothing
+        | not (edgeRelation e `Set.member` allowed) = Nothing
         | otherwise =
             case (fileIdx (edgeSource e), fileIdx (edgeTarget e)) of
               (Just i, Just j) | i /= j ->
@@ -307,23 +335,32 @@ neighbourWeights m st i a b = go 0 0 0 0
           else if c == b then go (idx + 1) wa (wb + w) wo
           else go (idx + 1) wa wb (wo + w)
 
+-- | Effect of moving file @i@ from cluster @a@ to cluster @b@: the new
+-- @(µ, ε)@ of both clusters and ΔMQ. Only the source and destination
+-- clusters change (`GraphosFormalization.Bunch.MQ.cf_moveTo`).
+moveEffect :: FileMDG -> SearchState s -> Int -> Int -> Int
+           -> ST s ((Double, Double), (Double, Double), Double)
+moveEffect m st i a b = do
+  (wA, wB, wO) <- neighbourWeights m st i a b
+  muA <- VUM.read (ssMu st) a
+  exA <- VUM.read (ssExt st) a
+  muB <- VUM.read (ssMu st) b
+  exB <- VUM.read (ssExt st) b
+  let muA' = muA - wA
+      exA' = exA - (wB + wO) + wA
+      muB' = muB + wB
+      exB' = exB - wB + (wA + wO)
+      delta = clusterFactor muA' exA' + clusterFactor muB' exB'
+            - clusterFactor muA exA - clusterFactor muB exB
+  pure ((muA', exA'), (muB', exB'), delta)
+
 -- | Move file @i@ to cluster @b@ (any id in @[0, n)@, empty or not) and
 -- return ΔMQ. Only the source and destination clusters change.
 moveFile :: FileMDG -> SearchState s -> Int -> Int -> ST s Double
 moveFile m st i b = do
   a <- VUM.read (ssAssign st) i
   if a == b then pure 0 else do
-    (wA, wB, wO) <- neighbourWeights m st i a b
-    muA <- VUM.read (ssMu st) a
-    exA <- VUM.read (ssExt st) a
-    muB <- VUM.read (ssMu st) b
-    exB <- VUM.read (ssExt st) b
-    let muA' = muA - wA
-        exA' = exA - (wB + wO) + wA
-        muB' = muB + wB
-        exB' = exB - wB + (wA + wO)
-        delta = clusterFactor muA' exA' + clusterFactor muB' exB'
-              - clusterFactor muA exA - clusterFactor muB exB
+    ((muA', exA'), (muB', exB'), delta) <- moveEffect m st i a b
     VUM.write (ssMu st) a muA'
     VUM.write (ssExt st) a exA'
     VUM.write (ssMu st) b muB'
@@ -556,3 +593,147 @@ replayMoves :: FileMDG -> VU.Vector Int -> [(Int, Int)] -> [Double]
 replayMoves m assign0 moves = runST $ do
   st <- initState m assign0 (mkGen 0) 0
   mapM (\(i, b) -> moveFile m st i b >> readSTRef (ssMQ st)) moves
+
+-- ───────────────────────────────────────────────
+-- Real repositories: split, refine (bunch-real-projects D3)
+-- ───────────────────────────────────────────────
+
+-- | Result of 'bunchClusterPartitioned'.
+data PartitionedResult = PartitionedResult
+  { prPartition :: [[Int]]  -- ^ clusters over the whole MDG, ascending file lists ordered by smallest member
+  , prRuns      :: [Int]    -- ^ file count of each search run, in run order (one entry when unsplit)
+  , prMoves     :: Int      -- ^ moves applied by the global refinement
+  , prPasses    :: Int      -- ^ refinement passes, the last one applying no move unless capped
+  , prMQ        :: Double   -- ^ MQ of 'prPartition' over the whole MDG
+  } deriving (Eq, Show)
+
+-- | Pass cap of 'refinePartition'.
+maxRefinePasses :: Int
+maxRefinePasses = 50
+
+-- | Bunch on a real repository. Up to @maxPerRun@ files: one population
+-- search. Above: one population search per directory sub-tree of at most
+-- @maxPerRun@ files ('splitBySubtree'), sub-tree modules offset in run order.
+-- Either way the result then goes through 'refinePartition' over the whole
+-- MDG, which absorbs the files a sub-tree run left alone because all their
+-- neighbours lie in other sub-trees.
+bunchClusterPartitioned :: Int -> BunchConfig -> FileMDG -> PartitionedResult
+bunchClusterPartitioned maxPerRun cfg m
+  | n == 0 = PartitionedResult [] [] 0 0 0
+  | otherwise =
+      let (assign1, moves, passes) = refinePartition m assign0
+          part = canonicalPartition assign1
+      in PartitionedResult
+           { prPartition = part
+           , prRuns = map length chunks
+           , prMoves = moves
+           , prPasses = passes
+           , prMQ = mqOfAssignment m (assignmentOf n part)
+           }
+  where
+    n = mdgFileCount m
+    chunks
+      | n <= max 1 maxPerRun = [[0 .. n - 1]]
+      | otherwise = splitBySubtree maxPerRun (map TS.toString (V.toList (mdgFiles m)))
+    assign0 = VU.replicate n 0 VU.// concat (offsetClusters 0 (map chunkClusters chunks))
+
+    offsetClusters _ [] = []
+    offsetClusters off (cls : rest) =
+      [ (i, off + j) | (j, cl) <- zip [0 ..] cls, i <- cl ] : offsetClusters (off + length cls) rest
+
+    -- Clusters of one chunk, as global file indices.
+    chunkClusters idxs =
+      let local = Map.fromList (zip idxs [0 :: Int ..])
+          global = V.fromList idxs
+          sub = mdgFromPairs (map (mdgFiles m V.!) idxs)
+                  [ ((lu, lv), mdgEdgeW m VU.! e)
+                  | e <- [0 .. mdgEdgeCount m - 1]
+                  , Just lu <- [Map.lookup (mdgEdgeU m VU.! e) local]
+                  , Just lv <- [Map.lookup (mdgEdgeV m VU.! e) local] ]
+          cls | mdgEdgeCount sub == 0 = [ [i] | i <- [0 .. length idxs - 1] ]
+              | otherwise = brPartition (bresBest (bunchCluster cfg sub))
+      in [ map (global V.!) cl | cl <- cls ]
+
+-- | Split files (given in ascending path order; the result holds their
+-- indices) into directory sub-trees of at most @maxN@ files. A group above
+-- @maxN@ splits by its next directory component; sibling groups smaller than
+-- @maxN / 10@ are pooled; a group whose files all sit in one directory is cut
+-- into consecutive chunks. Chunks are returned in ascending order of their
+-- smallest index, so the split is a deterministic function of the path set.
+splitBySubtree :: Int -> [FilePath] -> [[Int]]
+splitBySubtree _ [] = []
+splitBySubtree maxN0 paths = sortOn minIdx (go 0 items)
+  where
+    maxN = max 1 maxN0
+    items = zip [0 :: Int ..] (map dirParts paths)
+    threshold = max 1 (maxN `div` 10)
+    minIdx [] = maxBound
+    minIdx xs = minimum xs
+
+    go :: Int -> [(Int, [String])] -> [[Int]]
+    go depth grp
+      | length grp <= maxN = [map fst grp]
+      | otherwise =
+          let key (_, ds) = take (depth + 1) ds
+              groups = Map.elems (Map.fromListWith (flip (++)) [ (key it, [it]) | it <- grp ])
+          in case groups of
+               [only]
+                 | all (\(_, ds) -> length ds <= depth + 1) only -> cut only
+                 | otherwise -> go (depth + 1) only
+               _ ->
+                 let (small, big) = partition ((< threshold) . length) groups
+                     pooled = concat small
+                 in concatMap (go (depth + 1)) big
+                    ++ (if null pooled then [] else if length pooled <= maxN then [map fst pooled] else cut pooled)
+
+    cut grp = chunksOfN maxN (map fst (sortOn fst grp))
+
+    chunksOfN _ [] = []
+    chunksOfN k xs = let (a, b) = splitAt k xs in a : chunksOfN k b
+
+    dirParts p = case splitOnSlash p of
+      [] -> []
+      parts -> init parts
+
+    splitOnSlash s = case break (== '/') s of
+      (a, []) -> [a]
+      (a, _ : rest) -> a : splitOnSlash rest
+
+-- | Global refinement over the whole MDG: next-ascent over files in
+-- ascending index (= path) order; each file may move to a cluster holding
+-- one of its neighbours, the best strictly improving move (ΔMQ > 1e-12,
+-- earliest cluster id on ties) is applied. Passes repeat until one applies
+-- no move or 'maxRefinePasses' is reached. Returns the assignment, the moves
+-- applied and the passes run. Every applied move strictly increases MQ, so MQ
+-- never decreases and the result is a partition of the same files.
+refinePartition :: FileMDG -> VU.Vector Int -> (VU.Vector Int, Int, Int)
+refinePartition m assign0
+  | n == 0 = (assign0, 0, 0)
+  | otherwise = runST $ do
+      st <- initState m assign0 (mkGen 0) 0
+      let pass p total
+            | p > maxRefinePasses = finish st total maxRefinePasses
+            | otherwise = do
+                moved <- foldM (\acc i -> do
+                            mb <- bestMove st i
+                            case mb of
+                              Nothing -> pure acc
+                              Just b -> moveFile m st i b >> pure (acc + 1)) 0 [0 .. n - 1]
+                if moved == 0 then finish st total p else pass (p + 1) (total + moved)
+      pass 1 0
+  where
+    n = mdgFileCount m
+    finish st total p = do
+      a <- VU.freeze (ssAssign st)
+      pure (a, total, p)
+
+    bestMove st i = do
+      a <- VUM.read (ssAssign st) i
+      let nbs = mdgAdj m V.! i
+      cs <- mapM (VUM.read (ssAssign st)) (VU.toList nbs)
+      let targets = Set.toAscList (Set.delete a (Set.fromList cs))
+      foldM (\best b -> do
+                (_, _, d) <- moveEffect m st i a b
+                pure $ if improves d && maybe True ((d >) . snd) best then Just (b, d) else best)
+            Nothing targets
+        >>= pure . fmap fst
