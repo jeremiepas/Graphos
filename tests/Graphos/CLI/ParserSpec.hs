@@ -8,6 +8,8 @@ import Options.Applicative.Help (renderHelp, parserHelp)
 import Graphos.UseCase.Query.Render (defaultCommonQueryOpts)
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..))
+import Graphos.Domain.Config.Clustering (ClusteringOverrides(..), ClusteringAlgorithmName(..), noClusteringOverrides)
+import Graphos.Domain.Community.Landscape (RandomGraphSpec(..))
 
 parseServe :: [String] -> Either String Command
 parseServe args =
@@ -223,3 +225,55 @@ spec = do
       parsePipeline ["--max-community-fraction", "0"]   `shouldSatisfy` isLeft
       parsePipeline ["--max-community-fraction", "1.5"] `shouldSatisfy` isLeft
       parsePipeline ["--max-community-fraction", "-0.1"] `shouldSatisfy` isLeft
+
+  describe "pipelineOpts clustering-algorithm flags (bunch-search-based-modularization 6.1)" $ do
+    it "leaves every clustering value unset by default" $
+      fmap cfgClusteringOverrides (parsePipeline []) `shouldBe` Right noClusteringOverrides
+
+    it "parses --cluster-algorithm and every --bunch-* flag" $
+      fmap cfgClusteringOverrides (parsePipeline
+        [ "--cluster-algorithm", "bunch", "--seed", "7", "--bunch-population", "4"
+        , "--bunch-threshold", "50", "--bunch-sa", "100,0.99"
+        , "--bunch-max-iterations", "200", "--bunch-max-files", "3000", "--bunch-weighted" ])
+        `shouldBe` Right ClusteringOverrides
+          { covAlgorithm = Just AlgoBunch, covSeed = Just 7, covPopulation = Just 4
+          , covThreshold = Just 50, covAnnealing = Just (100, 0.99)
+          , covMaxIterations = Just 200, covMaxFiles = Just 3000, covWeighted = True }
+
+    it "accepts --cluster-algorithm leiden and --bunch-sa on" $ do
+      fmap (covAlgorithm . cfgClusteringOverrides) (parsePipeline ["--cluster-algorithm", "leiden"])
+        `shouldBe` Right (Just AlgoLeiden)
+      fmap (covAnnealing . cfgClusteringOverrides) (parsePipeline ["--bunch-sa", "on"])
+        `shouldBe` Right (Just (100, 0.99))
+
+    it "rejects --bunch-threshold 101 and an unknown algorithm" $ do
+      parsePipeline ["--bunch-threshold", "101"] `shouldSatisfy` isLeft
+      parsePipeline ["--bunch-threshold", "-1"] `shouldSatisfy` isLeft
+      parsePipeline ["--cluster-algorithm", "louvain"] `shouldSatisfy` isLeft
+
+    it "rejects a malformed --bunch-sa" $ do
+      parsePipeline ["--bunch-sa", "100"] `shouldSatisfy` isLeft
+      parsePipeline ["--bunch-sa", "100,1.5"] `shouldSatisfy` isLeft
+      parsePipeline ["--bunch-sa", "0,0.9"] `shouldSatisfy` isLeft
+
+  describe "clustereval landscape (6.2)" $ do
+    it "parses the documented options" $
+      parseWith commandOpts
+        [ "clustereval", "landscape", "--graph", "g.json", "--runs", "20", "--seed", "3"
+        , "--random-partitions", "50", "--random-graph", "bip:100:0.05", "--json", "--out", "o" ]
+        `shouldSatisfy` \case
+          Right (ClusterEvalLandscapeCmd lo) ->
+            lsoGraph lo == "g.json" && lsoRuns lo == 20 && lsoSeed lo == 3
+              && lsoRandomPartitions lo == 50 && lsoRandomGraph lo == Just (BipSpec 100 0.05)
+              && lsoJson lo && lsoOut lo == "o"
+          _ -> False
+
+    it "defaults to 100 runs on graphos-out/graph.json" $
+      parseWith commandOpts ["clustereval", "landscape"] `shouldSatisfy` \case
+        Right (ClusterEvalLandscapeCmd lo) ->
+          lsoGraph lo == "graphos-out/graph.json" && lsoRuns lo == 100
+            && lsoRandomGraph lo == Nothing && not (lsoJson lo)
+        _ -> False
+
+    it "rejects a malformed --random-graph" $
+      parseWith commandOpts ["clustereval", "landscape", "--random-graph", "foo:1"] `shouldSatisfy` isLeft

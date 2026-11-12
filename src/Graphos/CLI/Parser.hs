@@ -3,6 +3,7 @@ module Graphos.CLI.Parser
   ( -- * Command type
     Command(..)
   , ViewSubcommand(..)
+  , LandscapeOpts(..)
     -- * Parsers
   , pipelineOpts
   , queryOpts
@@ -22,6 +23,8 @@ module Graphos.CLI.Parser
   , migrateGraphOpts
   , commandOpts
   , granularityReader
+  , clusteringOverridesOpts
+  , landscapeOpts
     -- * Install-skill target
   , InstallSkillTarget(..)
     -- * Command reference rendering
@@ -40,6 +43,9 @@ import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Domain.Config.Detection (DetectionMode(..))
+import Graphos.Domain.Config.Clustering (ClusteringOverrides(..), parseAlgorithmName, defaultAnnealing)
+import Graphos.Domain.Community.Landscape (RandomGraphSpec, parseRandomGraphSpec)
+import qualified Data.Text as T
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern(..), parsePattern)
 
@@ -61,6 +67,7 @@ data Command
   | IntentcheckCmd FilePath FilePath [Text] Bool
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
   | ViewCmd ViewSubcommand
+  | ClusterEvalLandscapeCmd LandscapeOpts
   | LServers
  | Serve FilePath FilePath Int Bool Bool String
 
@@ -147,6 +154,71 @@ pipelineOpts = PipelineConfig
       <*> pure True                          -- cfgCommunityCapEnabled: placeholder; Main resolves from config+CLI
       <*> optional (option fractionReader (long "max-community-fraction" <> metavar "FRAC" <> help "Post-Leiden community-size cap as a fraction of total nodes (0,1]; supersedes the config file"))
       <*> switch (long "no-community-cap" <> help "Disable the post-Leiden community-size cap (keep raw Leiden communities)")
+      <*> clusteringOverridesOpts
+
+-- | Build flags selecting and tuning the clustering algorithm
+-- (bunch-search-based-modularization D7). Every value is optional: an
+-- absent flag leaves @graphos.yaml@'s @clustering.*@ value in place.
+clusteringOverridesOpts :: Parser ClusteringOverrides
+clusteringOverridesOpts = ClusteringOverrides
+  <$> optional (option (eitherReader parseAlgorithmName) (long "cluster-algorithm" <> metavar "ALGO" <> help "Clustering algorithm: leiden|bunch (default: leiden; overrides clustering.algorithm)"))
+  <*> optional (option (boundedIntReader "--seed" 0 maxBound) (long "seed" <> metavar "N" <> help "First seed of the Bunch population (default: 0; overrides clustering.seed)"))
+  <*> optional (option (boundedIntReader "--bunch-population" 1 maxBound) (long "bunch-population" <> metavar "P" <> help "Bunch: independent searches, seeds s..s+P-1 (default: 8)"))
+  <*> optional (option (boundedIntReader "--bunch-threshold" 0 100) (long "bunch-threshold" <> metavar "ETA" <> help "Bunch: hill-climbing threshold in percent, 0 = next-ascent .. 100 = steepest-ascent (default: 0)"))
+  <*> optional (option annealingReader (long "bunch-sa" <> metavar "T0,ALPHA" <> help "Bunch: enable simulated annealing with initial temperature T0 and cooling rate ALPHA (e.g. 100,0.99; 'on' uses 100,0.99)"))
+  <*> optional (option (boundedIntReader "--bunch-max-iterations" 1 maxBound) (long "bunch-max-iterations" <> metavar "N" <> help "Bunch: iteration cap per search (default: 10000)"))
+  <*> optional (option (boundedIntReader "--bunch-max-files" 0 maxBound) (long "bunch-max-files" <> metavar "N" <> help "Bunch: file count above which Leiden runs instead (default: 5000)"))
+  <*> switch (long "bunch-weighted" <> help "Bunch: weight the file graph by summed edge weights instead of one per file pair")
+
+-- | Integer reader rejecting values outside @[lo, hi]@.
+boundedIntReader :: String -> Int -> Int -> ReadM Int
+boundedIntReader flagName lo hi = eitherReader $ \s -> case readMaybe s of
+  Just v | v >= lo && v <= hi -> Right v
+         | otherwise -> Left (unwords [flagName, "out of range", "[" ++ show lo ++ "," ++ (if hi == maxBound then "∞" else show hi) ++ "]:", s])
+  Nothing -> Left (unwords ["not a valid integer:", s])
+
+-- | Reader for @--bunch-sa T0,ALPHA@ (or @on@ for the paper's 100,0.99).
+annealingReader :: ReadM (Double, Double)
+annealingReader = eitherReader $ \s -> case map toLower s of
+  "on" -> Right defaultAnnealing
+  _ -> case break (== ',') s of
+    (t0s, ',' : as) | Just t0 <- readMaybe t0s, Just a <- readMaybe as
+                    , t0 > 0, a > 0, a < 1 -> Right (t0, a)
+    _ -> Left ("--bunch-sa expects T0,ALPHA with T0 > 0 and 0 < ALPHA < 1 (e.g. 100,0.99), got: " ++ s)
+
+-- | Options of @graphos clustereval landscape@ (search-landscape-evaluation).
+data LandscapeOpts = LandscapeOpts
+  { lsoGraph            :: FilePath
+  , lsoRuns             :: Int
+  , lsoSeed             :: Int
+  , lsoRandomPartitions :: Int
+  , lsoRandomGraph      :: Maybe RandomGraphSpec
+  , lsoJson             :: Bool
+  , lsoOut              :: FilePath
+  , lsoThreshold        :: Int
+  , lsoAnnealing        :: Maybe (Double, Double)
+  , lsoMaxIterations    :: Int
+  , lsoWeighted         :: Bool
+  } deriving (Show, Eq)
+
+landscapeOpts :: Parser LandscapeOpts
+landscapeOpts = LandscapeOpts
+  <$> strOption (long "graph" <> metavar "GRAPH_JSON" <> value "graphos-out/graph.json" <> help "graph.json to evaluate (default: graphos-out/graph.json; ignored with --random-graph)")
+  <*> option (boundedIntReader "--runs" 1 maxBound) (long "runs" <> metavar "N" <> value 100 <> help "Independent Bunch searches (default: 100)")
+  <*> option (boundedIntReader "--seed" 0 maxBound) (long "seed" <> metavar "S" <> value 0 <> help "First seed; run r uses S+r (default: 0)")
+  <*> option (boundedIntReader "--random-partitions" 0 maxBound) (long "random-partitions" <> metavar "M" <> value 1000 <> help "Random partitions in the MQ baseline (default: 1000)")
+  <*> optional (option (eitherReader (parseRandomGraphSpec . T.pack)) (long "random-graph" <> metavar "rnd:N:D|bip:N:D" <> help "Run on a seeded random control graph instead of --graph"))
+  <*> switch (long "json" <> help "Print the landscape as one JSON object on stdout instead of writing landscape.json")
+  <*> strOption (long "out" <> metavar "DIR" <> value "graphos-out" <> help "Directory receiving landscape.json (default: graphos-out)")
+  <*> option (boundedIntReader "--bunch-threshold" 0 100) (long "bunch-threshold" <> metavar "ETA" <> value 0 <> help "Hill-climbing threshold in percent (default: 0)")
+  <*> optional (option annealingReader (long "bunch-sa" <> metavar "T0,ALPHA" <> help "Enable simulated annealing (e.g. 100,0.99)"))
+  <*> option (boundedIntReader "--bunch-max-iterations" 1 maxBound) (long "bunch-max-iterations" <> metavar "N" <> value 10000 <> help "Iteration cap per search (default: 10000)")
+  <*> switch (long "bunch-weighted" <> help "Weight the file graph by summed edge weights")
+
+clusterEvalOpts :: Parser Command
+clusterEvalOpts = hsubparser
+  ( command "landscape" (info (ClusterEvalLandscapeCmd <$> landscapeOpts) (progDesc "Run N seeded Bunch searches and report basins, edge similarity, a random baseline and the Leiden point" <> footer "Example: graphos clustereval landscape --graph graphos-out/graph.json --runs 100"))
+  )
 
 
 granularityReader :: ReadM Granularity
@@ -402,6 +474,7 @@ commandOpts = subparser
   <> command "intentcheck" (info (intentcheckOpts <**> helper) (progDesc "Verify intent specs against a graph: violated spec -> non-zero exit, all pass -> zero" <> footer "Example: graphos intentcheck --specs specs.json --graph graphos-out/graph.json"))
   <> command "impact" (info (impactOpts <**> helper) (progDesc "Analyze change impact obligations: per-node discharge status, --gate exits non-zero unless admissible" <> footer "Example: graphos impact --before before.json --after after.json --gate"))
   <> command "view" (info (viewOpts <**> helper) (progDesc "View OpenSpec changes, artifacts, diffs, and dashboard"))
+  <> command "clustereval" (info (clusterEvalOpts <**> helper) (progDesc "Evaluate clustering: search landscape of the Bunch modularization"))
   <> command "lservers" (info (pure LServers) (progDesc "List available LSP servers"))
   <> command "serve" (info (serveOpts <**> helper) (progDesc "Serve HTML graph output via HTTP"))
     <> command "init" (info (initOpts <**> helper) (progDesc "Generate a graphos.yaml config file"))
@@ -450,6 +523,7 @@ renderCommandReference = unlines $
   , "  --threads, -j N / --edge-density MODE"
   , "  --resolution FLOAT / --mcp GRAPH_JSON"
   , "  --ignore GLOB                 Additional ignore pattern (repeatable)"
+  , "  --cluster-algorithm leiden|bunch / --seed N / --bunch-* (see --help)"
   , ""
     , "graphos query QUESTION          Query the knowledge graph"
     , "  --dfs / --budget N / --graph FILE"
@@ -484,6 +558,8 @@ renderCommandReference = unlines $
   , ""
   , "graphos migrate-graph GRAPH      Upgrade a legacy graph.json to the JGF format"
   , "  --output, -o PATH              (default: overwrite in place)"
+  , ""
+  , "graphos clustereval landscape   Bunch search landscape (--graph/--runs/--random-graph/--json)"
   , ""
   , "graphos init                    Generate graphos.yaml"
   , ""

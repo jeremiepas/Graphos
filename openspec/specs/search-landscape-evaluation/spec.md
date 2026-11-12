@@ -1,5 +1,8 @@
-## ADDED Requirements
+# search-landscape-evaluation Specification
 
+## Purpose
+TBD - created by archiving change bunch-search-based-modularization. Update Purpose after archive.
+## Requirements
 ### Requirement: Structural search landscape
 
 `graphos clustereval landscape` SHALL run the Bunch search `--runs N` times
@@ -53,14 +56,18 @@ count and intra-edge fraction as the `leiden` point.
 ### Requirement: Random control graphs
 
 With `--random-graph rnd:N:D` or `bip:N:D` the system SHALL generate, from
-`--seed`, an MDG of N nodes and `round(D · N(N−1)/2)` distinct undirected
+`--seed`, an MDG of N nodes and `⌊D · N(N−1)/2⌋` distinct undirected
 edges chosen uniformly without replacement — for `bip` only between two halves
-of ⌊N/2⌋ and ⌈N/2⌉ nodes — and SHALL run the landscape on it instead of a graph
-file.
+of ⌊N/2⌋ and ⌈N/2⌉ nodes, saturating at the ⌊N/2⌋·⌈N/2⌉ cross pairs — and
+SHALL run the landscape on it instead of a graph file.
 
 #### Scenario: edge counts of the paper
-- **WHEN** `rnd:100:0.05`, `rnd:100:0.5` and `bip:100:0.75` are generated
-- **THEN** they have 247, 2,475 and 3,712 edges respectively and `bip` has no edge inside a half
+- **WHEN** `rnd:100:0.05`, `rnd:100:0.5` and `bip:100:0.25` are generated
+- **THEN** they have 247, 2,475 and 1,237 edges respectively and `bip` has no edge inside a half
+
+#### Scenario: bipartite saturation
+- **WHEN** `bip:100:0.75` is generated (nominally 3,712 edges)
+- **THEN** it is the complete bipartite graph of 2,500 cross edges, since two halves of 50 have no more
 
 #### Scenario: seeded
 - **WHEN** `rnd:100:0.05` is generated twice with `--seed 1`
@@ -81,3 +88,4 @@ summary (basins table, similarity table, baseline, Leiden point). With
 #### Scenario: file written
 - **WHEN** the command completes without `--json`
 - **THEN** `landscape.json` exists in the output directory and the summary names every basin
+

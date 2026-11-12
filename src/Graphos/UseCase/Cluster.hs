@@ -26,6 +26,8 @@ module Graphos.UseCase.Cluster
   , ClusterQuality(..)
   , BunchSkip(..)
   , runClustering
+  , partitionQuality
+  , clusterAlgorithmFromConfig
   , defaultBunchFileCap
   ) where
 
@@ -36,7 +38,8 @@ import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Ord (comparing)
 
-import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..))
+import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..))
+import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
 import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity)
@@ -223,22 +226,6 @@ defaultBunchFileCap = 5000
 defaultBunchSettings :: BunchSettings
 defaultBunchSettings = BunchSettings defaultBunchConfig defaultBunchFileCap False
 
--- | Why Bunch did not run: the MDG's file count against the cap.
-data BunchSkip = BunchSkip
-  { skipFiles :: Int
-  , skipCap   :: Int
-  } deriving (Eq, Show)
-
--- | Quality of the stage's final partition, algorithm-independent.
-data ClusterQuality = ClusterQuality
-  { cqAlgorithm     :: Text             -- ^ @"leiden"@ or @"bunch"@
-  , cqMQ            :: Double           -- ^ modularization quality (unit weights)
-  , cqModularity    :: Double           -- ^ global modularity Q
-  , cqIntraFraction :: Double           -- ^ intra-edge fraction of the partition
-  , cqClusters      :: Int              -- ^ cluster count
-  , cqSkip          :: Maybe BunchSkip  -- ^ Bunch skipped above the file cap
-  } deriving (Eq, Show)
-
 -- | Run the stage for the selected algorithm. Pure and deterministic: the
 -- Leiden path is exactly 'clusterGraphWithResolution'; the Bunch path folds
 -- the file MDG, checks the cap (falling back to Leiden with a skip entry)
@@ -262,7 +249,7 @@ runClustering algo res g = case algo of
 
     leidenRun skip =
       let (comm, coh) = clusterGraphWithResolution g res
-      in (comm, coh, qualityOf "leiden" g comm skip)
+      in (comm, coh, partitionQuality "leiden" g comm skip)
 
     bunchRun bs mdg0 =
       let best  = bresBest (bunchCluster (bsConfig bs) mdg0)
@@ -272,19 +259,42 @@ runClustering algo res g = case algo of
             [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
                               (map (mdgFiles mdg0 V.!) members))
             | (cid, members) <- zip [0 :: Int ..] (brPartition best) ]
-      in (comm, scoreAllCohesion (undirectedView g) comm, qualityOf "bunch" g comm Nothing)
+      in (comm, scoreAllCohesion (undirectedView g) comm, partitionQuality "bunch" g comm Nothing)
       -- Cohesion is scored on the same undirected projection as for Leiden
       -- (per-community intra-edge density), so the analysis and aggregates
       -- downstream stay uniform across algorithms.
 
-    qualityOf name gg cm skip =
-      let mq = modularizationQuality gg cm
-      in ClusterQuality
-           { cqAlgorithm     = name
-           , cqMQ            = mqValue mq
-           , cqModularity    = modularity gg cm
-           , cqIntraFraction = mqIntraFraction mq
-           , cqClusters      = Map.size cm
-           , cqSkip          = skip
-           }
 
+-- | Score a partition of the graph: MQ (unit weights), modularity and
+-- intra-edge fraction, tagged with the algorithm name and the skip entry.
+-- The pipeline re-scores the partition after the size-cap post-pass so the
+-- report describes exactly the communities the export writes.
+partitionQuality :: Text -> Graph -> CommunityMap -> Maybe BunchSkip -> ClusterQuality
+partitionQuality name g cm skip =
+  let mq = modularizationQuality g cm
+  in ClusterQuality
+       { cqAlgorithm     = name
+       , cqMQ            = mqValue mq
+       , cqModularity    = modularity g cm
+       , cqIntraFraction = mqIntraFraction mq
+       , cqClusters      = Map.size cm
+       , cqSkip          = skip
+       }
+
+-- | The stage algorithm selected by the effective clustering configuration
+-- (@graphos.yaml@ with CLI overrides applied).
+clusterAlgorithmFromConfig :: ClusteringConfig -> ClusterAlgorithm
+clusterAlgorithmFromConfig cc = case ccAlgorithm cc of
+  AlgoLeiden -> Leiden
+  AlgoBunch  -> BunchAlgorithm BunchSettings
+    { bsConfig   = defaultBunchConfig
+        { bcSeed          = fromIntegral (ccSeed cc)
+        , bcPopulation    = bfPopulation b
+        , bcThreshold     = bfThreshold b
+        , bcAnnealing     = bfAnnealing b
+        , bcMaxIterations = bfMaxIterations b
+        }
+    , bsMaxFiles = bfMaxFiles b
+    , bsWeighted = bfWeighted b
+    }
+  where b = ccBunch cc

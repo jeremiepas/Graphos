@@ -261,7 +261,7 @@ groupBasins minShare records =
         , basinRuns         = length rs
         , basinShare        = if total <= 0 then 0 else 100 * fromIntegral (length rs) / fromIntegral total
         , basinMQRange      = (rrFinalMQ (firstOf rs), rrFinalMQ (lastOf rs))
-        , basinClusterRange = (rrFinalClusters (firstOf rs), rrFinalClusters (lastOf rs))
+        , basinClusterRange = (minimum (map rrFinalClusters rs), maximum (map rrFinalClusters rs))
         }
      | (k, rs) <- grouped
      , not (null rs)

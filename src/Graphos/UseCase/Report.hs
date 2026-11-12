@@ -12,6 +12,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (toText)
+import Numeric (showFFloat)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
@@ -32,6 +33,7 @@ generateReport g analysis config detection mLabels =
         , T.pack $ "Articulation points: " ++ show (length artPoints)
         , T.pack $ "Biconnected components: " ++ show (analysisBccCount analysis)
         ]
+        ++ partitionQualityLines (analysisPartitionQuality analysis)
       sourceTally = Map.fromListWith (+) [ (toText s, 1 :: Int) | n <- Map.elems (gNodes g), Just s <- [nodeSource n] ]
       sourceLines = case Map.toList sourceTally of
         [] -> []
@@ -75,6 +77,21 @@ generateReport g analysis config detection mLabels =
      )
   where
     artPoints = analysisArticulation analysis
+
+-- | The @Partition quality@ summary line (report-consistency): the
+-- algorithm and the MQ, modularity and intra-edge fraction of the
+-- communities written to @graph.json@, precomputed by the cluster stage.
+-- A Bunch run skipped above the file cap is named next to it.
+partitionQualityLines :: Maybe ClusterQuality -> [Text]
+partitionQualityLines Nothing  = []
+partitionQualityLines (Just q) =
+  T.pack ("Partition quality (" ++ T.unpack (cqAlgorithm q) ++ "): MQ = " ++ fmt (cqMQ q)
+          ++ ", modularity = " ++ fmt (cqModularity q)
+          ++ ", intra-edge fraction = " ++ fmt (cqIntraFraction q))
+  : [ T.pack ("Bunch skipped: " ++ show (skipFiles sk) ++ " files exceed the cap of "
+              ++ show (skipCap sk) ++ "; Leiden ran instead")
+    | Just sk <- [cqSkip q] ]
+  where fmt x = showFFloat (Just 4) x ""
 
 -- | Render the "Extraction Coverage" section lines (extraction-quality:
 -- "Extraction coverage is reported in GRAPH_REPORT.md"): files detected,

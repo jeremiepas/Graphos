@@ -3,6 +3,8 @@
 module Graphos.Domain.Types.Analysis
   ( -- * Analysis types
     Analysis(..)
+  , ClusterQuality(..)
+  , BunchSkip(..)
   , GodNode(..)
   , SurprisingConnection(..)
   , SuggestedQuestion(..)
@@ -34,9 +36,32 @@ data Analysis = Analysis
   , analysisQuestions    :: ![SuggestedQuestion]
   , analysisArticulation :: ![NodeId]  -- ^ Articulation (bridge) nodes of the analyzed graph
   , analysisBccCount     :: !Int       -- ^ Number of biconnected components
+  , analysisPartitionQuality :: !(Maybe ClusterQuality)
+    -- ^ Quality of 'analysisCommunities' and the algorithm that produced it
+    -- (bunch-search-based-modularization); 'Nothing' when not clustered
   } deriving (Eq, Show, Generic)
 
 instance NFData Analysis
+
+-- | Why Bunch did not run: the MDG's file count against the cap.
+data BunchSkip = BunchSkip
+  { skipFiles :: !Int
+  , skipCap   :: !Int
+  } deriving (Eq, Show, Generic)
+
+instance NFData BunchSkip
+
+-- | Quality of the cluster stage's final partition, algorithm-independent.
+data ClusterQuality = ClusterQuality
+  { cqAlgorithm     :: !Text             -- ^ @"leiden"@ or @"bunch"@
+  , cqMQ            :: !Double           -- ^ modularization quality (unit weights)
+  , cqModularity    :: !Double           -- ^ global modularity Q
+  , cqIntraFraction :: !Double           -- ^ intra-edge fraction of the partition
+  , cqClusters      :: !Int              -- ^ cluster count
+  , cqSkip          :: !(Maybe BunchSkip) -- ^ Bunch skipped above the file cap
+  } deriving (Eq, Show, Generic)
+
+instance NFData ClusterQuality
 
 -- | A god node (high-degree hub)
 data GodNode = GodNode
