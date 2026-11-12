@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change checkpoint-and-cluster-only-controls. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Explicit fresh build
 
 The system SHALL provide `--fresh` / `--no-checkpoint` that forces full
@@ -47,3 +49,17 @@ extraction and edge inference.
 - **WHEN** `--cluster-only` is set and no usable checkpoint exists
 - **THEN** the tool exits with a clear error explaining a checkpoint is required
 
+### Requirement: Cluster-only persists its result
+
+When `--cluster-only` completes, the system SHALL write the clustered graph to
+`graph.json` in the output directory (atomically, with
+`metadata.graphos.communities` filled), SHALL write `community_graph.json`
+when `--community-graph` is set, and SHALL keep `graph.checkpoint.json`.
+
+#### Scenario: cluster-only writes graph.json
+- **WHEN** `graphos ./src --cluster-only` runs with a valid checkpoint
+- **THEN** `graph.json` exists and `metadata.graphos.communities` is non-empty
+
+#### Scenario: cluster-only writes the community graph
+- **WHEN** `graphos ./src --cluster-only --community-graph` runs
+- **THEN** `community_graph.json` exists and the checkpoint is still present
