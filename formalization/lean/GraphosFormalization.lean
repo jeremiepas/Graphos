@@ -64,6 +64,14 @@
       Fig. 2 value `2/5`, intra-edge fraction `≤ 1`, no intra-edge ⇒
       `MQ = 0`, and single-move locality (`cf_moveTo`: only the source and
       destination clusters change — the O(1) incremental update).
+    * `GraphosFormalization.Seam.UndirectedScoring` — Lean arm of the
+      `modularity-undirected-view` change: today's report score mixes
+      neighbour-set degrees with record-counted `σ_in`, and exceeds `Q ≤ 1`
+      (`Q = 3/2` witnesses under `--directed` and with both orientations
+      stored); scoring one record per unordered pair is exactly Phase 1's
+      `EdgeGraph.modularityNum`, so `-1/2 ≤ Q ≤ 1` holds
+      (`RecordGraph.fixed_range_bound`), and simple inputs are unchanged
+      (`supportPairs_eq_self`).
 
   Maintenance owner: R&D cell.
 -/
@@ -84,3 +92,4 @@ import GraphosFormalization.Seam.SupportGraph
 
 import GraphosFormalization.AVI1677.Critique
 import GraphosFormalization.Bunch.MQ
+import GraphosFormalization.Seam.UndirectedScoring
