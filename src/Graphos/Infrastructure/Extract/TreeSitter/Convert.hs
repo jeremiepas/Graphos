@@ -29,6 +29,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Convert
   , functionBoundaryTypes
     ) where
 
+import Data.Char (isAlpha)
 import Data.List (sortBy, groupBy)
 import Data.Ord (comparing)
 import Data.Text (Text)
@@ -62,6 +63,7 @@ import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 structureTypes :: [String]
 structureTypes =
   [ "module", "program", "source_file", "translation_unit"
+  , "compilation_unit"      -- C#
   , "package_clause"        -- Go
   , "mod_item"              -- Rust
   , "document"              -- JSON
@@ -118,11 +120,19 @@ apiSurfaceTypes =
   , "delegate_declaration"        -- C#                  (parser.c: "delegate_declaration")
   , "enum_member_declaration"     -- C# enum member      (parser.c: "enum_member_declaration")
   , "trait_declaration"           -- PHP: trait T { }    (tree-sitter-php: "trait_declaration")
-  , "subroutine"                  -- Perl: sub foo { }   (parser.c: only "subroutine", no "subroutine_declaration")
+  , "namespace_use_declaration"   -- PHP: use Foo\Bar;
+  , "include_expression"          -- PHP: include 'f.php' — the import forms are
+  , "include_once_expression"     --      expressions, nested in an
+  , "require_expression"          --      expression_statement, so they are
+  , "require_once_expression"     --      whitelisted in their own right
+  , "subroutine"                  -- Perl: anonymous `sub { }` (a named `sub f { }`
+                                  --       parses as "function_definition")
   , "package_statement"           -- Perl: package Foo;  (parser.c: "package_statement")
-  , "use_constant_statement"      -- Perl: use Foo; / use constant (parser.c: "use_constant_statement")
+  , "use_no_statement"            -- Perl: use Foo; / no Foo; (parser.c: "use_no_statement")
+  , "use_constant_statement"      -- Perl: use constant PI => 3;
   , "use_parent_statement"        -- Perl: use parent 'Base'; (parser.c: "use_parent_statement")
-  , "require_statement"           -- Perl: require 'x';  (parser.c: "require_statement")
+  , "require_statement"           -- Perl: require Foo::Bar; (a quoted `require 'x'`
+                                  --       does not parse at this ABI)
   ]
 
 importExportTypes :: [String]
@@ -130,9 +140,10 @@ importExportTypes =
   [ "import_declaration", "import_statement", "import_from_statement"
   , "export_statement", "export_default_declaration"
   , "using_directive"             -- C#: using System;
-  , "use_constant_statement"      -- Perl: use Foo; (see apiSurfaceTypes comment)
+  , "use_no_statement"            -- Perl: use Foo; (see apiSurfaceTypes comment)
+  , "use_constant_statement"      -- Perl: use constant PI => 3;
   , "use_parent_statement"        -- Perl: use parent 'Base';
-  , "require_statement"           -- Perl: require 'x';
+  , "require_statement"           -- Perl: require Foo::Bar;
   , "include_expression"          -- PHP: include 'file.php' (tree-sitter-php: "include_expression")
   , "include_once_expression"     -- PHP: include_once 'file.php'
   , "require_expression"          -- PHP: require 'file.php' (tree-sitter-php: "require_expression")
@@ -163,7 +174,8 @@ functionBoundaryTypes =
   , "arrow_function", "generator_function_declaration"
   , "constructor"
   , "function_item"       -- Rust
-  , "subroutine"                  -- Perl: parser.c "subroutine"
+  , "subroutine"                  -- Perl: anonymous sub
+  , "use_no_statement"            -- Perl
   , "use_constant_statement"      -- Perl
   , "use_parent_statement"        -- Perl
   , "require_statement"           -- Perl
@@ -180,6 +192,7 @@ wrapperTypes = [ "export_statement", "decorated_definition" ]
 moduleTypes :: [String]
 moduleTypes =
   [ "module", "program", "source_file", "translation_unit"
+  , "compilation_unit"
   , "package_clause", "mod_item"
   ]
 
@@ -214,8 +227,25 @@ nodeIdentifier :: SourceFile -> Granularity -> TSNodeInfo -> Maybe Text
 nodeIdentifier sf _ node =
   case tsnType node of
     t | t `elem` moduleTypes       -> Just (truncateText defaultTruncationBudget (T.pack (takeFileName (sourceFilePathStr sf))))
-      | t `elem` importExportTypes -> Just (truncateText defaultTruncationBudget (fromMaybe "" (extractSpecifier sf node)))
+      | t `elem` importExportTypes ->
+          Just (truncateText defaultTruncationBudget
+                  (fromMaybe (resolverOwnedLabel node) (extractSpecifier sf node)))
       | otherwise                  -> fmap (truncateText defaultTruncationBudget) (extractIdentifier node)
+
+-- | Label for an import whose edge belongs to a repository-context resolver
+-- ("Graphos.Infrastructure.Extract.TreeSitter.Imports"), not to
+-- 'importPartsFor': the specifier is unquoted, so 'extractSpecifier'
+-- deliberately yields nothing (emitting an edge here would duplicate the
+-- resolver's), but the node still needs a label instead of the empty string.
+resolverOwnedLabel :: TSNodeInfo -> Text
+resolverOwnedLabel node
+  | tsnType node `elem` resolverOwnedImportTypes =
+      fromMaybe "" (bareSpecifier (normalizeText (tsnText node)))
+  | otherwise = ""
+
+-- | Java and Kotlin @import a.b.C;@ — resolved in Imports.hs.
+resolverOwnedImportTypes :: [String]
+resolverOwnedImportTypes = ["import_declaration"]
 
 -- | Display label for a node: its identifier (falling back to the normalized
 -- node text when no identifier resolves).
@@ -261,9 +291,9 @@ extractImportTail t =
 --
 -- Prefers the declaration's string-literal child (the structured form the
 -- `import-resolution` spec requires); falls back to the last quoted token in
--- the node text for fixtures that carry no children. Never scans arbitrary
--- text for the `from ` keyword, so template literals inside a body yield
--- nothing.
+-- the node text for fixtures that carry no children, then to the unquoted
+-- form used by 'bareSpecifierTypes'. Never scans arbitrary text for the
+-- `from ` keyword, so template literals inside a body yield nothing.
 extractSpecifier :: SourceFile -> TSNodeInfo -> Maybe Text
 extractSpecifier _ node
   | tsnType node `notElem` importExportTypes = Nothing
@@ -274,7 +304,56 @@ extractSpecifier _ node
       let t = normalizeText (tsnText node)
       in case lastQuoted t of
            Just q -> Just (stripQuotes (T.strip q))
-           Nothing -> Nothing
+           Nothing
+             | tsnType node `elem` bareSpecifierTypes -> bareSpecifier t
+             | otherwise -> Nothing
+
+-- | Import forms whose grammar writes the specifier unquoted (AVI-1765):
+-- C# @using System.Text;@, PHP @use Foo\Bar;@, Perl @use Foo;@. Without a
+-- specifier these nodes are emitted as @Import@ nodes with no @imports@
+-- edge, which the `import-resolution` spec forbids.
+bareSpecifierTypes :: [String]
+bareSpecifierTypes =
+  [ "using_directive"             -- C#
+  , "namespace_use_declaration"   -- PHP
+  , "use_no_statement"            -- Perl
+  , "use_constant_statement"      -- Perl
+  , "use_parent_statement"        -- Perl
+  , "require_statement"           -- Perl
+  ]
+
+-- | Import-like forms that bring a module in rather than re-export it.
+-- Everything else in 'importExportTypes' is a re-export (TypeScript
+-- @export ... from@).
+plainImportTypes :: [String]
+plainImportTypes =
+  [ "import_declaration", "import_statement", "import_from_statement"
+  , "include_expression", "include_once_expression"
+  , "require_expression", "require_once_expression"
+  ] ++ bareSpecifierTypes
+
+-- | Specifier of an unquoted import: drop the leading keyword and its
+-- modifiers (@static@, @function@, @const@), follow a C# alias directive
+-- (@using Alias = Namespace.Type;@) to its right-hand side, and keep the
+-- dotted / backslashed path up to an alias, a group brace or the terminator.
+bareSpecifier :: Text -> Maybe Text
+bareSpecifier raw =
+  case afterAlias (dropWhile isKeyword (T.words (T.map unSemi raw))) of
+    (w : _) | let s = trimSeps (T.takeWhile (`notElem` ("{(,=" :: String)) w)
+            , startsIdent s -> Just s
+    _ -> Nothing
+  where
+    unSemi c = if c == ';' then ' ' else c
+    isKeyword w = T.toLower w `elem`
+      [ "use", "no", "using", "require", "include", "import"
+      , "static", "function", "const", "global" ]
+    afterAlias ws = case break (== "=") ws of
+      (_, _ : rhs@(_ : _)) -> rhs
+      _                    -> ws
+    trimSeps = T.dropWhileEnd (`elem` ("\\.:" :: String))
+    startsIdent s = case T.uncons s of
+      Just (c, _) -> isAlpha c || c == '_' || c == '\\'
+      Nothing     -> False
 
 -- | First named child whose type names a string literal.
 findStringLiteral :: [TSNodeInfo] -> Maybe Text
@@ -503,7 +582,7 @@ importPartsFor sf parentBase tType node =
       in [ (parentBase, ImportTarget
             { itPath = impPath
             , itName = impName
-            , itIsReExport = not (tType `elem` ["import_declaration", "import_statement", "import_from_statement"])
+            , itIsReExport = not (tType `elem` plainImportTypes)
                               || T.isInfixOf "export" (tsnText node) }) ]
     Nothing -> []
 
@@ -831,6 +910,7 @@ tsTypeToKind t = case t of
   "translation_unit" -> "Module"
   "program" -> "Module"
   "source_file" -> "Module"
+  "compilation_unit" -> "Module"
   "document" -> "Document"
   "object" -> "Object"
   "array" -> "Array"
@@ -846,6 +926,7 @@ tsTypeToKind t = case t of
   "trait_declaration" -> "Trait"
   "subroutine" -> "Function"
   "package_statement" -> "Module"
+  "use_no_statement" -> "Import"
   "use_constant_statement" -> "Import"
   "use_parent_statement" -> "Import"
   "require_statement" -> "Import"

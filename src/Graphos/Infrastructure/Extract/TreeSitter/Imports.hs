@@ -1,19 +1,21 @@
 {-# LANGUAGE OverloadedStrings #-}
--- | @imports@ edges for Go, Rust and Ruby (tree-sitter mode).
+-- | @imports@ edges for Go, Rust, Ruby, Java and Kotlin (tree-sitter mode).
 --
 -- TypeScript import edges are derived purely from the specifier text
--- ('Graphos.Infrastructure.Extract.TreeSitter.Resolver'). Go, Rust and Ruby
+-- ('Graphos.Infrastructure.Extract.TreeSitter.Resolver'). The languages here
 -- need repository context to tell an internal import from an external one —
 -- the nearest @go.mod@, the Cargo manifests of the crate and its workspace,
--- the files on disk — so resolution here runs in IO, after the pure AST
--- conversion, and appends its edges to the file's 'Extraction'.
+-- the JVM source roots, the files on disk — so resolution here runs in IO,
+-- after the pure AST conversion, and appends its edges to the file's
+-- 'Extraction'.
 --
 -- Two steps:
 --
 --   1. 'collectImportSites' (pure) reads the import sites off the AST: Go
 --      @import_spec@s, Rust @use_declaration@s (anywhere, including function
 --      bodies and inline modules), Ruby @require@ / @require_relative@ calls
---      with a literal string argument.
+--      with a literal string argument, Java/Kotlin @import_declaration@s
+--      (plain, @static@ and wildcard).
 --   2. 'resolveImportSites' (IO) maps each site to its imported units and
 --      'importEdgesFor' turns them into edges of the TypeScript shape:
 --      @<file module node> -imports-> <placeholder>@, where the placeholder's
@@ -73,16 +75,37 @@ import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveDots)
 -- Import sites
 -- ───────────────────────────────────────────────
 
-data ImportLang = LangGo | LangRust | LangRuby | LangJava
+data ImportLang = LangGo | LangRust | LangRuby | LangJava | LangKotlin
   deriving (Eq, Show)
 
--- | Languages handled here, by tree-sitter grammar name.
+-- | Languages handled here, by tree-sitter grammar name. Kotlin is parsed by
+-- the Java grammar (see @Wiring.getGrammarPtr@), so its import declarations
+-- arrive in the same shape and resolve the same way — against @.kt@ files
+-- first, then @.java@ ones, since Kotlin/Java interop is normal.
 importLangForGrammar :: String -> Maybe ImportLang
-importLangForGrammar "go"   = Just LangGo
-importLangForGrammar "rust" = Just LangRust
-importLangForGrammar "ruby" = Just LangRuby
-importLangForGrammar "java" = Just LangJava
-importLangForGrammar _      = Nothing
+importLangForGrammar "go"     = Just LangGo
+importLangForGrammar "rust"   = Just LangRust
+importLangForGrammar "ruby"   = Just LangRuby
+importLangForGrammar "java"   = Just LangJava
+importLangForGrammar "kotlin" = Just LangKotlin
+importLangForGrammar _        = Nothing
+
+-- | True for the JVM languages resolved by 'resolveJvm'.
+isJvmLang :: ImportLang -> Bool
+isJvmLang l = l == LangJava || l == LangKotlin
+
+-- | Source-file extensions a JVM import may resolve to, in preference order.
+jvmExtensions :: ImportLang -> [String]
+jvmExtensions LangKotlin = [".kt", ".java"]
+jvmExtensions _          = [".java"]
+
+-- | Conventional source-root suffixes of a JVM project, nearest-first.
+jvmRootSuffixes :: ImportLang -> [FilePath]
+jvmRootSuffixes l =
+  [ "src" </> "main" </> d | d <- dirs ] ++ [ "src" </> "test" </> d | d <- dirs ]
+  where dirs = case l of
+          LangKotlin -> ["kotlin", "java"]
+          _          -> ["java"]
 
 -- | One import statement (Go: one @import_spec@).
 data ImportSite = ImportSite
@@ -106,8 +129,8 @@ collectImportSites lang = concatMap (go [])
       (LangRuby, t)
         | t `elem` ["call", "method_call"], Just s <- rubySite n ->
             s : concatMap (go mods) (tsnChildren n)
-      (LangJava, "import_declaration") ->
-        case javaSite n of
+      (lang', "import_declaration") | isJvmLang lang' ->
+        case jvmSite n of
           Just s  -> s : concatMap (go mods) (tsnChildren n)
           Nothing -> concatMap (go mods) (tsnChildren n)
       _ -> concatMap (go mods) (tsnChildren n)
@@ -145,17 +168,22 @@ collectImportSites lang = concatMap (go [])
               _ -> Nothing
       _ -> Nothing
 
-    javaSite n =
+    -- `import a.b.C;`, `import a.b.*;`, `import static a.b.C.m;` — Java and
+    -- Kotlin (which omits the `;`). The `static` keyword is recorded in
+    -- 'siteVia' because it changes what the specifier names: a member of a
+    -- class, not the class itself.
+    jvmSite n =
       let raw = T.strip (tsnText n)
-          withoutImport = fromMaybe raw (T.stripPrefix "import" raw)
-          withoutStatic = case T.stripPrefix "static" (T.strip withoutImport) of
-                            Just r  -> T.strip r
-                            Nothing -> T.strip withoutImport
-          spec0 = T.strip (T.dropWhileEnd (\c -> c == ';' || isSpace c) withoutStatic)
-          spec = if T.null spec0 then "" else spec0
+          withoutImport = T.strip (fromMaybe raw (T.stripPrefix "import" raw))
+          (isStatic, rest) = case T.stripPrefix "static" withoutImport of
+            -- a class named `staticFoo` must not lose its first six letters
+            Just r | maybe True isSpace (fst <$> T.uncons r) -> (True, T.strip r)
+            _ -> (False, withoutImport)
+          spec = T.strip (T.dropWhileEnd (\c -> c == ';' || isSpace c) rest)
       in if T.null spec || not (validSpec (T.filter (/= '*') spec))
            then Nothing
-           else Just (ImportSite LangJava "import" spec Nothing (line n) [])
+           else Just (ImportSite lang (if isStatic then "import static" else "import")
+                                 spec Nothing (line n) [])
 
 -- | Strip one pair of surrounding quotes / backticks.
 unquote :: Text -> Text
@@ -209,8 +237,8 @@ resolveImportSites file sites@(s0 : _) = case siteLang s0 of
   LangRuby -> do
     root <- findRubyRoot (takeDirectory file)
     catMaybes <$> mapM (resolveRuby root file) sites
-  LangJava -> do
-    catMaybes <$> mapM (resolveJava file) sites
+  l | isJvmLang l -> catMaybes <$> mapM (resolveJvm file) sites
+  _ -> pure []
 
 -- | Walk up from @dir@ (inclusive) to the filesystem root.
 ancestors :: FilePath -> [FilePath]
@@ -275,49 +303,75 @@ goPackageFiles dir = do
     let cands = [dir </> e | e <- sort entries, takeExtension e == ".go", not ("_test.go" `isSuffixOf` e)]
     filterM doesFileExist cands
 
--- Java ────────────────────────────────────────────
+-- JVM (Java, Kotlin) ──────────────────────────────
 
--- | Resolve one Java import. Internal classes map to their source file (if it
+-- | Resolve one JVM import. Internal types map to their source file (if it
 -- exists on disk); types not found in the corpus fall back to an @external:@
--- target keyed under the dotted name.
-resolveJava :: FilePath -> ImportSite -> IO (Maybe ResolvedImport)
-resolveJava file site = do
-  let spec = siteSpec site
-      isWild = ".*" `T.isSuffixOf` spec
-      specNoWild = if isWild then T.dropEnd 2 spec else spec
-      segs = T.splitOn "." specNoWild
+-- target keyed under the dotted name. The importing file is never its own
+-- target.
+--
+-- What the specifier names depends on the two keywords:
+--
+-- @
+-- import a.b.C;          -- the file a\/b\/C.java
+-- import a.b.*;          -- every source file of the directory a\/b
+-- import static a.b.C.m; -- the file a\/b\/C.java (m is a member of C)
+-- import static a.b.C.*; -- the file a\/b\/C.java
+-- @
+--
+-- Kotlin uses the same shapes without the trailing @;@ and resolves to a
+-- @.kt@ file first ('jvmExtensions').
+resolveJvm :: FilePath -> ImportSite -> IO (Maybe ResolvedImport)
+resolveJvm file site
+  | T.null spec = pure Nothing
+  | isWild && not isStatic = do
+      found <- wildJvmFiles lang roots (relOf segs)
+      pure $ Just $ case filter (/= file) found of
+        [] -> external
+        fs -> ResolvedImport site spec (TargetFiles fs)
+  | otherwise = do
+      found <- firstExisting [ p | r <- roots, e <- jvmExtensions lang
+                             , let p = r </> relOf typeSegs ++ e, p /= file ]
+      pure $ Just $ maybe external (\p -> ResolvedImport site spec (TargetFiles [p])) found
+  where
+    lang = siteLang site
+    spec = siteSpec site
+    isStatic = siteVia site == "import static"
+    isWild = ".*" `T.isSuffixOf` spec
+    segs = T.splitOn "." (if isWild then T.dropEnd 2 spec else spec)
+    -- `import static a.b.C.m` names the member m of the type a.b.C; every
+    -- other non-wildcard form names the type itself.
+    typeSegs | isStatic, not isWild, length segs > 1 = init segs
+             | otherwise = segs
+    relOf = T.unpack . T.intercalate "/"
+    roots = jvmSourceRoots lang file
+    external = ResolvedImport site spec (TargetExternal spec)
 
-      -- source file for a concrete type: a/b/C.java
-      concreteRel = T.unpack (T.intercalate "/" segs) ++ ".java"
-      -- directory of a wildcard package import
-      wildDirRel = T.unpack (T.intercalate "/" segs)
-  if T.null spec
-    then pure Nothing
-    else if isWild
-      then do
-        found <- wildJavaFiles (takeDirectory file) wildDirRel
-        pure $ Just $ if null found
-                       then ResolvedImport site spec (TargetExternal spec)
-                       else ResolvedImport site spec (TargetFiles (sort found))
-    else do
-      found <- firstExisting [ d </> concreteRel | d <- ancestors (takeDirectory file) ]
-      pure $ Just $ maybe (ResolvedImport site spec (TargetExternal spec))
-                          (\p -> ResolvedImport site spec (TargetFiles [p]))
-                          found
+-- | Candidate source roots of a JVM file, nearest first: every ancestor
+-- directory (a package-path ancestor holds @a/b/C.java@ directly), then that
+-- ancestor's conventional @src/main/java@ and @src/test/java@ roots (plus the
+-- @kotlin@ ones for Kotlin) — so a class under @src/test/java@ resolves an
+-- import of a class that lives only under @src/main/java@, which no ancestor
+-- of the test file contains.
+jvmSourceRoots :: ImportLang -> FilePath -> [FilePath]
+jvmSourceRoots lang file =
+  nub (concatMap rootsOf (ancestors (takeDirectory file)))
+  where
+    rootsOf d = d : [ d </> suffix | suffix <- jvmRootSuffixes lang ]
 
--- | All @.java@ files found under @relDir@ (relative to one of the file's
--- ancestors), for a wildcard package import.
-wildJavaFiles :: FilePath -> FilePath -> IO [FilePath]
-wildJavaFiles start relDir = do
-  results <- fmap concat $ mapM tryAncestor (ancestors start)
+-- | All source files directly under @relDir@ in any candidate source root,
+-- for a wildcard package import.
+wildJvmFiles :: ImportLang -> [FilePath] -> FilePath -> IO [FilePath]
+wildJvmFiles lang roots relDir = do
+  results <- fmap concat $ mapM tryRoot roots
   pure (sort (nub results))
   where
-    tryAncestor d = do
+    tryRoot d = do
       let dir = d </> relDir
       isDir <- doesDirectoryExist dir
       if not isDir then pure [] else do
         entries <- listDirectory dir
-        pure [ dir </> e | e <- entries, takeExtension e == ".java" ]
+        pure [ dir </> e | e <- entries, takeExtension e `elem` jvmExtensions lang ]
 
 -- Ruby ────────────────────────────────────────────
 
@@ -732,8 +786,10 @@ importEdgesFor src rs = unzip (concatMap edgesOf rs)
     langName LangRust = "rust"
     langName LangRuby = "ruby"
     langName LangJava = "java"
+    langName LangKotlin = "kotlin"
 
--- | Append the import edges of a Go/Rust/Ruby file to its extraction.
+-- | Append the import edges of a Go/Rust/Ruby/Java/Kotlin file to its
+-- extraction.
 -- Other grammars, and files without a module node, are returned unchanged.
 withImportEdges :: String -> FilePath -> [TSNodeInfo] -> Extraction -> IO Extraction
 withImportEdges grammar file roots ex = case (importLangForGrammar grammar, fileModuleNode file roots) of

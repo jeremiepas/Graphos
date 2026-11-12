@@ -16,6 +16,20 @@ The system SHALL resolve a Java import declaration `import a.b.C;` to the module
 - **WHEN** the resolved path does not exist in the corpus
 - **THEN** no internal edge is emitted and the specifier is counted as unresolved (or emitted as an external node, consistent with Go/Rust/Ruby behavior)
 
+### Requirement: Kotlin import resolution to JVM source roots
+
+Kotlin is parsed by the Java grammar, so its `import a.b.C` declarations reach the same repository-context resolver. The system SHALL resolve a Kotlin import to `<source-root>/a/b/C.kt` when that file is in the corpus, and to `<source-root>/a/b/C.java` otherwise (Kotlin/Java interop). Candidate source roots SHALL include `src/main/kotlin`, `src/test/kotlin`, `src/main/java`, `src/test/java` and the package-path ancestors of the importing file.
+
+#### Scenario: Kotlin import resolves to a Kotlin source file
+
+- **WHEN** the corpus contains `src/main/kotlin/org/example/model/Cart.kt` and another Kotlin file contains `import org.example.model.Cart`
+- **THEN** the graph contains an `imports` edge whose target `source_file` is `src/main/kotlin/org/example/model/Cart.kt`
+
+#### Scenario: Kotlin import falls back to a Java source file
+
+- **WHEN** an imported type exists only as `src/main/java/org/example/legacy/Ledger.java`
+- **THEN** resolution targets that `.java` file rather than emitting an external node
+
 ### Requirement: New grammars participate in import edge policy
 
 For each newly added grammar, the implementation SHALL ensure that any node of kind `Import` emitted during extraction is accompanied by an `imports` edge governed by either the quoted-specifier conversion path or a language-specific resolver in Imports.hs. An extraction path that emits `Import` nodes without corresponding `imports` edges is non-conforming, per the existing cross-file connectivity requirement.

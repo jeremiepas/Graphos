@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
--- | @imports@ edges for Go, Rust and Ruby: real tree-sitter parse of small
--- on-disk projects (written to a temp directory), then
+-- | @imports@ edges for Go, Rust, Ruby, Java and Kotlin: real tree-sitter
+-- parse of small on-disk projects (written to a temp directory), then
 -- 'withImportEdges' — the same path the production extraction port takes.
 module Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec (spec) where
 
@@ -59,6 +59,13 @@ extraField :: Text -> Value -> Maybe Value
 extraField k (Object o) = KM.lookup (Key.fromText k) o
 extraField _ _ = Nothing
 
+-- | A file that emits @Import@ nodes must also emit @imports@ edges
+-- ('import-resolution': no orphan import nodes).
+noOrphanImports :: Extraction -> Expectation
+noOrphanImports ex =
+  [ n | n <- Map.elems (extractionNodes ex), fmap toText (nodeKind n) == Just "Import" ]
+    `shouldSatisfy` \imports -> null imports || not (null (importTargets ex))
+
 -- | Every imports edge leaves the file's module node.
 sourcesAreModule :: Extraction -> Expectation
 sourcesAreModule ex =
@@ -67,7 +74,7 @@ sourcesAreModule ex =
     `shouldSatisfy` all (== Just "Module")
 
 spec :: Spec
-spec = describe "tree-sitter imports edges (Go, Rust, Ruby)" $ do
+spec = describe "tree-sitter imports edges (Go, Rust, Ruby, Java, Kotlin)" $ do
   describe "parseUseTree" $ do
     it "expands groups, self, globs and aliases" $
       map (\u -> (upSegs u, upGlob u, upAlias u)) (parseUseTree "crate::a::{self, b::C, d::*, e as f}")
@@ -181,6 +188,102 @@ spec = describe "tree-sitter imports edges (Go, Rust, Ruby)" $ do
       sourcesAreModule ex
       [ extraField "via" x | (t, _, x) <- importTargets ex, "money.rb" `T.isSuffixOf` t ]
         `shouldBe` [Just (String "require_relative")]
+
+    it "Java: package path under a source root, wildcard and static imports, JDK external" $ \tmp -> do
+      writeTree tmp
+        [ ("src/main/java/org/example/App.java", T.unlines
+            [ "package org.example;", ""
+            , "import java.util.List;"
+            , "import org.example.model.Cart;"
+            , "import org.example.util.*;"
+            , "import static org.example.util.Money.zero;"
+            , "", "public class App { }" ])
+        , ("src/main/java/org/example/model/Cart.java", "package org.example.model;\npublic class Cart { }\n")
+        , ("src/main/java/org/example/util/Money.java", "package org.example.util;\npublic class Money { }\n")
+        , ("src/main/java/org/example/util/Clock.java", "package org.example.util;\npublic class Clock { }\n")
+        ]
+      ex <- extractFile "java" (tmp </> "src/main/java/org/example/App.java")
+      let f = T.pack . (tmp </>)
+      targetFiles ex `shouldBe` sort
+        [ "external:java.util.List"
+        , f "src/main/java/org/example/model/Cart.java"
+        , f "src/main/java/org/example/util/Clock.java"
+        , f "src/main/java/org/example/util/Money.java" ]
+      sourcesAreModule ex
+      -- the static import reaches the class, not a `Money/zero.java` that
+      -- does not exist
+      [ extraField "via" x | (t, _, x) <- importTargets ex, "util/Money.java" `T.isSuffixOf` t ]
+        `shouldBe` [Just (String "import static")]
+      -- a wildcard package import spreads its weight over the package files
+      [ w | (t, w, _) <- importTargets ex, "util/Clock.java" `T.isSuffixOf` t ] `shouldBe` [0.5]
+
+    it "Java: a test class resolves both the main class it imports and a test-only helper" $ \tmp -> do
+      writeTree tmp
+        [ ("src/main/java/org/example/Cart.java", "package org.example;\npublic class Cart { }\n")
+        , ("src/test/java/org/example/Fixtures.java", "package org.example;\npublic class Fixtures { }\n")
+        , ("src/test/java/org/example/app/CartTest.java", T.unlines
+            [ "package org.example.app;", ""
+            , "import org.example.Cart;"
+            , "import org.example.Fixtures;"
+            , "import org.example.missing.Absent;"
+            , "", "public class CartTest { }" ])
+        ]
+      ex <- extractFile "java" (tmp </> "src/test/java/org/example/app/CartTest.java")
+      let f = T.pack . (tmp </>)
+      targetFiles ex `shouldBe` sort
+        [ "external:org.example.missing.Absent"          -- not in the corpus: not fabricated
+        , f "src/main/java/org/example/Cart.java"
+        , f "src/test/java/org/example/Fixtures.java" ]
+      sourcesAreModule ex
+
+    it "Java: a same-package wildcard import never targets the importing file" $ \tmp -> do
+      writeTree tmp
+        [ ("src/main/java/org/example/App.java", "package org.example;\nimport org.example.*;\npublic class App { }\n")
+        ]
+      ex <- extractFile "java" (tmp </> "src/main/java/org/example/App.java")
+      targetFiles ex `shouldBe` ["external:org.example.*"]
+
+    it "Kotlin: imports resolve against src/main/kotlin, then Java interop, then external" $ \tmp -> do
+      writeTree tmp
+        [ ("src/main/kotlin/org/example/App.kt", T.unlines
+            [ "package org.example", ""
+            , "import org.example.model.Cart"
+            , "import org.example.legacy.Ledger"
+            , "import kotlin.collections.List"
+            , "", "class App" ])
+        , ("src/main/kotlin/org/example/model/Cart.kt", "package org.example.model\nclass Cart\n")
+        , ("src/main/java/org/example/legacy/Ledger.java", "package org.example.legacy;\npublic class Ledger { }\n")
+        ]
+      ex <- extractFile "kotlin" (tmp </> "src/main/kotlin/org/example/App.kt")
+      let f = T.pack . (tmp </>)
+      targetFiles ex `shouldBe` sort
+        [ "external:kotlin.collections.List"
+        , f "src/main/java/org/example/legacy/Ledger.java"   -- Kotlin/Java interop
+        , f "src/main/kotlin/org/example/model/Cart.kt" ]
+      sourcesAreModule ex
+      noOrphanImports ex
+      [ extraField "lang" x | (_, _, x) <- importTargets ex ] `shouldBe` replicate 3 (Just (String "kotlin"))
+
+    -- The `import-resolution` spec forbids emitting an Import node without an
+    -- imports edge. PHP/Perl/C# write their specifiers unquoted, so the edge
+    -- comes from the bare-specifier path in Convert, not from a resolver here.
+    it "PHP/Perl/C#: unquoted import forms still produce imports edges" $ \tmp -> do
+      writeTree tmp
+        [ ("a.php", "<?php\nnamespace Shop;\nuse Vendor\\Lib\\Util;\nclass C {}\n")
+        , ("a.pl", "package Shop;\nuse Foo::Bar;\nsub t { 1 }\n")
+        , ("a.cs", "using System.Text;\nusing static System.Math;\nnamespace Shop { class C {} }\n")
+        ]
+      php <- extractFile "php" (tmp </> "a.php")
+      targetFiles php `shouldBe` ["external:Vendor\\Lib\\Util"]
+      noOrphanImports php
+      perl <- extractFile "perl" (tmp </> "a.pl")
+      targetFiles perl `shouldBe` ["external:Foo::Bar"]
+      noOrphanImports perl
+      cs <- extractFile "csharp" (tmp </> "a.cs")
+      targetFiles cs `shouldBe` sort ["external:System.Math", "external:System.Text"]
+      noOrphanImports cs
+      -- these are imports, not TypeScript-style re-exports
+      [ extraField "re-export" x | (_, _, x) <- importTargets cs ] `shouldBe` [Nothing, Nothing]
 
     it "leaves other grammars untouched" $ \tmp -> do
       writeTree tmp [("a.py", "import os\n")]

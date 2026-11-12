@@ -218,16 +218,46 @@ sourceStem (SourceFile p _) =
 sourceFilePathStr :: SourceFile -> FilePath
 sourceFilePathStr (SourceFile p _) = T.unpack p
 
--- | The identifier text for a node: the first named child whose type is one of
--- the language-neutral identifier forms. Returns 'Nothing' when none exists,
--- which callers use to suppress identifier-less wrapper nodes.
+-- | The identifier text for a node: the first named child whose type is one
+-- of the language-neutral identifier forms, or — for the few declarations
+-- that name themselves otherwise — a fallback keyed on the declaration type,
+-- so that a `qualified_name` or a nested `identifier` is never mistaken for
+-- the node's own name where it is really a reference. Returns 'Nothing' when
+-- none exists, which callers use to suppress identifier-less wrapper nodes.
 extractIdentifier :: TSNodeInfo -> Maybe Text
 extractIdentifier info =
-  let candidates = filter (\c -> tsnIsNamed c && tsnType c `elem` identifierTypes) (tsnChildren info)
-  in case candidates of
+  case pick identifierTypes (tsnChildren info) of
+    Just t  -> Just t
+    Nothing -> case tsnType info of
+      -- C# `namespace A.B { }` names itself with a `qualified_name`; a plain
+      -- `namespace A { }` uses an `identifier`.
+      "namespace_declaration" -> pick ["qualified_name"] (tsnChildren info)
+      -- C# / Java `public Foo.Bar n;` keeps the name in the declarator —
+      -- the other children are the modifiers and the type, so an untargeted
+      -- descendant scan would return the type (`Foo`) instead. C# nests one
+      -- level deeper than Java: field_declaration > variable_declaration >
+      -- variable_declarator.
+      t | t `elem` ["field_declaration", "variable_declaration"] ->
+            pick identifierTypes
+              (concatMap tsnChildren (declarators (tsnChildren info)))
+      _ -> Nothing
+  where
+    pick tys cs =
+      case filter (\c -> tsnIsNamed c && tsnType c `elem` tys) cs of
         (c : _) -> Just (tsnText c)
         []      -> Nothing
-  where
+    -- `variable_declarator`s among @cs@ or their direct children.
+    declarators cs =
+      [ d | c <- cs
+          , d <- if isDeclarator c then [c] else filter isDeclarator (tsnChildren c) ]
+    isDeclarator = (== "variable_declarator") . tsnType
     identifierTypes = [ "identifier", "type_identifier", "property_identifier"
-                      , "field_identifier", "name" ]
+                      , "field_identifier", "name"
+                      -- Perl `package Shop::Cart;` and PHP `namespace Shop;`
+                      -- name themselves with a dedicated node type. Without
+                      -- these the declaration gets an empty identifier, hence
+                      -- an empty node id — and every such node in the corpus
+                      -- collides on that id when the per-file extractions are
+                      -- merged (AVI-1765).
+                      , "package_name", "namespace_name" ]
 
