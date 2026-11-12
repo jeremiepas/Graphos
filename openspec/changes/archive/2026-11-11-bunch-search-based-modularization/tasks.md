@@ -87,7 +87,19 @@ describes the partition the stage actually produced, including Bunch->Leiden
 fallback skips - hold equally under main's implementation and are covered by its
 `ReportSpec`/`ClusterSpec` cases.
 
-Merge-commit validation (AVI-99): see "AVI-99 validation of the merge commit" below.
+### AVI-99 validation of the merge commit (2026-11-12, head `1b1c9fd`)
+
+- Merge commit `1b1c9fda4e45de49fe0560297f87b50c481df046` (parents: main
+  `bb5597a`, PR #248 `1f27f6c`) pushed to `spec/bunch-search-based-modularization`;
+  PR #248 `mergeable: true` (remaining state is pending CI only).
+- `git diff main..merge -- src app tests graphos.cabal formalization` is empty:
+  every source, test and cabal byte matches main; the only delta is this
+  documentation file.
+- CI on the merge head: `prepare`, `workflow-pinning`, `openspec-archived`
+  success; `build` in progress at the time of recording. On main's identical
+  tree (`bb5597a`): `build`, `haddock`, `fixture` success; `test` in progress
+  (the full suite is a long job). The final green check on the merge head
+  belongs to the merge gate (`graphos-keeper`).
 
 ### Verification record at head `1f27f6c` (2026-11-11, AVI-65)
 
