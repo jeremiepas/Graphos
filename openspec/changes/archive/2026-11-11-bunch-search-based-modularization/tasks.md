@@ -69,3 +69,160 @@
 ## Follow-up (out of scope)
 
 - Bunch cost on large MDGs: ~6 s per run at 170 files / 6,006 edges, but > 18 min per run at 1,494 files. The default `--bunch-max-files 5000` is therefore far above what finishes in practice; lower the cap or make candidate generation cheaper (building blocks over every edge dominate)
+
+## Verification record - PR #248 lane (preserved by the AVI-99 conflict resolution)
+
+Conflict resolution (2026-11-12, [AVI-99](/AVI/issues/AVI-99)): while PR #248 was in
+re-review, main already received a finished implementation of tasks 5-7 in #249
+(archiving this change). The merge therefore adopts main's implementation -
+`ClusterQuality`/`BunchSkip` in `Graphos.Domain.Types.Analysis`, quality carried
+via `Analysis.analysisPartitionQuality`, report line
+`Partition quality (<algo>): MQ = ..., modularity = ..., intra-edge fraction = ...`
+- and PR #248's parallel implementation is not kept in code. The record below
+preserves the AVI-65 lane's review and validation history at head `1f27f6c`.
+Its implementation-specific details (types in `Graphos.Domain.Community.Quality`,
+`exportAll`/`epExportAll` taking the stage's record) describe the
+pre-resolution head and are superseded; the semantics they verified - the report
+describes the partition the stage actually produced, including Bunch->Leiden
+fallback skips - hold equally under main's implementation and are covered by its
+`ReportSpec`/`ClusterSpec` cases.
+
+### AVI-99 validation of the merge commit (2026-11-12, head `1b1c9fd`)
+
+- Merge commit `1b1c9fda4e45de49fe0560297f87b50c481df046` (parents: main
+  `bb5597a`, PR #248 `1f27f6c`) pushed to `spec/bunch-search-based-modularization`;
+  PR #248 `mergeable: true` (remaining state is pending CI only).
+- `git diff main..merge -- src app tests graphos.cabal formalization` is empty:
+  every source, test and cabal byte matches main; the only delta is this
+  documentation file.
+- CI on the merge head: `prepare`, `workflow-pinning`, `openspec-archived`
+  success; `build` in progress at the time of recording. On main's identical
+  tree (`bb5597a`): `build`, `haddock`, `fixture` success; `test` in progress
+  (the full suite is a long job). The final green check on the merge head
+  belongs to the merge gate (`graphos-keeper`).
+
+### Verification record at head `1f27f6c` (2026-11-11, AVI-65)
+
+Environment: GHC 9.10.3 / cabal 3.16.1.0 in the agent sandbox; the `devenv`
+shell is unavailable there. The final run resolved the missing system zlib with
+`--constraint="zlib +bundled-c-zlib"` and used `LANG=C.UTF-8` (Haskell's
+default ASCII locale cannot read the repo's UTF-8 fixtures).
+
+### Build and tests
+
+- `cabal build --flag dev --constraint="zlib +bundled-c-zlib" all`
+  (library + `graphos` executable): **green**, including `-Werror`.
+  (System zlib headers are absent in this sandbox; CI/devenv supplies zlib.)
+- Full `cabal test --enable-tests --flag dev` with two pre-existing
+  exclusions this change does not touch: **1616 examples, 4 failures,
+  4 pending** (200 s). The 4 failures are all `GrammarsSpec`
+  (PHP/Perl/C# vendored-grammar extraction) — files untouched by this
+  change; they were not independently re-run on `main`. The two excluded
+  issues are:
+  - `Graphos.Domain.Graph.BoundedDeltaCommunitySpec`'s "delta update equals
+    full rebuild on small random graphs" property does not terminate (>20 min
+    at 100% CPU, also reproduced with `--seed=1`);
+  - `GrammarsSpec`'s "TypeScript: only declared types/enum/interface kept"
+    fails on `type_identifier` nodes.
+  An earlier draft of this record said "1608 examples, 0 failures"; that run
+  did not surface the four `GrammarsSpec` cases and conflicted with the PR
+  brief's 4-failure figure. This corrected record is the authoritative one
+  for head `ab6df99` + the review fix.
+- New/affected specs green: `ConfigSpec` (ClusteringConfig defaults, YAML
+  decode, JSON round-trip, validation), `ParserSpec` (all eight build flags,
+  threshold/algorithm/SA rejection, `clustereval landscape` flags),
+  `ReportSpec` (Partition quality line), `ClusterSpec` (Leiden unchanged,
+  Bunch push-back, file cap), `ExportSpec` (including the new
+  Bunch→Leiden fallback regression below).
+
+### Review fix (AVI-95, changes requested)
+
+- `GRAPH_REPORT.md` now renders the `ClusterQuality` computed by the
+  clustering stage instead of re-deriving the algorithm name from config.
+  `ClusterQuality`/`BunchSkip` moved to `Graphos.Domain.Community.Quality`;
+  `exportAll`/`epExportAll` take the stage's record and the pipeline passes
+  `coQuality` on the full and `--cluster-only` paths. On a
+  `--bunch-max-files` fallback the line now reads e.g.
+  `algorithm=leiden, ..., bunch skipped: 12 files > --bunch-max-files 10
+  (ran Leiden fallback)`.
+- Regression test: `ExportSpec` "renders the passed quality, including a
+  Bunch->Leiden fallback" (config says Bunch; the passed record says Leiden +
+  skip; the report must describe what actually ran).
+
+### Deferred non-blocking review observations
+
+The AVI-95 reviewer marked these non-blocking and they are not addressed in
+this PR:
+
+- YAML `clustering.algorithm` unknown values are normalised to `leiden` at
+  decode time (`Domain/Config/Clustering.hs:104`), so
+  `validClusteringConfig`'s unknown-name arm is unreachable from YAML. Decode
+  should preserve the raw value and let validation reject it.
+- CLI `--bunch-population` / `--bunch-max-iterations` / `--bunch-max-files`
+  use bare `option auto`, and CLI overrides are not re-validated
+  (`app/Main.hs`); `--bunch-max-files -1` silently always skips.
+- Report doubles print at full precision (cosmetic).
+
+### Landscape smoke — Graphos repo
+
+Build: `graphos . -o /tmp/av65-graphos --no-viz --no-observability
+--no-semantic-edges --fresh`; 21,662 nodes / 120,134 edges / 1,947
+communities. `GRAPH_REPORT.md` contains:
+`Partition quality: algorithm=leiden, MQ=407.66865798423396,
+modularity=0.271362570841726, intra-edge fraction=0.2543992541661811`.
+
+Landscape: `graphos clustereval landscape --graph /tmp/av65-graphos/graph.json
+--runs 100 --bunch-max-iterations 100 --random-partitions 1000` (the iteration
+cap is lowered from the 10,000 default so the 100 runs fit the smoke budget;
+file MDG = 1,782 files / 35,249 edges):
+
+| MQ bin | Runs | Share | MQ range | Clusters |
+|---|---|---|---|---|
+| 0.55 | 11 | 11% | 0.5506–0.5903 | 870–1068 |
+| 0.60 | 17 | 17% | 0.6049–0.6495 | 1046–1040 |
+| 0.65 | 14 | 14% | 0.6508–0.6972 | 903–966 |
+| 0.70 | 12 | 12% | 0.7040–0.7457 | 768–1118 |
+| 0.75 | 17 | 17% | 0.7626–0.7983 | 402–1047 |
+| 0.80 | 6 | 6% | 0.8030–0.8412 | 864–1057 |
+| 0.85 | 9 | 9% | 0.8541–0.8998 | 257–902 |
+
+Similarity: Zero 68.86%, Low 30.94%, Medium 0.19%, High 0.01%
+(**Zero + High = 68.87%**). Random baseline (1,000 partitions): min 0.0478,
+median 0.2312, max 1.0041. Leiden point: MQ 7.7619, 1,164 clusters,
+intra-edge fraction 0.0189.
+
+### Landscape smoke — random controls (100 runs each)
+
+| MDG | Edges | Basins (share) | Zero / Low / Medium / High | Z+H | Baseline min/median/max |
+|---|---|---|---|---|---|
+| `rnd:100:0.05` | 247 | 8 basins, 11.4–11.8 (5–20% each) | 9.72 / 33.60 / 50.20 / 6.48 | 16.19% | 0 / 0.5766 / 1.5770 |
+| `rnd:100:0.5` | 2,475 | 1.55 (10%), 1.60 (79%), 1.65 (11%) | 0.81 / 59.23 / 39.96 / 0.00 | **0.81%** | 0.2399 / 0.5901 / 1.0189 |
+| `bip:100:0.05` | 247 | 10.85–11.05, 5 basins (6–31% each) | 7.29 / 36.44 / 51.82 / 4.45 | 11.74% | 0 / 0.5713 / 1.9144 |
+
+The real graph's Zero + High (68.87%) exceeds the dense random graph's
+(`rnd:100:0.5`, 0.81%), as required. The controls carry no communities, so the
+Leiden point is absent from their JSON.
+
+### Threshold / annealing smoke — Graphos repo
+
+`--runs 3 --bunch-max-iterations 10 --random-partitions 100` (same iteration
+cap for every row; annealing off rows have 0 accepts):
+
+| Config | Final MQ (3 runs) | MQ evaluations | Annealing accepts |
+|---|---|---|---|
+| η = 0 | 0.2922 / 0.4220 / 0.4477 | 6,074 / 2,259 / 7,235 | 0 / 0 / 0 |
+| η = 50 | 1.0812 / 1.6212 / 3.6683 | 3,116,640 / 4,481,355 / 9,635,695 | 0 / 0 / 0 |
+| η = 100 | 4.2613 / 4.4314 / 4.4921 | 19,303,457 / 9,039,144 / 6,313,175 | 0 / 0 / 0 |
+| `--bunch-sa 100,0.99` | 0.1612 / 0.3313 / 0.4000 | 41 / 11 / 10 | 5 / 5 / 4 |
+
+At only 10 iterations the threshold changes the achieved MQ (higher η climbs
+faster per iteration); the same-band claim is confirmed at convergence on
+`rnd:100:0.05` with `--runs 5 --bunch-max-iterations 500`: η = 0 → 10.72–11.81,
+η = 50 → 11.40–11.88, η = 100 → 11.35–11.68, with evaluations 304k–465k,
+333k–440k and 167k–299k respectively. Annealing on (`T0 = 100, α = 0.99`)
+accepts 250–251 worsening moves in 500 iterations and terminates at the cap,
+as designed.
+
+### OpenSpec
+
+`openspec validate bunch-search-based-modularization --strict` → valid (exit 0).
