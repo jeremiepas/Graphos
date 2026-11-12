@@ -72,6 +72,8 @@ data ClusterQuality = ClusterQuality
   , cqClusters      :: !Int              -- ^ cluster count
   , cqSkip          :: !(Maybe BunchSkip) -- ^ Bunch skipped above the file cap
   , cqBunchRuns     :: !(Maybe BunchRunInfo) -- ^ Bunch runs and refinement; 'Nothing' for Leiden
+  , cqScoredRelations :: !(Maybe [Text])    -- ^ relations MQ / modularity / intra fraction were scored over;
+                                            --   'Nothing' = every edge of the graph (Leiden)
   } deriving (Eq, Show, Generic)
 
 instance NFData ClusterQuality

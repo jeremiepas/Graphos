@@ -85,7 +85,7 @@ generateReport g analysis config detection mLabels =
 partitionQualityLines :: Maybe ClusterQuality -> [Text]
 partitionQualityLines Nothing  = []
 partitionQualityLines (Just q) =
-  T.pack ("Partition quality (" ++ T.unpack (cqAlgorithm q) ++ "): MQ = " ++ fmt (cqMQ q)
+  T.pack ("Partition quality (" ++ T.unpack (cqAlgorithm q) ++ scope ++ "): MQ = " ++ fmt (cqMQ q)
           ++ ", modularity = " ++ fmt (cqModularity q)
           ++ ", intra-edge fraction = " ++ fmt (cqIntraFraction q))
   : [ T.pack ("Bunch skipped: " ++ show (skipFiles sk) ++ " files exceed the cap of "
@@ -96,6 +96,9 @@ partitionQualityLines (Just q) =
      | Just r <- [cqBunchRuns q] ]
   where
     fmt x = showFFloat (Just 4) x ""
+    scope = case cqScoredRelations q of
+      Nothing   -> ""
+      Just rels -> ", scored over " ++ T.unpack (T.intercalate ", " rels)
     sizes rs = case rs of
       [one] -> show one
       _ | length rs <= 8 -> intercalateComma (map show rs)

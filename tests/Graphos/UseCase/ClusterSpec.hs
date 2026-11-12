@@ -185,7 +185,10 @@ configSpec = describe "clusterAlgorithmFromConfig / partitionQuality" $ do
         q = partitionQuality (cqAlgorithm q0) chainGraph comm (cqSkip q0)
     cqMQ q `shouldBe` mqValue (modularizationQuality chainGraph comm)
     cqAlgorithm q `shouldBe` "bunch"
-    q `shouldBe` q0 { cqBunchRuns = Nothing }
+    -- chainGraph only has allowlisted relations, so scoring the whole graph or
+    -- the MDG relations gives the same figures
+    (cqMQ q, cqModularity q, cqIntraFraction q, cqClusters q)
+      `shouldBe` (cqMQ q0, cqModularity q0, cqIntraFraction q0, cqClusters q0)
 
 -- ───────────────────────────────────────────────
 -- Real repositories (openspec bunch-real-projects D1, D2, D3)
@@ -238,6 +241,26 @@ realProjectsSpec = do
 
     it "the enriched graph folds to the same MDG (inferred relations excluded)" $
       foldToFileMDG UnitWeights enrichedTwoDir `shouldBe` foldToFileMDG UnitWeights twoDirGraph
+
+    it "scores the reused partition over the MDG relations, not the inferred edges" $ do
+      let step4@(comm4, _, q4) = runClustering bunch res twoDirGraph
+          (_, _, q5) = stepFiveClustering bunch res step4 enrichedTwoDir
+          wholeGraphMQ = mqValue (modularizationQuality enrichedTwoDir comm4)
+      cqMQ q5 `shouldBe` cqMQ q4
+      cqModularity q5 `shouldBe` cqModularity q4
+      cqScoredRelations q5 `shouldBe` Just ["imports", "calls", "references", "extends", "implements"]
+      -- the depends_on edges would change the score if they were counted
+      wholeGraphMQ `shouldSatisfy` (/= cqMQ q5)
+
+    it "bunchPartitionQuality equals modularizationQuality of the restricted graph" $ do
+      let (comm, _, _) = runClustering bunch res twoDirGraph
+          q = bunchPartitionQuality [Imports] enrichedTwoDir comm
+      cqMQ q `shouldBe` mqValue (modularizationQuality (restrictToRelations [Imports] enrichedTwoDir) comm)
+      cqScoredRelations q `shouldBe` Just ["imports"]
+
+    it "Leiden quality still covers every edge" $ do
+      let (_, _, q) = runClustering Leiden res twoDirGraph
+      cqScoredRelations q `shouldBe` Nothing
 
     it "re-clusters with Leiden" $ do
       let step4 = runClustering Leiden res twoDirGraph
