@@ -365,7 +365,7 @@ Graph {
 
 | Category | Extensions |
 |----------|-----------|
-| code | `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`, `.rs`, `.hs`, `.nix`, `.rb`, `.java`, `.c`, `.cpp`, `.h`, `.hpp`, `.cs`, `.kt`, `.kts`, `.scala`, `.php`, `.swift`, `.lua`, `.zig`, `.ps1`, `.ex`, `.exs`, `.m`, `.mm`, `.jl`, `.vue`, `.svelte`, `.dart` |
+| code | `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.go`, `.rs`, `.java`, `.c`, `.cpp`, `.h`, `.hpp`, `.rb`, `.cs`, `.kt`, `.kts`, `.scala`, `.php`, `.swift`, `.lua`, `.zig`, `.hs`, `.lhs`, `.ex`, `.exs`, `.m`, `.mm`, `.jl`, `.vue`, `.svelte`, `.dart`, `.ps1`, `.nix`, `.cc`, `.cxx`, `.hh`, `.hxx`, `.yaml`, `.yml`, `.sql`, `.pl`, `.pm`, `.psgi` |
 | doc | `.md`, `.txt`, `.rst`, `.adoc`, `.org` |
 | paper | `.pdf` |
 | image | `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif` |

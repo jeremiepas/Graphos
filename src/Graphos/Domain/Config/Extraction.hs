@@ -349,6 +349,7 @@ defaultFileExtensions = FileExtensionConfig
                  , ".cc", ".cxx", ".hh", ".hxx"  -- C++ (vendored tree-sitter-cpp)
                  , ".yaml", ".yml"               -- YAML (vendored tree-sitter-yaml)
                  , ".sql"                        -- SQL (vendored tree-sitter-sql)
+                 , ".pl", ".pm", ".psgi"         -- Perl (vendored tree-sitter-perl)
                  ]
   , fecDoc   = [ ".md", ".txt", ".rst", ".adoc", ".org"
                , ".text", ".raml"  -- NEW
