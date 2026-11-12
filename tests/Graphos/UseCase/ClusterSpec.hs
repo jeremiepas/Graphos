@@ -12,7 +12,7 @@ import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph)
-import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity)
+import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig, foldToFileMDG, mdgFileCount, mdgEdgeCount, bunchCluster, BunchResult(..), BunchRun(..))
 import Graphos.Domain.Community.MQ (Weighting(..))
 import Graphos.UseCase.Cluster
@@ -25,6 +25,7 @@ spec = do
   bunchSpec
   capSpec
   configSpec
+  realProjectsSpec
 
 -- ───────────────────────────────────────────────
 -- Fixtures
@@ -176,11 +177,107 @@ configSpec = describe "clusterAlgorithmFromConfig / partitionQuality" $ do
         { bsConfig = defaultBunchConfig
             { bcSeed = 7, bcPopulation = 3, bcThreshold = 50
             , bcAnnealing = Just (100, 0.99), bcMaxIterations = 42 }
-        , bsMaxFiles = 9, bsWeighted = True }
+        , bsMaxFiles = 9, bsMaxFilesPerRun = 500
+        , bsRelations = [Imports, Calls, References, Extends, Implements], bsWeighted = True }
 
   it "scores the partition it is given: MQ equals modularizationQuality of those communities" $ do
     let (comm, _, q0) = runClustering (BunchAlgorithm defaultBunchSettings) res chainGraph
         q = partitionQuality (cqAlgorithm q0) chainGraph comm (cqSkip q0)
     cqMQ q `shouldBe` mqValue (modularizationQuality chainGraph comm)
     cqAlgorithm q `shouldBe` "bunch"
-    q `shouldBe` q0
+    -- chainGraph only has allowlisted relations, so scoring the whole graph or
+    -- the MDG relations gives the same figures
+    (cqMQ q, cqModularity q, cqIntraFraction q, cqClusters q)
+      `shouldBe` (cqMQ q0, cqModularity q0, cqIntraFraction q0, cqClusters q0)
+
+-- ───────────────────────────────────────────────
+-- Real repositories (openspec bunch-real-projects D1, D2, D3)
+-- ───────────────────────────────────────────────
+
+-- | Two 3-file directories, each a chain, joined by one import.
+twoDirGraph :: Graph
+twoDirGraph = buildGraph False $ extractionFromLists
+  [ nodeIn "a/1.ts" "a1", nodeIn "a/2.ts" "a2", nodeIn "a/3.ts" "a3"
+  , nodeIn "b/1.ts" "b1", nodeIn "b/2.ts" "b2", nodeIn "b/3.ts" "b3" ]
+  [ edgeOf Imports "a1" "a2", edgeOf Imports "a2" "a3", edgeOf Imports "a1" "a3"
+  , edgeOf Imports "b1" "b2", edgeOf Imports "b2" "b3", edgeOf Imports "b1" "b3"
+  , edgeOf Imports "a3" "b1" ]
+
+-- | 'twoDirGraph' after edge inference: depends_on edges across the directories.
+enrichedTwoDir :: Graph
+enrichedTwoDir = buildGraph False $ extractionFromLists
+  [ nodeIn "a/1.ts" "a1", nodeIn "a/2.ts" "a2", nodeIn "a/3.ts" "a3"
+  , nodeIn "b/1.ts" "b1", nodeIn "b/2.ts" "b2", nodeIn "b/3.ts" "b3" ]
+  [ edgeOf Imports "a1" "a2", edgeOf Imports "a2" "a3", edgeOf Imports "a1" "a3"
+  , edgeOf Imports "b1" "b2", edgeOf Imports "b2" "b3", edgeOf Imports "b1" "b3"
+  , edgeOf Imports "a3" "b1"
+  , edgeOf DependsOn "a1" "b2", edgeOf DependsOn "a2" "b3", edgeOf DependsOn "a3" "b2" ]
+
+realProjectsSpec :: Spec
+realProjectsSpec = do
+  let bunch = BunchAlgorithm defaultBunchSettings { bsConfig = defaultBunchConfig { bcSeed = 1, bcPopulation = 2 } }
+
+  describe "capPartition (D1)" $ do
+    it "never splits a Bunch partition, whatever the cap" $ do
+      let (comm, _, q) = runClustering bunch res twoDirGraph
+      cqAlgorithm q `shouldBe` "bunch"
+      capPartition q True 0.01 twoDirGraph comm `shouldBe` comm
+      Map.size comm `shouldSatisfy` (< 6)        -- fewer modules than files
+
+    it "caps a Leiden partition, including Leiden run above the Bunch ceiling" $ do
+      let skipped = BunchAlgorithm defaultBunchSettings { bsMaxFiles = 2 }
+          (comm, _, q) = runClustering skipped res twoDirGraph
+      cqAlgorithm q `shouldBe` "leiden"
+      capPartition q True 0.2 twoDirGraph comm `shouldBe` capCommunitySizes twoDirGraph comm 0.2
+      capPartition q False 0.2 twoDirGraph comm `shouldBe` comm
+
+  describe "stepFiveClustering (D2)" $ do
+    it "reuses the Step-4 Bunch partition on the inference-enriched graph" $ do
+      let step4@(comm4, _, _) = runClustering bunch res twoDirGraph
+          (comm5, _, q5) = stepFiveClustering bunch res step4 enrichedTwoDir
+      comm5 `shouldBe` comm4
+      cqAlgorithm q5 `shouldBe` "bunch"
+      cqBunchRuns q5 `shouldSatisfy` (/= Nothing)
+
+    it "the enriched graph folds to the same MDG (inferred relations excluded)" $
+      foldToFileMDG UnitWeights enrichedTwoDir `shouldBe` foldToFileMDG UnitWeights twoDirGraph
+
+    it "scores the reused partition over the MDG relations, not the inferred edges" $ do
+      let step4@(comm4, _, q4) = runClustering bunch res twoDirGraph
+          (_, _, q5) = stepFiveClustering bunch res step4 enrichedTwoDir
+          wholeGraphMQ = mqValue (modularizationQuality enrichedTwoDir comm4)
+      cqMQ q5 `shouldBe` cqMQ q4
+      cqModularity q5 `shouldBe` cqModularity q4
+      cqScoredRelations q5 `shouldBe` Just ["imports", "calls", "references", "extends", "implements"]
+      -- the depends_on edges would change the score if they were counted
+      wholeGraphMQ `shouldSatisfy` (/= cqMQ q5)
+
+    it "bunchPartitionQuality equals modularizationQuality of the restricted graph" $ do
+      let (comm, _, _) = runClustering bunch res twoDirGraph
+          q = bunchPartitionQuality [Imports] enrichedTwoDir comm
+      cqMQ q `shouldBe` mqValue (modularizationQuality (restrictToRelations [Imports] enrichedTwoDir) comm)
+      cqScoredRelations q `shouldBe` Just ["imports"]
+
+    it "Leiden quality still covers every edge" $ do
+      let (_, _, q) = runClustering Leiden res twoDirGraph
+      cqScoredRelations q `shouldBe` Nothing
+
+    it "re-clusters with Leiden" $ do
+      let step4 = runClustering Leiden res twoDirGraph
+          (comm5, _, _) = stepFiveClustering Leiden res step4 enrichedTwoDir
+          (commL, _, _) = runClustering Leiden res enrichedTwoDir
+      comm5 `shouldBe` commL
+
+  describe "partitioned dispatch (D3)" $ do
+    it "splits by sub-tree above the per-run size instead of falling back to Leiden" $ do
+      let split = BunchAlgorithm defaultBunchSettings
+                    { bsConfig = defaultBunchConfig { bcSeed = 1, bcPopulation = 2 }, bsMaxFilesPerRun = 3 }
+          (comm, _, q) = runClustering split res twoDirGraph
+      cqAlgorithm q `shouldBe` "bunch"
+      cqSkip q `shouldBe` Nothing
+      fmap briRuns (cqBunchRuns q) `shouldBe` Just [3, 3]
+      sort (concatMap snd (Map.toList comm)) `shouldBe` sort ["a1", "a2", "a3", "b1", "b2", "b3"]
+
+    it "keeps the hard ceiling: above bsMaxFiles Leiden runs with a skip entry" $ do
+      let (_, _, q) = runClustering (BunchAlgorithm defaultBunchSettings { bsMaxFiles = 5 }) res twoDirGraph
+      cqSkip q `shouldBe` Just (BunchSkip 6 5)

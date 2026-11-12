@@ -28,6 +28,13 @@ module Graphos.UseCase.Cluster
   , runClustering
   , partitionQuality
   , clusterAlgorithmFromConfig
+  , capPartition
+  , bunchPartitionQuality
+  , restrictToRelations
+  , isBunchPartition
+  , stepFiveClustering
+  , BunchRunInfo(..)
+  , defaultBunchFilesPerRun
   , defaultBunchFileCap
   ) where
 
@@ -38,20 +45,21 @@ import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Ord (comparing)
 
-import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..))
+import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation, relationToText, extractionFromLists)
 import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..))
-import Graphos.Domain.Graph (Graph, gNodes, gEdges)
+import Graphos.Domain.Graph (Graph(..), buildGraph)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
-import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity)
+import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity, capCommunitySizes)
 import Graphos.Domain.Community.MQ (Weighting(..), modularizationQuality, mqValue, mqIntraFraction)
 import Graphos.Domain.Community.Bunch
   ( BunchConfig(..)
-  , BunchResult(..)
-  , BunchRun(..)
   , FileMDG(..)
-  , bunchCluster
+  , PartitionedResult(..)
+  , bunchClusterPartitioned
   , defaultBunchConfig
-  , foldToFileMDG
+  , defaultMDGRelations
+  , forbiddenMDGRelations
+  , foldToFileMDGWith
   , mdgFileCount
   )
 import qualified Data.Set as Set
@@ -214,25 +222,35 @@ data ClusterAlgorithm = Leiden | BunchAlgorithm BunchSettings
 -- two knobs that live above the search — the file cap and the weighting of
 -- the MDG fold.
 data BunchSettings = BunchSettings
-  { bsConfig   :: BunchConfig -- ^ seed, population, η, annealing, iteration cap
-  , bsMaxFiles :: Int         -- ^ file count above which Leiden is run instead
-  , bsWeighted :: Bool        -- ^ fold the MDG with 'EdgeWeights' instead of unit weights
+  { bsConfig        :: BunchConfig -- ^ seed, population, η, annealing, iteration cap
+  , bsMaxFiles      :: Int         -- ^ hard ceiling: file count above which Leiden is run instead
+  , bsMaxFilesPerRun :: Int        -- ^ files per search run; above it the MDG is split by sub-tree
+  , bsRelations     :: [Relation]  -- ^ relations folded into the MDG
+  , bsWeighted      :: Bool        -- ^ fold the MDG with 'EdgeWeights' instead of unit weights
   } deriving (Eq, Show)
 
--- | Default file cap (design D2): 5,000 files.
+-- | Default hard ceiling (bunch-real-projects D3): 50,000 files.
 defaultBunchFileCap :: Int
-defaultBunchFileCap = 5000
+defaultBunchFileCap = 50000
+
+-- | Default files per search run (bunch-real-projects D3): one search stops
+-- being tractable well below 1,000 files (≈ 1 s at 164, ≈ 25 s at 440,
+-- > 28 min at 1,778).
+defaultBunchFilesPerRun :: Int
+defaultBunchFilesPerRun = 500
 
 defaultBunchSettings :: BunchSettings
-defaultBunchSettings = BunchSettings defaultBunchConfig defaultBunchFileCap False
+defaultBunchSettings =
+  BunchSettings defaultBunchConfig defaultBunchFileCap defaultBunchFilesPerRun defaultMDGRelations False
 
 -- | Run the stage for the selected algorithm. Pure and deterministic: the
 -- Leiden path is exactly 'clusterGraphWithResolution'; the Bunch path folds
--- the file MDG, checks the cap (falling back to Leiden with a skip entry)
--- and runs the population search. The returned partition is the Bunch
--- result pushed back to symbols, *without* the community-size cap — the
--- caller applies 'capCommunitySizes' to it exactly as it does for Leiden,
--- and never 'mergeSmallCommunities' (MQ already penalises singletons).
+-- the file MDG over the configured relations, checks the hard ceiling
+-- (falling back to Leiden with a skip entry), runs the population search —
+-- per directory sub-tree above the per-run size — and the global refinement
+-- ('bunchClusterPartitioned'). The returned partition is the Bunch result
+-- pushed back to symbols; 'capPartition' leaves it uncapped and
+-- 'mergeSmallCommunities' never applies (MQ already penalises singletons).
 runClustering :: ClusterAlgorithm -> Resolution -> Graph
               -> (CommunityMap, CohesionMap, ClusterQuality)
 runClustering algo res g = case algo of
@@ -244,7 +262,10 @@ runClustering algo res g = case algo of
     weighting = case algo of
       BunchAlgorithm bs | bsWeighted bs -> EdgeWeights
       _ -> UnitWeights
-    mdg = foldToFileMDG weighting g
+    relations = case algo of
+      BunchAlgorithm bs -> bsRelations bs
+      Leiden -> defaultMDGRelations
+    mdg = foldToFileMDGWith relations weighting g
     n   = mdgFileCount mdg
 
     leidenRun skip =
@@ -252,14 +273,16 @@ runClustering algo res g = case algo of
       in (comm, coh, partitionQuality "leiden" g comm skip)
 
     bunchRun bs mdg0 =
-      let best  = bresBest (bunchCluster (bsConfig bs) mdg0)
+      let result = bunchClusterPartitioned (bsMaxFilesPerRun bs) (bsConfig bs) mdg0
           nodesByFile = Map.fromListWith (flip (++))
             [ (nodeSourceFile nd, [nodeId nd]) | nd <- Map.elems (gNodes g) ]
           comm = Map.fromList
             [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
                               (map (mdgFiles mdg0 V.!) members))
-            | (cid, members) <- zip [0 :: Int ..] (brPartition best) ]
-      in (comm, scoreAllCohesion (undirectedView g) comm, partitionQuality "bunch" g comm Nothing)
+            | (cid, members) <- zip [0 :: Int ..] (prPartition result) ]
+          info = BunchRunInfo { briRuns = prRuns result, briMoves = prMoves result, briPasses = prPasses result }
+      in ( comm, scoreAllCohesion (undirectedView g) comm
+         , (bunchPartitionQuality (bsRelations bs) g comm) { cqBunchRuns = Just info } )
       -- Cohesion is scored on the same undirected projection as for Leiden
       -- (per-community intra-edge density), so the analysis and aggregates
       -- downstream stay uniform across algorithms.
@@ -279,7 +302,71 @@ partitionQuality name g cm skip =
        , cqIntraFraction = mqIntraFraction mq
        , cqClusters      = Map.size cm
        , cqSkip          = skip
+       , cqBunchRuns     = Nothing
+       , cqScoredRelations = Nothing
        }
+
+-- | Quality of a Bunch partition, scored over the relations Bunch clustered
+-- on (bunch-real-projects D2): the MDG relations minus the never-folded ones.
+-- Scoring the whole exported graph instead would count the @depends_on@ /
+-- @inferred@ edges added by edge inference after clustering, so the report
+-- would disagree with the MQ the search optimised.
+bunchPartitionQuality :: [Relation] -> Graph -> CommunityMap -> ClusterQuality
+bunchPartitionQuality rels g cm =
+  let scored = mdgRelations rels
+  in (partitionQuality "bunch" (restrictToRelations scored g) cm Nothing)
+       { cqScoredRelations = Just (map relationToText scored) }
+
+-- | The relations a Bunch MDG folds: the configured ones minus
+-- 'forbiddenMDGRelations', in their configured order.
+mdgRelations :: [Relation] -> [Relation]
+mdgRelations rels = [ r | r <- rels, r `notElem` forbiddenMDGRelations ]
+
+-- | The graph with the same nodes and only the edges of the given relations.
+restrictToRelations :: [Relation] -> Graph -> Graph
+restrictToRelations rels g =
+  buildGraph (gDirected g) $ extractionFromLists
+    (Map.elems (gNodes g))
+    [ e | e <- Map.elems (gEdges g), edgeRelation e `elem` rels ]
+
+-- | The community-size cap post-pass of the pipeline (spec
+-- @community-size-cap@, bunch-real-projects D1), keyed on the algorithm that
+-- actually produced the partition ('cqAlgorithm'): Leiden partitions —
+-- including Leiden run because Bunch was above its hard ceiling — are split
+-- above @frac@ of the nodes when the cap is enabled; a Bunch partition is
+-- returned unsplit, because MQ already penalises loosely coupled modules and
+-- a 5 % cap on a small graph allows one file per module.
+capPartition :: ClusterQuality -> Bool -> Double -> Graph -> CommunityMap -> CommunityMap
+capPartition q enabled frac g comm
+  | isBunchPartition q = comm
+  | enabled            = capCommunitySizes g comm frac
+  | otherwise          = comm
+
+-- | Whether a partition came from the Bunch search (not from Leiden, even when
+-- Bunch was selected and skipped above its hard ceiling).
+isBunchPartition :: ClusterQuality -> Bool
+isBunchPartition q = cqAlgorithm q == "bunch"
+
+-- | Step 5 of the pipeline (spec @pipeline-clustering@, bunch-real-projects
+-- D2): Leiden re-clusters the enriched graph; Bunch reuses its Step-4
+-- partition — its MDG excludes every relation edge inference adds, so a
+-- second search would only repeat the first — with cohesion recomputed on the
+-- enriched graph and the quality re-scored there over the MDG relations
+-- ('bunchPartitionQuality'), which inference does not touch.
+stepFiveClustering :: ClusterAlgorithm -> Resolution
+                   -> (CommunityMap, CohesionMap, ClusterQuality)  -- ^ Step-4 result
+                   -> Graph                                       -- ^ enriched graph
+                   -> (CommunityMap, CohesionMap, ClusterQuality)
+stepFiveClustering algo res (comm4, _, q4) enriched
+  | not (isBunchPartition q4) = runClustering algo res enriched
+  | otherwise =
+    ( comm4
+    , scoreAllCohesion (undirectedView enriched) comm4
+    , (bunchPartitionQuality rels enriched comm4) { cqBunchRuns = cqBunchRuns q4 } )
+  where
+    rels = case algo of
+      BunchAlgorithm bs -> bsRelations bs
+      Leiden            -> defaultMDGRelations
 
 -- | The stage algorithm selected by the effective clustering configuration
 -- (@graphos.yaml@ with CLI overrides applied).
@@ -295,6 +382,8 @@ clusterAlgorithmFromConfig cc = case ccAlgorithm cc of
         , bcMaxIterations = bfMaxIterations b
         }
     , bsMaxFiles = bfMaxFiles b
+    , bsMaxFilesPerRun = bfMaxFilesPerRun b
+    , bsRelations = bfRelations b
     , bsWeighted = bfWeighted b
     }
   where b = ccBunch cc
