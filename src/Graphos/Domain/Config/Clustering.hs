@@ -12,6 +12,8 @@ module Graphos.Domain.Config.Clustering
   , defaultClusteringConfig
   , defaultBunchFileConfig
   , defaultAnnealing
+  , forbiddenBunchRelations
+  , parseRelationName
   , validClusteringConfig
   , mergeClusteringConfig
     -- * CLI overrides
@@ -27,6 +29,8 @@ import Control.DeepSeq (NFData)
 import Data.Aeson (FromJSON(..), withObject, withText, (.:?), (.!=))
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+
+import Graphos.Domain.Types.Edge (Relation(..), relationToText)
 
 -- | The clustering algorithm of the build's cluster stage.
 data ClusteringAlgorithmName = AlgoLeiden | AlgoBunch
@@ -59,7 +63,9 @@ data BunchFileConfig = BunchFileConfig
   , bfThreshold     :: Int                    -- ^ η in percent, 0..100 (default 0, NAHC)
   , bfAnnealing     :: Maybe (Double, Double) -- ^ @(T0, α)@ when simulated annealing is on
   , bfMaxIterations :: Int                    -- ^ iteration cap (default 10,000)
-  , bfMaxFiles      :: Int                    -- ^ file count above which Leiden runs instead (default 5,000)
+  , bfMaxFiles      :: Int                    -- ^ hard ceiling: file count above which Leiden runs instead (default 50,000)
+  , bfMaxFilesPerRun :: Int                   -- ^ files per search run; above it the MDG is split by directory sub-tree (default 500)
+  , bfRelations     :: [Relation]             -- ^ relations folded into the MDG (default imports, calls, references, extends, implements)
   , bfWeighted      :: Bool                   -- ^ fold the MDG with edge weights
   } deriving (Eq, Show, Generic)
 
@@ -71,9 +77,22 @@ defaultBunchFileConfig = BunchFileConfig
   , bfThreshold     = 0
   , bfAnnealing     = Nothing
   , bfMaxIterations = 10000
-  , bfMaxFiles      = 5000
+  , bfMaxFiles      = 50000
+  , bfMaxFilesPerRun = 500
+  , bfRelations     = [Imports, Calls, References, Extends, Implements]
   , bfWeighted      = False
   }
+
+-- | Relations the Bunch MDG may never fold (bunch-real-projects D2): file
+-- structure, documentation links and edge-inference output.
+forbiddenBunchRelations :: [Relation]
+forbiddenBunchRelations = [Contains, Documents, DependsOn, Inferred]
+
+-- | Parse a relation by its @graph.json@ name (@imports@, @calls@, …).
+parseRelationName :: String -> Either String Relation
+parseRelationName s = case [ r | r <- [minBound .. maxBound], T.unpack (relationToText r) == s ] of
+  (r : _) -> Right r
+  []      -> Left ("unknown relation: " ++ s)
 
 -- | Annealing schedule used when annealing is enabled without explicit
 -- @t0@/@alpha@ (the paper's @T0 = 100, α = 0.99@).
@@ -89,6 +108,11 @@ instance FromJSON BunchFileConfig where
     thr     <- v .:? "threshold"  .!= bfThreshold d
     mIter   <- (<|>) <$> v .:? "max_iterations" <*> v .:? "maxIterations"
     mFiles  <- (<|>) <$> v .:? "max_files"      <*> v .:? "maxFiles"
+    mPerRun <- (<|>) <$> v .:? "max_files_per_run" <*> v .:? "maxFilesPerRun"
+    mRels   <- v .:? "relations"
+    rels    <- case mRels of
+      Nothing -> pure (bfRelations d)
+      Just names -> either fail pure (mapM parseRelationName names)
     wgt     <- v .:? "weighted"   .!= bfWeighted d
     ann     <- v .:? "annealing"
     pure BunchFileConfig
@@ -97,6 +121,8 @@ instance FromJSON BunchFileConfig where
       , bfAnnealing     = ann >>= annealingOf
       , bfMaxIterations = maybe (bfMaxIterations d) id mIter
       , bfMaxFiles      = maybe (bfMaxFiles d) id mFiles
+      , bfMaxFilesPerRun = maybe (bfMaxFilesPerRun d) id mPerRun
+      , bfRelations     = rels
       , bfWeighted      = wgt
       }
     where
@@ -174,6 +200,13 @@ validClusteringConfig c
       Left $ "clustering.bunch.max_iterations must be >= 1, got " ++ show (bfMaxIterations b)
   | bfMaxFiles b < 0 =
       Left $ "clustering.bunch.max_files must be >= 0, got " ++ show (bfMaxFiles b)
+  | bfMaxFilesPerRun b < 2 =
+      Left $ "clustering.bunch.max_files_per_run must be >= 2, got " ++ show (bfMaxFilesPerRun b)
+  | null (bfRelations b) =
+      Left "clustering.bunch.relations must name at least one relation"
+  | (r : _) <- filter (`elem` forbiddenBunchRelations) (bfRelations b) =
+      Left $ "clustering.bunch.relations may not include " ++ T.unpack (relationToText r)
+          ++ " (contains, documents, depends_on and inferred are never folded)"
   | Just (t0, alpha) <- bfAnnealing b, t0 <= 0 || alpha <= 0 || alpha >= 1 =
       Left $ "clustering.bunch.annealing needs t0 > 0 and 0 < alpha < 1, got " ++ show (t0, alpha)
   | otherwise = Right c
@@ -197,6 +230,8 @@ mergeClusteringConfig project global =
         , bfAnnealing     = pickB bfAnnealing
         , bfMaxIterations = pickB bfMaxIterations
         , bfMaxFiles      = pickB bfMaxFiles
+        , bfMaxFilesPerRun = pickB bfMaxFilesPerRun
+        , bfRelations     = pickB bfRelations
         , bfWeighted      = pickB bfWeighted
         }
     }
@@ -217,6 +252,7 @@ data ClusteringOverrides = ClusteringOverrides
   , covAnnealing     :: Maybe (Double, Double)         -- ^ @--bunch-sa T0,ALPHA@
   , covMaxIterations :: Maybe Int                      -- ^ @--bunch-max-iterations@
   , covMaxFiles      :: Maybe Int                      -- ^ @--bunch-max-files@
+  , covMaxFilesPerRun :: Maybe Int                     -- ^ @--bunch-max-files-per-run@
   , covWeighted      :: Bool                           -- ^ @--bunch-weighted@
   } deriving (Eq, Show, Generic)
 
@@ -224,7 +260,7 @@ instance NFData ClusteringOverrides
 
 noClusteringOverrides :: ClusteringOverrides
 noClusteringOverrides =
-  ClusteringOverrides Nothing Nothing Nothing Nothing Nothing Nothing Nothing False
+  ClusteringOverrides Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing False
 
 -- | CLI values override the configuration.
 applyClusteringOverrides :: ClusteringOverrides -> ClusteringConfig -> ClusteringConfig
@@ -237,6 +273,7 @@ applyClusteringOverrides o c = c
       , bfAnnealing     = covAnnealing o <|> bfAnnealing b
       , bfMaxIterations = maybe (bfMaxIterations b) id (covMaxIterations o)
       , bfMaxFiles      = maybe (bfMaxFiles b) id (covMaxFiles o)
+      , bfMaxFilesPerRun = maybe (bfMaxFilesPerRun b) id (covMaxFilesPerRun o)
       , bfWeighted      = covWeighted o || bfWeighted b
       }
   }

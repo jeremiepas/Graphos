@@ -25,6 +25,7 @@ spec :: Spec
 spec = do
   foldSpec
   searchSpec
+  realProjectsSpec
 
 -- ───────────────────────────────────────────────
 -- Search
@@ -251,3 +252,110 @@ edge rel u v = Edge
   , edgeConfidence = Confidence 1.0
   , edgeExtra = Nothing
   }
+
+-- ───────────────────────────────────────────────
+-- Real repositories (openspec bunch-real-projects D2, D3)
+-- ───────────────────────────────────────────────
+
+realProjectsSpec :: Spec
+realProjectsSpec = do
+  describe "foldToFileMDG relation allowlist (D2)" $ do
+    it "ignores inferred, depends_on and documents edges" $ do
+      let nodes = [ nodeIn "a.ts" "a", nodeIn "b.ts" "b", nodeIn "c.ts" "c", nodeIn "README.md" "readme" ]
+          edges = [ edge DependsOn "a" "b", edge Inferred "b" "a", edge Documents "readme" "a", edge Imports "a" "c" ]
+          m = foldToFileMDG UnitWeights (buildGraph False (extractionFromLists nodes edges))
+          pairs = [ (mdgFiles m V.! (mdgEdgeU m VU.! e), mdgFiles m V.! (mdgEdgeV m VU.! e)) | e <- [0 .. mdgEdgeCount m - 1] ]
+      pairs `shouldBe` [("a.ts", "c.ts")]
+
+    it "folds only the configured relations and never a forbidden one" $ do
+      let nodes = [ nodeIn "a.ts" "a", nodeIn "b.ts" "b", nodeIn "c.ts" "c" ]
+          g = buildGraph False (extractionFromLists nodes [ edge Imports "a" "b", edge Calls "b" "c", edge DependsOn "a" "c" ])
+      mdgEdgeCount (foldToFileMDGWith [Calls] UnitWeights g) `shouldBe` 1
+      mdgEdgeCount (foldToFileMDGWith [DependsOn] UnitWeights g) `shouldBe` 0
+      mdgEdgeCount (foldToFileMDGWith [Imports, Calls, DependsOn] UnitWeights g) `shouldBe` 2
+
+  describe "splitBySubtree (D3)" $ do
+    it "splits by directory and keeps root files together" $ do
+      let paths = [ "src/a/" ++ show i ++ ".ts" | i <- [1 .. 5 :: Int] ]
+               ++ [ "src/b/" ++ show i ++ ".ts" | i <- [1 .. 5 :: Int] ] ++ ["x.ts", "y.ts"]
+      splitBySubtree 6 paths `shouldBe` [[0 .. 4], [5 .. 9], [10, 11]]
+
+    it "cuts a single directory into consecutive chunks" $
+      splitBySubtree 4 [ "lib/" ++ [c] ++ ".ts" | c <- ['a' .. 'j'] ] `shouldBe` [[0 .. 3], [4 .. 7], [8, 9]]
+
+    it "chunks partition the input and respect the maximum" $
+      property $ forAll genPaths $ \(maxN, paths) ->
+        let chunks = splitBySubtree maxN paths
+        in sort (concat chunks) == [0 .. length paths - 1] && all ((<= max 1 maxN) . length) chunks
+           && not (any null chunks)
+
+    it "is a deterministic function of the path list" $
+      property $ forAll genPaths $ \(maxN, paths) -> splitBySubtree maxN paths == splitBySubtree maxN paths
+
+  describe "refinePartition (D3)" $ do
+    it "never lowers MQ and returns a partition of the same files" $
+      property $ forAll genMDGAndMoves $ \(m, assign0, _) ->
+        let (assign1, _, passes) = refinePartition m assign0
+        in VU.length assign1 == VU.length assign0
+           && mqOfAssignment m assign1 >= mqOfAssignment m assign0 - 1e-9
+           && passes <= maxRefinePasses
+
+    it "is idempotent on its own output" $
+      property $ forAll genMDGAndMoves $ \(m, assign0, _) ->
+        let (assign1, _, _) = refinePartition m assign0
+            (_, moves2, _) = refinePartition m assign1
+        in moves2 == 0
+
+    it "absorbs a file left alone next to its clique" $ do
+      let start = VU.fromList (10 : replicate 4 0 ++ replicate 5 1)   -- file 0 isolated from clique {1..4}
+          (assign1, moves, _) = refinePartition twoCliques start
+      canonicalPartition assign1 `shouldBe` [[0 .. 4], [5 .. 9]]
+      moves `shouldSatisfy` (>= 1)
+
+  describe "bunchClusterPartitioned (D3)" $ do
+    let cfg = defaultBunchConfig { bcPopulation = 2 }
+    it "runs one search when the MDG fits one run, and refinement changes nothing" $ do
+      let r = bunchClusterPartitioned 500 cfg twoCliques
+      prRuns r `shouldBe` [10]
+      prPartition r `shouldBe` [[0 .. 4], [5 .. 9]]
+      prMoves r `shouldBe` 0
+
+    it "splits by sub-tree above the per-run size and recovers both cliques" $ do
+      let m = mdgFromPairs (map fromText ([ T.pack ("a/" ++ show i ++ ".ts") | i <- [0 .. 4 :: Int] ]
+                                       ++ [ T.pack ("b/" ++ show i ++ ".ts") | i <- [0 .. 4 :: Int] ]))
+                           (mdgPairs twoCliques)
+          r = bunchClusterPartitioned 5 cfg m
+      prRuns r `shouldBe` [5, 5]
+      prPartition r `shouldBe` [[0 .. 4], [5 .. 9]]
+
+    it "absorbs a cross-sub-tree singleton (all its imports in another sub-tree)" $ do
+      -- a/0..3 form a clique; c/x.ts imports all of them and sits alone in its sub-tree.
+      let fs = map fromText ([ T.pack ("a/" ++ show i ++ ".ts") | i <- [0 .. 3 :: Int] ] ++ ["c/x.ts"])
+          m = mdgFromPairs fs ([ ((i, j), 1) | i <- [0 .. 3], j <- [i + 1 .. 3] ] ++ [ ((i, 4), 1) | i <- [0 .. 3] ])
+          r = bunchClusterPartitioned 4 cfg m
+      prRuns r `shouldBe` [4, 1]
+      prPartition r `shouldBe` [[0 .. 4]]
+      prMoves r `shouldSatisfy` (>= 1)
+      prMQ r `shouldSatisfy` (> mqOfAssignment m (VU.fromList [0, 0, 0, 0, 1]))
+
+    it "is deterministic for a fixed seed" $ do
+      let m = mdgFromPairs (map fromText ([ T.pack ("a/" ++ show i ++ ".ts") | i <- [0 .. 4 :: Int] ]
+                                       ++ [ T.pack ("b/" ++ show i ++ ".ts") | i <- [0 .. 4 :: Int] ]))
+                           (mdgPairs twoCliques)
+      bunchClusterPartitioned 3 cfg m `shouldBe` bunchClusterPartitioned 3 cfg m
+
+-- | The weighted pairs of an MDG, to rebuild it under other file names.
+mdgPairs :: FileMDG -> [((Int, Int), Double)]
+mdgPairs m = [ ((mdgEdgeU m VU.! e, mdgEdgeV m VU.! e), mdgEdgeW m VU.! e) | e <- [0 .. mdgEdgeCount m - 1] ]
+
+-- | A per-run maximum and an ascending, duplicate-free list of nested paths.
+genPaths :: Gen (Int, [FilePath])
+genPaths = do
+  maxN <- choose (1, 12 :: Int)
+  k <- choose (0, 60 :: Int)
+  ps <- vectorOf k $ do
+    depth <- choose (0, 3 :: Int)
+    dirs <- vectorOf depth (elements ["src", "lib", "a", "b", "c"])
+    f <- elements [ [c] ++ ".ts" | c <- ['a' .. 'h'] ]
+    pure (concatMap (++ "/") dirs ++ f)
+  pure (maxN, sort (nub ps))

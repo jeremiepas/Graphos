@@ -8,6 +8,7 @@ import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config
 import Graphos.Domain.Config.Clustering
+import Graphos.Domain.Types.Edge (Relation(..))
 
 spec :: Spec
 spec = do
@@ -170,10 +171,30 @@ spec = do
     it "decodes clustering.algorithm, clustering.seed and clustering.bunch.*" $
       decode "{\"algorithm\":\"bunch\",\"seed\":3,\"bunch\":{\"population\":4,\"threshold\":50,\
              \\"annealing\":{\"enabled\":true,\"t0\":50,\"alpha\":0.9},\"max_iterations\":200,\
-             \\"max_files\":1000,\"weighted\":true}}"
+             \\"max_files\":1000,\"max_files_per_run\":300,\"relations\":[\"imports\",\"calls\"],\"weighted\":true}}"
         `shouldBe` Just defaultClusteringConfig
           { ccAlgorithm = AlgoBunch, ccSeed = 3
-          , ccBunch = BunchFileConfig 4 50 (Just (50, 0.9)) 200 1000 True }
+          , ccBunch = defaultBunchFileConfig
+              { bfPopulation = 4, bfThreshold = 50, bfAnnealing = Just (50, 0.9), bfMaxIterations = 200
+              , bfMaxFiles = 1000, bfMaxFilesPerRun = 300, bfRelations = [Imports, Calls], bfWeighted = True } }
+
+    it "defaults to the real-projects limits and the code-dependency allowlist (bunch-real-projects)" $ do
+      bfMaxFiles defaultBunchFileConfig `shouldBe` 50000
+      bfMaxFilesPerRun defaultBunchFileConfig `shouldBe` 500
+      bfRelations defaultBunchFileConfig `shouldBe` [Imports, Calls, References, Extends, Implements]
+
+    it "rejects an unknown relation name in clustering.bunch.relations" $
+      (eitherDecode "{\"bunch\":{\"relations\":[\"imports\",\"frobs\"]}}" :: Either String ClusteringConfig)
+        `shouldSatisfy` either (const True) (const False)
+
+    it "validates the allowlist and the per-run size" $ do
+      let withB f = defaultClusteringConfig { ccBunch = f defaultBunchFileConfig }
+          rejected = either (const True) (const False)
+      validClusteringConfig (withB (\b -> b { bfRelations = [Imports, DependsOn] })) `shouldSatisfy` rejected
+      validClusteringConfig (withB (\b -> b { bfRelations = [Documents] })) `shouldSatisfy` rejected
+      validClusteringConfig (withB (\b -> b { bfRelations = [] })) `shouldSatisfy` rejected
+      validClusteringConfig (withB (\b -> b { bfMaxFilesPerRun = 1 })) `shouldSatisfy` rejected
+      validClusteringConfig (withB (\b -> b { bfRelations = [Imports, Extends] })) `shouldSatisfy` either (const False) (const True)
 
     it "accepts camelCase multi-word keys and defaults the annealing schedule" $
       fmap ccBunch (decode "{\"bunch\":{\"maxIterations\":7,\"maxFiles\":9,\"annealing\":{\"enabled\":true}}}")
