@@ -63,14 +63,35 @@ step.
   `external:` is resolved against the set of extracted files:
   - extension-less paths and directory imports (`/index.*`);
   - root aliases `@/`, `~/`, `#/`, `$lib/`;
-  - tsconfig/jsconfig `compilerOptions.paths` when the file exists;
-  - JVM fully-qualified names, by unique path suffix.
+  - tsconfig/jsconfig `compilerOptions.paths` when the file exists.
+
+  Java imports are left to `avi-1765`, which resolves them through source
+  roots. The alias and `paths` rules are built-in resolvers of `avi-1766`'s
+  `resolve:` framework, so a user `resolve:` entry overrides them.
 
   A target resolves only when exactly one file matches. Otherwise it stays
   external, unchanged. Resolution never reads outside the corpus and never runs
   code.
 - `--edge-density sparse` (lowercase) is already handled by the open change
   `cli-enum-flag-vocabulary`; this change depends on nothing from it.
+
+## Dependencies
+
+| Change | State (2026-11-12) | Relation |
+|---|---|---|
+| `cap-oversized-communities` | archived (#253) | D1 amends its `community-size-cap` requirement (Leiden only) |
+| `usable-leiden-on-code-graphs`, `imports-edges-go-rust-ruby` | archived (#253) | D2/D4 build on their `community-detection` and `import-resolution` requirements |
+| `usable-graph-for-code-review` | 19/25, open | **Before D4.** Its canonical target identity (`.js` → source extension, `/index`) is the per-file step that D4 rule 1 completes, by adding the missing-extension case. Archive it first so rule 1 is read against its requirement. |
+| `avi-1765-…-java-imports` | 0/26, open | **Before D4.** It owns Java import resolution through source roots, so D4 has no JVM rule. Its `GrammarsSpec` tests already fail on `main`. |
+| `avi-1440-ts-declaration-only-type-nodes` | 0/6, open | **Before task 5.4 (green suite).** Its TypeScript test already fails on `main`. It also changes `references` edges, one of D2's allowlisted relations. |
+| `avi-1766-custom-extractors` | 0/39, open | **Aligned, not blocking.** D4 rules 2–3 are built-in resolvers of its `resolve:` framework. If it lands first, D4 registers them as resolver kinds; otherwise D4 ships them with the same precedence and 1766 adopts them. |
+| `modularity-undirected-view` | 2/12, open | **Before validation (tasks 5.x).** The report's modularity figures in the validation targets assume the corrected (undirected) score. |
+| `cli-enum-flag-vocabulary` | 0/39, open | **Soft.** `--bunch-max-files-per-run` and `clustering.bunch.relations` follow its token-table / bounded-reader conventions. |
+| `clustering-evaluation-and-selection` | 0/17, open | **To reconcile.** Its "Selectable clustering algorithm", "File-count cap" and "File dependency matrix" overlap the merged Bunch requirements. Close it as superseded, or rebase it on them, before this change archives. |
+
+The hanging property `BoundedDeltaCommunitySpec` "delta update equals full
+rebuild on small random graphs" (no open change) must also be fixed or
+bounded before the full `cabal test` of task 5.4 can pass.
 
 ## Capabilities
 
@@ -83,8 +104,9 @@ step.
   - New requirement: global refinement pass (D3).
 - `pipeline-clustering`: the Step-5 re-cluster reuses a Bunch partition instead
   of re-searching on the inference-enriched graph (D2).
-- `import-resolution`: new requirement, corpus-aware resolution of unresolved
-  and alias targets (D4).
+- `community-size-cap`: the cap applies to Leiden partitions only (D1).
+- `import-resolution`: new requirement, corpus-aware resolution of
+  extension-less and alias targets (D4, Java excluded).
 
 ## Impact
 
@@ -95,8 +117,8 @@ step.
   - `UseCase/Pipeline/Core.hs`: Step-5 reuse.
   - `Domain/Config/Clustering.hs` and `CLI/Parser.hs`:
     `bunch.relations`, `--bunch-max-files-per-run`.
-  - New `Infrastructure/Extract/ImportResolution.hs`, called from the build use
-    case.
+  - New `Infrastructure/Extract/ImportResolution.hs` (built-in resolvers of the
+    `avi-1766` framework), called from the build use case.
 - **Tests:**
   - `BunchSpec`: relation filter, split, refinement monotonicity,
     determinism, permutation invariance.

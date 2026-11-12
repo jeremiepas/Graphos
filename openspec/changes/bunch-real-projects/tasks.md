@@ -1,6 +1,15 @@
+## 0. Prerequisites (see proposal *Dependencies*)
+
+- [ ] 0.1 `usable-graph-for-code-review` finished and archived (needed by D4 rule 1)
+- [ ] 0.2 `avi-1765` implemented and archived (Java import resolution; its `GrammarsSpec` failures fixed)
+- [ ] 0.3 `avi-1440` implemented (its TypeScript `GrammarsSpec` failure fixed)
+- [ ] 0.4 `BoundedDeltaCommunitySpec` "small random graphs" property fixed or bounded, so the full suite terminates
+- [ ] 0.5 `modularity-undirected-view` implemented (validation numbers use the undirected score)
+- [ ] 0.6 `clustering-evaluation-and-selection` reconciled with the merged Bunch requirements (closed as superseded or rebased)
+
 ## 1. D1 — No size cap on Bunch
 
-- [ ] 1.1 `UseCase/Pipeline/Core.hs`: skip `capCommunitySizes` and `oversizedCommunities` when the algorithm is Bunch. Check: `ClusterSpec` — 29-file nestjs-realworld fixture keeps fewer modules than files and MQ > 0 with `--max-community-fraction 0.05`; Leiden still capped
+- [ ] 1.1 `UseCase/Pipeline/Core.hs`: skip `capCommunitySizes` and `oversizedCommunities` when the algorithm is Bunch (`community-size-cap` delta). Check: `ClusterSpec` — 29-file nestjs-realworld fixture keeps fewer modules than files and MQ > 0 with `--max-community-fraction 0.05`; Leiden still capped
 
 ## 2. D2 — Relation allowlist, Step-5 reuse
 
@@ -18,8 +27,8 @@
 
 ## 4. D4 — Corpus-aware import resolution
 
-- [ ] 4.1 New `Infrastructure/Extract/ImportResolution.hs`: rules 1–4 of the spec, uniqueness rule, tsconfig/jsconfig `paths` reader. Check: `ImportResolutionSpec` — one case per spec scenario, ambiguous suffix left external, scoped package untouched
-- [ ] 4.2 Wire it between extraction and `buildGraph` in the build use case; drop orphaned `External` nodes. Check: integration test on a fixture with `./b`, `@/lib/x`, `$lib/api.js`, a JVM import
+- [ ] 4.1 New `Infrastructure/Extract/ImportResolution.hs`: rules 1–3 of the spec as built-in resolvers (`path-alias`, `tsconfig-paths`) of the `avi-1766` `resolve:` framework (or with its precedence if it has not landed), uniqueness rule, tsconfig/jsconfig `paths` reader. Check: `ImportResolutionSpec` — one case per spec scenario, ambiguous suffix left external, scoped package untouched, a `resolve:` entry overrides a built-in rule
+- [ ] 4.2 Wire it between extraction and `buildGraph` in the build use case, after `usable-graph-for-code-review`'s per-file resolution; drop orphaned `External` nodes. Check: integration test on a fixture with `./b`, `@/lib/x`, `$lib/api.js` (Java covered by `avi-1765`)
 - [ ] 4.3 Existing `import-resolution` scenarios (Haskell canonical ids, TS connectivity, no orphan imports) still pass
 
 ## 5. Validation on real repositories
