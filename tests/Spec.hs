@@ -47,6 +47,7 @@ import qualified Graphos.UseCase.Extract.HaskellSpec
 import qualified Graphos.UseCase.Extract.ImageSpec
 import qualified Graphos.UseCase.QuerySpec
 import qualified Graphos.UseCase.ClusterSpec
+import qualified Graphos.UseCase.ClusterEvalSpec
 import qualified Graphos.UseCase.Query.RefineSpec
 import qualified Graphos.UseCase.Query.RenderSpec
 import qualified Graphos.UseCase.SelectContextSpec
@@ -161,6 +162,7 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.Extract.ImageSpec.spec
   Graphos.UseCase.QuerySpec.spec
   Graphos.UseCase.ClusterSpec.spec
+  Graphos.UseCase.ClusterEvalSpec.spec
   Graphos.UseCase.Query.RefineSpec.spec
   Graphos.UseCase.Query.RenderSpec.spec
   Graphos.UseCase.SelectContextSpec.spec

@@ -25,7 +25,10 @@ module Graphos.UseCase.ClusterEval
   , landscapeReport
   , foldCommunitiesToFiles
   , landscapeSummary
+  , landscapeJSON
   ) where
+
+import Data.Aeson (Value, object, (.=))
 
 import Data.List (nub, sort, sortOn)
 import Data.Ord (Down(..))
@@ -129,7 +132,7 @@ foldCommunitiesToFiles mdg g =
       nodeComm = Map.fromList
         [ (nodeId n, c) | n <- Map.elems (gNodes g), Just c <- [nodeCommunityId n] ]
       nodesByFile = Map.fromListWith (flip (++))
-        [ (nodeSourceFile n, nodeId n) | n <- Map.elems (gNodes g) ]
+        [ (nodeSourceFile n, [nodeId n]) | n <- Map.elems (gNodes g) ]
       fileComm = Map.fromList
         [ (f, majority cids)
         | f <- files
@@ -145,7 +148,7 @@ foldCommunitiesToFiles mdg g =
       idxOf = Map.fromList (zip grouped [0 :: Int ..])
       singletons = zip [length grouped ..]
                        [ f | f <- files, case fileComm Map.! f of Nothing -> True; _ -> False ]
-      singletonIdx = Map.fromList singletons
+      singletonIdx = Map.fromList [ (f, i) | (i, f) <- singletons ]
       fullAssign = VU.fromList
         [ case fileComm Map.! f of
             Just c  -> idxOf Map.! c
@@ -189,7 +192,7 @@ basinsTable bs =
 
 similarityTable :: SimilarityDistribution -> [Text]
 similarityTable d =
-  ["| Bucket | P_uv | Edges | Share of \|E\| |"
+  ["| Bucket | P_uv | Edges | Share of \\|E\\| |"
   , "|--------|------|-------|---------------|"]
   ++ [ T.pack ("| " ++ name ++ " | " ++ range ++ " | " ++ show (countOf b)
         ++ " | " ++ showDouble (similarityShare d b) ++ "% |")
@@ -219,3 +222,72 @@ leidenLines (Just p) =
 -- | Fixed-notation double rendering for the summary tables.
 showDouble :: Double -> String
 showDouble x = showFFloat (Just 4) x ""
+
+-- | The landscape as one JSON object (@landscape.json@ and @--json@):
+-- @config@, @mdg@, @runs@ (sorted by final MQ), @similarity@, @basins@,
+-- @random_baseline@ and, when the graph carries communities, @leiden@.
+landscapeJSON :: LandscapeInput -> LandscapeReport -> Value
+landscapeJSON input rep = object $
+  [ "config" .= object
+      [ "seed"              .= liSeed input
+      , "runs"              .= liRuns input
+      , "random_partitions" .= liRandomPartitions input
+      , "weighted"          .= liWeighted input
+      , "random_graph"      .= fmap renderRandomGraphSpec (liControl input)
+      , "basin_min_share"   .= liBasinMinShare input
+      , "threshold"         .= bcThreshold (liBunch input)
+      , "annealing"         .= fmap (\(t0, a) -> object ["t0" .= t0, "alpha" .= a]) (bcAnnealing (liBunch input))
+      , "max_iterations"    .= bcMaxIterations (liBunch input)
+      ]
+  , "mdg" .= object
+      [ "files" .= mdgFileCount mdg
+      , "edges" .= VU.length (mdgEdgeU mdg)
+      ]
+  , "runs" .= map runJSON (lrRuns res)
+  , "similarity" .= object
+      ( [ "edges" .= simEdges sim, "runs" .= simRuns sim ]
+        ++ [ bucketKey b .= object
+               [ "edges"   .= Map.findWithDefault 0 b (simCounts sim)
+               , "percent" .= similarityShare sim b ]
+           | b <- [minBound .. maxBound] ] )
+  , "basins" .= map basinJSON (lrBasins res)
+  , "random_baseline" .= object
+      [ "count"  .= rbCount bl
+      , "min"    .= rbMin bl
+      , "median" .= rbMedian bl
+      , "max"    .= rbMax bl
+      ]
+  ]
+  ++ [ "leiden" .= object
+         [ "mq"             .= lpMQ p
+         , "clusters"       .= lpClusters p
+         , "intra_fraction" .= lpIntraFraction p ]
+     | Just p <- [lrLeiden rep] ]
+  where
+    mdg = lrmdg rep
+    res = lrResult rep
+    sim = lrSimilarity res
+    bl  = lrBaseline res
+    bucketKey b = case b of
+      BucketZero   -> "zero"
+      BucketLow    -> "low"
+      BucketMedium -> "medium"
+      BucketHigh   -> "high"
+    runJSON r = object
+      [ "seed"              .= rrSeed r
+      , "start_mq"          .= rrStartMQ r
+      , "start_clusters"    .= rrStartClusters r
+      , "final_mq"          .= rrFinalMQ r
+      , "final_clusters"    .= rrFinalClusters r
+      , "intra_fraction"    .= rrIntraFraction r
+      , "evaluations"       .= rrEvaluations r
+      , "iterations"        .= rrIterations r
+      , "annealing_accepts" .= rrAnnealingAccepts r
+      ]
+    basinJSON b = object
+      [ "mq_bin"        .= basinKey b
+      , "runs"          .= basinRuns b
+      , "percent"       .= basinShare b
+      , "mq_range"      .= [fst (basinMQRange b), snd (basinMQRange b)]
+      , "cluster_range" .= [fst (basinClusterRange b), snd (basinClusterRange b)]
+      ]

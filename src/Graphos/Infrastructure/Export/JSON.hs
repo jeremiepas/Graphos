@@ -81,6 +81,7 @@ emptyAnalysis = Analysis
   , analysisQuestions   = []
   , analysisArticulation = []
   , analysisBccCount    = 0
+  , analysisPartitionQuality = Nothing
   }
 
 -- | Export a subgraph (a 'G.LabeledGraph') in the standard graph.json format so

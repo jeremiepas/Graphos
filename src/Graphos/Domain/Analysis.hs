@@ -71,6 +71,7 @@ analyze g commMap cohesionMap =
     , analysisQuestions    = questions
     , analysisArticulation = artPoints
     , analysisBccCount     = bccCount
+    , analysisPartitionQuality = Nothing
     }
 
 surprisingConnections :: Graph -> CommunityMap -> Int -> [SurprisingConnection]

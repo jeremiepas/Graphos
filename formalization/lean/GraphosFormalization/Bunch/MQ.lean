@@ -1,6 +1,6 @@
 /-
   bunch-search-based-modularization — Lean arm of the `modularization-quality`
-  capability (openspec/changes/bunch-search-based-modularization).
+  capability (openspec/changes/archive/2026-11-11-bunch-search-based-modularization).
 
   Source: Mitchell & Mancoridis, *On the evaluation of the Bunch search-based
   software modularization algorithm*, Soft Computing 12(1):77–93, 2008, §2.2:
