@@ -29,6 +29,8 @@ module Graphos.UseCase.Cluster
   , partitionQuality
   , clusterAlgorithmFromConfig
   , capPartition
+  , bunchPartitionQuality
+  , restrictToRelations
   , isBunchPartition
   , stepFiveClustering
   , BunchRunInfo(..)
@@ -43,9 +45,9 @@ import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Ord (comparing)
 
-import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation)
+import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation, relationToText, extractionFromLists)
 import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..))
-import Graphos.Domain.Graph (Graph, gNodes, gEdges)
+import Graphos.Domain.Graph (Graph(..), buildGraph)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
 import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity, capCommunitySizes)
 import Graphos.Domain.Community.MQ (Weighting(..), modularizationQuality, mqValue, mqIntraFraction)
@@ -56,6 +58,7 @@ import Graphos.Domain.Community.Bunch
   , bunchClusterPartitioned
   , defaultBunchConfig
   , defaultMDGRelations
+  , forbiddenMDGRelations
   , foldToFileMDGWith
   , mdgFileCount
   )
@@ -279,7 +282,7 @@ runClustering algo res g = case algo of
             | (cid, members) <- zip [0 :: Int ..] (prPartition result) ]
           info = BunchRunInfo { briRuns = prRuns result, briMoves = prMoves result, briPasses = prPasses result }
       in ( comm, scoreAllCohesion (undirectedView g) comm
-         , (partitionQuality "bunch" g comm Nothing) { cqBunchRuns = Just info } )
+         , (bunchPartitionQuality (bsRelations bs) g comm) { cqBunchRuns = Just info } )
       -- Cohesion is scored on the same undirected projection as for Leiden
       -- (per-community intra-edge density), so the analysis and aggregates
       -- downstream stay uniform across algorithms.
@@ -300,7 +303,31 @@ partitionQuality name g cm skip =
        , cqClusters      = Map.size cm
        , cqSkip          = skip
        , cqBunchRuns     = Nothing
+       , cqScoredRelations = Nothing
        }
+
+-- | Quality of a Bunch partition, scored over the relations Bunch clustered
+-- on (bunch-real-projects D2): the MDG relations minus the never-folded ones.
+-- Scoring the whole exported graph instead would count the @depends_on@ /
+-- @inferred@ edges added by edge inference after clustering, so the report
+-- would disagree with the MQ the search optimised.
+bunchPartitionQuality :: [Relation] -> Graph -> CommunityMap -> ClusterQuality
+bunchPartitionQuality rels g cm =
+  let scored = mdgRelations rels
+  in (partitionQuality "bunch" (restrictToRelations scored g) cm Nothing)
+       { cqScoredRelations = Just (map relationToText scored) }
+
+-- | The relations a Bunch MDG folds: the configured ones minus
+-- 'forbiddenMDGRelations', in their configured order.
+mdgRelations :: [Relation] -> [Relation]
+mdgRelations rels = [ r | r <- rels, r `notElem` forbiddenMDGRelations ]
+
+-- | The graph with the same nodes and only the edges of the given relations.
+restrictToRelations :: [Relation] -> Graph -> Graph
+restrictToRelations rels g =
+  buildGraph (gDirected g) $ extractionFromLists
+    (Map.elems (gNodes g))
+    [ e | e <- Map.elems (gEdges g), edgeRelation e `elem` rels ]
 
 -- | The community-size cap post-pass of the pipeline (spec
 -- @community-size-cap@, bunch-real-projects D1), keyed on the algorithm that
@@ -324,7 +351,8 @@ isBunchPartition q = cqAlgorithm q == "bunch"
 -- D2): Leiden re-clusters the enriched graph; Bunch reuses its Step-4
 -- partition — its MDG excludes every relation edge inference adds, so a
 -- second search would only repeat the first — with cohesion recomputed on the
--- enriched graph and the quality re-scored there.
+-- enriched graph and the quality re-scored there over the MDG relations
+-- ('bunchPartitionQuality'), which inference does not touch.
 stepFiveClustering :: ClusterAlgorithm -> Resolution
                    -> (CommunityMap, CohesionMap, ClusterQuality)  -- ^ Step-4 result
                    -> Graph                                       -- ^ enriched graph
@@ -334,7 +362,11 @@ stepFiveClustering algo res (comm4, _, q4) enriched
   | otherwise =
     ( comm4
     , scoreAllCohesion (undirectedView enriched) comm4
-    , (partitionQuality (cqAlgorithm q4) enriched comm4 (cqSkip q4)) { cqBunchRuns = cqBunchRuns q4 } )
+    , (bunchPartitionQuality rels enriched comm4) { cqBunchRuns = cqBunchRuns q4 } )
+  where
+    rels = case algo of
+      BunchAlgorithm bs -> bsRelations bs
+      Leiden            -> defaultMDGRelations
 
 -- | The stage algorithm selected by the effective clustering configuration
 -- (@graphos.yaml@ with CLI overrides applied).

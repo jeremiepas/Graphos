@@ -827,8 +827,11 @@ clusterGraph appEnv graph config _embeddingsPath = do
           finalComm = capPartition rawQuality (cfgCommunityCapEnabled config) frac enrichedGraph' rawComm
           -- Re-scored after the size cap so the report's partition quality
           -- describes exactly the communities the export writes.
-          quality = (partitionQuality (cqAlgorithm rawQuality) enrichedGraph' finalComm (cqSkip rawQuality))
-                      { cqBunchRuns = cqBunchRuns rawQuality }
+          -- A Bunch partition is never capped and is already scored over its
+          -- MDG relations by 'stepFiveClustering'.
+          quality
+            | isBunchPartition rawQuality = rawQuality
+            | otherwise = partitionQuality (cqAlgorithm rawQuality) enrichedGraph' finalComm (cqSkip rawQuality)
           anal = (analyzeGraph enrichedGraph' finalComm finalCohes)
                    { analysisPartitionQuality = Just quality }
       forM_ (cqSkip quality) $ \sk ->

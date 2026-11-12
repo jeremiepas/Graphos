@@ -8,6 +8,8 @@
 - [x] 2.2 `Domain/Community/Bunch.hs` `foldToFileMDG`: fold only allowlisted relations. Check: `BunchSpec` — `depends_on`/`documents` edges add no MDG pair; existing fold scenarios unchanged
 - [x] 2.3 `UseCase/Pipeline/Core.hs`: for Bunch, Step 5 joins the Step-4 partition to the enriched graph (no second search), recomputes cohesion. Check: `ClusterSpec`/pipeline test — Bunch search invoked once, exported partition = Step-4 partition
 
+- [x] 2.4 Report quality of a Bunch partition scored over the MDG relations (`Cluster.bunchPartitionQuality`, `report-consistency` delta); the report line names them. Check: `ClusterSpec` — Step-5 quality on the inference-enriched graph equals the Step-4 quality, and differs from the whole-graph MQ; `ReportSpec` — scope rendered
+
 ## 3. D3 — Partitioned search, global refinement
 
 - [x] 3.1 `Bunch.hs` `splitBySubtree :: Int -> [FilePath] -> [[FilePath]]` (split by next path component, pool siblings < max/10, alphabetical cut for a single directory). Check: QuickCheck — every chunk ≤ max, chunks partition the input, order-invariant
