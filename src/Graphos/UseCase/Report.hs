@@ -91,7 +91,16 @@ partitionQualityLines (Just q) =
   : [ T.pack ("Bunch skipped: " ++ show (skipFiles sk) ++ " files exceed the cap of "
               ++ show (skipCap sk) ++ "; Leiden ran instead")
     | Just sk <- [cqSkip q] ]
-  where fmt x = showFFloat (Just 4) x ""
+  ++ [ T.pack ("Bunch runs: " ++ show (length (briRuns r)) ++ " (" ++ sizes (briRuns r) ++ " files)"
+               ++ ", refinement: " ++ show (briMoves r) ++ " moves in " ++ show (briPasses r) ++ " passes")
+     | Just r <- [cqBunchRuns q] ]
+  where
+    fmt x = showFFloat (Just 4) x ""
+    sizes rs = case rs of
+      [one] -> show one
+      _ | length rs <= 8 -> intercalateComma (map show rs)
+        | otherwise -> intercalateComma (map show (take 8 rs)) ++ ", …"
+    intercalateComma = foldr1 (\a b -> a ++ ", " ++ b)
 
 -- | Render the "Extraction Coverage" section lines (extraction-quality:
 -- "Extraction coverage is reported in GRAPH_REPORT.md"): files detected,

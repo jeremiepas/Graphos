@@ -234,11 +234,16 @@ spec = do
       fmap cfgClusteringOverrides (parsePipeline
         [ "--cluster-algorithm", "bunch", "--seed", "7", "--bunch-population", "4"
         , "--bunch-threshold", "50", "--bunch-sa", "100,0.99"
-        , "--bunch-max-iterations", "200", "--bunch-max-files", "3000", "--bunch-weighted" ])
+        , "--bunch-max-iterations", "200", "--bunch-max-files", "3000"
+        , "--bunch-max-files-per-run", "250", "--bunch-weighted" ])
         `shouldBe` Right ClusteringOverrides
           { covAlgorithm = Just AlgoBunch, covSeed = Just 7, covPopulation = Just 4
           , covThreshold = Just 50, covAnnealing = Just (100, 0.99)
-          , covMaxIterations = Just 200, covMaxFiles = Just 3000, covWeighted = True }
+          , covMaxIterations = Just 200, covMaxFiles = Just 3000, covMaxFilesPerRun = Just 250, covWeighted = True }
+
+    it "rejects --bunch-max-files-per-run below 2 (bunch-real-projects D3)" $
+      fmap cfgClusteringOverrides (parsePipeline ["--bunch-max-files-per-run", "1"])
+        `shouldSatisfy` either (const True) (const False)
 
     it "accepts --cluster-algorithm leiden and --bunch-sa on" $ do
       fmap (covAlgorithm . cfgClusteringOverrides) (parsePipeline ["--cluster-algorithm", "leiden"])
