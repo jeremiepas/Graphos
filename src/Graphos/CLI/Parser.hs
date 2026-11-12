@@ -167,7 +167,8 @@ clusteringOverridesOpts = ClusteringOverrides
   <*> optional (option (boundedIntReader "--bunch-threshold" 0 100) (long "bunch-threshold" <> metavar "ETA" <> help "Bunch: hill-climbing threshold in percent, 0 = next-ascent .. 100 = steepest-ascent (default: 0)"))
   <*> optional (option annealingReader (long "bunch-sa" <> metavar "T0,ALPHA" <> help "Bunch: enable simulated annealing with initial temperature T0 and cooling rate ALPHA (e.g. 100,0.99; 'on' uses 100,0.99)"))
   <*> optional (option (boundedIntReader "--bunch-max-iterations" 1 maxBound) (long "bunch-max-iterations" <> metavar "N" <> help "Bunch: iteration cap per search (default: 10000)"))
-  <*> optional (option (boundedIntReader "--bunch-max-files" 0 maxBound) (long "bunch-max-files" <> metavar "N" <> help "Bunch: file count above which Leiden runs instead (default: 5000)"))
+  <*> optional (option (boundedIntReader "--bunch-max-files" 0 maxBound) (long "bunch-max-files" <> metavar "N" <> help "Bunch: hard ceiling, file count above which Leiden runs instead (default: 50000)"))
+  <*> optional (option (boundedIntReader "--bunch-max-files-per-run" 2 maxBound) (long "bunch-max-files-per-run" <> metavar "N" <> help "Bunch: files per search run; larger graphs are split by directory sub-tree, then refined as a whole (default: 500)"))
   <*> switch (long "bunch-weighted" <> help "Bunch: weight the file graph by summed edge weights instead of one per file pair")
 
 -- | Integer reader rejecting values outside @[lo, hi]@.

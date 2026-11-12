@@ -56,7 +56,7 @@ import Graphos.Domain.Config.Memory
 import Graphos.Infrastructure.System.Memory (readMemInfo)
 import Graphos.Domain.Embedding (prepare)
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, gCompositions, gEmbeddings, gEmbeddingsPath, addEdges)
-import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..), capCommunitySizes, oversizedCommunities)
+import Graphos.Domain.Community (computeCompositions, Resolution(..), MergeStrategy(..), oversizedCommunities)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.LLMPort (LLMPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -81,7 +81,7 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiSources)
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions, buildGraphFromExtractionsWithStats)
-import Graphos.UseCase.Cluster (joinCommunitiesToNodes, computeCommunityAggregates, runClustering, partitionQuality, clusterAlgorithmFromConfig)
+import Graphos.UseCase.Cluster (joinCommunitiesToNodes, computeCommunityAggregates, runClustering, partitionQuality, clusterAlgorithmFromConfig, capPartition, isBunchPartition, stepFiveClustering)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
 import Graphos.UseCase.Label (labelCommunities)
@@ -789,7 +789,7 @@ clusterGraph appEnv graph config _embeddingsPath = do
                            , resMergeInto = MergeToNeighbor
                            , resMaxIterations = cfgMaxLeidenIterations config }
           algo = clusterAlgorithmFromConfig (gcClustering (cfgGraphosConfig config))
-          (commMap, cohesion, _) = runClustering algo res graph
+          step4@(commMap, cohesion, _) = runClustering algo res graph
       withHeapGuard lp mBudget "cluster" $ do
         _ <- evaluate (Map.size commMap + sum (map length (Map.elems commMap)))
         (commMap, cohesion) `deepseq` pure ()
@@ -818,20 +818,27 @@ clusterGraph appEnv graph config _embeddingsPath = do
 
       lpLogInfo lp "Step 5: Re-clustering and analyzing..."
       step5Start <- getCurrentTime
-      let (rawComm, finalCohes, rawQuality) = runClustering algo res enrichedGraph'
+      -- Leiden re-clusters the enriched graph; Bunch reuses its Step-4 partition
+      -- (its MDG excludes every relation inference adds) — bunch-real-projects D2.
+      let (rawComm, finalCohes, rawQuality) = stepFiveClustering algo res step4 enrichedGraph'
           frac = cfgMaxCommunityFraction config
-          finalComm = if cfgCommunityCapEnabled config
-                      then capCommunitySizes enrichedGraph' rawComm frac
-                      else rawComm
+          -- The size cap applies to Leiden partitions only (bunch-real-projects D1).
+          capActive = cfgCommunityCapEnabled config && not (isBunchPartition rawQuality)
+          finalComm = capPartition rawQuality (cfgCommunityCapEnabled config) frac enrichedGraph' rawComm
           -- Re-scored after the size cap so the report's partition quality
           -- describes exactly the communities the export writes.
-          quality = partitionQuality (cqAlgorithm rawQuality) enrichedGraph' finalComm (cqSkip rawQuality)
+          quality = (partitionQuality (cqAlgorithm rawQuality) enrichedGraph' finalComm (cqSkip rawQuality))
+                      { cqBunchRuns = cqBunchRuns rawQuality }
           anal = (analyzeGraph enrichedGraph' finalComm finalCohes)
                    { analysisPartitionQuality = Just quality }
       forM_ (cqSkip quality) $ \sk ->
         lpLogWarn lp $ T.pack $ "Bunch skipped: " ++ show (skipFiles sk) ++ " files exceed --bunch-max-files "
                              ++ show (skipCap sk) ++ "; running Leiden instead"
-      when (cfgCommunityCapEnabled config) $
+      forM_ (cqBunchRuns quality) $ \r ->
+        lpLogInfo lp $ T.pack $ "  Bunch: " ++ show (length (briRuns r)) ++ " search run(s) over "
+                             ++ show (sum (briRuns r)) ++ " files, refinement " ++ show (briMoves r)
+                             ++ " moves in " ++ show (briPasses r) ++ " passes"
+      when capActive $
         forM_ (oversizedCommunities enrichedGraph' rawComm frac) $ \(cid, cnt) ->
           lpLogWarn lp $ T.pack $ "Oversized community " ++ show cid ++ " (" ++ show cnt ++ " nodes) exceeds cap " ++ show frac ++ " of graph; splitting into sub-communities"
       withHeapGuard lp mBudget "analyze" $ do
