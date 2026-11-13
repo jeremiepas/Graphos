@@ -174,17 +174,21 @@ pass — deferred, see note on task 3.2.
       (streams 1–4, ~25 new examples) already pin down each language's
       field-based behavior precisely against verified fixtures; a second,
       slower, file-based layer for the remaining languages is deferred.
-- [ ] 5.3 **Not done**: no Fineract checkout was available in this session,
-      so no full-corpus before/after metrics were recorded against the
-      actual originating repository. What was verified instead: a hand-built
-      fixture reproducing the four diagnosed gaps (route/verb/cron/config
-      annotations, overloaded methods, `System.getenv`, intra-class calls)
-      confirms, live, via the compiled CLI: correct method/field names (0
-      return-type-label instances), 2 `calls` edges, `httpVerb`/`route`/
-      `cron`/`configKeys` populated, and `env:`/`config:` nodes with
-      `references` edges — all at both `--granularity fine` and the
-      production-default `--granularity function` (notable strings; calls
-      remain Fine-only, matching AVI-1447's original, unchanged scope).
+- [x] 5.3 Done: full-corpus before/after rerun against a shallow clone of
+      apache/fineract (7250 `.java` files), comparing a `main`-built binary
+      (separate worktree) against this change's binary on the identical
+      checkout. See `FINERACT_VERIFICATION.md` for the complete table.
+      Headline, at real-world scale: `calls` edges 0 -> 20,709;
+      return-type-mislabeled methods 5,803/40,059 (14.5%) -> 0;
+      `type_identifier` leak nodes 2,824 -> 0; 33,920 nodes gained a
+      structured `annotations` array (829 `httpVerb`, 782 `route`, 37
+      `configKeys`, 1 `topics`); 2 `Env` + 36 `Config` + 1 `Topic` canonical
+      nodes appeared. Also surfaced (and documented, not fixed — pre-existing,
+      out of scope): identifier-less Tier-3 nodes (`if_statement` etc.) share
+      a bare, kind-agnostic, cross-file-collidable id space
+      (`baseId = maybe "" (...)`, unchanged by this change); and `@Scheduled`
+      usages in Fineract use `fixedRate`/`initialDelay`, which `namedArg`
+      doesn't extract (only `cron`/`fixedDelay` are implemented).
 - [x] 5.4 Targeted `cabal test` runs green throughout (153 examples, 0
       failures, 1 pre-existing pending, across every `tree-sitter`/
       `signatures`/`AVI-1447`/`Core`/`Resolver`/`multi-source`/`notable
