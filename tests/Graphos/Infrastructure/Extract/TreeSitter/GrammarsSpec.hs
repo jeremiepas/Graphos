@@ -16,11 +16,14 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Short (toText)
 
-import Graphos.Domain.Config (Granularity(..), ExtractorConfig(..), defaultExtractors)
+import Graphos.Domain.Config
+  ( Granularity(..), ExtractorConfig(..), ExtractorMode(..), defaultExtractors
+  , FileExtensionConfig(..), defaultFileExtensions )
 import Graphos.Domain.Types (Node(..))
 import Graphos.Domain.Types.Graph (extractionNodes)
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
+import Graphos.Infrastructure.Extract.TreeSitter.Grammar (LanguageInfo(..), languageForExt)
 import Graphos.Infrastructure.Wiring (getGrammarPtr)
 
 -- | Parse @src@ with @grammar@ and return the (kind, label) of every node.
@@ -35,6 +38,18 @@ extract grammar gran path src =
         Just ts -> pure
           [ (maybe "" toText (nodeKind n), toText (nodeLabel n))
           | n <- Map.elems (extractionNodes (tsNodesToExtraction (mkSourceFile path "") gran defaultTruncationBudget ts)) ]
+
+-- | Parse @src@ with @grammar@ and return the full node list.
+extractNodes :: String -> Granularity -> FilePath -> ByteString -> IO [Node]
+extractNodes grammar gran path src =
+  case getGrammarPtr grammar of
+    Nothing -> expectationFailure ("no binding for " ++ grammar) >> pure []
+    Just lang -> do
+      parsed <- parseWithGrammar lang src
+      case parsed of
+        Nothing -> expectationFailure ("parse failed for " ++ grammar) >> pure []
+        Just ts -> pure (Map.elems (extractionNodes
+                     (tsNodesToExtraction (mkSourceFile path "") gran defaultTruncationBudget ts)))
 
 -- | Assert that some node has @kind@ and a label containing @needle@.
 hasNode :: [(Text, Text)] -> Text -> Text -> Expectation
@@ -70,6 +85,22 @@ spec = describe "tree-sitter grammars" $ do
     let grammars = mapMaybe ecGrammar (Map.elems defaultExtractors)
         unbound = filter (not . isJust . getGrammarPtr) grammars
     filter (`notElem` ["c", "nix", "markdown"]) unbound `shouldBe` []
+
+  -- `extraction` spec: the default extractor table and the grammar
+  -- extension registry agree on the languages added by AVI-1765, and the
+  -- file-category defaults actually detect them (a grammar registered for an
+  -- extension that `fecCode` does not list is never reached).
+  it "registers the AVI-1765 extensions end to end" $ do
+    let expected =
+          [ (".php",  "php"),    (".kt",   "kotlin"), (".kts", "kotlin")
+          , (".pl",   "perl"),   (".pm",   "perl"),   (".psgi", "perl")
+          , (".cs",   "csharp") ]
+    sequence_
+      [ do Map.lookup ext defaultExtractors `shouldSatisfy`
+             maybe False (\ec -> ecMode ec == ExtractTreeSitter && ecGrammar ec == Just g)
+           fmap liGrammarName (languageForExt ext) `shouldBe` Just g
+           fecCode defaultFileExtensions `shouldContain` [ext]
+      | (ext, g) <- expected ]
 
   it "Ruby: modules, classes, instance and singleton methods" $ do
     ns <- extract "ruby" GranularityFunction "a.rb" $
@@ -165,13 +196,17 @@ spec = describe "tree-sitter grammars" $ do
     hasNode ns "Import" "Baz"
 
   it "Perl: subroutines, packages and use/require imports" $ do
+    -- `sub f { }` is a function_definition and `use Foo;` a use_no_statement
+    -- at the vendored ABI 11 grammar; a quoted `require 'x.pl'` does not
+    -- parse there at all (it yields an ERROR node), so only the bareword
+    -- `require Foo::Bar;` form is claimed.
     ns <- extract "perl" GranularityFunction "a.pl" $
-      "package Shop::Cart;\nuse Foo;\nuse parent 'Base';\nsub total { 1 }\nrequire 'other.pl';\n"
+      "package Shop::Cart;\nuse Foo;\nuse parent 'Base';\nsub total { 1 }\nrequire Other::Mod;\n"
     hasNode ns "Module" "Cart"
     hasNode ns "Function" "total"
     let importLabels = [ l | (k, l) <- ns, k == "Import" ]
     importLabels `shouldSatisfy` any ("Foo" `T.isInfixOf`)
-    importLabels `shouldSatisfy` any ("other.pl" `T.isInfixOf`)
+    importLabels `shouldSatisfy` any ("Other::Mod" `T.isInfixOf`)
 
   it "Perl: use_parent captures parent class import" $ do
     ns <- extract "perl" GranularityFunction "c.pl" $
@@ -194,9 +229,35 @@ spec = describe "tree-sitter grammars" $ do
       "namespace Shop {\nclass Cart {}\n}\n"
     kinds ns `shouldNotContain` ["Unknown"]
 
+  -- A declaration that resolves to no identifier gets the node id "", and
+  -- every such node in a corpus then collides on that id when the per-file
+  -- extractions are merged — one survivor for the whole graph (AVI-1765).
+  -- Bare `type_identifier` nodes are excluded: they are leaves, so they
+  -- carry the same empty id, but they are references rather than
+  -- declarations and removing them is AVI-1440's change, not this one.
+  it "no declaration collapses to an empty node id" $ do
+    let cases =
+          [ ("perl",   "a.pl",  "package Shop::Cart;\nsub total { 1 }\n")
+          , ("php",    "a.php", "<?php\nnamespace Shop\\Cart;\nclass C {}\n")
+          , ("csharp", "a.cs",  "namespace Acme.Shop { struct Item { public int N; private Foo.Bar b; } }\n")
+          , ("java",   "A.java","package org.example;\nclass A { private Foo.Bar b; int n; }\n")
+          , ("cpp",    "a.cpp", "namespace shop { class Cart { int n; }; }\n")
+          ]
+    mapM_ (\(g, path, src) -> do
+             ns <- extractNodes g GranularityFunction path src
+             let anonymous = [ toText (nodeLabel n)
+                             | n <- ns, nodeId n == ""
+                             , fmap toText (nodeKind n) /= Just "type_identifier" ]
+             anonymous `shouldBe` [])
+          cases
+
   it "Kotlin: Kotlin is Java-alias — parses without error via Java grammar" $ do
     ns <- extract "kotlin" GranularityFunction "A.kt" $
-      "package shop\nclass Cart {}\n"
-    -- Java grammar parses Kotlin coarsely; we only guard that FFI binding
-    -- succeeds and extraction yields at least the module node.
-    ns `shouldSatisfy` (not . null)
+      "package shop\nimport foo.Bar\nclass Cart {}\n"
+    -- The Java grammar parses Kotlin coarsely; we guard that the FFI binding
+    -- succeeds, that extraction yields the module and class nodes, and that
+    -- the import carries its specifier as a label (an empty one would mean
+    -- no resolvable target for the import resolver, AVI-1765).
+    hasNode ns "Module" "A.kt"
+    hasNode ns "Class" "Cart"
+    hasNode ns "Import" "foo.Bar"

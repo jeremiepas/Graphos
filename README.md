@@ -16,8 +16,9 @@ Graphos extracts structure from your project and builds a graph: nodes are funct
 |------|-----------|------------|
 | Full symbols + resolved `imports` + `calls` | `.go` `.rs` | Class/function/method nodes, repo-resolved import edges to real files, name-matched call edges |
 | Full symbols + `calls`, imports unresolved | `.ts` `.tsx` `.js` `.jsx` | Symbol nodes and call edges; import edges exist but target a specifier-derived placeholder, not a repo-verified file |
-| Full symbols + resolved `imports`, no `calls` | `.rb` `.java` | Repo-resolved import edges; the call-matching mechanism only recognizes the `call_expression`/`new_expression` node names that Go/Rust/TS/JS grammars use — Ruby's/Java's call nodes are named differently, so no call edges |
-| Full symbols, no `calls`, no resolved imports | `.py` `.pyw` `.php` `.kt` `.kts` `.pl` `.pm` `.psgi` `.cs` | Class/method/field nodes only — same `call_expression` naming gap, and none of these have a dedicated import resolver |
+| Full symbols + resolved `imports`, no `calls` | `.rb` `.java` `.kt` `.kts` | Repo-resolved import edges (Kotlin resolves against `src/main/kotlin`, then Java interop); the call-matching mechanism only recognizes the `call_expression`/`new_expression` node names that Go/Rust/TS/JS grammars use — Ruby's/Java's/Kotlin's call nodes are named differently, so no call edges |
+| Full symbols + placeholder `imports`, no `calls` | `.php` `.pl` `.pm` `.psgi` `.cs` | Class/method/field nodes plus import edges read off the unquoted specifier (`use Foo\Bar;`, `using System.Text;`) — the target is a specifier-derived placeholder, not a repo-verified file |
+| Full symbols, no `calls`, no resolved imports | `.py` `.pyw` | Class/method/field nodes only — same `call_expression` naming gap, and no dedicated import resolver |
 | Full symbols, Haskell's own import resolver, no `calls` | `.hs` `.lhs` | Module-qualified imports resolved via Haskell-specific logic, not the generic tree-sitter import path |
 | Structure/data only | `.json` `.yaml` `.yml` `.sql` `.md` `.rst` `.adoc` | File- or document-level nodes, no symbols, no edges beyond containment |
 | C/C++ family | `.cpp` `.hpp` `.cc` `.cxx` `.hh` `.hxx` | Full symbols via the `cpp` grammar; `#include` becomes an `Import` node but isn't resolved to a verified file |
@@ -43,7 +44,7 @@ There is no audio/video transcription today, despite what older copies of this R
 |--------|-------------|---------------|
 | Setup | None — grammar is compiled in | Install and trust a language server binary |
 | Offline | Yes | No — needs the server running |
-| Cross-file imports | Real for Go/Rust/Ruby/Java; placeholder-only for most others | Native, via the server's own project model |
+| Cross-file imports | Real for Go/Rust/Ruby/Java/Kotlin; placeholder-only for most others | Native, via the server's own project model |
 | Call graph | Name-matched, same-file or import-resolved only | Semantic, via `callHierarchy`/`incomingCalls` |
 | Hover/type info | Not available | Available |
 | New/unsupported language | Needs a vendored or Hackage grammar binding | Just point `graphos.yaml`'s `lsp:` section at an installed server |
