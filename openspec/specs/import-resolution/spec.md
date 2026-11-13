@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change fix-graph-quality-and-tracing. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: Canonical module node identity
 
 Haskell stub extraction (PRD §3.2 extract stage) MUST assign module nodes and import-target nodes a canonical node ID derived from the module name, such that an `import X` edge in any file resolves to the same node as the module node produced for the file that declares `module X`. The `Main` module SHALL be exempt and keep a directory-scoped ID to avoid collisions between distinct executables.
@@ -193,3 +191,43 @@ Every Rust `use_declaration` SHALL produce its own `Import` node. This applies w
 #### Scenario: Use in a function body
 - **WHEN** a function body contains `use crate::util::fmt::render;`
 - **THEN** the extraction holds an `Import` node for it, and the function `contains` it
+
+### Requirement: Java import resolution to source roots
+
+The system SHALL resolve a Java import declaration `import a.b.C;` to the module node for `<source-root>/a/b/C.java` when that file is in the corpus. Candidate source roots SHALL be, at minimum, `src/main/java`, `src/test/java`, and any directory whose own relative path is an ancestor consistent with the package declaration of the imported file (or whose subtree contains the package path). Resolution SHALL occur in tree-sitter mode through the repository-context import resolver (Imports.hs), not through the quoted-specifier path used by TypeScript.
+
+#### Scenario: Spring Petclinic-style Java import resolves
+- **WHEN** the corpus contains `src/main/java/org/example/Foo.java` and another file contains `import org.example.Foo;`
+- **THEN** the graph contains an `imports` edge from the importing file's module node to the `Foo` module node, with target `source_file` `src/main/java/org/example/Foo.java`
+
+#### Scenario: Test source root is consulted
+- **WHEN** an imported type exists only under `src/test/java`
+- **THEN** resolution targets the corresponding test-root file rather than emitting an external node
+
+#### Scenario: Missing target is not fabricated
+- **WHEN** the resolved path does not exist in the corpus
+- **THEN** no internal edge is emitted and the specifier is counted as unresolved (or emitted as an external node, consistent with Go/Rust/Ruby behavior)
+
+### Requirement: Kotlin import resolution to JVM source roots
+
+Kotlin is parsed by the Java grammar, so its `import a.b.C` declarations reach the same repository-context resolver. The system SHALL resolve a Kotlin import to `<source-root>/a/b/C.kt` when that file is in the corpus, and to `<source-root>/a/b/C.java` otherwise (Kotlin/Java interop). Candidate source roots SHALL include `src/main/kotlin`, `src/test/kotlin`, `src/main/java`, `src/test/java` and the package-path ancestors of the importing file.
+
+#### Scenario: Kotlin import resolves to a Kotlin source file
+
+- **WHEN** the corpus contains `src/main/kotlin/org/example/model/Cart.kt` and another Kotlin file contains `import org.example.model.Cart`
+- **THEN** the graph contains an `imports` edge whose target `source_file` is `src/main/kotlin/org/example/model/Cart.kt`
+
+#### Scenario: Kotlin import falls back to a Java source file
+
+- **WHEN** an imported type exists only as `src/main/java/org/example/legacy/Ledger.java`
+- **THEN** resolution targets that `.java` file rather than emitting an external node
+
+### Requirement: New grammars participate in import edge policy
+
+For each newly added grammar, the implementation SHALL ensure that any node of kind `Import` emitted during extraction is accompanied by an `imports` edge governed by either the quoted-specifier conversion path or a language-specific resolver in Imports.hs. An extraction path that emits `Import` nodes without corresponding `imports` edges is non-conforming, per the existing cross-file connectivity requirement.
+
+#### Scenario: No orphan import nodes for new grammars
+- **WHEN** a PHP, Kotlin, Perl, or C# file with imports is extracted
+- **THEN** every emitted `Import` node's enclosing file has at least one `imports` edge, or no `Import` nodes are emitted at all
+"
+
