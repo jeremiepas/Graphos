@@ -93,9 +93,17 @@ decision that references produce no node), polluting every Java/TS graph.
 ## Non-goals / known limits
 
 - **Kotlin**: `.kt` currently parses with the *Java* grammar (imports-only
-  approximation). Streams 1–4 will not fire on real Kotlin syntax until a
-  Kotlin grammar (ABI ≤ 11) is vendored — tracked as a stretch task, not a
-  blocker.
+  approximation) — investigated and confirmed genuinely blocked, not merely
+  deferred. The only `fwcd/tree-sitter-kotlin` revision that generates at the
+  required `LANGUAGE_VERSION` ≤ 11 (tag `0.2.11`, 2021) has a real parsing
+  bug — `return foo(x)` never produces a `call_expression` — unchanged for
+  every release through at least 2026-04; the upstream fix requires ABI 14,
+  which the Hackage `tree-sitter` package (latest: `0.9.0.3`, checked
+  directly) cannot load. See tasks.md task 6.1 for the full investigation.
+  Closing this needs either a correct ABI-≤-11 Kotlin grammar that doesn't
+  currently exist, or upgrading past the Haskell binding's ABI ceiling — a
+  cross-cutting change affecting every vendored grammar, not a Kotlin-only
+  fix, and out of scope here.
 - **Haskell calls**: function application has no call node; deferred.
 - **Type-level resolution**: callee resolution stays name-based best-effort
   (confidence 0.9), consistent with AVI-1447; no symbol tables.
