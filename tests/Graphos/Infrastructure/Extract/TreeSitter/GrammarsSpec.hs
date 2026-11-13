@@ -19,8 +19,8 @@ import Data.Text.Short (toText)
 import Graphos.Domain.Config
   ( Granularity(..), ExtractorConfig(..), ExtractorMode(..), defaultExtractors
   , FileExtensionConfig(..), defaultFileExtensions )
-import Graphos.Domain.Types (Node(..))
-import Graphos.Domain.Types.Graph (extractionNodes)
+import Graphos.Domain.Types (Node(..), Edge(..), Relation(..), Extraction)
+import Graphos.Domain.Types.Graph (extractionNodes, extractionEdges, extractionFromLists)
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Grammar (LanguageInfo(..), languageForExt)
@@ -38,6 +38,19 @@ extract grammar gran path src =
         Just ts -> pure
           [ (maybe "" toText (nodeKind n), toText (nodeLabel n))
           | n <- Map.elems (extractionNodes (tsNodesToExtraction (mkSourceFile path "") gran defaultTruncationBudget ts)) ]
+
+-- | Parse @src@ with @grammar@ and return the full 'Extraction' (nodes and
+-- edges), for real-grammar checks that need to see `calls`/`references`
+-- edges, not just node kind/label.
+extractAll :: String -> Granularity -> FilePath -> ByteString -> IO Extraction
+extractAll grammar gran path src =
+  case getGrammarPtr grammar of
+    Nothing -> expectationFailure ("no binding for " ++ grammar) >> pure (extractionFromLists [] [])
+    Just lang -> do
+      parsed <- parseWithGrammar lang src
+      case parsed of
+        Nothing -> expectationFailure ("parse failed for " ++ grammar) >> pure (extractionFromLists [] [])
+        Just ts -> pure (tsNodesToExtraction (mkSourceFile path "") gran defaultTruncationBudget ts)
 
 -- | Parse @src@ with @grammar@ and return the full node list.
 extractNodes :: String -> Granularity -> FilePath -> ByteString -> IO [Node]
@@ -271,3 +284,45 @@ spec = describe "tree-sitter grammars" $ do
     hasNode ns "Module" "A.kt"
     hasNode ns "Class" "Cart"
     hasNode ns "Import" "foo.Bar"
+
+  -- extraction-semantic-enrichment: the ConvertSpec.hs unit tests pin down
+  -- individual field-based behaviors against hand-built TSNodeInfo literals
+  -- (verified against each pinned grammar's node-types.json). These checks
+  -- instead run the REAL vendored/Hackage-pinned parser on real source, to
+  -- catch any gap between that offline verification and what the actual
+  -- grammar produces.
+  describe "extraction-semantic-enrichment: real-grammar checks" $ do
+    it "Java: method named by its own name, not its return type; intra-class call resolves; annotation captured; env node present" $ do
+      ex <- extractAll "java" GranularityFine "ClientApi.java" $ TE.encodeUtf8 $ T.unlines
+        [ "package com.acme;"
+        , "import javax.ws.rs.GET;"
+        , "@javax.ws.rs.Path(\"/v1/clients\")"
+        , "public class ClientApi {"
+        , "  @GET"
+        , "  public ClientData retrieveClient(final long id) {"
+        , "    return helper(id);"
+        , "  }"
+        , "  private ClientData helper(final long id) {"
+        , "    String key = System.getenv(\"CLIENTS_TABLE\");"
+        , "    return new ClientData(key, id);"
+        , "  }"
+        , "}"
+        ]
+      let ns = Map.elems (extractionNodes ex)
+          labels = map (toText . nodeLabel) ns
+          calls = [ (edgeSource e, edgeTarget e) | e <- Map.elems (extractionEdges ex), edgeRelation e == Calls ]
+      "retrieveClient" `elem` labels `shouldBe` True
+      "ClientData" `elem` labels `shouldBe` False
+      any (\(_, t) -> "helper" `T.isSuffixOf` t) calls `shouldBe` True
+      any (\n -> fmap toText (nodeKind n) == Just "Env" && toText (nodeLabel n) == "CLIENTS_TABLE") ns
+        `shouldBe` True
+
+    it "Python: a decorator on a function is captured in nodeExtra" $ do
+      ns <- extractNodes "python" GranularityFine "service.py" $ TE.encodeUtf8 $ T.unlines
+        [ "@app.route(\"/clients\")"
+        , "def retrieve_client():"
+        , "    pass"
+        ]
+      let labels = map (toText . nodeLabel) ns
+      "retrieve_client" `elem` labels `shouldBe` True
+      any (\n -> isJust (nodeExtra n)) ns `shouldBe` True
