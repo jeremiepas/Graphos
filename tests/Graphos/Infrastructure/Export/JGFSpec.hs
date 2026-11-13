@@ -204,6 +204,7 @@ spec = do
       let node = makeNode "src/long.ts"
             TSNodeInfo
               { tsnType = "function_declaration"
+              , tsnFieldName = Nothing
               , tsnText = T.replicate 5000 "x"
               , tsnStartRow = 0, tsnStartCol = 0
               , tsnEndRow = 0, tsnEndCol = 0
@@ -222,6 +223,7 @@ spec = do
         let node = makeNode "src/long.ts"
               TSNodeInfo
                 { tsnType = "function_declaration"
+                , tsnFieldName = Nothing
                 , tsnText = T.replicate 5000 "x"
                 , tsnStartRow = 0, tsnStartCol = 0
                 , tsnEndRow = 0, tsnEndCol = 0
