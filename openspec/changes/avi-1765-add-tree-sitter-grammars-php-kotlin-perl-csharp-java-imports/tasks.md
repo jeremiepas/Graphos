@@ -75,6 +75,13 @@
   type, so a type reference is never mistaken for a name) to the C#
   `qualified_name` namespace form and to the `variable_declarator` that holds
   a field's name.
+- **The empty-id collision also hit YAML and JSON.** Found by rerunning
+  task 4.4 on Apache Fineract rather than only on the hand-made fixture
+  corpus: 92 YAML/JSON files produced exactly 1 `Document` node, because a
+  tree-sitter `document` has no identifier child. `document` joins
+  `moduleTypes`, so it is named after its file like `program` /
+  `source_file`. The lesson is that the fixture corpus must carry every
+  file category the pipeline can emit, not just the languages under change.
 - 3.4: LSP defaults were available and are registered (`omnisharp`,
   `phpactor`, `perlnavigator`, `kotlin-language-server`).
 - 6.4: `graphos-test` is **1663 examples, 1 failure, 4 pending in 84 s**, with
