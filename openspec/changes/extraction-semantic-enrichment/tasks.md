@@ -198,6 +198,56 @@ pass — deferred, see note on task 3.2.
 
 ## 6. Stretch (separate PR, not blocking)
 
-- [ ] 6.1 Vendor tree-sitter-kotlin (ABI ≤ 11) and stop parsing `.kt` with
-      the Java grammar; add Kotlin to the matrix, fixtures, and tables. Not
-      attempted this pass.
+- [ ] 6.1 **Investigated, blocked — not completable within the ABI ≤ 11
+      constraint.** `.kt` keeps parsing with the Java grammar, unchanged.
+      Attempted:
+      - `fwcd/tree-sitter-kotlin` tag `0.2.11` (2021-10-12, the last release
+        whose `grammar.js` predates all of the Unicode-identifier and
+        parser-conflict changes below) generates cleanly at
+        `LANGUAGE_VERSION 11` with the CLI 0.16.9 process this repo's other
+        vendored grammars use. But it has a confirmed, serious parsing bug,
+        not a cosmetic gap: `return foo(x)` never parses as a
+        `call_expression` (an `infix_expression`/`jump_expression` rule wins
+        the ambiguity instead), and `return Foo(x, y)` (two-plus args)
+        produces an outright `ERROR` node. Verified directly: `tree-sitter
+        parse` on `fun f() { helper(id) }` (bare statement) and
+        `fun f() { val x = helper(id) }` (RHS of a property) both correctly
+        produce `call_expression`; the identical call wrapped in `return
+        helper(id)` does not. `return expr(...)` is an extremely common
+        Kotlin shape — shipping this would make `calls` edges systematically
+        and silently incomplete for Kotlin, which is worse than the current
+        honest Java-alias approximation.
+      - Confirmed, via `git log -S`, that `grammar.js` had **zero commits**
+        between 0.3.0 (2023-10-02) and 2026-04-11 — so every tagged/dated
+        release through mid-2026 carries the identical bug.
+      - The current upstream HEAD (`d6af96d`, 2026-10-31) does fix it
+        (verified: `return helper(id)` correctly nests a `call_expression`
+        inside `jump_expression`), but requires `LANGUAGE_VERSION 14`: its
+        `grammar.js` uses a `\p{L}` Unicode regex class the 0.16.9 generator
+        rejects outright. Patching just that one rule to an ASCII-only
+        `[a-zA-Z_][a-zA-Z0-9_]*` equivalent gets past the regex error but
+        hits a second, deeper wall: an unresolved grammar conflict (`'!'
+        _expression  •  '@'  …`, between `call_expression`/
+        `check_expression`/`prefix_expression`) that the 0.16.9 generator's
+        older conflict-resolution logic cannot auto-resolve — the kind of
+        gap `vendor/README.md` already documents for SQL
+        (`DerekStride/tree-sitter-sql` "does not generate with it"). Fixing
+        this would mean hand-authoring explicit `conflicts:` entries against
+        a grammar under heavy, unfamiliar active development (40+ commits of
+        parser fixes between 2026-08 and 2026-10-31 alone) — an open-ended
+        task, not a bounded patch.
+      - Checked `tree-sitter-grammars/tree-sitter-kotlin` (the other
+        actively-maintained fork, 8 stars) as an alternative: also ships
+        only `LANGUAGE_VERSION 14`, same wall.
+      - Confirmed the **actual root constraint**: the Haskell `tree-sitter`
+        package is at `0.9.0.3` on Hackage (checked directly) — the latest
+        release, and still the ABI 9–11 ceiling `vendor/README.md` already
+        documents for `cpp`/`nix` being similarly blocked. There is no
+        newer Haskell binding to move to; the ceiling is not
+        grammar-specific.
+      - **Conclusion**: closing this gap needs either (a) a correct,
+        ABI-≤-11-generatable Kotlin grammar that doesn't currently exist
+        upstream, or (b) upgrading past the `tree-sitter-0.9` Haskell
+        binding's ABI ceiling — the latter is a cross-cutting change
+        affecting every vendored grammar (cpp, nix, yaml, sql, c-sharp,
+        perl), far beyond "add Kotlin," and belongs in its own proposal.
