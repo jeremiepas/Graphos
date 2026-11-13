@@ -235,6 +235,11 @@ spec = describe "tree-sitter grammars" $ do
   -- Bare `type_identifier` nodes are excluded: they are leaves, so they
   -- carry the same empty id, but they are references rather than
   -- declarations and removing them is AVI-1440's change, not this one.
+  it "two YAML files do not share one node id" $ do
+    a <- extractNodes "yaml" GranularityFile "a.yaml" "name: one\n"
+    b <- extractNodes "yaml" GranularityFile "b.yaml" "name: two\n"
+    map nodeId a `shouldNotBe` map nodeId b
+
   it "no declaration collapses to an empty node id" $ do
     let cases =
           [ ("perl",   "a.pl",  "package Shop::Cart;\nsub total { 1 }\n")
@@ -242,6 +247,11 @@ spec = describe "tree-sitter grammars" $ do
           , ("csharp", "a.cs",  "namespace Acme.Shop { struct Item { public int N; private Foo.Bar b; } }\n")
           , ("java",   "A.java","package org.example;\nclass A { private Foo.Bar b; int n; }\n")
           , ("cpp",    "a.cpp", "namespace shop { class Cart { int n; }; }\n")
+          -- a YAML/JSON `document` has no identifier child at all, so before
+          -- it was named after its file every YAML and JSON file in a corpus
+          -- shared the id "" and collapsed into one surviving node
+          , ("yaml",   "docker-compose.yml", "version: \"3.8\"\nservices:\n  db:\n    image: postgres\n")
+          , ("json",   "pkg.json", "{\"a\": 1, \"b\": [2, 3]}\n")
           ]
     mapM_ (\(g, path, src) -> do
              ns <- extractNodes g GranularityFunction path src
