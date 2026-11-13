@@ -19,6 +19,7 @@ import Graphos.Infrastructure.Extract.TreeSitter.Resolver (resolveImport)
 tsNode :: String -> Text -> [TSNodeInfo] -> TSNodeInfo
 tsNode ty txt children = TSNodeInfo
   { tsnType = ty
+  , tsnFieldName = Nothing
   , tsnText = txt
   , tsnStartRow = 0, tsnStartCol = 0, tsnEndRow = 0, tsnEndCol = 0
   , tsnIsNamed = True
