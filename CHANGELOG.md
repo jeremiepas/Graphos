@@ -6,6 +6,9 @@
 - Tree-sitter grammars for PHP, Kotlin (aliased to the Java parser), Perl, and
   C# are registered, plus vendored Perl/C# parsers and Hackage PHP; Java
   imports of the form `a.b.C` now resolve to `source-root/a/b/C.java`.
+- Kotlin import resolution (AVI-1765): `import a.b.C` resolves against
+  `src/main/kotlin` / `src/test/kotlin` first, then the Java source roots for
+  Kotlin/Java interop, then falls back to an external node.
 - **Stub extraction is now a visible, reported outcome.** Any code file that
   falls through to stub extraction (no tree-sitter/LSP structure) is now
   named at INFO level with a per-extension breakdown (was silent debug
@@ -16,6 +19,35 @@
   extension.
 
 ### Fixed
+- **PHP, Perl, C# and Kotlin now actually produce import edges and labelled
+  import nodes (AVI-1765).** Their grammars write the specifier unquoted, so
+  `Convert.extractSpecifier` — which only looked for string literals — yielded
+  nothing: `Import` nodes carried an empty label and no `imports` edge, which
+  the `import-resolution` spec forbids. Alongside that, PHP's import forms
+  (`namespace_use_declaration`, `include`/`require` expressions) were missing
+  from the emission whitelist, C#'s file root `compilation_unit` was missing
+  from `structureTypes` (so `.cs` files had no module node and their `using`
+  edges had no source), and three Perl node names in the whitelists did not
+  exist in the vendored ABI 11 grammar — `use Foo;` is `use_no_statement` and
+  a named `sub f { }` is `function_definition`. Verified node names are
+  recorded in `vendor/README.md`.
+- **Declarations that name themselves with a non-`identifier` node no longer
+  collapse onto one empty node id.** Perl `package Shop::Cart;`
+  (`package_name`), PHP `namespace Shop;` (`namespace_name`), C#
+  `namespace A.B { }` (`qualified_name`) and C#/Java field declarations (the
+  name sits in the `variable_declarator`) all resolved to no identifier, so
+  each got the node id `""` — and every such node in a corpus collided on
+  that id when the per-file extractions were merged, leaving exactly one
+  survivor for the whole graph.
+- **`.pl`, `.pm` and `.psgi` are in `fecCode`.** They were registered as
+  tree-sitter extensions but absent from the file-category defaults, so Perl
+  files were never detected and never reached the extractor.
+- **Java imports resolve across source roots.** Resolution walked only the
+  importing file's ancestors, so a class under `src/test/java` could not
+  resolve an import of a class under `src/main/java`. Candidate roots now
+  include each ancestor's `src/main/java` and `src/test/java`. Static imports
+  (`import static a.b.C.m;`) resolve to the enclosing type, and a file is
+  never its own import target.
 - Java wildcard imports deduplicate source files discovered across ancestor
   directories.
 - Apply review-driven changes from AVI-10 verdicts (AVI-11).

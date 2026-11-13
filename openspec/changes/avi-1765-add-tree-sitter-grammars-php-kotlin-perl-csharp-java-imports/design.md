@@ -70,8 +70,14 @@ The base Haskell `tree-sitter` package pins the runtime to ABI 9–11, so every 
 
 Rollback: revert the openspec change or disable extensions via `graphos.yaml`.
 
-## Open Questions
+## Open Questions -- resolved
 
-- Are ABI-11-compatible Hackage packages available for any of the four languages?
-- Should Perl module resolution follow `@INC`/`lib/` semantics or be deferred?
+- *Are ABI-11-compatible Hackage packages available for any of the four
+  languages?* Only PHP (`tree-sitter-php >= 0.5`). C# and Perl are vendored at
+  ABI 11; Kotlin has none at any compatible ABI and is aliased to the Java
+  grammar. See `vendor/README.md`.
+- *Should Perl module resolution follow `@INC`/`lib/` semantics or be
+  deferred?* Deferred. Perl `use`/`require` emit external placeholder targets
+  keyed by the bare specifier, which satisfies the no-orphan-import
+  requirement without guessing at `@INC`.
 " 
