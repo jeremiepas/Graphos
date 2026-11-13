@@ -18,6 +18,8 @@ module Graphos.Infrastructure.Extract.TreeSitter.Core
    , sourceStem
    , sourceFilePathStr
    , extractIdentifier
+   , childByField
+   , childrenByField
    ) where
 
 import Control.Exception (catch, SomeException(..), bracket)
@@ -47,6 +49,7 @@ import TreeSitter.Language (Language)
 -- | Simplified node info from tree-sitter AST.
 data TSNodeInfo = TSNodeInfo
   { tsnType      :: String
+  , tsnFieldName :: Maybe String  -- ^ this node's field name in its parent production, if any
   , tsnText      :: Text
   , tsnStartRow  :: Int
   , tsnStartCol  :: Int
@@ -55,6 +58,23 @@ data TSNodeInfo = TSNodeInfo
   , tsnIsNamed   :: Bool
   , tsnChildren  :: [TSNodeInfo]
   } deriving (Eq, Show)
+
+-- | First child whose tree-sitter grammar field name matches. Grammar fields
+-- (e.g. `name`, `function`, `body`) identify a child by its syntactic role
+-- instead of a positional/type-based guess — see `node-types.json` per
+-- grammar for the authoritative field list.
+childByField :: String -> TSNodeInfo -> Maybe TSNodeInfo
+childByField field node =
+  case filter (\c -> tsnFieldName c == Just field) (tsnChildren node) of
+    (c : _) -> Just c
+    []      -> Nothing
+
+-- | Every child whose tree-sitter grammar field name matches — for fields
+-- the grammar marks @multiple: true@ (e.g. TypeScript's repeatable
+-- `class_declaration.decorator`), where 'childByField' would only see the
+-- first.
+childrenByField :: String -> TSNodeInfo -> [TSNodeInfo]
+childrenByField field node = filter (\c -> tsnFieldName c == Just field) (tsnChildren node)
 
 -- | Interruptible FFI binding to tree-sitter's parse function so that
 -- Haskell async exceptions can abort a pathological parse.
@@ -129,6 +149,7 @@ readChildren depth node content
 toNodeInfo :: Node -> ByteString -> [TSNodeInfo] -> TSNodeInfo
 toNodeInfo node content children = TSNodeInfo
   { tsnType = safeNodeType (nodeType node)
+  , tsnFieldName = safeFieldName (nodeFieldName node)
   , tsnText = extractText node content
   , tsnStartRow = fromIntegral (pointRow (nodeStartPoint node))
   , tsnStartCol = fromIntegral (pointColumn (nodeStartPoint node))
@@ -154,6 +175,16 @@ safeNodeType ptr
   | ptr == nullPtr = "unknown"
   | otherwise = unsafePerformIO $ catch (peekCString (castPtr ptr))
                                          (\(_ :: SomeException) -> pure "unknown")
+
+-- | Safe CString peek for an optional grammar field name. NULL means the
+-- node has no field in its parent production (a purely positional child) —
+-- distinct from `safeNodeType`'s "unknown" placeholder, since "no field" is
+-- the common, expected case for most children.
+safeFieldName :: Ptr a -> Maybe String
+safeFieldName ptr
+  | ptr == nullPtr = Nothing
+  | otherwise = unsafePerformIO $ catch (Just <$> peekCString (castPtr ptr))
+                                         (\(_ :: SomeException) -> pure Nothing)
 
 -- | Default truncation budget for extracted text.
 defaultTruncationBudget :: Int
@@ -218,30 +249,72 @@ sourceStem (SourceFile p _) =
 sourceFilePathStr :: SourceFile -> FilePath
 sourceFilePathStr (SourceFile p _) = T.unpack p
 
--- | The identifier text for a node: the first named child whose type is one
--- of the language-neutral identifier forms, or — for the few declarations
--- that name themselves otherwise — a fallback keyed on the declaration type,
--- so that a `qualified_name` or a nested `identifier` is never mistaken for
--- the node's own name where it is really a reference. Returns 'Nothing' when
--- none exists, which callers use to suppress identifier-less wrapper nodes.
+-- | The identifier text for a node: the grammar's own `name` field when one
+-- is present (verified against each pinned grammar's `node-types.json` —
+-- e.g. java `method_declaration.name`, python `function_definition.name`),
+-- or — when the grammar exposes no field — the first named child whose type
+-- is one of the language-neutral identifier forms, preferring a plain
+-- `identifier` over a `type_identifier` (a method's return type precedes its
+-- name as a positional child in several grammars; without this preference a
+-- `ClientData retrieveClient(...)` method would be misnamed `ClientData`),
+-- or — for the few declarations that name themselves otherwise — a fallback
+-- keyed on the declaration type, so that a `qualified_name` or a nested
+-- `identifier` is never mistaken for the node's own name where it is really
+-- a reference. Returns 'Nothing' when none exists, which callers use to
+-- suppress identifier-less wrapper nodes.
 extractIdentifier :: TSNodeInfo -> Maybe Text
 extractIdentifier info =
-  case pick identifierTypes (tsnChildren info) of
-    Just t  -> Just t
-    Nothing -> case tsnType info of
-      -- C# `namespace A.B { }` names itself with a `qualified_name`; a plain
-      -- `namespace A { }` uses an `identifier`.
-      "namespace_declaration" -> pick ["qualified_name"] (tsnChildren info)
-      -- C# / Java `public Foo.Bar n;` keeps the name in the declarator —
-      -- the other children are the modifiers and the type, so an untargeted
-      -- descendant scan would return the type (`Foo`) instead. C# nests one
-      -- level deeper than Java: field_declaration > variable_declaration >
-      -- variable_declarator.
-      t | t `elem` ["field_declaration", "variable_declaration"] ->
-            pick identifierTypes
-              (concatMap tsnChildren (declarators (tsnChildren info)))
-      _ -> Nothing
+  case childByField "name" info of
+    Just c  -> Just (tsnText c)
+    Nothing -> case followDeclarator info of
+      Just t  -> Just t
+      Nothing -> case pickPreferred (tsnChildren info) of
+        Just t  -> Just t
+        Nothing -> case tsnType info of
+          -- C# `namespace A.B { }` names itself with a `qualified_name`; a plain
+          -- `namespace A { }` uses an `identifier`.
+          "namespace_declaration" -> pick ["qualified_name"] (tsnChildren info)
+          -- C# / Java `public Foo.Bar n;` keeps the name in the declarator —
+          -- the other children are the modifiers and the type, so an untargeted
+          -- descendant scan would return the type (`Foo`) instead. C# nests one
+          -- level deeper than Java: field_declaration > variable_declaration >
+          -- variable_declarator.
+          t | t `elem` ["field_declaration", "variable_declaration"] ->
+                pickPreferred (concatMap tsnChildren (declarators (tsnChildren info)))
+          _ -> Nothing
   where
+    -- C/C++ nest a declaration's name inside a `declarator` field chain
+    -- (`function_definition.declarator` is a `function_declarator`, itself
+    -- holding the name under its own `declarator` field, optionally through
+    -- `pointer_declarator`/`array_declarator`/`parenthesized_declarator`
+    -- layers) rather than exposing a direct `name` field. Verified against
+    -- the vendored `tree-sitter-cpp` grammar's `node-types.json`.
+    followDeclarator :: TSNodeInfo -> Maybe Text
+    followDeclarator node =
+      case childByField "name" node of
+        -- Java `field_declaration.declarator` -> `variable_declarator`, which
+        -- exposes its own `name` field one level in (verified via
+        -- node-types.json) — the chain terminates here even though
+        -- `variable_declarator` isn't itself a name-leaf type.
+        Just n  -> Just (tsnText n)
+        Nothing -> case childByField "declarator" node of
+          Just child
+            | tsnType child `elem`
+                [ "identifier", "field_identifier", "qualified_identifier"
+                , "destructor_name", "operator_name" ]
+                -> Just (tsnText child)
+            | otherwise -> followDeclarator child
+          Nothing -> Nothing
+    -- An `identifier` child wins over any other identifier-class child
+    -- (notably `type_identifier`, which in several grammars is a method's
+    -- return type and precedes the name positionally); falls back to the
+    -- full identifier-type scan when no plain `identifier` exists, which is
+    -- the correct outcome for declarations whose own name *is* a
+    -- `type_identifier` (e.g. a TypeScript `interface`/`type` name).
+    pickPreferred cs =
+      case filter (\c -> tsnIsNamed c && tsnType c == "identifier") cs of
+        (c : _) -> Just (tsnText c)
+        []      -> pick identifierTypes cs
     pick tys cs =
       case filter (\c -> tsnIsNamed c && tsnType c `elem` tys) cs of
         (c : _) -> Just (tsnText c)
