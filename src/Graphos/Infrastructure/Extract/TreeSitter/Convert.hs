@@ -194,6 +194,11 @@ moduleTypes =
   [ "module", "program", "source_file", "translation_unit"
   , "compilation_unit"
   , "package_clause", "mod_item"
+  -- A YAML/JSON `document` *is* its file, so it names itself after the file
+  -- like any other root. Without this it has no identifier child, so every
+  -- YAML and JSON file in a corpus shared the node id "" and collapsed into
+  -- a single surviving node (AVI-1765).
+  , "document"
   ]
 
 -- | All node types that can represent definitions (fine level).

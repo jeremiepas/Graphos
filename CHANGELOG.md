@@ -39,6 +39,12 @@
   each got the node id `""` — and every such node in a corpus collided on
   that id when the per-file extractions were merged, leaving exactly one
   survivor for the whole graph.
+- **Every YAML and JSON file in a corpus collapsed into one node.** A
+  tree-sitter `document` node has no identifier child, so it fell to the same
+  empty node id as the declarations above and only one survived the merge.
+  A `document` *is* its file, so it is now named after the file like any
+  other root. Measured on Apache Fineract: 92 YAML/JSON files, 1 node in the
+  graph before the fix.
 - **`.pl`, `.pm` and `.psgi` are in `fecCode`.** They were registered as
   tree-sitter extensions but absent from the file-category defaults, so Perl
   files were never detected and never reached the extractor.
