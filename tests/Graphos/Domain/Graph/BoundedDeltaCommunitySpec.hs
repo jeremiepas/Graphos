@@ -222,15 +222,34 @@ spec = do
 
       commMapsEquiv deltaComm fullComm `shouldBe` True
 
-    it "delta update equals full rebuild on small random graphs (property)" $ do
-      -- Use QuickCheck with limited iterations to test PROP-EQV on random graphs
+    it "delta update satisfies the community invariants on small random graphs (property)" $ do
+      -- PROP-EQV constrains the exported graph (see PROPEQVSpec); for the
+      -- community map the spec requires a valid partition of V' with the
+      -- communities outside C(Δ) carried over verbatim (INV-PARTITION, Lemma 1).
+      -- Exact equality with a full re-cluster is not required: the delta update
+      -- re-clusters C(Δ) on the induced subgraph, while a full rebuild searches
+      -- the whole graph, so the two can settle on different local optima.
       property $ \(BoundedDeltaTestCase (oldGraph0, newGraph, churnNodes)) ->
         let (oldCommMap, _) = clusterGraphWithResolution oldGraph0 testResolution
             oldGraph = setCommunityIds oldGraph0 oldCommMap
             oldComm = communityMapFromGraph oldGraph
             deltaComm = boundedDeltaCommunityUpdate testResolution oldGraph newGraph oldComm churnNodes
-            (fullComm, _) = clusterGraphWithResolution newGraph testResolution
-        in commMapsEquiv deltaComm fullComm
+
+            affected = affectedCommunities oldGraph newGraph oldComm churnNodes
+            carriedExpected =
+              Map.map (filter (`Map.member` gNodes newGraph))
+                (Map.filterWithKey (\cid _ -> not (Set.member cid affected)) oldComm)
+            carriedKept = Map.intersection deltaComm carriedExpected == carriedExpected
+
+            nodeIds = Map.keysSet (gNodes newGraph)
+            members = concat (Map.elems deltaComm)
+            covers = sort members == sort (Set.toList nodeIds)
+            noEmpty = all (not . null) (Map.elems deltaComm)
+            disjoint =
+              let counts = Map.fromListWith (+) [(nid, 1 :: Int) | nid <- members]
+              in all (== 1) (Map.elems counts)
+        in counterexample ("churn=" ++ show churnNodes ++ " delta=" ++ show deltaComm) $
+             covers && noEmpty && disjoint && carriedKept
 
   describe "boundedDeltaCommunityUpdate' (no explicit old graph)" $ do
     it "behaves as full recluster when oldGraph == newGraph" $ do
@@ -332,8 +351,11 @@ instance Arbitrary BoundedDeltaTestCase where
     newGraph <- pure $ buildGraph True $ extractionFromLists (remainingNodes ++ newNodes) remainingEdges
     pure $ BoundedDeltaTestCase (baseGraph, newGraph, churnNodes)
 
+  -- Every candidate must be strictly smaller than its input. Starting at 0
+  -- would re-emit `churn` unchanged, and a failing case whose identity shrink
+  -- still fails sends QuickCheck into an unbounded shrink loop.
   shrink (BoundedDeltaTestCase (oldG, newG, churn)) =
-    [ BoundedDeltaTestCase (oldG, newG, drop i churn) | i <- [0 .. length churn - 1] ]
+    [ BoundedDeltaTestCase (oldG, newG, drop i churn) | i <- [1 .. length churn] ]
 
 instance Show BoundedDeltaTestCase where
   show (BoundedDeltaTestCase (oldG, newG, churn)) =
