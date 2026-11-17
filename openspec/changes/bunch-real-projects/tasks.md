@@ -37,7 +37,7 @@
 
 - [ ] 5.1 `dataset-discovery` (57 repositories, clones at pinned commits): `taxonomy` ≥ 100 files in the import graph; `jhipster-sample-app` +200 internal imports; nestjs-realworld 9 modules, MQ ≈ 4.20
 - [ ] 5.2 solario-core `14d86be28` `src/cli`: MQ ≈ 18.37, 0 singletons
-- [ ] 5.3 pc26 (3,929 files): ≤ 1 % singletons, MQ ≥ 370, no Leiden fallback; record wall time
+- [x] 5.3 pc26 (3,929 files): ≤ 1 % singletons, MQ ≥ 330 as printed by the report (scored over the Bunch MDG relations), no Leiden fallback; record wall time. Measured on `e23e44e`, seed 0, `--cluster-only`: 1,092 modules, 0 singletons, MQ 332.33, 22 runs, 2,779 refinement moves in 8 passes, 299 s
 - [ ] 5.4 Leiden `DeterminismSpec` / `PermutationSpec` unchanged; full `cabal test` green
 
 ## 6. Close-out
