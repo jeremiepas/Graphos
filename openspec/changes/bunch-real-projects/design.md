@@ -142,8 +142,10 @@ for `usable-graph-for-code-review` and `avi-1765`.
   uniqueness rule. On `dataset-discovery` the check-labels-style gate (every
   path tracked, one component per file) stayed green across 57 repositories.
 - **Cross-sub-tree structure.** At pc26 scale only 28 % of imports fall inside
-  one sub-tree. Refinement recovers singletons and raises MQ (149 → 376), but
-  modularity stays lower (0.156) than on graphs clustered in one run. The
+  one sub-tree. Refinement recovers singletons and raises MQ (149 → 376 in the
+  external workaround's own metric; 332 as Graphos scores it), but
+  modularity stays lower (0.156 workaround, 0.205 Graphos) than on graphs
+  clustered in one run. The
   report states the split so that is visible.
 
 ## Validation targets (reproduce the workaround numbers)
@@ -152,6 +154,6 @@ for `usable-graph-for-code-review` and `avi-1765`.
 |---|---|
 | nestjs-realworld (29 files) | 9 modules, MQ 4.20 (today 29 singletons, MQ 0) |
 | solario-core `src/cli` (159) | MQ 18.37, 0 singletons |
-| pc26 (3,929) | ≤ 1 % singletons, MQ ≥ 370 |
+| pc26 (3,929) | ≤ 1 % singletons, MQ ≥ 330 (report MQ over the Bunch MDG relations; measured 332.33) |
 | taxonomy (Next.js `@/` aliases) | ≥ 100 files in the import graph (today 0) |
 | jhipster frontend (`app/*` paths) | +224 resolved internal imports |
