@@ -1,9 +1,9 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: TypeScript `Type` nodes come only from declarations, not references
 
-In addition to the `Function-level extraction stops at function bodies` requirement
-above, at `function` (and `file`) granularity the TreeSitter extractor SHALL emit a
+In addition to the `Function-level extraction stops at function bodies`
+requirement, at `function` (and `file`) granularity the TreeSitter extractor SHALL emit a
 `kind: "Type"` node for a **declared** TypeScript type only — a `type_declaration`
 (`type X = …`), a `type_alias_declaration` (`interface X { … }`), or an
 `enum_declaration` — and SHALL **not** emit a `Type` node for a bare `type_identifier`

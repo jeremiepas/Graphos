@@ -37,6 +37,8 @@ module Graphos.Domain.Community.Bunch
     FileMDG(..)
   , foldToFileMDG
   , foldToFileMDGWith
+  , isImportPlaceholder
+  , mdgFileSet
   , defaultMDGRelations
   , forbiddenMDGRelations
   , mdgFromPairs
@@ -80,7 +82,7 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Word (Word64)
 
-import Graphos.Domain.Types (Edge(..), Node(..), Relation(..))
+import Graphos.Domain.Types (Edge(..), Node(..), Relation(..), FileType(..))
 import Graphos.Domain.Graph (Graph, gNodes, gEdges)
 import Graphos.Domain.Community.MQ (Weighting(..), clusterFactor)
 import Graphos.Domain.Random (Gen, mkGen, uniformInt, uniformDouble)
@@ -145,6 +147,25 @@ defaultMDGRelations = [Imports, Calls, References, Extends, Implements]
 forbiddenMDGRelations :: [Relation]
 forbiddenMDGRelations = [Contains, Documents, DependsOn, Inferred]
 
+-- | A node an importer emits for its import target: kind @External@ (a
+-- package or builtin), or kind @Module@ with no line span (a path whose file
+-- is not in the corpus). Every extractor keys a real module node with a line
+-- span, and a real module node replaces its placeholder on merge.
+isImportPlaceholder :: Node -> Bool
+isImportPlaceholder nd = case fmap TS.toText (nodeKind nd) of
+  Just "External" -> True
+  Just "Module"   -> nodeLineStart nd == Nothing
+  _               -> False
+
+-- | The files that are modules of the system: those with a declared code
+-- node ('CodeFile', not an import-target placeholder). Packages, paths
+-- outside the corpus, and documentation, image or office files are not MDG
+-- files; edges into them add no pair.
+mdgFileSet :: Graph -> Set.Set ShortText
+mdgFileSet g = Set.fromList
+  [ nodeSourceFile nd | nd <- Map.elems (gNodes g)
+  , nodeFileType nd == CodeFile, not (isImportPlaceholder nd) ]
+
 -- | Fold a graph to its file-level MDG over 'defaultMDGRelations'.
 foldToFileMDG :: Weighting -> Graph -> FileMDG
 foldToFileMDG = foldToFileMDGWith defaultMDGRelations
@@ -154,8 +175,8 @@ foldToFileMDG = foldToFileMDGWith defaultMDGRelations
 foldToFileMDGWith :: [Relation] -> Weighting -> Graph -> FileMDG
 foldToFileMDGWith rels weighting g =
   let allowed = Set.fromList rels `Set.difference` Set.fromList forbiddenMDGRelations
+      files  = Set.toAscList (mdgFileSet g)
       fileOf = Map.map nodeSourceFile (gNodes g)
-      files  = Map.keys (Map.fromList [ (f, ()) | f <- Map.elems fileOf ])
       idx    = Map.fromList (zip files [0 :: Int ..])
 
       fileIdx nid = Map.lookup nid fileOf >>= \f -> Map.lookup f idx
