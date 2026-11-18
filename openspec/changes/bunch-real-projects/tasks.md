@@ -4,7 +4,7 @@
 - [x] 0.2 `avi-1765` implemented and archived (Java import resolution; its `GrammarsSpec` failures fixed)
 - [x] 0.3 `avi-1440` implemented (its TypeScript `GrammarsSpec` failure fixed). Implemented in #88; archived 2026-11-18
 - [x] 0.4 `BoundedDeltaCommunitySpec` "small random graphs" property fixed or bounded, so the full suite terminates
-- [ ] 0.5 `modularity-undirected-view` implemented (validation numbers use the undirected score)
+- [x] 0.5 `modularity-undirected-view` implemented (validation numbers use the undirected score). Archived 2026-11-19; the recorded Bunch figures come from undirected builds and are unchanged (`src/cli` re-measured)
 - [ ] 0.6 `clustering-evaluation-and-selection` reconciled with the merged Bunch requirements (closed as superseded or rebased)
 
 ## 1. D1 — No size cap on Bunch
