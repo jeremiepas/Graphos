@@ -151,7 +151,14 @@ buildLabelIndexRef nodeMap =
         | (nid, n) <- Map.toList nodeMap
         , T.length (T.toLower (toText (nodeLabel n))) > 2
         ])
-  in Map.unionWith (++) splitTokens fullLabels
+      -- identifier-resolution: the declared label is also a key as written
+      exactLabels = Map.map reverse (Map.fromListWith (++)
+        [ (lbl, [nid])
+        | (nid, n) <- Map.toList nodeMap
+        , let lbl = toText (nodeLabel n)
+        , T.length lbl > 2, T.any (\c -> T.toLower (T.singleton c) /= T.singleton c) lbl
+        ])
+  in Map.unionWith (++) (Map.unionWith (++) splitTokens fullLabels) exactLabels
 
 buildPathIndexRef :: Map NodeId Node -> Map Text [NodeId]
 buildPathIndexRef nodeMap =
