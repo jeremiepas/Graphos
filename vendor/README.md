@@ -14,6 +14,9 @@ FFI symbols are bound in `Graphos.Infrastructure.Extract.TreeSitter.Vendored`.
 | `tree-sitter-sql` | <https://github.com/m-novikov/tree-sitter-sql> | `148b442` (2022-06-19) | 11 | MIT | `parser.c` regenerated from `grammar.js` with tree-sitter CLI **0.16.9** |
 | `tree-sitter-c-sharp` | <https://github.com/tree-sitter/tree-sitter-c-sharp> | vendored 2026-10-31 (AVI-1716) | 11 | MIT | revision predates C# 9 records; `record_declaration` is not a node at this ABI |
 | `tree-sitter-perl` | <https://github.com/tree-sitter/tree-sitter-perl> | vendored 2026-10-31 (AVI-1716) | 11 | MIT | see the Perl node-type note below |
+| `tree-sitter-tsx` | <https://github.com/tree-sitter/tree-sitter-typescript> (`tsx/`, `common/`) | `aa950f5` (2020-01-27) | 11 | MIT | the revision whose `typescript/src/parser.c` is byte-identical to Hackage `tree-sitter-typescript 0.5.0.3`, so `.ts` and `.tsx` share node types; `#include <tree_sitter/parser.h>` in `tsx/src/parser.c` and `common/scanner.h` patched to a relative include of the grammar's own (older) header |
+
+`getGrammarPtr "tsx"` and `"javascript"` (`.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`) use `tree-sitter-tsx`: with the plain TypeScript grammar, JSX parsed to an `ERROR` root and the file had no module node. Hackage `tree-sitter-tsx 0.1.0.0` requires `tree-sitter < 0.3` and does not build here.
 
 `tree-sitter-php` is **not** vendored: it is provided by `tree-sitter-php >= 0.5` on Hackage (ABI 11, `LANGUAGE_VERSION 11` verified in vendor `src/parser.c`).
 
