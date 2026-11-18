@@ -35,6 +35,7 @@ import Control.DeepSeq (NFData(..))
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
 import Data.Bits (xor, shiftR, (.&.))
 import Data.List (sort)
+import Data.Maybe (isJust, isNothing)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -179,12 +180,24 @@ duplicateKeyDropCount = snd . edgeDropCounts
 -- where foldr mergeExtractions over 1000+ files causes OOM.
 mergeExtractions :: Extraction -> Extraction -> Extraction
 mergeExtractions a b =
-  let mergedNodes = extNodes a `Map.union` extNodes b
+  let mergedNodes = Map.unionWith preferDeclared (extNodes a) (extNodes b)
       mergedEdges = extEdges a `Map.union` extEdges b
   in Extraction
     { extractionNodes = mergedNodes
     , extractionEdges = mergedEdges
     }
+
+-- | On an id present in both extractions, keep the left node unless only the
+-- right one is a declaration (has a line span). An importer emits a
+-- placeholder for its import target under the target file's module-node id,
+-- with no line span; whichever file merged first used to win, so a real
+-- module node could be replaced by the placeholder (27 of 161 files of
+-- solario-core `src/cli`). For consistent extractions (equal nodes on shared
+-- ids) this is the plain left-biased union.
+preferDeclared :: Node -> Node -> Node
+preferDeclared l r
+  | isNothing (nodeLineStart l), isJust (nodeLineStart r) = r
+  | otherwise = l
 
 -- | Merge two graphs (old graph takes precedence for overlapping nodes;
 -- the new graph's exclusive keys are unioned in). `Data.Map.union` / `<>`
