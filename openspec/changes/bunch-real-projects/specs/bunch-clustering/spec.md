@@ -3,11 +3,18 @@
 ### Requirement: File-level module dependency graph
 
 The system SHALL fold a graph of any granularity to a module dependency graph
-whose nodes are the distinct `nodeSourceFile` values and whose undirected
+whose nodes are the system's code files, and whose undirected
 edges join two files when an edge whose relation is in the Bunch relation
 allowlist links a node of one file to a node of the other. The allowlist SHALL
 be `clustering.bunch.relations`, default `imports`, `calls`, `references`,
-`extends`, `implements`. It SHALL NEVER admit `contains`, `documents`,
+`extends`, `implements`. A code file is a `nodeSourceFile` with at least one
+`CodeFile` node that is not an import-target placeholder (kind `External`, or
+kind `Module` with no line span). Packages, builtins, paths outside the
+corpus, and documentation, image or office files SHALL NOT be MDG nodes, and
+edges into them add no pair. After the search, the nodes of such a file SHALL
+join the module holding most of their neighbours over the allowlisted
+relations and `documents`, ties to the lowest module id; a file with no such
+neighbour SHALL form a module of its own. It SHALL NEVER admit `contains`, `documents`,
 `depends_on`, `inferred` or any relation produced by edge inference. Self-pairs
 SHALL be dropped. The weight of a file pair SHALL be 1, or the sum of the
 folded edges' `edgeWeight` when `--bunch-weighted` is set. Files SHALL be
@@ -16,6 +23,18 @@ indexed in ascending path order before any random draw. (PRD §5.1)
 #### Scenario: symbol edges fold to one file pair
 - **WHEN** functions in `a.ts` call functions in `b.ts` three times and `b.ts` imports `a.ts`
 - **THEN** the MDG has one edge `{a.ts, b.ts}` of weight 1, or weight 4 when weighted
+
+#### Scenario: packages and out-of-corpus targets are not modules
+- **WHEN** `a.ts` and `b.ts` import each other and both import the package `zod`, and `a.ts` imports `src/domain/x.ts`, which is not in the corpus
+- **THEN** the MDG files are `a.ts` and `b.ts` with one pair, and the `zod` and `src/domain/x.ts` placeholder nodes join the module of their importers
+
+#### Scenario: documentation is not a module
+- **WHEN** `docs/a.md` documents `a1.ts` and `a2.ts`, and edge inference later adds `references` edges from code to `specs/x.md` headers
+- **THEN** neither Markdown file is an MDG file; `docs/a.md` joins the module of `a1.ts`
+
+#### Scenario: measured subtree baseline
+- **WHEN** solario-core `14d86be28` `src/cli` (161 TS files) is clustered with Bunch
+- **THEN** the MDG has 161 files, not the 351 counted when each package and each `src/domain` target was a file, and no file with a dependency edge inside `src/cli` is a module of its own
 
 #### Scenario: contains-only graph
 - **WHEN** the only edges are `contains` edges from files to their symbols
@@ -106,4 +125,4 @@ number of moves and passes.
 
 #### Scenario: measured large-repository baseline
 - **WHEN** the pc26 build (3,929 files, 17,292 import pairs) is clustered with the default limits
-- **THEN** at most 1 % of the modules are single files, no Leiden fallback is logged, and the MQ in `GRAPH_REPORT.md` (scored over the Bunch MDG relations) is at least 330 (the partitioned search without refinement gave 1,579 singletons)
+- **THEN** at most 1 % of the modules are single files that have a dependency edge (a file with none cannot move under MQ), no Leiden fallback is logged, and the MQ in `GRAPH_REPORT.md` (scored over the Bunch MDG relations between code files) is at least 330 (the partitioned search without refinement gave 1,579 singletons)
