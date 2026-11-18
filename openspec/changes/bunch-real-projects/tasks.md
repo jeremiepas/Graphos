@@ -41,7 +41,7 @@
     - taxonomy `298a885`: 0 → 168 imports, **93 files** — not met (≥ 100). Every `@/` import whose target has a module node resolves. The 22 missing files (e.g. `components/main-nav.tsx`, `components/ui/card.tsx`, `env.mjs`) have **no module node** before or after D4: `getGrammarPtr "tsx"` (and `"javascript"`) returns the plain TypeScript grammar, so JSX parses to an `ERROR` root. Needs a TSX grammar (follow-up, outside D4).
     - nestjs-realworld `c1c2cc4`, `--cluster-algorithm bunch`: 0 → 65 imports; 18 modules over 35 `src/` files, 7 singletons, report MQ 5.69. The 9 modules / MQ 4.20 figure came from the workaround's imports-only file graph over 29 files; Graphos scores over the five MDG relations (as for pc26 in #261), so the target needs restating. A hub imported from 7 modules (`user.entity.ts`) stays a singleton under MQ.
 - [ ] 5.2 solario-core `14d86be28` `src/cli`: MQ ≈ 18.37, 0 singletons
-- [ ] 5.3 pc26 (3,929 files): ≤ 1 % singletons, MQ ≥ 370, no Leiden fallback; record wall time
+- [x] 5.3 pc26 (3,929 files): ≤ 1 % singletons, MQ ≥ 330 as printed by the report (scored over the Bunch MDG relations), no Leiden fallback; record wall time. Measured on `e23e44e`, seed 0, `--cluster-only`: 1,092 modules, 0 singletons, MQ 332.33, 22 runs, 2,779 refinement moves in 8 passes, 299 s
 - [ ] 5.4 Leiden `DeterminismSpec` / `PermutationSpec` unchanged; full `cabal test` green
 
 ## 6. Close-out

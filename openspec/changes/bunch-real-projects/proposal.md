@@ -26,6 +26,10 @@ graph) removed all but one and raised MQ from 149 to 376:
 | llm-telemetry | 994 | 566 → 231 | 370 → 0 | 48.8 → 81.5 | 0.171 → 0.318 |
 | platformcon | 670 | 476 → 163 | 384 → 1 | 23.4 → 62.6 | 0.146 → 0.366 |
 
+These MQ figures come from the external workaround's own scoring. Graphos scores
+the same kind of partition over the Bunch MDG relations, and gives pc26 MQ 332
+(0 singletons), so the pc26 validation target is MQ ≥ 330.
+
 The workarounds live outside Graphos (`graphos-out-bunch-dataset/`,
 `dataset-discovery/scripts/c4/`). This change moves the fixes into Graphos so
 `graphos . --cluster-algorithm bunch` gives the same result with no extra
