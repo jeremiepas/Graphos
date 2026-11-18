@@ -87,3 +87,19 @@ SHALL be materialized in the extraction, because `buildGraph` drops edges with u
 - **WHEN** the built graph for `example/ts-lsp-test` is inspected
 - **THEN** no node has kind `External` with a `source_file` that is also the `source_file` of a
   `Module` node
+
+## ADDED Requirements
+
+### Requirement: An import edge is not shadowed by another relation on the same pair
+
+The graph keeps one edge per `(source, target)` pair. When several extracted edges share a pair,
+the system SHALL keep the most structural relation, in this order: `contains`, `imports`,
+`extends`, `implements`, `calls`, `references`, `tests`, `maps`, `documents`, the spec relations
+(`refines`, `satisfies`, `constrains`, `conflicts_with`, `supersedes`), then `depends_on` and
+`inferred`; between edges of the same relation, the larger edge id. A module's `imports` edge is
+therefore never replaced by a `calls` edge bound through the same import, so a chain of relative
+imports stays a path of `imports` hops (`lean/ReviewGraph.lean`, `chain_lifts`).
+
+#### Scenario: top-level call through an import
+- **WHEN** `index.ts` imports `dbGetById` from `./db` and calls it at top level, so the module node of `index.ts` has both an `imports` and a `calls` edge to the module node of `db.ts`
+- **THEN** the graph keeps the `imports` edge, and `graphos path index.ts db.ts` returns a path of `imports` hops
