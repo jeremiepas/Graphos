@@ -46,7 +46,7 @@ import Data.List (sortBy)
 import Data.Maybe (listToMaybe)
 import Data.Ord (comparing)
 
-import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation, relationToText, extractionFromLists)
+import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation(..), relationToText, extractionFromLists)
 import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..))
 import Graphos.Domain.Graph (Graph(..), buildGraph)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
@@ -62,6 +62,7 @@ import Graphos.Domain.Community.Bunch
   , forbiddenMDGRelations
   , foldToFileMDGWith
   , mdgFileCount
+  , mdgFileSet
   )
 import qualified Data.Set as Set
 import qualified Data.Vector as V
@@ -281,7 +282,7 @@ runClustering algo res g = case algo of
             [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
                               (map (mdgFiles mdg0 V.!) members))
             | (cid, members) <- zip [0 :: Int ..] (prPartition result) ]
-          comm = attachPlaceholderFiles (mdgRelations (bsRelations bs)) g mdg0 searched
+          comm = attachPlaceholderFiles (Documents : mdgRelations (bsRelations bs)) g mdg0 searched
           info = BunchRunInfo { briRuns = prRuns result, briMoves = prMoves result, briPasses = prPasses result }
       in ( comm, scoreAllCohesion (undirectedView g) comm
          , (bunchPartitionQuality (bsRelations bs) g comm) { cqBunchRuns = Just info } )
@@ -291,7 +292,8 @@ runClustering algo res g = case algo of
 
 
 -- | Give a community to the nodes of files left out of the MDG (import-target
--- placeholders: packages, paths outside the corpus). Each such file joins the
+-- placeholders: packages, paths outside the corpus; documentation, image and
+-- office files). Each such file joins the
 -- community holding most of its neighbours over @rels@, ties to the lowest
 -- id; a file with no such neighbour gets a community of its own, in
 -- ascending path order after the searched ones.
@@ -346,7 +348,13 @@ partitionQuality name g cm skip =
 bunchPartitionQuality :: [Relation] -> Graph -> CommunityMap -> ClusterQuality
 bunchPartitionQuality rels g cm =
   let scored = mdgRelations rels
-  in (partitionQuality "bunch" (restrictToRelations scored g) cm Nothing)
+      inMDG = mdgFileSet g
+      fileOf nid = fmap nodeSourceFile (Map.lookup nid (gNodes g))
+      bothInMDG e = all (maybe False (`Set.member` inMDG) . fileOf) [edgeSource e, edgeTarget e]
+      scope = buildGraph (gDirected g) $ extractionFromLists
+        (Map.elems (gNodes g))
+        [ e | e <- Map.elems (gEdges g), edgeRelation e `elem` scored, bothInMDG e ]
+  in (partitionQuality "bunch" scope cm Nothing)
        { cqScoredRelations = Just (map relationToText scored) }
 
 -- | The relations a Bunch MDG folds: the configured ones minus
