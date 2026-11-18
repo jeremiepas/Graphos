@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change graphos-product. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Workflow 14 — OTLP traces via hs-opentelemetry-sdk
 Module `Graphos.Infrastructure.Observability` SHALL export `runWithTracing :: Text -> GraphosConfig -> IO a -> IO a`. Module `Graphos.Infrastructure.Observability.SDK` SHALL initialize OTLP exporter on startup. Spans SHALL be created for each pipeline stage (detect, extract, build, cluster, infer, analyze, export) using `inSpan`. Endpoint default: `http://localhost:4318`. CLI: `--otel` enables, `--otel-endpoint <url>` overrides. Env: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SDK_DISABLED` (kill switch). (PRD §10.1, §10.2, workflow 14)
 
@@ -36,11 +38,19 @@ Module `Graphos.Infrastructure.Logging` SHALL export leveled logging. When OTLP 
 - **THEN** the log SHALL include the span's `trace_id`
 
 ### Requirement: Workflow 14 — debug trace JSONL output
-System SHALL write timestamped JSON events to `graphos-out/debug/*.jsonl`. Each event: `timestamp`, `stage`, `event_type`, `details`. (PRD §10.1, workflow 14)
+System SHALL write timestamped JSON events to `<output-dir>/debug/*.jsonl` when debug tracing is enabled. Each event: `timestamp`, `stage`, `event_type`, `details`. Debug tracing SHALL be enabled only when the effective log level is debug or trace and `--no-observability` is not set; `--no-observability` SHALL disable the debug trace environment so that no trace directory or file is created. `observability.debugTraceDir` SHALL be resolved against the output directory when relative, and `--debug-trace DIR` overrides it; a trace file SHALL never be written to the working directory unless that is the directory named by the operator. (PRD §10.1, workflow 14)
 
 #### Scenario: Debug JSONL file created
-- **WHEN** pipeline runs
-- **THEN** `graphos-out/debug/` SHALL contain `.jsonl` with stage transition events
+- **WHEN** pipeline runs with `--debug`
+- **THEN** `<output-dir>/debug/` SHALL contain `.jsonl` with stage transition events
+
+#### Scenario: --no-observability writes no trace
+- **WHEN** `graphos . --no-observability` runs with a global config declaring `debugTraceDir: "./traces"` and `debug: true`
+- **THEN** no `traces/` directory exists in the working directory or the output directory after the run, verifiable by `cabal test` on the observability initialisation
+
+#### Scenario: Relative trace directory lands under the output directory
+- **WHEN** `graphos . -o build/out --debug` runs with `debugTraceDir: "traces"`
+- **THEN** trace files are written under `build/out/traces/`
 
 ### Requirement: Workflow 14 — OpenTelemetry env vars
 SHALL respect: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME` (default `graphos`), `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_BSP_SCHEDULE_DELAY` (default 5000ms), `OTEL_SDK_DISABLED`. CLI flags override env vars. (PRD §10.2, workflow 14)
@@ -48,4 +58,3 @@ SHALL respect: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTE
 #### Scenario: OTEL_SERVICE_NAME from env
 - **WHEN** `OTEL_SERVICE_NAME=my-graphos` is set
 - **THEN** traces SHALL attribute to service "my-graphos"
-
