@@ -13,25 +13,32 @@ resolvers of the `resolve:` framework of `avi-1766-custom-extractors`, so a
 scope here: `avi-1765` resolves them through source roots. The system SHALL
 apply, in order:
 
-1. **Extension-less and directory targets.** `p` resolves to `p.<ext>` for the
-   extensions of the importing file's language family (TS/JS:
-   `.ts .tsx .js .jsx .mjs .cjs .mts .cts .vue .svelte`), then to
-   `p/index.<ext>`.
-2. **Root aliases.** `@/x`, `~/x`, `#/x` and `$lib/x` resolve by stripping the
-   alias root, then by a unique path-suffix match of `x`. An explicit code
-   extension in `x` is ignored for matching.
+1. **Extension-less and directory targets.** `p` resolves to `p` itself, then
+   to `p.<ext>` for the extensions of the TS/JS family
+   (`.ts .tsx .js .jsx .mjs .cjs .mts .cts .vue .svelte`), then to
+   `p/index.<ext>`; the first existing file wins, as in TypeScript's own
+   lookup. A code extension already on `p` that names no corpus file is
+   dropped first, so `./x.js` reaches `x.js` in a JavaScript project.
+2. **Root aliases.** `@/x`, `~/x` and `#/x` resolve by stripping the alias
+   root, then by a unique path-suffix match of `x`; `$lib/x` matches the
+   suffix `lib/x`. An explicit code extension in `x` is ignored for matching.
 3. **tsconfig / jsconfig `paths`.** When a `tsconfig.json` or `jsconfig.json`
    with `compilerOptions.paths` is in the corpus, a specifier matching one of
-   its patterns resolves through the mapped location. Otherwise a specifier
-   containing `/` resolves by a unique path-suffix match.
+   its patterns resolves through the mapped location, relative to its
+   `baseUrl`, using the nearest config enclosing the importing file
+   (`extends` is not followed). Otherwise a specifier containing `/` resolves
+   by a unique path-suffix match.
 
-A target SHALL resolve only when exactly one corpus file matches. A target with
-zero or several matches SHALL stay unchanged. Scoped package specifiers
-(`@scope/name`), `node:` builtins and bare package names that match no corpus
-file SHALL stay `external:`. A resolved edge SHALL keep its `EdgeId`. An
-`External` node left with no incoming edge SHALL be dropped. Resolution SHALL
-read only paths and configuration files of the corpus, and SHALL execute
-nothing. (PRD §3.2, §3.3)
+Only imports from files of the TS/JS family are considered. A suffix match
+(rules 2–3) SHALL resolve only when exactly one corpus file matches. A target
+with no match, or several suffix matches, SHALL stay unchanged. Scoped
+package specifiers (`@scope/name`) that match no `paths` pattern, `node:`
+builtins and bare package names SHALL stay `external:`. Every edge into a
+resolved placeholder is rewritten (`calls` edges bound to an import too), and
+a resolved edge SHALL keep its `EdgeId`. An `External` node, or a placeholder
+`Module` node of an unresolved path, left with no edge SHALL be dropped.
+Resolution SHALL read only paths and configuration files of the corpus, and
+SHALL execute nothing. (PRD §3.2, §3.3)
 
 #### Scenario: extension-less relative import
 - **WHEN** `src/app/a.ts` imports `./b` and `src/app/b.ts` exists
