@@ -325,7 +325,11 @@ attachPlaceholderFiles rels g mdg searched =
 -- | Score a partition of the graph: MQ (unit weights), modularity and
 -- intra-edge fraction, tagged with the algorithm name and the skip entry.
 -- The pipeline re-scores the partition after the size-cap post-pass so the
--- report describes exactly the communities the export writes.
+-- report describes exactly the communities the export writes. Modularity is
+-- scored on the simple undirected support graph inside 'modularity' itself
+-- (modularity-undirected-view), so a @--directed@ graph, or one storing both
+-- orientations of a pair, is passed as is and still yields a value in
+-- @[-1/2, 1]@.
 partitionQuality :: Text -> Graph -> CommunityMap -> Maybe BunchSkip -> ClusterQuality
 partitionQuality name g cm skip =
   let mq = modularizationQuality g cm

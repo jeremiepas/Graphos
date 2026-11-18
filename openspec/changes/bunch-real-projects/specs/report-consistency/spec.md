@@ -13,7 +13,10 @@ over the edges whose relation is in the Bunch MDG relations
 see `bunch-clustering`). These are the edges Bunch clustered on: edges added
 by edge inference after clustering, including the code↔doc `references` edges
 of semantic and bounded edge inference, are not counted. The line SHALL name
-those relations. (PRD §5.4)
+those relations. Modularity SHALL be scored on the simple undirected support
+graph of the scored edges (one record per unordered pair of distinct nodes),
+whether or not the build is `--directed`, and SHALL therefore lie in
+`[-0.5, 1]` (`modularity-undirected-view`). (PRD §5.4)
 
 #### Scenario: report agrees with export
 - **WHEN** a clustered build completes
@@ -30,3 +33,11 @@ those relations. (PRD §5.4)
 #### Scenario: Bunch quality ignores inferred code↔doc references
 - **WHEN** edge inference adds `references` edges from code nodes to Markdown header nodes after a Bunch clustering
 - **THEN** the printed MQ, modularity and intra-edge fraction equal those of the Step-4 partition before inference
+
+#### Scenario: directed build reports undirected modularity
+- **WHEN** a build runs with `--directed`
+- **THEN** the printed modularity equals the modularity of the same communities on the undirected projection of the graph, and lies in `[-0.5, 1]`
+
+#### Scenario: solario-core regression
+- **WHEN** solario-core `14d86be28` is built with `--granularity file --directed`
+- **THEN** the printed modularity is at most `1` (it printed `1.2149` before `modularity-undirected-view`)

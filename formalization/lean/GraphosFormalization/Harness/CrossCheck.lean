@@ -41,10 +41,27 @@
   the Haskell arm. This executable therefore never touches `Float`.
 -/
 import GraphosFormalization.Phase1.CrossCheckFixtures
+import GraphosFormalization.Seam.UndirectedScoring
 
 namespace GraphosFormalization
 
 open EdgeGraph
+
+/-- The `modularity-undirected-view` witnesses (`Seam/UndirectedScoring.lean`):
+the fixed score on `twoArcs` (one arc per block, read as `--directed`) and on
+`bothWays` (both orientations of each pair stored). Both give `Qnum 8 / 16`,
+where today's score gives `3/2`. -/
+def seamRows : List CrossCheckRow :=
+  [ { fixture := "twoArcs",  partition := "two blocks",
+      m := UndirectedScoring.twoArcs.fixedM,
+      qnum := UndirectedScoring.twoArcs.fixedNum UndirectedScoring.twoBlocks }
+  , { fixture := "bothWays", partition := "two blocks",
+      m := UndirectedScoring.bothWays.fixedM,
+      qnum := UndirectedScoring.bothWays.fixedNum UndirectedScoring.twoBlocks } ]
+
+/-- Every row the harness prints and checks: the §5 fixtures, then the seam
+witnesses. -/
+def allRows : List CrossCheckRow := crossCheckRows ++ seamRows
 
 /-- Number of decimal places printed for `Q`. `15` keeps the rendering well
 inside the contract's `2⁻²⁴ ≈ 5.96e-8` tolerance; the comparison itself always
@@ -99,7 +116,7 @@ def tsvColumns : String := "fixture\tpartition\tm\tqnum\tnum\tden\tqdec15"
 
 /-- The complete TSV artifact. -/
 def tsvLines : List String :=
-  tsvHeader ++ [tsvColumns] ++ crossCheckRows.map CrossCheckRow.tsvLine
+  tsvHeader ++ [tsvColumns] ++ allRows.map CrossCheckRow.tsvLine
 
 /-- Non-empty, non-comment lines — the part `--check` diffs. -/
 def dataLines (s : String) : List String :=
@@ -126,11 +143,11 @@ def printHuman : IO Unit := do
   IO.println "Tolerance: eps = 2^-24 (Double rounding only; rational fixtures are exact)."
   IO.println ""
   IO.println "  fixture  partition           m   qnum    Q (exact)   Q (decimal)"
-  for r in crossCheckRows do
+  for r in allRows do
     IO.println s!"  {r.fixture}\t{r.partition}\t{r.m}\t{r.qnum}\t{r.qFraction}\t{r.qDecimal}"
   IO.println ""
   IO.println "checks:"
-  IO.println s!"  fixture 5 range (-1/2 <= Q <= 1) on all rows: {if crossCheckRows.all rangeOk then "ok" else "VIOLATED"}"
+  IO.println s!"  fixture 5 range (-1/2 <= Q <= 1) on all rows: {if allRows.all rangeOk then "ok" else "VIOLATED"}"
   IO.println s!"  fixture 4 local move non-decreasing (exact): {if localMoveOk then "ok" else "VIOLATED"}"
   IO.println ""
   IO.println "verdict: the Lean definition reduces to the §5 exact values."
