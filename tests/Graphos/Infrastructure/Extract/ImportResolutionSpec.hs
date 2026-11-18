@@ -129,6 +129,28 @@ spec = describe "Corpus-aware import resolution (bunch-real-projects D4)" $ do
           importIds x = sort [ k | (k, e) <- Map.toList (extractionEdges x), edgeRelation e == Imports ]
       importIds ex' `shouldBe` importIds ex
 
+  it "an import whose target path differs only by a leading ./ reaches the real module node" $
+    withSystemTempDirectory "graphos-d4" $ \root -> do
+      -- the pipeline names files `./src/...` when run on `.`; resolveImport
+      -- drops the `./`, so the target id (dir hash of `src`) is not the
+      -- module node's (dir hash of `./src`)
+      let files = [ ("src/a.ts", "import { b } from './b.js';\nexport const a = b;\n")
+                  , ("src/b.ts", "export const b = 1;\n") ]
+      writeTree root files
+      let one rel = do
+            src <- BS.readFile (root </> rel)
+            lang <- maybe (fail "no grammar") pure (getGrammarPtr "typescript")
+            ts <- maybe (fail "parse") pure =<< parseWithGrammar lang src
+            pure (tsNodesToExtraction (mkSourceFile ("./" ++ rel) "") GranularityFunction defaultTruncationBudget ts)
+      exs <- mapM (one . fst) files
+      let ex = Extraction (Map.unions (map extractionNodes exs)) (Map.unions (map extractionEdges exs))
+          (ex', stats) = resolveCorpusImports [] ex
+          targets = [ toText (nodeSourceFile n) <> maybe "" (const "+line") (nodeLineStart n)
+                    | e <- Map.elems (extractionEdges ex'), edgeRelation e == Imports
+                    , Just n <- [Map.lookup (edgeTarget e) (extractionNodes ex')] ]
+      targets `shouldBe` ["./src/b.ts+line"]
+      rsExtension stats `shouldBe` 1
+
   it "is the identity on a corpus without placeholders" $
     resolveTree [ ("src/a.ts", "import { b } from './b.ts';\nexport const a = b;\n")
                 , ("src/b.ts", "export const b = 1;\n") ] $ \root ex stats -> do

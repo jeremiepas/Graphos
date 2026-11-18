@@ -11,7 +11,7 @@ import Data.Text.Short (fromText)
 import Test.Hspec
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, buildGraph)
+import Graphos.Domain.Graph (Graph, buildGraph, gNodes, gEdges)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig, foldToFileMDG, mdgFileCount, mdgEdgeCount, bunchCluster, BunchResult(..), BunchRun(..))
 import Graphos.Domain.Community.MQ (Weighting(..))
@@ -277,6 +277,32 @@ realProjectsSpec = do
           q = bunchPartitionQuality [Imports] enrichedTwoDir comm
       cqMQ q `shouldBe` mqValue (modularizationQuality (restrictToRelations [Imports] enrichedTwoDir) comm)
       cqScoredRelations q `shouldBe` Just ["imports"]
+
+    it "inferred code→doc `references` edges change neither the MDG nor the score" $ do
+      -- semantic/bounded edge inference links code to doc headers with
+      -- `References` (an allowlisted relation); a doc file is not an MDG file
+      let doc f nid = (nodeIn f nid) { nodeFileType = DocFile }
+          withDocs = buildGraph False $ extractionFromLists
+            (Map.elems (gNodes twoDirGraph) ++ [doc "specs/x.md" "x.h1", doc "specs/y.md" "y.h1"])
+            (Map.elems (gEdges twoDirGraph)
+              ++ [ edgeOf References c d | c <- ["a1", "a2", "b3"], d <- ["x.h1", "y.h1"] ])
+          step4@(comm4, _, q4) = runClustering bunch res twoDirGraph
+          (comm5, _, q5) = stepFiveClustering bunch res step4 withDocs
+      foldToFileMDG UnitWeights withDocs `shouldBe` foldToFileMDG UnitWeights twoDirGraph
+      comm5 `shouldBe` comm4
+      (cqMQ q5, cqModularity q5, cqIntraFraction q5) `shouldBe` (cqMQ q4, cqModularity q4, cqIntraFraction q4)
+
+    it "doc files left out of the MDG join the module they document, or one of their own" $ do
+      let doc f nid = (nodeIn f nid) { nodeFileType = DocFile }
+          g = buildGraph False $ extractionFromLists
+            (Map.elems (gNodes twoDirGraph) ++ [doc "docs/a.md" "da", doc "docs/lone.md" "dl"])
+            (Map.elems (gEdges twoDirGraph) ++ [edgeOf Documents "da" "a1", edgeOf Documents "da" "a2"])
+          (comm, _, _) = runClustering bunch res g
+          cidOf nid = [ cid | (cid, ms) <- Map.toList comm, nid `elem` ms ]
+      cidOf "da" `shouldBe` cidOf "a1"
+      length (cidOf "dl") `shouldBe` 1
+      cidOf "dl" `shouldNotBe` cidOf "a1"
+      cidOf "dl" `shouldNotBe` cidOf "b1"
 
     it "Leiden quality still covers every edge" $ do
       let (_, _, q) = runClustering Leiden res twoDirGraph
