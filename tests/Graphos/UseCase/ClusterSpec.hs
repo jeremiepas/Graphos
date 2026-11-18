@@ -136,6 +136,26 @@ bunchSpec = describe "runClustering (BunchAlgorithm …)" $ do
     mapM_ (\cid -> filesOf cid `shouldSatisfy` (not . null)) (Map.keys comm)
     Map.size comm `shouldSatisfy` (\k -> k >= 1 && k <= 3)
 
+  it "placeholder nodes join the community of their importers, and are covered" $ do
+    -- two triangles of files joined by one edge; package `p` is imported only
+    -- from the first triangle, package `q` by nobody
+    let tri xs = [ edgeOf Imports u v | (u, i) <- zip xs [0 :: Int ..], (v, j) <- zip xs [0 ..], i < j ]
+        files = ["a1", "a2", "a3", "b1", "b2", "b3"]
+        ph f k = (nodeIn ("external:" <> f) f) { nodeKind = Just (fromText k), nodeLineStart = Nothing }
+        nodes = [ nodeIn (f <> ".ts") f | f <- files ] ++ [ph "p" "External", ph "q" "External"]
+        edges = tri ["a1", "a2", "a3"] ++ tri ["b1", "b2", "b3"] ++ [edgeOf Imports "a3" "b1"]
+                ++ [ edgeOf Imports f "p" | f <- ["a1", "a2", "a3"] ]
+        g = buildGraph False (extractionFromLists nodes edges)
+        (comm, _, _) = runClustering (BunchAlgorithm settings) res g
+        cidOf nid = [ cid | (cid, ms) <- Map.toList comm, nid `elem` ms ]
+    sort (concatMap snd (Map.toList comm)) `shouldBe` sort (files ++ ["p", "q"])
+    cidOf "p" `shouldBe` cidOf "a1"
+    cidOf "a1" `shouldNotBe` cidOf "b1"
+    -- unreferenced `q` gets a community of its own
+    length (cidOf "q") `shouldBe` 1
+    cidOf "q" `shouldNotBe` cidOf "a1"
+    cidOf "q" `shouldNotBe` cidOf "b1"
+
 -- ───────────────────────────────────────────────
 -- File cap (5.1)
 -- ───────────────────────────────────────────────

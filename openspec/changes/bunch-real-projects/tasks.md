@@ -19,6 +19,8 @@
 
 - [x] 2.4 Report quality of a Bunch partition scored over the MDG relations (`Cluster.bunchPartitionQuality`, `report-consistency` delta); the report line names them. Check: `ClusterSpec` — Step-5 quality on the inference-enriched graph equals the Step-4 quality, and differs from the whole-graph MQ; `ReportSpec` — scope rendered
 
+- [x] 2.5 `Bunch.hs` `foldToFileMDGWith`: a file holding only import-target placeholders (`External`, or line-less `Module`) is not an MDG file; `Cluster.attachPlaceholderFiles` gives its nodes the module of most of their neighbours. Check: `BunchSpec` (placeholders not files, no pair), `ClusterSpec` (placeholders join their importers, unreferenced one alone, full cover). Measured: solario-core `src/cli` MDG 351 → 161 files, 90 → 1 singletons, 60 s → 4 s
+
 ## 3. D3 — Partitioned search, global refinement
 
 - [x] 3.1 `Bunch.hs` `splitBySubtree :: Int -> [FilePath] -> [[FilePath]]` (split by next path component, pool siblings < max/10, alphabetical cut for a single directory). Check: QuickCheck — every chunk ≤ max, chunks partition the input, order-invariant
@@ -32,6 +34,7 @@
 - [x] 4.1 New `Infrastructure/Extract/ImportResolution.hs`: rules 1–3 of the spec as built-in resolvers (`path-alias`, `tsconfig-paths`) of the `avi-1766` `resolve:` framework (or with its precedence if it has not landed), uniqueness rule, tsconfig/jsconfig `paths` reader. Check: `ImportResolutionSpec` — one case per spec scenario, ambiguous suffix left external, scoped package untouched, a `resolve:` entry overrides a built-in rule. Done: 13 examples green. `avi-1766` has not landed, so there is no `resolve:` entry to consult yet; the override case moves to 1766, which registers `path-alias` / `tsconfig-paths` as resolver kinds
 - [x] 4.2 Wire it between extraction and `buildGraph` in the build use case, after `usable-graph-for-code-review`'s per-file resolution; drop orphaned `External` nodes. Check: integration test on a fixture with `./b`, `@/lib/x`, `$lib/api.js` (Java covered by `avi-1765`). Done in `Pipeline/Core.hs` Step 2 (one INFO line with per-rule counts); `ImportResolutionSpec` runs real tree-sitter extractions of such fixtures. Not wired into `--watch` incremental re-extraction, which sees only the changed files
 - [x] 4.3 Existing `import-resolution` scenarios (Haskell canonical ids, TS connectivity, no orphan imports) still pass. Full suite 1,708 examples, 0 failures (BoundedDelta random-graph property skipped, see 0.4)
+- [x] 4.4 `Graph/Core.hs` `mergeExtractions`: a declared node (line span) wins over a line-less placeholder of the same id, in either merge order. Check: `GraphSpec`. Before, 27 of 161 `src/cli` files lost their module node to an importer's placeholder
 
 ## 5. Validation on real repositories
 
@@ -39,8 +42,9 @@
   - Partial, D4 build vs `e23e44e` (2026-11-18, pinned commits of `manifest.json`, `--no-cluster`), file-to-file `imports` between real module nodes:
     - jhipster-sample-app `6b000b5`: 0 → 548 imports (265 files), 241 resolved through tsconfig `paths` — **met** (+200).
     - taxonomy `298a885`: 0 → 258 imports, **119 files** — **met** (≥ 100). Needed the vendored TSX grammar: with the plain TypeScript grammar 22 JSX/`.mjs` files had no module node (93 files). All 131 TS/JS files now have one.
-    - nestjs-realworld `c1c2cc4`, `--cluster-algorithm bunch`: 0 → 65 imports; 18 modules over 35 `src/` files, 7 singletons, report MQ 5.69. The 9 modules / MQ 4.20 figure came from the workaround's imports-only file graph over 29 files; Graphos scores over the five MDG relations (as for pc26 in #261), so the target needs restating. A hub imported from 7 modules (`user.entity.ts`) stays a singleton under MQ.
+    - nestjs-realworld `c1c2cc4`, `--cluster-algorithm bunch`: 0 → 65 imports. After 2.5/4.4: 12 modules over 36 files, 2 singletons (`index.js`, no edges; `shared/base.controller.ts`), report MQ 3.53. Before 2.5: 18 modules, 7 singletons, MQ 5.69. The 9 modules / MQ 4.20 figure came from the workaround's imports-only file graph over 29 files; Graphos scores over the five MDG relations (as for pc26 in #261), so the target needs restating.
 - [ ] 5.2 solario-core `14d86be28` `src/cli`: MQ ≈ 18.37, 0 singletons
+  - Measured 2026-11-18 (`graphos src/cli --cluster-algorithm bunch`, seed 0): 161 files, 40 modules, **1 singleton** (`utils/governance-gate.ts`, whose 4 dependency edges all leave the subtree), report MQ 20.83, modularity 0.42, 4 s. The workaround had 38 modules, MQ 18.37, scored over its imports-only graph; the report scores the five MDG relations (cf. pc26 in #261). Before 2.5/4.4: 351 MDG files, 112 modules, 90 singletons.
 - [x] 5.3 pc26 (3,929 files): ≤ 1 % singletons, MQ ≥ 330 as printed by the report (scored over the Bunch MDG relations), no Leiden fallback; record wall time. Measured on `e23e44e`, seed 0, `--cluster-only`: 1,092 modules, 0 singletons, MQ 332.33, 22 runs, 2,779 refinement moves in 8 passes, 299 s
 - [ ] 5.4 Leiden `DeterminismSpec` / `PermutationSpec` unchanged; full `cabal test` green
 

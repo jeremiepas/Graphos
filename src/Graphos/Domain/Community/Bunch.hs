@@ -37,6 +37,7 @@ module Graphos.Domain.Community.Bunch
     FileMDG(..)
   , foldToFileMDG
   , foldToFileMDGWith
+  , isImportPlaceholder
   , defaultMDGRelations
   , forbiddenMDGRelations
   , mdgFromPairs
@@ -145,6 +146,16 @@ defaultMDGRelations = [Imports, Calls, References, Extends, Implements]
 forbiddenMDGRelations :: [Relation]
 forbiddenMDGRelations = [Contains, Documents, DependsOn, Inferred]
 
+-- | A node an importer emits for its import target: kind @External@ (a
+-- package or builtin), or kind @Module@ with no line span (a path whose file
+-- is not in the corpus). Every extractor keys a real module node with a line
+-- span, and a real module node replaces its placeholder on merge.
+isImportPlaceholder :: Node -> Bool
+isImportPlaceholder nd = case fmap TS.toText (nodeKind nd) of
+  Just "External" -> True
+  Just "Module"   -> nodeLineStart nd == Nothing
+  _               -> False
+
 -- | Fold a graph to its file-level MDG over 'defaultMDGRelations'.
 foldToFileMDG :: Weighting -> Graph -> FileMDG
 foldToFileMDG = foldToFileMDGWith defaultMDGRelations
@@ -154,8 +165,11 @@ foldToFileMDG = foldToFileMDGWith defaultMDGRelations
 foldToFileMDGWith :: [Relation] -> Weighting -> Graph -> FileMDG
 foldToFileMDGWith rels weighting g =
   let allowed = Set.fromList rels `Set.difference` Set.fromList forbiddenMDGRelations
+      nodesOfFile = Map.fromListWith (++) [ (nodeSourceFile nd, [nd]) | nd <- Map.elems (gNodes g) ]
+      -- A file holding nothing but import-target placeholders (a package, or
+      -- a path outside the corpus) is not a module of the system.
+      files  = [ f | (f, nds) <- Map.toAscList nodesOfFile, not (all isImportPlaceholder nds) ]
       fileOf = Map.map nodeSourceFile (gNodes g)
-      files  = Map.keys (Map.fromList [ (f, ()) | f <- Map.elems fileOf ])
       idx    = Map.fromList (zip files [0 :: Int ..])
 
       fileIdx nid = Map.lookup nid fileOf >>= \f -> Map.lookup f idx
