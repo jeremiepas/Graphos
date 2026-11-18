@@ -156,6 +156,14 @@ spec = do
           merged = mergeExtractions a b
       length (extractionNodes merged) `shouldBe` 2
 
+    it "a declared node wins over a line-less placeholder with the same id, in either order" $ do
+      let placeholder = testNode "m"
+          declared = (testNode "m") { nodeLineStart = Just 1, nodeLineEnd = Just 9 }
+          viaLeft = mergeExtractions (extractionFromLists [placeholder] []) (extractionFromLists [declared] [])
+          viaRight = mergeExtractions (extractionFromLists [declared] []) (extractionFromLists [placeholder] [])
+      fmap nodeLineStart (Map.lookup "m" (extractionNodes viaLeft)) `shouldBe` Just (Just 1)
+      fmap nodeLineStart (Map.lookup "m" (extractionNodes viaRight)) `shouldBe` Just (Just 1)
+
   describe "degree" $ do
     it "returns 0 for isolated nodes" $ do
       let g = buildGraph False (extractionFromLists [testNode "a"] [])

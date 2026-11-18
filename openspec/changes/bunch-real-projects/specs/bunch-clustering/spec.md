@@ -3,11 +3,18 @@
 ### Requirement: File-level module dependency graph
 
 The system SHALL fold a graph of any granularity to a module dependency graph
-whose nodes are the distinct `nodeSourceFile` values and whose undirected
+whose nodes are the distinct `nodeSourceFile` values of the system's own
+files, and whose undirected
 edges join two files when an edge whose relation is in the Bunch relation
 allowlist links a node of one file to a node of the other. The allowlist SHALL
 be `clustering.bunch.relations`, default `imports`, `calls`, `references`,
-`extends`, `implements`. It SHALL NEVER admit `contains`, `documents`,
+`extends`, `implements`. A file all of whose nodes are import-target
+placeholders (kind `External`, or kind `Module` with no line span: a package,
+a builtin, or a path outside the corpus) SHALL NOT be an MDG node, and edges
+into it add no pair. After the search, the nodes of such a file SHALL join the
+module holding most of their neighbours over the allowlisted relations, ties
+to the lowest module id; a file with no such neighbour SHALL form a module of
+its own. It SHALL NEVER admit `contains`, `documents`,
 `depends_on`, `inferred` or any relation produced by edge inference. Self-pairs
 SHALL be dropped. The weight of a file pair SHALL be 1, or the sum of the
 folded edges' `edgeWeight` when `--bunch-weighted` is set. Files SHALL be
@@ -16,6 +23,14 @@ indexed in ascending path order before any random draw. (PRD §5.1)
 #### Scenario: symbol edges fold to one file pair
 - **WHEN** functions in `a.ts` call functions in `b.ts` three times and `b.ts` imports `a.ts`
 - **THEN** the MDG has one edge `{a.ts, b.ts}` of weight 1, or weight 4 when weighted
+
+#### Scenario: packages and out-of-corpus targets are not modules
+- **WHEN** `a.ts` and `b.ts` import each other and both import the package `zod`, and `a.ts` imports `src/domain/x.ts`, which is not in the corpus
+- **THEN** the MDG files are `a.ts` and `b.ts` with one pair, and the `zod` and `src/domain/x.ts` placeholder nodes join the module of their importers
+
+#### Scenario: measured subtree baseline
+- **WHEN** solario-core `14d86be28` `src/cli` (161 TS files) is clustered with Bunch
+- **THEN** the MDG has 161 files, not the 351 counted when each package and each `src/domain` target was a file, and at most one module is a single file
 
 #### Scenario: contains-only graph
 - **WHEN** the only edges are `contains` edges from files to their symbols
