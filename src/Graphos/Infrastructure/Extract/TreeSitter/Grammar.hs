@@ -31,6 +31,8 @@ knownExtensions = Map.fromList
   , (".jsx",  LanguageInfo "javascript" "javascriptreact" CodeFile)
   , (".mjs",  LanguageInfo "javascript" "javascript" CodeFile)
   , (".cjs",  LanguageInfo "javascript" "javascript" CodeFile)
+  , (".mjs",  LanguageInfo "javascript" "javascript" CodeFile)
+  , (".cjs",  LanguageInfo "javascript" "javascript" CodeFile)
   , -- Other languages with tree-sitter support
     (".py",   LanguageInfo "python" "python" CodeFile)
   , (".pyw",  LanguageInfo "python" "python" CodeFile)

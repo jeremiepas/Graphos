@@ -322,8 +322,10 @@ convertEntity e = Entity
 -- | Get the tree-sitter language pointer for a grammar name.
 getGrammarPtr :: String -> Maybe (Ptr TS_LANG.Language)
 getGrammarPtr "typescript"   = Just TSTypeScript.tree_sitter_typescript
-getGrammarPtr "tsx"          = Just TSTypeScript.tree_sitter_typescript
-getGrammarPtr "javascript"   = Just TSTypeScript.tree_sitter_typescript
+-- TSX (vendored) also parses JavaScript: `.js` / `.jsx` files carry JSX, which
+-- the plain TypeScript grammar turns into an ERROR root with no module node.
+getGrammarPtr "tsx"          = Just TSVendored.tree_sitter_tsx
+getGrammarPtr "javascript"   = Just TSVendored.tree_sitter_tsx
 getGrammarPtr "python"       = Just TSPython.tree_sitter_python
 getGrammarPtr "json"         = Just TSJSON.tree_sitter_json
 getGrammarPtr "go"           = Just TSGo.tree_sitter_go
