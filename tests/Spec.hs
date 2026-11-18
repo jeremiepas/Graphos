@@ -40,6 +40,7 @@ import qualified Graphos.Domain.ContextSpec
 import qualified Graphos.UseCase.PipelineSpec
 import qualified Graphos.UseCase.StagingSpec
 import qualified Graphos.UseCase.ExtractSpec
+import qualified Graphos.UseCase.CodeReviewGraphSpec
 import qualified Graphos.UseCase.InferSpec
 import qualified Graphos.UseCase.InferDocumentSpec
 import qualified Graphos.UseCase.DocLinkParitySpec
@@ -156,6 +157,7 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.PipelineSpec.spec
   Graphos.UseCase.StagingSpec.spec
   Graphos.UseCase.ExtractSpec.spec
+  Graphos.UseCase.CodeReviewGraphSpec.spec
   Graphos.UseCase.InferSpec.spec
   Graphos.UseCase.InferDocumentSpec.spec
   Graphos.UseCase.DocLinkParitySpec.spec
