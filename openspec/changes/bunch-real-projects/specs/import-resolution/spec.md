@@ -63,3 +63,15 @@ SHALL execute nothing. (PRD §3.2, §3.3)
 #### Scenario: measured corpus baseline
 - **WHEN** the pipeline builds `taxonomy` (Next.js, `@/` aliases) and `jhipster-sample-app` (tsconfig `app/*`) from `dataset-discovery`
 - **THEN** taxonomy has at least 100 files joined by file-to-file `imports` edges (0 before this change) and jhipster gains at least 200 internal `imports` edges
+
+### Requirement: Declared module nodes win over import-target placeholders
+
+An importer emits a placeholder node for its import target under the id of the
+target file's module node, with no line span. When per-file extractions are
+merged, a node with a line span SHALL win over a line-less node of the same id,
+whatever the merge order. Otherwise the left operand wins, so for consistent
+extractions (equal nodes on shared ids) the merge is the plain union.
+
+#### Scenario: placeholder merged first
+- **WHEN** `src/cli/commands/x.ts` imports `../banner.js` and its extraction is merged before that of `src/cli/banner.ts`
+- **THEN** the merged node `…_banner_Module:banner.ts` is the declared module node of `banner.ts` (line span present), not the placeholder

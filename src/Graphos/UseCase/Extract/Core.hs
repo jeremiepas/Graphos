@@ -33,7 +33,7 @@ import Data.Ord (comparing)
 import Data.Bits ((.|.))
 import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
-import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef')
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import qualified Data.Text as T
 import Data.Text (Text)
 import Data.Map (Map)
@@ -155,12 +155,19 @@ extractAll appEnv config detection mProvenance = do
           let pct = (count * 100) `div` totalFiles :: Int
           in logInfo $ T.pack $ "  [extract] Processed " ++ show count ++ "/" ++ show totalFiles ++ " files (" ++ show pct ++ "%)"
 
-  let accumulateNodes :: IORef (Map.Map NodeId Node) -> [Node] -> IO ()
-      accumulateNodes ref nodes = modifyIORef' ref $ \acc ->
+  -- Extraction threads (tree-sitter pool, doc, office, image, paper) update
+  -- these refs concurrently: a plain read-then-write ('modifyIORef'') loses
+  -- one thread's update when two interleave, dropping whole files from the
+  -- merged extraction (pc26: up to 787 files differed between two runs).
+  let atomicModify :: IORef a -> (a -> a) -> IO ()
+      atomicModify ref f = atomicModifyIORef' ref (\x -> (f x, ()))
+
+      accumulateNodes :: IORef (Map.Map NodeId Node) -> [Node] -> IO ()
+      accumulateNodes ref nodes = atomicModify ref $ \acc ->
         List.foldl' (\m n -> Map.insertWith (\_old new -> new) (nodeId n) n m) acc nodes
 
       accumulateEdges :: IORef (Map.Map EdgeId Edge) -> [Edge] -> IO ()
-      accumulateEdges ref edges = modifyIORef' ref $ \acc -> Map.union (Map.fromList [(edgeId e, e) | e <- edges]) acc
+      accumulateEdges ref edges = atomicModify ref $ \acc -> Map.union (Map.fromList [(edgeId e, e) | e <- edges]) acc
 
       accumulate :: IORef (Map.Map NodeId Node) -> IORef (Map.Map EdgeId Edge) -> Extraction -> IO ()
       accumulate nodeRef edgeRef ext = do
@@ -168,7 +175,7 @@ extractAll appEnv config detection mProvenance = do
         accumulateEdges edgeRef (Map.elems (extractionEdges ext))
 
       mergeIntoRunning :: Extraction -> IO ()
-      mergeIntoRunning ext = modifyIORef' runningRef $ \running -> mergeExtractions running ext
+      mergeIntoRunning ext = atomicModify runningRef $ \running -> mergeExtractions running ext
 
   let officeThreadCount = max 1 (min 4 numThreads)
   unless (null officeFiles) $
@@ -339,8 +346,8 @@ extractAll appEnv config detection mProvenance = do
                 paperStubRef    <- newIORef 0 :: IO (IORef Int)
                 let recordResult ext = do
                       if isStubExtraction ext
-                        then modifyIORef' paperStubRef (+ 1)
-                        else modifyIORef' paperSuccessRef (+ 1)
+                        then atomicModify paperStubRef (+ 1)
+                        else atomicModify paperSuccessRef (+ 1)
                 if paperThreadCount <= 1
                   then mapM_ (\fp -> do
                     ext <- epExtractPdfFile ep config fp

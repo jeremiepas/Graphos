@@ -203,6 +203,24 @@ foldSpec = describe "foldToFileMDG" $ do
     mdgEdgeCount m `shouldBe` 0
     V.toList (mdgAdj m) `shouldBe` [VU.empty, VU.empty]
 
+  describe "import-target placeholders are not MDG files" $ do
+    -- a.ts, b.ts import each other and the package `zod`; a.ts also imports
+    -- `src/domain/x.ts`, a path outside the corpus (line-less Module node).
+    let pkg = (nodeIn "external:zod" "zod") { nodeKind = Just (fromText "External"), nodeLineStart = Nothing }
+        outside = (nodeIn "src/domain/x.ts" "x.mod") { nodeKind = Just (fromText "Module"), nodeLineStart = Nothing }
+        nodes = [ nodeIn "a.ts" "a", nodeIn "b.ts" "b", pkg, outside ]
+        edges = [ edge Imports "a" "b", edge Imports "a" "zod", edge Imports "b" "zod", edge Imports "a" "x.mod" ]
+        m = foldToFileMDG UnitWeights (buildGraph False (extractionFromLists nodes edges))
+    it "only files with a declared node are MDG files" $
+      V.toList (mdgFiles m) `shouldBe` [fromText "a.ts", fromText "b.ts"]
+    it "edges into placeholders add no pair" $
+      mdgEdgeCount m `shouldBe` 1
+    it "a file whose module node is real stays, even if a placeholder shares its path" $ do
+      let realMod = (nodeIn "c.ts" "c") { nodeKind = Just (fromText "Module") }
+          ph = (nodeIn "c.ts" "c.ph") { nodeKind = Just (fromText "Module"), nodeLineStart = Nothing }
+          m' = foldToFileMDG UnitWeights (buildGraph False (extractionFromLists [realMod, ph] []))
+      V.toList (mdgFiles m') `shouldBe` [fromText "c.ts"]
+
   it "edges inside one file are dropped (no self-pair)" $ do
     let g = buildGraph False (extractionFromLists [nodeIn "a.ts" "a.f", nodeIn "a.ts" "a.g"] [edge Calls "a.f" "a.g"])
     mdgEdgeCount (foldToFileMDG UnitWeights g) `shouldBe` 0

@@ -150,10 +150,13 @@ for `usable-graph-for-code-review` and `avi-1765`.
 
 ## Validation targets (reproduce the workaround numbers)
 
+Singleton counts concern files with a dependency edge, as in the workaround's
+import graph: a file with no edge in the MDG cannot move under MQ.
+
 | Graph | Expected after this change |
 |---|---|
 | nestjs-realworld (29 files) | 9 modules, MQ 4.20 (today 29 singletons, MQ 0) |
 | solario-core `src/cli` (159) | MQ 18.37, 0 singletons |
-| pc26 (3,929) | ≤ 1 % singletons, MQ ≥ 330 (report MQ over the Bunch MDG relations; measured 332.33) |
+| pc26 (3,929) | ≤ 1 % singletons, MQ ≥ 330 (report MQ over the Bunch MDG relations; measured 410.59 after D4) |
 | taxonomy (Next.js `@/` aliases) | ≥ 100 files in the import graph (today 0) |
 | jhipster frontend (`app/*` paths) | +224 resolved internal imports |
