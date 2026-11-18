@@ -9,9 +9,11 @@ the export uses. For a Leiden partition the three figures SHALL be scored over
 every edge of the exported graph. For a Bunch partition they SHALL be scored
 over the edges whose relation is in the Bunch MDG relations
 (`clustering.bunch.relations` minus `contains`, `documents`, `depends_on`,
-`inferred`). These are the edges Bunch clustered on: edges added by edge
-inference after clustering are not counted. The line SHALL name those
-relations. (PRD §5.4)
+`inferred`) and whose two endpoints lie in MDG files (the system's code files,
+see `bunch-clustering`). These are the edges Bunch clustered on: edges added
+by edge inference after clustering, including the code↔doc `references` edges
+of semantic and bounded edge inference, are not counted. The line SHALL name
+those relations. (PRD §5.4)
 
 #### Scenario: report agrees with export
 - **WHEN** a clustered build completes
@@ -24,3 +26,7 @@ relations. (PRD §5.4)
 #### Scenario: Bunch quality ignores inferred edges
 - **WHEN** a Bunch build's exported graph holds `depends_on` / `inferred` edges added by edge inference
 - **THEN** the printed MQ equals the MQ of the same communities over the import, call, reference, extends and implements edges only, and the line reads `Partition quality (bunch, scored over imports, calls, references, extends, implements)`
+
+#### Scenario: Bunch quality ignores inferred code↔doc references
+- **WHEN** edge inference adds `references` edges from code nodes to Markdown header nodes after a Bunch clustering
+- **THEN** the printed MQ, modularity and intra-edge fraction equal those of the Step-4 partition before inference
