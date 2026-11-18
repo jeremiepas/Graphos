@@ -110,7 +110,7 @@ instance FromJSON Graph where
 --
 -- Dangling edges (referencing nodes not in extractionNodes) are dropped,
 -- self-edges (edgeSource e == edgeTarget e) are dropped as well, and duplicate
--- (source,target) edges are collapsed by 'Map.fromList'. This keeps the support
+-- (source,target) edges are collapsed to one ('keepStronger'). This keeps the support
 -- graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract (adj v v
 -- == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraphWithStats :: Bool -> Extraction -> (Graph, (Int, Int))
@@ -124,7 +124,7 @@ buildGraphWithStats directed extraction =
                        , edgeSource e /= edgeTarget e
                        , Map.member (edgeSource e) nodes
                        , Map.member (edgeTarget e) nodes ]
-      candidateMap = Map.fromList [ ((edgeSource e, edgeTarget e), e) | e <- validEdges ]
+      candidateMap = Map.fromListWith keepStronger [ ((edgeSource e, edgeTarget e), e) | e <- validEdges ]
       duplicateDropCount = length validEdges - Map.size candidateMap
       edgeMap = candidateMap
       fwdAdj = Map.fromListWith Set.union
@@ -155,6 +155,41 @@ buildGraphWithStats directed extraction =
 -- (adj v v == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction = fst (buildGraphWithStats directed extraction)
+
+-- | Of two edges sharing a @(source,target)@ key, the one the graph keeps: the
+-- more structural relation ('relationPrecedence'), then the larger 'EdgeId'
+-- (the former last-wins order). A module's @imports@ edge is therefore never
+-- shadowed by a @calls@ edge bound through the same import, so an import chain
+-- stays a path of @imports@ hops (lean/ReviewGraph.lean @chain_lifts@).
+keepStronger :: Edge -> Edge -> Edge
+keepStronger new old
+  | rank new < rank old = new
+  | rank new > rank old = old
+  | edgeId new >= edgeId old = new
+  | otherwise = old
+  where rank = relationPrecedence . edgeRelation
+
+-- | Rank of a relation when two edges collapse onto one key (lower wins):
+-- structure, then declared dependencies, then usage, then documentation and
+-- spec links, then inference.
+relationPrecedence :: Relation -> Int
+relationPrecedence r = case r of
+  Contains      -> 0
+  Imports       -> 1
+  Extends       -> 2
+  Implements    -> 3
+  Calls         -> 4
+  References    -> 5
+  Tests         -> 6
+  Maps          -> 7
+  Documents     -> 8
+  Refines       -> 9
+  Satisfies     -> 10
+  Constrains    -> 11
+  ConflictsWith -> 12
+  Supersedes    -> 13
+  DependsOn     -> 14
+  Inferred      -> 15
 
 -- | Convenience accessors for the edge-drop counts.
 buildGraphStats :: Bool -> Extraction -> (Int, Int)
