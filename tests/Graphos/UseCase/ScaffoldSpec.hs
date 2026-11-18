@@ -70,6 +70,16 @@ spec = do
         , ".claude/agents/graphos-navigator.md"
         ]
 
+    it "every generated file states exact resolution and points repeated queries to graphos serve (usable-graph 5.4)" $ do
+      let req = ScaffoldRequest { srTargets = Opencode :| [Claude, Generic], srVersion = ver }
+      mapM_ (\f -> do
+               let body = sfContent f
+               body `shouldSatisfy` T.isInfixOf "resolve"
+               body `shouldSatisfy` T.isInfixOf "exact"
+               body `shouldSatisfy` T.isInfixOf "65227_db_Function:dbGetById"
+               body `shouldSatisfy` T.isInfixOf "`graphos serve`")
+            (planScaffold req ref)
+
     it "produces one file for Generic target" $ do
       let req = ScaffoldRequest { srTargets = Generic :| [], srVersion = ver }
           files = planScaffold req ref

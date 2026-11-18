@@ -149,6 +149,14 @@ spec = do
       Set.member "a" (neighbors g "a") `shouldBe` False
       (degree g "a") `shouldBe` 0
 
+  describe "buildGraph duplicate (source,target) keys" $ do
+    it "keeps the imports edge over a calls edge on the same pair, whatever the edge ids" $ do
+      let mk eid rel = (testEdge "a" "b") { edgeId = EdgeId eid, edgeRelation = rel }
+          keep es = fmap edgeRelation (Map.lookup ("a", "b") (gEdges (buildGraph True (extractionFromLists [testNode "a", testNode "b"] es))))
+      keep [mk "z-call" Calls, mk "a-imp" Imports] `shouldBe` Just Imports
+      keep [mk "a-call" Calls, mk "z-imp" Imports] `shouldBe` Just Imports
+      keep [mk "x" Inferred, mk "y" References] `shouldBe` Just References
+
   describe "mergeExtractions" $ do
     it "deduplicates nodes by id" $ do
       let a = extractionFromLists [testNode "x"] []
