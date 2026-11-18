@@ -602,7 +602,7 @@ extractionConfigFingerprint config = T.pack . unwords $
       , "treesitter-imports=go,rust,ruby:1"
         -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
       , "nodeIdentity=av1452-bounded-ids"
-      , "idScheme=2"
+      , "idScheme=3"  -- 3: nameless definitions keyed `anonymous`, nameless const/var lists not emitted
       ]
     , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
             ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)
