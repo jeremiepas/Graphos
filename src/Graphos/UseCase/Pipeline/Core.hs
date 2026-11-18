@@ -81,6 +81,7 @@ import Graphos.UseCase.Port.ExportPort (ExportPort(..))
 import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiSources)
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions, buildGraphFromExtractionsWithStats)
+import Graphos.Infrastructure.Extract.ImportResolution (loadPathsConfigs, resolveCorpusImports, ResolutionStats(..))
 import Graphos.UseCase.Cluster (joinCommunitiesToNodes, computeCommunityAggregates, runClustering, partitionQuality, clusterAlgorithmFromConfig, capPartition, isBunchPartition, stepFiveClustering)
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
@@ -605,8 +606,18 @@ runPipelineStages appEnv config = do
 
       lpLogInfo lp "Step 2: Extracting entities and relationships..."
       extractStart <- getCurrentTime
-      extraction <- withHeapGuard lp mBudget "extract" $
+      rawExtraction <- withHeapGuard lp mBudget "extract" $
         extractAll appEnv configWithStreaming detection mProvenance
+      -- bunch-real-projects D4: resolve extension-less, alias and tsconfig
+      -- `paths` import targets against the extracted corpus.
+      pathsConfigs <- loadPathsConfigs rawExtraction
+      let (extraction, resolution) = resolveCorpusImports pathsConfigs rawExtraction
+      lpLogInfo lp $ T.pack $ "  Corpus import resolution: "
+        ++ show (rsExtension resolution) ++ " by extension/index, "
+        ++ show (rsAlias resolution) ++ " by root alias, "
+        ++ show (rsPaths resolution) ++ " by tsconfig paths/suffix ("
+        ++ show (length pathsConfigs) ++ " config(s)); "
+        ++ show (rsDropped resolution) ++ " placeholder node(s) dropped"
       extractEnd <- getCurrentTime
       collapsedNodes <- if dcMode effectiveDetection == Collapse
             then collapseDetectedFiles appEnv configWithStreaming (detectionClassification detection)

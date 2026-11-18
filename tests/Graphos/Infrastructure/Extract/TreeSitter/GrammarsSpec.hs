@@ -190,6 +190,23 @@ spec = describe "tree-sitter grammars" $ do
     noNodeWithLabel ns "number"
     noNodeWithLabel ns "string"
 
+  -- ── JSX: `tsx` and `javascript` are the vendored TSX grammar ──
+  -- With the plain TypeScript grammar a JSX file parsed to an ERROR root and
+  -- lost its module node (and every import edge leaving it).
+
+  it "TSX: a JSX component file keeps its module node and declarations" $ do
+    ns <- extract "tsx" GranularityFunction "card.tsx" $
+      "import * as React from \"react\"\nconst Card = React.forwardRef<HTMLDivElement, Props>((props, ref) => (\n  <div ref={ref} {...props} />\n))\nexport function Title() { return <h3>t</h3> }\n"
+    hasNode ns "Module" "card.tsx"
+    hasNode ns "Variable" "Card"
+    hasNode ns "Function" "Title"
+
+  it "JavaScript: JSX in a .jsx / .js file parses with a module node" $ do
+    ns <- extract "javascript" GranularityFunction "nav.jsx" $
+      "import Link from \"next/link\"\nexport default function Nav() { return <Link href=\"/\">home</Link> }\n"
+    hasNode ns "Module" "nav.jsx"
+    hasNode ns "Function" "Nav"
+
   -- ── AVI-1765 review findings: per-language cases for PHP/Perl/C#/Kotlin ──
 
   it "PHP: classes, traits, namespace_use and include/require imports" $ do

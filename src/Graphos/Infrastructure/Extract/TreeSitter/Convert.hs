@@ -35,7 +35,7 @@ import Data.Ord (comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
-import Data.Maybe (fromMaybe, isJust, mapMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, mapMaybe, listToMaybe)
 import Data.Aeson (object, (.=), Value(..), toJSON)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
@@ -201,6 +201,31 @@ functionBoundaryTypes =
 -- once (flagged exported); callers recurse through them unchanged.
 wrapperTypes :: [String]
 wrapperTypes = [ "export_statement", "decorated_definition" ]
+
+-- | Declaration lists (`const a = 1, b = 2`, `var x`): the names live on
+-- their declarators, which are emitted themselves.
+declarationListTypes :: [String]
+declarationListTypes = [ "lexical_declaration", "variable_declaration" ]
+
+-- | A node that is never emitted and whose children are walked in its place:
+-- a wrapper, or a declaration list with no identifier of its own (emitting
+-- it would duplicate its declarators under an id with no name).
+isTransparent :: TSNodeInfo -> Bool
+isTransparent n =
+  tsnType n `elem` wrapperTypes
+  || (tsnType n `elem` declarationListTypes && isNothing (extractIdentifier n))
+
+-- | Identifier of a definition that has no name of its own (an arrow
+-- function passed as an argument, an anonymous class). The id keeps the
+-- file prefix (`<dirHash>_<stem>_<kind>:anonymous`), and in-file repeats take
+-- the usual `#L<line>` suffix.
+anonymousIdentifier :: Text
+anonymousIdentifier = "anonymous"
+
+-- | Identifier an emitted definition's id is built from: its own, or
+-- 'anonymousIdentifier' (the label keeps the declaration text).
+emittedIdentifier :: SourceFile -> Granularity -> TSNodeInfo -> Text
+emittedIdentifier sf gran node = fromMaybe anonymousIdentifier (nodeIdentifier sf gran node)
 
 -- | AST types whose identifier is the file name rather than a declared name.
 moduleTypes :: [String]
@@ -605,19 +630,18 @@ traverseNode :: SourceFile -> Granularity -> Int -> Maybe (NodeId, Int) -> Bool 
 traverseNode sf gran budget parentEmitted isExported node =
   let tType   = tsnType node
       isDef   = tType `elem` typesFor gran && tsnIsNamed node
-      ident   = nodeIdentifier sf gran node
       kind    = T.pack (tsTypeToKind tType)
-      baseId  = maybe "" (\i -> makeNodeId sf kind i) ident
+      baseId  = makeNodeId sf kind (emittedIdentifier sf gran node)
       thisLine = tsnStartRow node
       sig     = tsNodeSignature sf gran budget node
       marker  = if isExported then Just (object ["exported" .= (True :: Bool)]) else Nothing
       parentKey = fromMaybe ("", 0) parentEmitted
-      containEdge = if T.null baseId then [] else [ContainEdge parentKey (baseId, thisLine)]
+      containEdge = [ ContainEdge pk (baseId, thisLine) | Just pk <- [parentEmitted] ]
       childAcc = if descendInto gran True node
                  then foldChildren sf gran budget (Just (baseId, thisLine)) False (tsnChildren node)
                  else ([], [], [])
       (csns, cces, cims) = childAcc
-  in if not isDef || tType `elem` wrapperTypes
+  in if not isDef || isTransparent node
         -- Suppress wrappers and non-definition nodes; recurse unchanged.
         then foldChildren sf gran budget parentEmitted
                (isExported || tType `elem` wrapperTypes)
@@ -770,7 +794,7 @@ allDefinitions gran = go
     go n =
       let tType = tsnType n
           isDef = tsnIsNamed n && tType `elem` typesFor gran
-      in if not isDef || tType `elem` wrapperTypes
+      in if not isDef || isTransparent n
            then concatMap go (tsnChildren n)
            else n : if descendInto gran True n then concatMap go (tsnChildren n) else []
 
@@ -802,7 +826,7 @@ collectCallsCtx sf gran roots = CallsCtx
   }
   where
     children = concatMap tsnChildren roots
-    top = children ++ [ k | c <- children, tsnType c `elem` wrapperTypes, k <- tsnChildren c ]
+    top = children ++ [ k | c <- children, isTransparent c, k <- tsnChildren c ]
 
     importBindings n
       | tsnType n `elem` importExportTypes =
@@ -839,7 +863,7 @@ callEdgePairs sf gran roots = concatMap (walk Nothing False) roots
     walk enc inside n =
       let tType   = tsnType n
           isCall  = tType `elem` callTypes
-          emitted = tsnIsNamed n && tType `elem` typesFor gran && tType `notElem` wrapperTypes
+          emitted = tsnIsNamed n && tType `elem` typesFor gran && not (isTransparent n)
           enc'    = if emitted && (tType `elem` functionBoundaryTypes || tType `elem` moduleTypes)
                       then maybe enc Just (definitionBaseId sf gran n)
                       else enc
@@ -954,7 +978,7 @@ definitionsWithAnnotations gran = go []
       in if tType == "decorated_definition"
            then let decs = [ decoratorAnnotation d | d <- tsnChildren n, tsnType d == "decorator" ]
                 in concatMap (go (pending ++ decs)) (tsnChildren n)
-           else if not isDef || tType `elem` wrapperTypes
+           else if not isDef || isTransparent n
              then concatMap (go pending) (tsnChildren n)
              else (n, take 16 (pending ++ javaModifierAnnotations n ++ tsClassDecorators n))
                   : if descendInto gran True n then concatMap (go []) (tsnChildren n) else []
@@ -1120,7 +1144,7 @@ envRefPairs sf gran roots = concatMap (walk Nothing) roots
   where
     walk enc n =
       let tType = tsnType n
-          emitted = tsnIsNamed n && tType `elem` typesFor gran && tType `notElem` wrapperTypes
+          emitted = tsnIsNamed n && tType `elem` typesFor gran && not (isTransparent n)
           enc' = if emitted && (tType `elem` functionBoundaryTypes || tType `elem` moduleTypes)
                    then fmap (\bid -> (bid, tsnStartRow n)) (definitionBaseId sf gran n)
                    else enc

@@ -11,6 +11,7 @@ module Graphos.Infrastructure.Extract.TreeSitter.Vendored
   , tree_sitter_sql
   , tree_sitter_perl
   , tree_sitter_c_sharp
+  , tree_sitter_tsx
   ) where
 
 import Foreign.Ptr (Ptr)
@@ -30,3 +31,8 @@ foreign import ccall unsafe "vendor/tree-sitter-perl/src/parser.c tree_sitter_pe
 
 foreign import ccall unsafe "vendor/tree-sitter-c-sharp/src/parser.c tree_sitter_c_sharp"
   tree_sitter_c_sharp :: Ptr Language
+
+-- | TypeScript + JSX, from the same upstream revision as the Hackage
+-- @tree-sitter-typescript 0.5.0.3@ grammar, so node types match.
+foreign import ccall unsafe "vendor/tree-sitter-tsx/tsx/src/parser.c tree_sitter_tsx"
+  tree_sitter_tsx :: Ptr Language

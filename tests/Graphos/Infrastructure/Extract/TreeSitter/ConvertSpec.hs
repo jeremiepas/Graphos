@@ -182,6 +182,42 @@ spec = do
                     , edgeRelation e == Contains, edgeSource e == classId ]
       containsFromClass `shouldBe` methodIds
 
+  describe "3.3b nameless declarations keep the file prefix" $ do
+    -- `const f = () => 1; [1].map(() => 0); [2].map(() => 1);`
+    let declarator n = tsNode "variable_declarator" (n <> " = () => 1") [ident n, tsNode "arrow_function" "() => 1" []]
+        lexical ds = tsNode "lexical_declaration" "const ..." ds
+        anonArrow l = tsNode "arrow_function" "() => 0" [] `withLine` l
+        program = tsNode "program" "module"
+          [ lexical [declarator "f"] `withLine` 1
+          , anonArrow 2
+          , anonArrow 3 ]
+        fileA = mkSourceFile "src/a.ts" ""
+        fileB = mkSourceFile "src/b.ts" ""
+        exA = tsNodesToExtraction fileA GranularityFunction defaultTruncationBudget [program]
+        exB = tsNodesToExtraction fileB GranularityFunction defaultTruncationBudget [program]
+        idsA = Map.keys (extractionNodes exA)
+
+    it "a const statement is not emitted; its declarator is" $ do
+      [ nodeLabel n | n <- Map.elems (extractionNodes exA), nodeKind n == Just (fromText "Variable") ]
+        `shouldBe` [fromText "f"]
+
+    it "an anonymous function is keyed <dirHash>_<stem>_Function:anonymous, repeats by #L<line>" $ do
+      -- the arrow assigned to `f` (row 0) is anonymous too
+      let anon = makeNodeId fileA "Function" "anonymous"
+      filter (T.isPrefixOf anon) idsA `shouldBe` [anon, anon <> "#L2", anon <> "#L3"]
+
+    it "a nameless node keeps its declaration text as label" $
+      [ nodeLabel n | n <- Map.elems (extractionNodes exA), nodeId n == makeNodeId fileA "Function" "anonymous" <> "#L2" ]
+        `shouldBe` [fromText "() => 0"]
+
+    it "every id carries its file prefix, so two files never share an id" $ do
+      all (\i -> not (T.null i) && not (T.isPrefixOf "#" i)) idsA `shouldBe` True
+      Map.size (Map.union (extractionNodes exA) (extractionNodes exB))
+        `shouldBe` Map.size (extractionNodes exA) + Map.size (extractionNodes exB)
+
+    it "no contains edge leaves an empty id" $
+      [ e | e <- Map.elems (extractionEdges exA), edgeSource e == "" ] `shouldBe` []
+
   describe "3.4 field-aware declaration names (extraction-semantic-enrichment)" $ do
     it "a method's name field wins over a preceding type_identifier return type" $ do
       let ex = tsNodesToExtraction sf GranularityFunction defaultTruncationBudget

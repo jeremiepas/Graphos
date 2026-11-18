@@ -600,9 +600,10 @@ extractionConfigFingerprint config = T.pack . unwords $
       , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
         -- bump when tree-sitter extraction output changes for unchanged files
       , "treesitter-imports=go,rust,ruby:1"
+      , "jsxGrammar=tsx-aa950f5"  -- .tsx/.js/.jsx/.mjs/.cjs parsed with the vendored TSX grammar
         -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
       , "nodeIdentity=av1452-bounded-ids"
-      , "idScheme=2"
+      , "idScheme=3"  -- 3: nameless definitions keyed `anonymous`, nameless const/var lists not emitted
       ]
     , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
             ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)
