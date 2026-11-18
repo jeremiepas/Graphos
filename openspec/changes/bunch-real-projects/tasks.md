@@ -2,7 +2,7 @@
 
 - [ ] 0.1 `usable-graph-for-code-review` finished and archived (needed by D4 rule 1)
 - [x] 0.2 `avi-1765` implemented and archived (Java import resolution; its `GrammarsSpec` failures fixed)
-- [ ] 0.3 `avi-1440` implemented (its TypeScript `GrammarsSpec` failure fixed)
+- [x] 0.3 `avi-1440` implemented (its TypeScript `GrammarsSpec` failure fixed). Implemented in #88; archived 2026-11-18
 - [x] 0.4 `BoundedDeltaCommunitySpec` "small random graphs" property fixed or bounded, so the full suite terminates
 - [ ] 0.5 `modularity-undirected-view` implemented (validation numbers use the undirected score)
 - [ ] 0.6 `clustering-evaluation-and-selection` reconciled with the merged Bunch requirements (closed as superseded or rebased)
