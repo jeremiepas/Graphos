@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change configurable-extraction-granularity. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Three-level granularity enum
 
 The system MUST support a `Granularity` configuration value with exactly three levels — `fine`, `function`, and `file` — controlling which tree-sitter AST nodes become graph nodes (PRD §3.2 extract stage, §14 configuration). The value SHALL serialize to/from the strings `fine`, `function`, and `file` in config files.
@@ -19,7 +21,7 @@ The system MUST support a `Granularity` configuration value with exactly three l
 
 ### Requirement: Granularity resolution order
 
-The effective granularity for a file MUST be resolved as: CLI `--granularity` flag, else per-extension `ExtractorConfig` override, else global `extraction.granularity`, else the built-in default `function` (PRD §14). Resolution SHALL be a pure function of configuration values.
+The effective granularity for a file MUST be resolved as: CLI `--granularity` flag, else per-extension `ExtractorConfig` override, else global `extraction.granularity` (top-level `granularity` key of `graphos.yaml`), else the built-in default `function` (PRD §14). Resolution SHALL be a pure function of configuration values, and the resolved level SHALL be the one handed to every extractor adapter: the tree-sitter FFI wiring MUST convert with the level resolved for the file, never with a constant.
 
 #### Scenario: CLI flag wins over all config
 
@@ -35,6 +37,14 @@ The effective granularity for a file MUST be resolved as: CLI `--granularity` fl
 
 - **WHEN** neither CLI flag nor any config granularity is set
 - **THEN** files extract at `function` level
+
+#### Scenario: Global file level reaches the tree-sitter converter
+
+- **WHEN** a project `graphos.yaml` sets top-level `granularity: file`, its `.ts` extractor entry
+  sets no granularity, and the pipeline runs over `example/ts-lsp-test`
+- **THEN** every `.ts` file contributes exactly one `Module` node and the log line
+  `Granularity: file` matches the emitted node count, verifiable by `cabal test` as an
+  integration scenario
 
 ### Requirement: Function-level extraction stops at function bodies
 
@@ -81,4 +91,3 @@ The built-in default extractor configuration MUST assign `file` granularity to t
 
 - **WHEN** the pipeline runs with default configuration on a repository containing a large lock file
 - **THEN** that JSON file contributes exactly one node to the graph
-
