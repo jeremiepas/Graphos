@@ -138,6 +138,16 @@ spec = do
                 Just p  -> p `shouldSatisfy` importsHops g)
         [("index.ts", "db.ts"), ("db.ts", "types.ts"), ("index.ts", "types.ts")]
 
+    it "giLabelIndex maps a declared name both exactly and lowercased (identifier-resolution)" $ do
+      g <- toyGraph
+      let idx = buildIndex g Map.empty
+          fn = [ nid | (nid, n) <- Map.toList (gNodes g), toText (nodeLabel n) == "dbGetById" ]
+      length fn `shouldBe` 1
+      Map.lookup "dbGetById" (giLabelIndex idx) `shouldBe` Just fn
+      fmap (filter (`elem` fn)) (Map.lookup "dbgetbyid" (giLabelIndex idx)) `shouldBe` Just fn
+      -- an exact-case hit scores as exact, not as the case-insensitive fallback
+      map snScore (srFound (symbolLookup "dbGetById" g idx)) `shouldBe` [1.0]
+
     it "resolve \"dbGetById\" is single, \"dbGetByIdentifier\" is not found" $ do
       g <- toyGraph
       let idx = buildIndex g Map.empty
