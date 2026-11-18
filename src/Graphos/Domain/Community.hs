@@ -28,6 +28,7 @@ module Graphos.Domain.Community
 
    , CommunityStats(..)
    , computeCommunityStats
+   , supportPairs
    , modularity
     , localMovesFrom
 
@@ -255,19 +256,39 @@ data CommunityStats = CommunityStats
 
 computeCommunityStats :: Graph -> Map NodeId CommunityId -> CommunityStats
 computeCommunityStats g assign =
-  let degrees = Map.mapWithKey (\nid _n -> fromIntegral (Set.size (neighbors g nid))) (gNodes g)
-      m = sum (Map.elems degrees) / 2.0
+  let pairs = supportPairs g
+      -- Degrees, m, σ_tot and σ_in all come from the one list of support
+      -- pairs, so they agree whatever 'gDirected' says and however many
+      -- orientations of a pair 'gEdges' stores (modularity-undirected-view D1).
+      degrees = Map.unionWith (+)
+        (Map.map (const 0.0) (gNodes g))
+        (Map.fromListWith (+) (concat [ [(u, 1.0), (v, 1.0)] | (u, v) <- pairs ]))
+      m = fromIntegral (length pairs)
       sigmaTot = Map.fromListWith (+)
         [ (Map.findWithDefault 0 nid assign, Map.findWithDefault 0.0 nid degrees)
         | nid <- Map.keys (gNodes g)
         ]
-      internalContribs = [ (Map.findWithDefault 0 (edgeSource e) assign, 2.0)
-                         | e <- Map.elems (gEdges g)
-                         , Map.findWithDefault 0 (edgeSource e) assign
-                           == Map.findWithDefault 0 (edgeTarget e) assign
+      internalContribs = [ (cu, 2.0)
+                         | (u, v) <- pairs
+                         , let cu = Map.findWithDefault 0 u assign
+                         , cu == Map.findWithDefault 0 v assign
                          ]
       sigmaIn = Map.fromListWith (+) internalContribs
   in CommunityStats { csSigmaIn = sigmaIn, csSigmaTot = sigmaTot, csDegrees = degrees, csM = m }
+
+-- | The simple undirected support graph of @g@ as a list of pairs: every
+-- unordered @{u, v}@ with @u /= v@ and both endpoints in 'gNodes' that some
+-- edge of 'gEdges' joins, in either direction, listed once as @(min, max)@ in
+-- ascending order (modularity-undirected-view D2; the Lean
+-- @UndirectedScoring.supportPairs@ / @toEdgeGraph@). Edge direction and stored
+-- orientation duplicates do not change it.
+supportPairs :: Graph -> [(NodeId, NodeId)]
+supportPairs g = Set.toAscList $ Set.fromList
+  [ (min u v, max u v)
+  | (u, v) <- Map.keys (gEdges g)
+  , u /= v
+  , Map.member u (gNodes g), Map.member v (gNodes g)
+  ]
 
 -- | Auditable global modularity @Q@ at resolution @γ = 1@ (Newshyld 2004,
 -- /Modularity and community structure in networks/, Eq. 1).

@@ -1,6 +1,7 @@
 module Graphos.Domain.CommunitySpec where
 
 import Test.Hspec
+import Test.QuickCheck (Gen, choose, forAll, vectorOf, sublistOf, elements, counterexample, (===), (.&&.))
 import Control.DeepSeq (deepseq)
 import Control.Monad (forM_)
 import Data.Text (Text)
@@ -17,9 +18,49 @@ import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, gCompositions, Graph(..), degree)
-import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution, capCommunitySizes, oversizedCommunities)
+import Graphos.Domain.Community (detectCommunities, detectCommunitiesWithResolution, cohesionScore, cohesionWeighted, weightedModularity, bestCommunityWeighted, CommunityStatsWeighted(..), computeCommunityStatsWeighted, buildReverseIndex, communityOf, countMoves, modularity, localMovesFrom, CommunityComposition(..), computeCompositions, Resolution(..), defaultResolution, capCommunitySizes, oversizedCommunities, undirectedView, supportPairs)
+-- | A random record graph for modularity-undirected-view: 2–8 nodes, any
+-- subset of ordered pairs (both orientations of a pair may be stored), a
+-- random 'gDirected' flag, and a random partition of the nodes.
+genScored :: Gen (Graph, CommunityMap)
+genScored = do
+  n <- choose (2, 8 :: Int)
+  let ns = [ T.pack ("v" ++ show i) | i <- [0 .. n - 1] ]
+  arcs <- sublistOf [ (u, v) | u <- ns, v <- ns, u /= v ]
+  directed <- elements [False, True]
+  k <- choose (1, n)
+  labels <- vectorOf n (choose (0, k - 1))
+  let node nid = Node
+        { nodeId = nid, nodeLabel = fromText nid, nodeFileType = CodeFile
+        , nodeSourceFile = fromText "g.ts", nodeSource = Nothing
+        , nodeLineStart = Nothing, nodeLineEnd = Nothing, nodeSignature = Nothing
+        , nodeCommunityId = Nothing, nodeKind = Nothing, nodeDegree = Nothing
+        , nodeIsBridge = Nothing, nodeExtra = Nothing, nodePresentBits = 0 }
+      arc (u, v) = Edge (EdgeId (u <> "->" <> v)) u v Calls 1.0 (Confidence 1.0) Nothing
+      g = buildGraph directed (extractionFromLists (map node ns) (map arc arcs))
+      cm = Map.fromListWith (++) [ (c, [nid]) | (nid, c) <- zip ns labels ]
+  pure (g, cm)
+
 spec :: Spec
 spec = do
+  describe "modularity on the undirected support graph (modularity-undirected-view)" $ do
+    it "ignores gDirected: modularity g == modularity (undirectedView g)" $
+      forAll genScored $ \(g, cm) ->
+        modularity g cm === modularity (undirectedView g) cm
+    it "ignores stored orientation: adding the reverse of an existing edge changes nothing" $
+      forAll genScored $ \(g, cm) ->
+        case Map.keys (gEdges g) of
+          [] -> counterexample "no edge" True
+          ((u, v) : _) ->
+            let rev = Edge (EdgeId (v <> "->" <> u <> ":rev")) v u Calls 1.0 (Confidence 1.0) Nothing
+                g' = buildGraph (gDirected g)
+                       (extractionFromLists (Map.elems (gNodes g)) (rev : Map.elems (gEdges g)))
+            in (supportPairs g' === supportPairs g) .&&. (modularity g' cm === modularity g cm)
+    it "stays in [-1/2, 1]" $
+      forAll genScored $ \(g, cm) ->
+        let q = modularity g cm
+        in counterexample (show q) (q >= -0.5 - 1e-12 && q <= 1 + 1e-12)
+
   describe "capCommunitySizes" $ do
     let twelve = map (\i -> T.pack ("n" ++ show i)) [0 .. 11 :: Int]
         pathEdges = [ testEdge (twelve !! i) (twelve !! (i + 1)) | i <- [0 .. 10 :: Int]]

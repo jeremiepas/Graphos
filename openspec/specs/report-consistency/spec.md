@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change fix-graph-quality-and-tracing. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Report and export derive from identical graph data
 
 `GRAPH_REPORT.md` and `graph.json` (PRD §12 export formats) MUST be generated from the same graph state: the enriched graph (post edge-inference) and the final community map (post re-clustering). Node, edge, and community totals stated in the report SHALL equal the counts of the corresponding arrays/objects in `graph.json`.
@@ -45,7 +47,10 @@ The pipeline MUST log a prominent warning after the build stage when a code-domi
 `GRAPH_REPORT.md` SHALL print a `Partition quality` line naming the clustering
 algorithm and giving the MQ, modularity and intra-edge fraction of the
 communities written to `graph.json`, computed from the same `CommunityMap`
-the export uses. (PRD §5.4)
+the export uses. The modularity SHALL be scored on the simple undirected
+support graph of the build (one record per unordered pair of distinct nodes),
+whether or not the build is `--directed`, and SHALL therefore lie in
+`[-0.5, 1]`. (PRD §5.4)
 
 #### Scenario: report agrees with export
 - **WHEN** a clustered build completes
@@ -55,3 +60,10 @@ the export uses. (PRD §5.4)
 - **WHEN** a build runs with `--cluster-algorithm bunch`
 - **THEN** the `Partition quality` line names `bunch`; without the flag it names `leiden`
 
+#### Scenario: directed build reports undirected modularity
+- **WHEN** a build runs with `--directed`
+- **THEN** the printed modularity equals the modularity of the same communities on the undirected projection of the graph, and lies in `[-0.5, 1]`
+
+#### Scenario: solario-core regression
+- **WHEN** solario-core `14d86be28` is built with `--granularity file --directed`
+- **THEN** the printed modularity is at most `1` (it printed `1.2149` before this change)

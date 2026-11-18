@@ -4,7 +4,8 @@
 -- @bunch-clustering@).
 module Graphos.UseCase.ClusterSpec (spec) where
 
-import Data.List (sort)
+import Data.List (sort, nub)
+import Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text.Short (fromText)
@@ -12,7 +13,7 @@ import Test.Hspec
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph, gNodes, gEdges)
-import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes)
+import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes, undirectedView)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig, foldToFileMDG, mdgFileCount, mdgEdgeCount, bunchCluster, BunchResult(..), BunchRun(..))
 import Graphos.Domain.Community.MQ (Weighting(..))
 import Graphos.UseCase.Cluster
@@ -233,8 +234,32 @@ enrichedTwoDir = buildGraph False $ extractionFromLists
   , edgeOf Imports "a3" "b1"
   , edgeOf DependsOn "a1" "b2", edgeOf DependsOn "a2" "b3", edgeOf DependsOn "a3" "b2" ]
 
+-- | A @--directed@ fixture whose report modularity used to leave [-1/2, 1]:
+-- two directed triangles joined by one arc, with two pairs also stored in the
+-- reverse orientation (modularity-undirected-view).
+directedFixture :: Graph
+directedFixture = buildGraph True $ extractionFromLists
+  [ nodeIn "a/1.ts" "a1", nodeIn "a/2.ts" "a2", nodeIn "a/3.ts" "a3"
+  , nodeIn "b/1.ts" "b1", nodeIn "b/2.ts" "b2", nodeIn "b/3.ts" "b3" ]
+  [ edgeOf Imports "a1" "a2", edgeOf Imports "a2" "a3", edgeOf Imports "a3" "a1"
+  , edgeOf Imports "b1" "b2", edgeOf Imports "b2" "b3", edgeOf Imports "b3" "b1"
+  , edgeOf Imports "a3" "b1"
+  , edgeOf Calls "a2" "a1", edgeOf Calls "b2" "b1" ]
+
 realProjectsSpec :: Spec
 realProjectsSpec = do
+  describe "report modularity on a --directed build (modularity-undirected-view 2.3)" $
+    forM_ [("leiden", Leiden), ("bunch", BunchAlgorithm defaultBunchSettings { bsConfig = defaultBunchConfig { bcSeed = 1 } })] $ \(name, algo) ->
+      it (name ++ ": cqModularity is in [-1/2, 1], equals the undirected score, and finalComm covers every node") $ do
+        let (rawComm, _, rawQ) = runClustering algo res directedFixture
+            finalComm = capPartition rawQ True 0.05 directedFixture rawComm
+            q = partitionQuality (cqAlgorithm rawQ) directedFixture finalComm (cqSkip rawQ)
+            members = concat (Map.elems finalComm)
+        sort members `shouldBe` sort (Map.keys (gNodes directedFixture))
+        length members `shouldBe` length (nub members)
+        cqModularity q `shouldSatisfy` (\m -> m >= -0.5 && m <= 1)
+        cqModularity q `shouldBe` modularity (undirectedView directedFixture) finalComm
+
   let bunch = BunchAlgorithm defaultBunchSettings { bsConfig = defaultBunchConfig { bcSeed = 1, bcPopulation = 2 } }
 
   describe "capPartition (D1)" $ do
