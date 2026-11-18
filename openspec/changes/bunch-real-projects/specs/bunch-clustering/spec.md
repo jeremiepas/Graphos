@@ -106,4 +106,4 @@ number of moves and passes.
 
 #### Scenario: measured large-repository baseline
 - **WHEN** the pc26 build (3,929 files, 17,292 import pairs) is clustered with the default limits
-- **THEN** at most 1 % of the modules are single files and MQ is at least 370 (the partitioned search without refinement gave 1,579 singletons and MQ 149)
+- **THEN** at most 1 % of the modules are single files, no Leiden fallback is logged, and the MQ in `GRAPH_REPORT.md` (scored over the Bunch MDG relations) is at least 330 (the partitioned search without refinement gave 1,579 singletons)
