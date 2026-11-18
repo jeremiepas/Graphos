@@ -15,3 +15,5 @@ fixture	partition	m	qnum	num	den	qdec15
 5d	split (leiden)	13	286	11	26	0.423076923076923
 6	split (leiden)	13	286	11	26	0.423076923076923
 7	split (leiden)	13	286	11	26	0.423076923076923
+twoArcs	two blocks	2	8	1	2	0.500000000000000
+bothWays	two blocks	2	8	1	2	0.500000000000000
