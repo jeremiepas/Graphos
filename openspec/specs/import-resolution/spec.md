@@ -246,3 +246,79 @@ imports stays a path of `imports` hops (`lean/ReviewGraph.lean`, `chain_lifts`).
 #### Scenario: top-level call through an import
 - **WHEN** `index.ts` imports `dbGetById` from `./db` and calls it at top level, so the module node of `index.ts` has both an `imports` and a `calls` edge to the module node of `db.ts`
 - **THEN** the graph keeps the `imports` edge, and `graphos path index.ts db.ts` returns a path of `imports` hops
+
+### Requirement: Corpus-aware import target resolution
+
+After extraction and before graph build, the system SHALL resolve every
+`imports` target that per-file resolution left as an extension-less path, a
+directory, or an `external:` specifier, against the set of extracted file paths
+of the corpus. Per-file resolution is `resolveImport`, plus the canonical
+target identity of `usable-graph-for-code-review`, which rewrites `.js` to the
+source extension and resolves `/index`. These rules run after it, as built-in
+resolvers of the `resolve:` framework of `avi-1766-custom-extractors`, so a
+`resolve:` entry for the same extension overrides them. Java imports are out of
+scope here: `avi-1765` resolves them through source roots. The system SHALL
+apply, in order:
+
+1. **Extension-less and directory targets.** `p` resolves to `p` itself, then
+   to `p.<ext>` for the extensions of the TS/JS family
+   (`.ts .tsx .js .jsx .mjs .cjs .mts .cts .vue .svelte`), then to
+   `p/index.<ext>`; the first existing file wins, as in TypeScript's own
+   lookup. A code extension already on `p` that names no corpus file is
+   dropped first, so `./x.js` reaches `x.js` in a JavaScript project.
+2. **Root aliases.** `@/x`, `~/x` and `#/x` resolve by stripping the alias
+   root, then by a unique path-suffix match of `x`; `$lib/x` matches the
+   suffix `lib/x`. An explicit code extension in `x` is ignored for matching.
+3. **tsconfig / jsconfig `paths`.** When a `tsconfig.json` or `jsconfig.json`
+   with `compilerOptions.paths` is in the corpus, a specifier matching one of
+   its patterns resolves through the mapped location, relative to its
+   `baseUrl`, using the nearest config enclosing the importing file
+   (`extends` is not followed). Otherwise a specifier containing `/` resolves
+   by a unique path-suffix match.
+
+Only imports from files of the TS/JS family are considered. A suffix match
+(rules 2–3) SHALL resolve only when exactly one corpus file matches. A target
+with no match, or several suffix matches, SHALL stay unchanged. Scoped
+package specifiers (`@scope/name`) that match no `paths` pattern, `node:`
+builtins and bare package names SHALL stay `external:`. Every edge into a
+resolved placeholder is rewritten (`calls` edges bound to an import too), and
+a resolved edge SHALL keep its `EdgeId`. An `External` node, or a placeholder
+`Module` node of an unresolved path, left with no edge SHALL be dropped.
+Resolution SHALL read only paths and configuration files of the corpus, and
+SHALL execute nothing. (PRD §3.2, §3.3)
+
+#### Scenario: extension-less relative import
+- **WHEN** `src/app/a.ts` imports `./b` and `src/app/b.ts` exists
+- **THEN** the `imports` edge targets the module node of `src/app/b.ts`, not an `External` node
+
+#### Scenario: Next.js root alias
+- **WHEN** `app/page.tsx` imports `@/lib/utils` and the corpus has exactly one `lib/utils.ts`
+- **THEN** the edge targets `lib/utils.ts`; and a scoped package `@remix-run/react` stays `external:@remix-run/react`
+
+#### Scenario: SvelteKit `$lib` with an extension
+- **WHEN** `src/routes/+page.js` imports `$lib/api.js` and `src/lib/api.js` exists
+- **THEN** the edge targets `src/lib/api.js`
+
+#### Scenario: Angular tsconfig paths
+- **WHEN** `tsconfig.json` maps `app/*` to `src/main/webapp/app/*` and a file imports `app/config/error.constants`
+- **THEN** the edge targets `src/main/webapp/app/config/error.constants.ts`
+
+#### Scenario: ambiguous suffix stays external
+- **WHEN** a specifier `utils` would match both `src/a/utils.ts` and `src/b/utils.ts`
+- **THEN** the target is left unchanged
+
+#### Scenario: measured corpus baseline
+- **WHEN** the pipeline builds `taxonomy` (Next.js, `@/` aliases) and `jhipster-sample-app` (tsconfig `app/*`) from `dataset-discovery`
+- **THEN** taxonomy has at least 100 files joined by file-to-file `imports` edges (0 before this change) and jhipster gains at least 200 internal `imports` edges
+
+### Requirement: Declared module nodes win over import-target placeholders
+
+An importer emits a placeholder node for its import target under the id of the
+target file's module node, with no line span. When per-file extractions are
+merged, a node with a line span SHALL win over a line-less node of the same id,
+whatever the merge order. Otherwise the left operand wins, so for consistent
+extractions (equal nodes on shared ids) the merge is the plain union.
+
+#### Scenario: placeholder merged first
+- **WHEN** `src/cli/commands/x.ts` imports `../banner.js` and its extraction is merged before that of `src/cli/banner.ts`
+- **THEN** the merged node `…_banner_Module:banner.ts` is the declared module node of `banner.ts` (line span present), not the placeholder

@@ -10,11 +10,12 @@ the missing measuring stick, a second algorithm family, and the selection loop.
 
 ```
 graph.json (any granularity)
-   │  fold to files (contains/defines collapse, all relations → file→file, counts)
+   │  Bunch file-level MDG (code files, clustering.bunch.relations, edge weights)
    ▼
-file dependency matrix W (F × F, symmetric: W = A + Aᵀ)
+file dependency matrix W (F × F, symmetric: the weighted MDG pairs)
    │
    ├──► Leiden (auto-tuned)  ─────────────┐
+   ├──► Bunch (clustering.bunch.*)  ───────┤
    ├──► agglomerative(dist, link, K) ×grid ┤──► candidate partitions P₁…Pₙ
    │                                       │
 directory ground truth T (depth d,         │
@@ -31,7 +32,7 @@ directory ground truth T (depth d,         │
 | Piece | Layer | Module |
 |---|---|---|
 | Partition type, ground truth, MoJo, MoJoFM, stability | Domain | `Graphos.Domain.Community.Partition` |
-| File folding, distance matrix, linkage, dendrogram cut | Domain | `Graphos.Domain.Community.Agglomerative` |
+| Distance matrix over the MDG's `W`, linkage, dendrogram cut (the fold is `Bunch.foldToFileMDGWith`) | Domain | `Graphos.Domain.Community.Agglomerative` |
 | Sweep, ranking, selection | UseCase | `Graphos.UseCase.ClusterEval` |
 | Algorithm dispatch in the cluster stage | UseCase | `Graphos.UseCase.Cluster` |
 | Load several graphs, write JSON / markdown report, CLI | Infrastructure | CLI parser, `app/Main.hs`, Export |
