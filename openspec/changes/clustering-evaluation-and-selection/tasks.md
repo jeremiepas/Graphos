@@ -7,21 +7,21 @@
 
 ## 2. Agglomerative clustering (Domain) — parallel with 1.2–1.4
 
-- [ ] 2.1 Fold graph to files and build W (unboxed upper triangle). Check: the two file-dependency-matrix scenarios
+- [ ] 2.1 Build W from the Bunch MDG (`foldToFileMDGWith (clustering.bunch.relations) EdgeWeights`, unboxed upper triangle) — no second fold. Check: the three file-dependency-matrix scenarios
 - [ ] 2.2 Distances (euclidean, manhattan, cosine, zero-row rule). Check: hand-computed 3×3 fixture
 - [ ] 2.3 Single linkage via Prim MST + cut at K. Check: two-group fixture, exact K, determinism
 - [ ] 2.4 Average and complete linkage via nearest-neighbour chain. Check: matches a naive O(F³) reference on random graphs F ≤ 30 (QuickCheck)
-- [ ] 2.5 File-count cap with reported skip. Check: cap scenario
+- [ ] 2.5 File-count cap: skip to Leiden with a reported skip, mirroring `BunchSkip`. Check: cap scenario
 
 ## 3. Orchestration (UseCase)
 
 - [ ] 3.1 `Graphos.UseCase.ClusterEval`: score / compare / sweep, ranking with tie-breaks. Check: ranking scenarios
-- [ ] 3.2 `UseCase/Cluster.hs` dispatch on `ClusterAlgorithm`; `auto` applies the winner to node communities. Check: default-unchanged scenario (Leiden partition byte-identical), winner-applied scenario
+- [ ] 3.2 `UseCase/Cluster.hs`: extend the existing `ClusterAlgorithm` (`Leiden | BunchAlgorithm`) with agglomerative and auto in `runClustering`; `auto` applies the winner (Leiden, Bunch or agglomerative) to node communities. Check: default-unchanged scenario (Leiden partition byte-identical), winner-applied scenario
 
 ## 4. CLI and outputs (Infrastructure)
 
-- [ ] 4.1 `clustereval` subcommand (`score|compare|sweep`, `--graph`, `--ref-graph`, `--truth-depth`, `--truth`, `--json`). Check: JSON keys of the score and compare scenarios
-- [ ] 4.2 Build flags `--cluster-algorithm`, `--linkage`, `--distance`, `--cluster-divisor`, `--agglomerative-max-files`; config key `cluster.algorithm`. Check: CLI parser tests
+- [ ] 4.1 `clustereval` subcommands `score|compare|sweep` next to the existing `landscape` (`--graph`, `--ref-graph`, `--truth-depth`, `--truth`, `--json`). Check: JSON keys of the score and compare scenarios
+- [ ] 4.2 Extend the existing `--cluster-algorithm` / `clustering.algorithm` vocabulary (`agglomerative`, `auto`, via the token table of `cli-enum-flag-vocabulary` when it lands) and add `--linkage`, `--distance`, `--cluster-divisor`, `--agglomerative-max-files`; config key `cluster.algorithm`. Check: CLI parser tests
 - [ ] 4.3 `cluster_eval.json` (atomic write) and a markdown ranking section in `GRAPH_REPORT.md`. Check: file present after an `auto` build
 
 ## 5. Verification
