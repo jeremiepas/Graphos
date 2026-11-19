@@ -22,6 +22,7 @@ module Graphos.CLI.Parser
   , subgraphOpts
   , migrateGraphOpts
   , commandOpts
+  , subcommandNames
   , granularityReader
   , clusteringOverridesOpts
   , landscapeOpts
@@ -456,6 +457,17 @@ migrateGraphOpts :: Parser Command
 migrateGraphOpts = MigrateGraphCmd
   <$> strArgument (metavar "GRAPH" <> help "Path to a graph.json in the legacy top-level format")
   <*> optional (strOption (long "output" <> short 'o' <> metavar "PATH" <> help "Output path (default: overwrite GRAPH in place)"))
+
+-- | Every parser subcommand name, in CLI order. Kept next to 'commandOpts'
+-- so the docs drift guard (tests/DocsSpec.hs) can assert that the CLI
+-- reference documents the whole surface.
+subcommandNames :: [Text]
+subcommandNames =
+  [ "query", "cypher", "path", "explain", "symbols", "neighbors"
+  , "push", "push-memgraph", "merge", "ingest", "subgraph", "migrate-graph"
+  , "speccheck", "intentcheck", "impact", "view", "clustereval", "lservers"
+  , "serve", "init", "install-skill", "research"
+  ]
 
 commandOpts :: Parser Command
 commandOpts = subparser

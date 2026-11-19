@@ -11,14 +11,14 @@ context: |
 
   ## Problem & Solution
   Problem: LLMs waste tokens re-reading entire codebases. Developers lack navigable maps of how code connects.
-  Solution: Use LSP to extract code structure as a graph, cluster with Leiden community detection, produce persistent queryable context that saves tokens per LLM call.
+  Solution: Use tree-sitter (LSP opt-in per extension) to extract code structure as a graph, cluster with Leiden community detection, produce persistent queryable context that saves tokens per LLM call.
 
   ## Tech Stack
   Language: Haskell (GHC 9.10)
   Build: Cabal 3.0
-  Dev Shell: Nix (nixpkgs-unstable, shell.nix)
+  Dev Shell: devenv (Nix-backed; `devenv shell`)
   Graph Library: FGL 5.8+ (functional graph library, pure graph operations)
-  Protocol: LSP (lsp-types 2.0+, Language Server Protocol for extraction)
+  Protocol: tree-sitter grammars by default; LSP (lsp-types 2.0+) opt-in per extension
   Serialization: Aeson 2.0+ (JSON for graph.json, config, LSP protocol)
   CLI: optparse-applicative 0.17+
   Testing: Hspec 2.10+ / QuickCheck 2.14+
@@ -31,27 +31,27 @@ context: |
   Pattern: Clean Architecture (Domain ← UseCase ← Infrastructure)
   - Domain (pure, no IO): Types (Node, Edge, Graph, Community, Analysis, Pipeline, Extraction, Ingest, Context), Graph (Core, FGL adapter, Query, Diff, Analysis, Index), Community (Leiden, Label, Resolution, Merge, Cohesion, Representatives), Analysis (God nodes, bridges, surprising, suggested questions), Config, Context formatting, Extraction validation
   - UseCase (pure orchestration, no IO implementation): Pipeline, Detect, Extract, Build, Cluster, Infer, Analyze, Report, Export, Query, Load, Ingest, SelectContext
-  - Infrastructure (all IO): LSP (Client, Protocol, Transport, Extraction, ServerMap 30+ langs, Capabilities), Extract (tree-sitter CLI), FileSystem (Cache, Manifest, Watcher, Ignore, Sensitive, OfficeConvert, Conversation), Export (JSON, HTML, Report, Obsidian, Neo4j, SVG, GraphML, CommunityGraph), Server (MCP stdio 11 tools, static HTTP), Logging + OTLP bridge, Observability wrapper, Config loader, LLM client + Embeddings
+  - Infrastructure (all IO): LSP (Client, Protocol, Transport, Extraction, ServerMap 30+ langs, Capabilities), Extract (tree-sitter CLI), FileSystem (Cache, Manifest, Watcher, Ignore, Sensitive, OfficeConvert, Conversation), Export (JSON, HTML, Report, Obsidian, Neo4j, SVG, GraphML, CommunityGraph), Server (MCP stdio 13 tools, static HTTP), Logging + OTLP bridge, Observability wrapper, Config loader, LLM client + Embeddings
   HARD RULE: Domain has ZERO IO. UseCase has ZERO IO implementation. ALL side effects in Infrastructure only.
 
   ## Build & Test
-  Setup: nix-shell shell.nix
+  Setup: devenv shell
   Build: cabal build (uses -Wall -Wcompat -Wincomplete-uni-patterns -Werror with --flag dev)
   Test: cabal test (Hspec + QuickCheck)
   REPL: cabal repl
   Run: cabal run graphos -- <path>
-  GHC: 9.10 (via Nix shell.nix hp = pkgs.haskell.packages.ghc910)
+  GHC: 9.10 (via devenv; hp = pkgs.haskell.packages.ghc910)
 
   ## Pipeline Stages
   detect → extract → build → cluster → infer → analyze → export
   Each stage is a pure function. Checkpoint after Build. SHA256 cache for incremental.
 
   ## Key Decisions
-  - LSP over tree-sitter: any language with server, semantic info, cross-file refs, zero grammar maintenance
+  - Tree-sitter first: no server to install, offline, grammar compiled in; LSP is an opt-in per-extension override for semantic info and cross-file refs
   - FGL adapter: Domain maps (NodeId→Node, EId→Edge) ↔ FGL Gr a b (Patricia Tree). FGL module does NOT import Domain.Graph (avoids cycles). Operates on raw Maps/Sets.
   - Leiden community detection: 3 phases (local moving, refinement, aggregation). Parameters: resGamma (default 1.0), resMinSize (3), resMaxIterations (50).
   - Context selection: 5 strategies by complexity (Focused/Module/CrossModule/Architectural/Exploratory). Token budget allocation. Compact markdown output.
-  - MCP server: stdio JSON-RPC, 11 tools, community 0 = synthetic chat community (one-way edges, non-polluting).
+  - MCP server: stdio JSON-RPC, 13 tools, community 0 = synthetic chat community (one-way edges, non-polluting).
   - Neo4j: 3 push modes (FullPush/SubgraphPush/CommunityPush). Auto-select by graph size (<10k=Full, >=10k=Subgraph).
   - Observability: OTLP traces + IORef metrics store + OTLP log bridge + debug-trace JSONL. Collector at :4318.
 
@@ -80,18 +80,18 @@ context: |
 # Per-artifact rules
 rules:
   proposal:
-    - Reference PRD.md section numbers for every capability
-    - Capabilities MUST map 1:1 to workflow docs (01-full-pipeline through 16-lsp-discovery)
+    - Ground every capability in the config context and the workflow docs under docs/workflows/
+    - Capabilities SHOULD map to workflow docs (01-full-pipeline through 18-cypher-write)
     - Keep the proposal under 2 pages — focus on why not how
   specs:
     - Every requirement MUST use SHALL/MUST (not should/may)
     - Every requirement MUST have at least one Scenario with WHEN/THEN format using exactly 4 hashtags (####)
-    - Reference PRD section numbers in requirement descriptions
+    - Ground requirements in the config context and the relevant docs/workflows/ pages
     - Map scenarios to testable outcomes verifiable by cabal test
   design:
     - Architecture decisions MUST reference the clean architecture layers (Domain/UseCase/Infrastructure)
     - Every decision MUST list alternatives considered
-    - No code examples — use schema diagrams and structured tables per PRD style
+    - No code examples — use schema diagrams and structured tables
     - Verification strategy MUST reference cabal build/test commands
   tasks:
     - Tasks should be completable in 1-4 hours each

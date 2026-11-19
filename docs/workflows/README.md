@@ -13,15 +13,15 @@
 | 05 | [Path](05-path.md) | `graphos path <from> <to>` | Shortest path between two nodes |
 | 06 | [Explain](06-explain.md) | `graphos explain <node>` | Show a node and all its connections |
 | 07 | [Context Selection](07-context-selection.md) | `graphos query <q>` (via MCP `select_context`) | LLM context optimization — 5 strategies by complexity |
-| 08 | [MCP Server](08-mcp-server.md) | `graphos --mcp <graph.json>` | AI agent integration via 11 tools + chat memory |
+| 08 | [MCP Server](08-mcp-server.md) | `graphos --mcp <graph.json>` | AI agent integration via 13 tools + chat memory |
 | 09 | [Merge](09-merge.md) | `graphos merge <a> <b> -o <dir>` | Combine two knowledge graphs + re-cluster |
 | 10 | [Ingest](10-ingest.md) | `graphos ingest <file>` | Single file/URL ingestion + optional embeddings |
 | 11 | [Community Labeling](11-community-labeling.md) | `graphos <path> --label` | LLM-based human-readable community names |
 | 12 | [Neo4j Push](12-neo4j-push.md) | `graphos <path> --neo4j --neo4j-push` | Graph database push — 3 modes (full/subgraph/community) |
 | 13 | [Memgraph Push](13-memgraph-push.md) | `graphos <path> --memgraph --memgraph-push` | In-memory graph database push via Bolt protocol |
-| 14 | [Observability](14-observability.md) | `graphos <path> --otel` | OTLP traces + metrics + logs + debug trace |
-| 15 | [Config Init](15-config-init.md) | `graphos init` | Bootstrap graphos.yaml with defaults |
-| 16 | [LSP Discovery](16-lsp-discovery.md) | `graphos lservers` | Auto-detect installed LSP servers |
+| 14 | [Symbols](14-symbols.md) | `graphos symbols <name>` | Exact symbol lookup by name |
+| 15 | [Neighbors](15-neighbors.md) | `graphos neighbors <node>` | Expand the neighborhood around a node |
+| 16 | [Agent Scaffolding](16-agent-scaffolding.md) | `graphos install-skill`, `graphos init` | Scaffold config and user-level AI assistant skills |
 | 17 | [Cypher](17-cypher.md) | `graphos cypher "<query>"` | Read-only openCypher/GQL subset (MATCH/WHERE/RETURN) over the property graph |
 | 18 | [Cypher Write](18-cypher-write.md) | `graphos cypher "<statement>" --write` | openCypher write subset (CREATE/MERGE/SET/REMOVE/DELETE) with optional graph.json persistence |
 
@@ -31,7 +31,7 @@
 ┌──────────────────────────────────────────────────────────────────────┐
 │                                                                      │
 │  ┌─────────────────┐     ┌──────────────────┐                       │
-│  │ 15. Config Init │────▶│ 01. Full Pipeline│◀──── 16. LSP Discovery│
+│  │ 15. Neighbors   │     │ 01. Full Pipeline│◀──── 16. Scaffolding  │
 │  └─────────────────┘     └──┬──┬──┬──┬──┬─┘                       │
 │                              │  │  │  │  │                           │
 │              ┌───────────────┘  │  │  │  └──────────────┐           │
@@ -54,9 +54,9 @@
 │  │ 08. MCP Server  │   │ 09. Merge        │   │ 10. Ingest     │    │
 │  └─────────────────┘   └──────────────────┘   └──────────────────┘    │
 │                                                                       │
-│  ┌─────────────────┐                                                  │
-│  │ 14. Observability│ ← orthogonal, runs alongside any pipeline      │
-│  └─────────────────┘                                                  │
+│  ┌─────────────────┐   ┌──────────────────┐                          │
+│  │ 14. Symbols     │   │ 17/18. Cypher    │                          │
+│  └─────────────────┘   └──────────────────┘                          │
 │                                                                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -76,8 +76,6 @@ graphos-out/
 │   └── *.sha256
 ├── memory/                 ← 08 (conversation history)
 │   └── conv_*.md
-├── debug/                  ← 14 (debug trace JSONL)
+├── debug/                  ← OTLP debug trace JSONL
 │   └── *.jsonl
-├── index.json              ← 10 (ingest embedding index)
-└── obsidian/               ← 01, 02 (with --obsidian)
 ```

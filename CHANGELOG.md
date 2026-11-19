@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Documentation
+- **Documentation overhaul (Diátaxis + drift guard).** `docs/` is restructured
+  into Tutorials, How-to/Workflows, Reference, and Explanation with
+  `docs/README.md` as the single index; internal notes and point-in-time
+  snapshots move to `docs/internal/`. `README.md` is rewritten as a ~150-line
+  front door with one LSP security section. `CONTRIBUTING.md` now defers to
+  `GITFLOW.md` for the branch model and to `docs/reference/release-policy.md`
+  for releases instead of duplicating a `develop`-based flow. The workflow
+  index matches the 18 files on disk, the MCP reference lists all 13 tools, and
+  a new `tests/DocsSpec.hs` runs in `cabal test` to fail on broken links,
+  anchors, workflow-index drift, MCP tool drift, CLI coverage gaps, or
+  duplicated README sections.
+
 ### Added
 - Tree-sitter grammars for PHP, Kotlin (aliased to the Java parser), Perl, and
   C# are registered, plus vendored Perl/C# parsers and Hackage PHP; Java

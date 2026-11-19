@@ -408,6 +408,7 @@ test-suite graphos-test
   hs-source-dirs: tests
   other-modules:
     Paths_graphos
+    DocsSpec
     Graphos.Domain.TypesSpec
     Graphos.Domain.SpecCheckSpec
     Graphos.Domain.IntentGraphVerificationSpec

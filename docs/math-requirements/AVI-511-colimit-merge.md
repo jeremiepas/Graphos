@@ -189,7 +189,7 @@ has **no commuting witness**. This is a required *inequality*: the design mandat
 
 > **Constrains:** `mergeGraphsAndAnalyze` (`Merge.hs:37-64`).
 
-### 6.2 Reconcile cohesion with the sibling doc [AVI-510](/AVI/issues/AVI-510)
+### 6.2 Reconcile cohesion with the sibling doc (AVI-510)
 
 The sibling doc settles cohesion as the **average internal-neighbor ratio** (§6.1 of `community-detection-modularity.md`):
 ```

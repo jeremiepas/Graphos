@@ -1,6 +1,6 @@
 # Graphos Release Policy
 
-Status: **active** — enforced by the Paperclip routines listed in [Automation](#automation).
+Status: **active** — enforced by the Paperclip routines listed in [Automation](#7-automation).
 Owner: CTO (portfolio authority). Execution: head-of-graphos, merge-gatekeeper.
 Scope: `github.com/jeremiepas/Graphos` (private repo on GitHub Free — branch protection is
 unavailable, so **Paperclip lanes are the only merge gate**; see repo `AGENTS.md`).
