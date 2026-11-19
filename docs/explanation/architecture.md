@@ -1,4 +1,4 @@
-# Graphos Infrastructure Schema
+# Architecture
 
 ## 1. Application Architecture
 

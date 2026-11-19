@@ -1,21 +1,12 @@
-# documentation
-
-Diátaxis-structured documentation tree with a single index, an accurate front-door README,
-single-sourced governance docs, and a `cabal test`-enforced drift guard. Grounded in the
-workflow docs (`docs/workflows/01…18`) and the `openspec/config.yaml` project context (no PRD.md
-exists in this repository; config rule reference fixed by this change).
-
 ## ADDED Requirements
 
 ### Requirement: Documentation index and Diátaxis structure
 
-The repository SHALL provide `docs/README.md` as the single documentation entry point, organizing
-every audience-facing document under exactly one Diátaxis quadrant (Tutorials, How-to/Workflows,
-Reference, Explanation). Every `*.md` file under `docs/` — excluding `docs/internal/`,
-`docs/math/`, and `docs/math-requirements/` (the latter two indexed as a single "Formal
-foundations" entry) — SHALL be reachable from this index. Internal working notes and
-point-in-time snapshots SHALL live under `docs/internal/` and SHALL NOT appear in the audience
-index.
+The repository SHALL provide `docs/README.md` as the single documentation entry point. Every
+audience-facing `*.md` file under `docs/` SHALL be reachable from it under exactly one Diátaxis
+quadrant (Tutorials, How-to/Workflows, Reference, Explanation). `docs/internal/` SHALL hold
+internal notes and snapshots and SHALL NOT be linked from the index; `docs/math/` and
+`docs/math-requirements/` SHALL be indexed as one "Formal foundations" entry.
 
 #### Scenario: index covers the documentation tree
 
