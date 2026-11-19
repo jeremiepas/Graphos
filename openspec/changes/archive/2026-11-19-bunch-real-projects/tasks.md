@@ -5,7 +5,8 @@
 - [x] 0.3 `avi-1440` implemented (its TypeScript `GrammarsSpec` failure fixed). Implemented in #88; archived 2026-11-18
 - [x] 0.4 `BoundedDeltaCommunitySpec` "small random graphs" property fixed or bounded, so the full suite terminates
 - [x] 0.5 `modularity-undirected-view` implemented (validation numbers use the undirected score). Archived 2026-11-19; the recorded Bunch figures come from undirected builds and are unchanged (`src/cli` re-measured)
-- [ ] 0.6 `clustering-evaluation-and-selection` reconciled with the merged Bunch requirements (closed as superseded or rebased)
+- [x] 0.6 `clustering-evaluation-and-selection` reconciled with the merged Bunch requirements (closed as superseded or rebased)
+  - Rebased 2026-11-19 (decision: rebase, keep MoJo / linkage / `clustereval score|compare|sweep`): `agglomerative` and `auto` extend the existing `--cluster-algorithm leiden|bunch`; its file dependency matrix is the Bunch MDG folded with edge weights (code files, `clustering.bunch.relations`); its file cap falls back to Leiden like `--bunch-max-files`; the new `clustereval` subcommands sit beside `landscape`; the sweep and `auto` rank Bunch with Leiden. `openspec validate --strict` green.
 
 ## 1. D1 — No size cap on Bunch
 
@@ -55,4 +56,5 @@
 
 - [x] 6.1 `openspec validate bunch-real-projects --strict`
   - Valid on 2026-11-19 (after the `report-consistency` delta took in the `modularity-undirected-view` scenarios).
-- [ ] 6.2 Replace the external workarounds (`graphos-out-bunch-dataset/c4_project.py`, `refine_record.py`, `dataset-discovery/scripts/c4/c4_build.py` resolvers) with plain `graphos … --cluster-algorithm bunch`; archive the change
+- [x] 6.2 Replace the external workarounds (`graphos-out-bunch-dataset/c4_project.py`, `refine_record.py`, `dataset-discovery/scripts/c4/c4_build.py` resolvers) with plain `graphos … --cluster-algorithm bunch`; archive the change
+  - Decision 2026-11-19: note only, external scripts left untouched. They are redundant: plain `graphos … --cluster-algorithm bunch` reproduces what they did — imports resolved without the post-build resolver (jhipster 548 file-to-file imports via tsconfig `paths`, taxonomy 258 via `@/`), no singleton fixing pass needed (nestjs-realworld 9 modules MQ 4.30, solario-core `src/cli` 40 modules MQ 18.79, pc26 MQ 410.59 with 1 connected singleton, refinement built in). `graphos-out-bunch-dataset/c4_project.py`, `refine_record.py` and `dataset-discovery/scripts/c4/c4_build.py` resolvers can be dropped by their owners; archived with this change.
