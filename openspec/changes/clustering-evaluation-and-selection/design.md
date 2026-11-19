@@ -82,18 +82,24 @@ maximal-overlap group of B, `M` = elements outside their cluster's tag,
 
 | Parameter | Grid (defaults) |
 |---|---|
-| Feature vector of file i | row i of W (edge counts, both directions) |
+| Feature vector of file i | row i of W (summed edge weights, both directions) with `W[i][i]` = the row's largest weight — without it, two files that depend only on each other have orthogonal rows |
 | Distance | euclidean, manhattan, cosine (cosine of a zero row = 1) |
 | Linkage | single, average, complete |
 | Cut | K = ⌈F / q⌉ for q ∈ {5, 7, 10, 15, 20, 25} (the paper's configuration suffixes such as `cosine_single_25` are read as this divisor; configurable) |
 | Determinism | ties broken by smallest (cluster id, cluster id) pair |
 | Cap | F ≤ 10,000 (`--agglomerative-max-files`); above it the run is skipped with a reported reason |
 
-Algorithms: single linkage via a minimum spanning tree (Prim, O(F²) time,
-O(F) extra space over the distance matrix); average and complete via the
-nearest-neighbour-chain algorithm (O(F²) time, valid because both linkages
-are reducible). Distance matrix O(F²) memory — at F = 10,000 that is ~400 MB
-of `Double`s in an unboxed upper triangle, which is why the cap exists.
+Algorithm (all three linkages): the generic agglomerative algorithm with a
+cached nearest neighbour per cluster and Lance–Williams updates (min,
+size-weighted mean, max). Each step merges the globally closest pair by
+`(distance, cluster id, cluster id)` — exactly the naive O(F³) rule, so the
+result equals the naive reference, ties included; typical cost O(F²), O(F³)
+only in degenerate tie patterns. A minimum spanning tree cut (single) or the
+nearest-neighbour chain (average, complete) were the first plan; both resolve
+a tie at the cut differently from the cluster-id rule (found by the
+naive-reference property), so they were dropped. Distance matrix O(F²)
+memory — at F = 10,000 that is ~400 MB of `Double`s in an unboxed upper
+triangle, which is why the cap exists.
 
 Alternatives: naive O(F³) merging (rejected, too slow above a few thousand
 files); approximate/sparse linkage (deferred); clustering at function

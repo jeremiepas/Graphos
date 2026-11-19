@@ -18,7 +18,9 @@ edges and self-pairs.
 ### Requirement: Agglomerative hierarchical clustering
 
 The system SHALL cluster files by agglomerative hierarchical clustering on the
-rows of W, with distance ∈ {euclidean, manhattan, cosine} (cosine distance of a
+rows of W, each with its self entry `W[i][i]` set to the row's largest weight
+(so two files that depend only on each other have equal rows; a file with no
+dependency keeps a zero row), with distance ∈ {euclidean, manhattan, cosine} (cosine distance of a
 zero row is 1), linkage ∈ {single, average, complete}, and a cut producing
 exactly `K = ⌈F / q⌉` clusters for a divisor q (default grid
 {5, 7, 10, 15, 20, 25}). Ties SHALL be broken by the smallest cluster-id pair so

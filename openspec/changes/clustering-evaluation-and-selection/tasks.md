@@ -11,10 +11,14 @@
 
 ## 2. Agglomerative clustering (Domain) — parallel with 1.2–1.4
 
-- [ ] 2.1 Fold graph to files and build W (unboxed upper triangle). Check: the two file-dependency-matrix scenarios
-- [ ] 2.2 Distances (euclidean, manhattan, cosine, zero-row rule). Check: hand-computed 3×3 fixture
-- [ ] 2.3 Single linkage via Prim MST + cut at K. Check: two-group fixture, exact K, determinism
-- [ ] 2.4 Average and complete linkage via nearest-neighbour chain. Check: matches a naive O(F³) reference on random graphs F ≤ 30 (QuickCheck)
+- [x] 2.1 Fold graph to files and build W (unboxed upper triangle). Check: the two file-dependency-matrix scenarios
+  - `Agglomerative.fileMatrix rels = foldToFileMDGWith rels EdgeWeights`; feature rows (`featureRow`) add the self entry. The three scenarios pass on built graphs.
+- [x] 2.2 Distances (euclidean, manhattan, cosine, zero-row rule). Check: hand-computed 3×3 fixture
+  - `rowDistance` over sparse rows (merge of ascending indices): euclidean, manhattan, cosine (`1 − cos`, 1 for a zero row). Hand-computed 4-file fixture; symmetric, non-negative (QuickCheck).
+- [x] 2.3 Single linkage (planned: Prim MST + cut at K). Check: two-group fixture, exact K, determinism
+  - Single linkage runs the same generic algorithm as 2.4 (Lance–Williams `min`): a Prim MST cut broke the cluster-id tie rule at the cut (QuickCheck counterexample), see design D4. Two-group fixture for all distances, F = 20 / q = 5 → 4 clusters, equals a naive single-linkage merge (2,000 cases).
+- [x] 2.4 Average and complete linkage (planned: nearest-neighbour chain). Check: matches a naive O(F³) reference on random graphs F ≤ 30 (QuickCheck)
+  - Generic algorithm with cached nearest neighbours (not the NN chain, which reorders tied merges). Equals the naive O(F³) reference for average and complete × 3 distances on random graphs F ≤ 30 (2,000 cases); Lance–Williams = mean / max of pairwise distances; deterministic; exactly `min K F` clusters.
 - [ ] 2.5 File-count cap with reported skip. Check: cap scenario
 
 ## 3. Orchestration (UseCase)

@@ -107,6 +107,7 @@ library
                     Graphos.Domain.Community.MQ
                     Graphos.Domain.Community.Bunch
                     Graphos.Domain.Community.Partition
+                    Graphos.Domain.Community.Agglomerative
                     Graphos.Domain.Community.Landscape
                     Graphos.Domain.Random
                    Graphos.Domain.Analysis
@@ -429,6 +430,7 @@ test-suite graphos-test
     Graphos.Domain.Community.DeterminismSpec
     Graphos.Domain.Community.PermutationSpec
     Graphos.Domain.Community.PartitionSpec
+    Graphos.Domain.Community.AgglomerativeSpec
     Graphos.Domain.Community.MQSpec
     Graphos.Domain.Community.BunchSpec
     Graphos.Domain.Community.LandscapeSpec
