@@ -8,7 +8,8 @@ import Data.List (sort, nub)
 import Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
-import Data.Text.Short (fromText)
+import qualified Data.Text as T
+import Data.Text.Short (fromText, toText)
 import Test.Hspec
 
 import Graphos.Domain.Types
@@ -16,8 +17,13 @@ import Graphos.Domain.Graph (Graph, buildGraph, gNodes, gEdges)
 import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes, undirectedView)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig, foldToFileMDG, mdgFileCount, mdgEdgeCount, bunchCluster, BunchResult(..), BunchRun(..))
 import Graphos.Domain.Community.MQ (Weighting(..))
+import Graphos.Domain.Community.Agglomerative (Distance(..), Linkage(..))
 import Graphos.UseCase.Cluster
-import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..), defaultClusteringConfig, defaultBunchFileConfig)
+import Graphos.Domain.Config.Clustering
+  ( ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..)
+  , AgglomerativeFileConfig(..), LinkageName(..), DistanceName(..)
+  , defaultClusteringConfig, defaultBunchFileConfig, defaultAgglomerativeFileConfig
+  )
 import Graphos.Domain.Community.MQ (modularizationQuality, mqValue)
 
 spec :: Spec
@@ -26,6 +32,7 @@ spec = do
   bunchSpec
   capSpec
   configSpec
+  agglomerativeSpec
   realProjectsSpec
 
 -- ───────────────────────────────────────────────
@@ -352,3 +359,57 @@ realProjectsSpec = do
     it "keeps the hard ceiling: above bsMaxFiles Leiden runs with a skip entry" $ do
       let (_, _, q) = runClustering (BunchAlgorithm defaultBunchSettings { bsMaxFiles = 5 }) res twoDirGraph
       cqSkip q `shouldBe` Just (BunchSkip 6 5)
+
+-- ───────────────────────────────────────────────
+-- Agglomerative dispatch and the file cap (2.5, 3.2)
+-- ───────────────────────────────────────────────
+
+agglomerativeSpec :: Spec
+agglomerativeSpec = do
+  describe "runClustering (AgglomerativeAlgorithm ...)" $ do
+    it "clusters files and pushes the file partition to every symbol node" $ do
+      let settings = defaultAgglomerativeSettings
+            { asDistance = Cosine, asLinkage = Single, asDivisor = 1 }
+          (comm, _, q) = runClustering (AgglomerativeAlgorithm settings) res twoDirGraph
+          files = [ "a/1.ts", "a/2.ts", "a/3.ts", "b/1.ts", "b/2.ts", "b/3.ts" ]
+          fileComm f = [ cid | (cid, nids) <- Map.toList comm
+                             , nid <- nids
+                             , Just nd <- [Map.lookup nid (gNodes twoDirGraph)]
+                             , let file = T.unpack (toText (nodeSourceFile nd))
+                             , file == f ]
+      cqAlgorithm q `shouldBe` "agglomerative"
+      sort (concat (Map.elems comm)) `shouldBe` sort (Map.keys (gNodes twoDirGraph))
+      -- every symbol of a file shares one cluster
+      map (length . nub . fileComm) files `shouldBe` replicate 6 1
+
+    it "skips above --agglomerative-max-files and reports the cap, running Leiden" $ do
+      let settings = defaultAgglomerativeSettings { asMaxFiles = 2 }
+          (comm, _, q) = runClustering (AgglomerativeAlgorithm settings) res twoDirGraph
+      cqAlgorithm q `shouldBe` "leiden"
+      cqSkip q `shouldBe` Just (BunchSkip 6 2)
+      comm `shouldBe` fst (clusterGraphWithResolution twoDirGraph res)
+
+    it "is deterministic: same graph, same configuration, same partition" $ do
+      let settings = defaultAgglomerativeSettings { asDistance = Euclidean, asLinkage = Average, asDivisor = 1 }
+      fst3 (runClustering (AgglomerativeAlgorithm settings) res twoDirGraph)
+        `shouldBe` fst3 (runClustering (AgglomerativeAlgorithm settings) res twoDirGraph)
+
+  describe "clusterAlgorithmFromConfig (agglomerative and auto)" $ do
+    it "maps the agglomerative block to AgglomerativeSettings" $
+      clusterAlgorithmFromConfig defaultClusteringConfig
+        { ccAlgorithm = AlgoAgglomerative
+        , ccAgglomerative = defaultAgglomerativeFileConfig
+            { afDistance = DistanceManhattan, afLinkage = LinkageAverage, afDivisor = 10, afMaxFiles = 123 } }
+        `shouldBe` AgglomerativeAlgorithm defaultAgglomerativeSettings
+          { asDistance = Manhattan, asLinkage = Average, asDivisor = 10, asMaxFiles = 123 }
+
+    it "maps auto to AutoAlgorithm carrying both algorithm families" $ do
+      let cfg = defaultClusteringConfig { ccAlgorithm = AlgoAuto, ccSeed = 3 }
+      case clusterAlgorithmFromConfig cfg of
+        AutoAlgorithm au -> do
+          bsConfig (auBunch au) `shouldBe` defaultBunchConfig { bcSeed = 3 }
+          auAgglomerative au `shouldBe` defaultAgglomerativeSettings
+        other -> expectationFailure ("expected AutoAlgorithm, got " ++ show other)
+
+  where
+    fst3 (a, _, _) = a

@@ -70,6 +70,7 @@ parserAnalysis = Analysis
   , analysisArticulation = []
   , analysisBccCount    = 0
   , analysisPartitionQuality = Nothing
+  , analysisClusterEval = Nothing
   }
 
 budget :: ContextBudget

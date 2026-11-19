@@ -7,6 +7,7 @@ module Graphos.UseCase.Export
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Map.Strict as Map
+import Data.Aeson (toJSON)
 
 import Graphos.UseCase.Report (generateReport)
 import Graphos.Domain.Types hiding (PushMode(..))
@@ -28,6 +29,10 @@ exportAll ep g analysis config detection mLabels aggregates = do
   let reportPath = cfgOutputDir config ++ "/GRAPH_REPORT.md"
   let reportContent = generateReport g analysis config detection mLabels
   epExportReport ep reportContent reportPath
+
+  case analysisClusterEval analysis of
+    Just rep -> epExportClusterEval ep (toJSON rep) (cfgOutputDir config ++ "/cluster_eval.json")
+    Nothing  -> pure ()
 
   htmlPath <- if cfgNoViz config
     then pure Nothing

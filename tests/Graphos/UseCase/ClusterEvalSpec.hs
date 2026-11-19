@@ -8,6 +8,7 @@ import Data.Aeson (Value(..))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
+import Data.List (sort, sortBy)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText)
@@ -15,14 +16,20 @@ import Numeric (showFFloat)
 import Test.Hspec
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, buildGraph)
+import Graphos.Domain.Graph (Graph, buildGraph, gNodes)
+import Graphos.Domain.Community.Partition (mjScore)
 import Graphos.Domain.Community.Bunch (mdgFileCount)
 import Graphos.Domain.Community.Landscape (LandscapeResult(..), RandomGraphSpec(..), Basin(..), RunRecord(..))
 import Graphos.UseCase.Cluster (joinCommunitiesToNodes)
 import Graphos.UseCase.ClusterEval
 
 spec :: Spec
-spec = describe "UseCase.ClusterEval landscape" $ do
+spec = do
+  landscapeSpec
+  scoreSweepSpec
+
+landscapeSpec :: Spec
+landscapeSpec = describe "UseCase.ClusterEval landscape" $ do
   it "emits N runs with seeds s..s+N-1 sorted by final MQ" $ do
     let rep = landscapeReport input (Just plain)
         runs = lrRuns (lrResult rep)
@@ -105,3 +112,50 @@ edgeOf u v = Edge
   , edgeConfidence = Confidence 1.0
   , edgeExtra = Nothing
   }
+
+-- | Score / compare / sweep (clustering-evaluation-and-selection 3.1, 4.1).
+scoreSweepSpec :: Spec
+scoreSweepSpec = describe "UseCase.ClusterEval score / compare / sweep" $ do
+  it "score emits mojofm, truth_groups, clusters and dropped" $ do
+    let truth = directoryTruthFor 1 plain
+        r = scoreGraph clustered truth
+        keys = case scoreJSON r of
+          Object o -> map Key.toText (KeyMap.keys o)
+          _        -> []
+    keys `shouldMatchList` ["mojofm", "mno", "max_mno", "common", "dropped", "truth_groups", "clusters"]
+    srDropped r `shouldBe` 0
+    srTruthGroups r `shouldBe` 1
+
+  it "compare reports stability in both directions" $ do
+    let r = compareGraphs clustered plain
+        keys = case compareJSON r of
+          Object o -> map Key.toText (KeyMap.keys o)
+          _        -> []
+    all (`elem` keys) ["stability_ab", "stability_ba"] `shouldBe` True
+    mjScore (crAB r) `shouldSatisfy` (\x -> x >= 0 && x <= 100)
+    mjScore (crBA r) `shouldSatisfy` (\x -> x >= 0 && x <= 100)
+
+  it "sweep ranks by MoJoFM desc, then singletons, then name, and applies the winner" $ do
+    let truth = directoryTruthFor 2 plain
+        opts = (defaultSweepOptions truth) { soDivisors = [1] }
+        r = sweepGraph opts clustered
+        rows = swRows r
+        names = map swConfig rows
+        mojos = map swMojofm rows
+    length rows `shouldBe` 11                     -- leiden + bunch + 3 distances x 3 linkages x 1 divisor
+    all (`elem` names) ["leiden", "bunch"] `shouldBe` True
+    mojos `shouldBe` sortBy (flip compare) mojos  -- non-increasing
+    case rows of
+      (best : _) -> swSelected r `shouldBe` best
+      []         -> expectationFailure "sweep returned no rows"
+    -- every node gets a community from the winning partition
+    sort (concat (Map.elems (swCommunities (swSelected r))))
+      `shouldBe` sort (Map.keys (gNodes clustered))
+
+  it "renders the ranking as a markdown table" $ do
+    let truth = directoryTruthFor 2 plain
+        r = sweepGraph ((defaultSweepOptions truth) { soDivisors = [5] }) clustered
+        md = sweepMarkdown r
+    md `shouldSatisfy` T.isInfixOf "## Configuration sweep"
+    md `shouldSatisfy` T.isInfixOf "| Rank | Configuration | MoJoFM |"
+    md `shouldSatisfy` T.isInfixOf ("Selected: " <> swConfig (swSelected r))

@@ -52,6 +52,8 @@ import qualified Graphos.Infrastructure.Export.Memgraph as ExportMemgraph
 import qualified Graphos.Infrastructure.Export.IncrementalJSON as Inc
 import qualified Graphos.Infrastructure.Export.CommunityGraph as CommunityGraph
 import qualified Graphos.Infrastructure.Export.JSON as ExportJSON
+import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
+import Data.Aeson (encode)
 import Graphos.Infrastructure.FileSystem.Cache
   ( loadPipelineCheckpoint, savePipelineCheckpoint, clearPipelineCheckpoint
   , loadCachedFingerprinted, saveCachedFingerprinted
@@ -239,6 +241,7 @@ productionExportPort _logEnv _obsEnv =
             ExportHTML.exportHTML g analysis mLabels (map ExportHTML.convertAggregate aggregates) hPath
         , UEP.epExportObsidian = ExportObsidian.exportObsidian
         , UEP.epExportReport = ExportReport.exportReport
+        , UEP.epExportClusterEval = \v path -> writeFileAtomic path (encode v)
         , UEP.epExportCypher = Neo4j.exportCypher
         , UEP.epExportMemgraphCypher = ExportMemgraph.exportMemgraphCypher
         , UEP.epPushToNeo4jFull = Neo4j.pushToNeo4jWithCommunities

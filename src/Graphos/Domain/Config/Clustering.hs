@@ -9,8 +9,12 @@ module Graphos.Domain.Config.Clustering
   ( ClusteringConfig(..)
   , ClusteringAlgorithmName(..)
   , BunchFileConfig(..)
+  , AgglomerativeFileConfig(..)
+  , LinkageName(..)
+  , DistanceName(..)
   , defaultClusteringConfig
   , defaultBunchFileConfig
+  , defaultAgglomerativeFileConfig
   , defaultAnnealing
   , forbiddenBunchRelations
   , parseRelationName
@@ -22,6 +26,10 @@ module Graphos.Domain.Config.Clustering
   , applyClusteringOverrides
   , parseAlgorithmName
   , renderAlgorithmName
+  , parseLinkageName
+  , renderLinkageName
+  , parseDistanceName
+  , renderDistanceName
   ) where
 
 import Control.Applicative ((<|>))
@@ -33,7 +41,7 @@ import GHC.Generics (Generic)
 import Graphos.Domain.Types.Edge (Relation(..), relationToText)
 
 -- | The clustering algorithm of the build's cluster stage.
-data ClusteringAlgorithmName = AlgoLeiden | AlgoBunch
+data ClusteringAlgorithmName = AlgoLeiden | AlgoBunch | AlgoAgglomerative | AlgoAuto
   deriving (Eq, Show, Generic)
 
 instance NFData ClusteringAlgorithmName
@@ -44,9 +52,12 @@ instance FromJSON ClusteringAlgorithmName where
 
 parseAlgorithmName :: String -> Either String ClusteringAlgorithmName
 parseAlgorithmName s = case map toLowerAscii s of
-  "leiden" -> Right AlgoLeiden
-  "bunch"  -> Right AlgoBunch
-  _        -> Left ("unknown clustering algorithm: " ++ s ++ " (expected leiden or bunch)")
+  "leiden"        -> Right AlgoLeiden
+  "bunch"         -> Right AlgoBunch
+  "agglomerative" -> Right AlgoAgglomerative
+  "auto"          -> Right AlgoAuto
+  _               -> Left ("unknown clustering algorithm: " ++ s
+                           ++ " (expected leiden, bunch, agglomerative or auto)")
   where
     toLowerAscii c
       | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
@@ -55,6 +66,58 @@ parseAlgorithmName s = case map toLowerAscii s of
 renderAlgorithmName :: ClusteringAlgorithmName -> String
 renderAlgorithmName AlgoLeiden = "leiden"
 renderAlgorithmName AlgoBunch  = "bunch"
+renderAlgorithmName AlgoAgglomerative = "agglomerative"
+renderAlgorithmName AlgoAuto  = "auto"
+
+-- | Linkage of the agglomerative clusterer (@clustering.agglomerative.linkage@).
+data LinkageName = LinkageSingle | LinkageAverage | LinkageComplete
+  deriving (Eq, Show, Generic)
+
+instance NFData LinkageName
+
+instance FromJSON LinkageName where
+  parseJSON = withText "LinkageName" $ \t -> either fail pure (parseLinkageName (T.unpack t))
+
+parseLinkageName :: String -> Either String LinkageName
+parseLinkageName s = case map toLowerAscii s of
+  "single"   -> Right LinkageSingle
+  "average"  -> Right LinkageAverage
+  "complete" -> Right LinkageComplete
+  _          -> Left ("unknown linkage: " ++ s ++ " (expected single, average or complete)")
+  where
+    toLowerAscii c
+      | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
+      | otherwise            = c
+
+renderLinkageName :: LinkageName -> String
+renderLinkageName LinkageSingle   = "single"
+renderLinkageName LinkageAverage  = "average"
+renderLinkageName LinkageComplete = "complete"
+
+-- | Distance of the agglomerative clusterer (@clustering.agglomerative.distance@).
+data DistanceName = DistanceEuclidean | DistanceManhattan | DistanceCosine
+  deriving (Eq, Show, Generic)
+
+instance NFData DistanceName
+
+instance FromJSON DistanceName where
+  parseJSON = withText "DistanceName" $ \t -> either fail pure (parseDistanceName (T.unpack t))
+
+parseDistanceName :: String -> Either String DistanceName
+parseDistanceName s = case map toLowerAscii s of
+  "euclidean" -> Right DistanceEuclidean
+  "manhattan" -> Right DistanceManhattan
+  "cosine"    -> Right DistanceCosine
+  _           -> Left ("unknown distance: " ++ s ++ " (expected euclidean, manhattan or cosine)")
+  where
+    toLowerAscii c
+      | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
+      | otherwise            = c
+
+renderDistanceName :: DistanceName -> String
+renderDistanceName DistanceEuclidean = "euclidean"
+renderDistanceName DistanceManhattan = "manhattan"
+renderDistanceName DistanceCosine    = "cosine"
 
 -- | The @clustering.bunch.*@ block: the search parameters of the Bunch
 -- algorithm plus the stage-level file cap and MDG weighting.
@@ -82,6 +145,39 @@ defaultBunchFileConfig = BunchFileConfig
   , bfRelations     = [Imports, Calls, References, Extends, Implements]
   , bfWeighted      = False
   }
+
+-- | The @clustering.agglomerative.*@ block: the agglomerative clusterer's
+-- linkage, distance, cut divisor and file cap.
+data AgglomerativeFileConfig = AgglomerativeFileConfig
+  { afLinkage  :: LinkageName   -- ^ @linkage@ (default single)
+  , afDistance :: DistanceName  -- ^ @distance@ (default cosine)
+  , afDivisor  :: Int           -- ^ @divisor@: K = ceil(F / divisor) (default 25)
+  , afMaxFiles :: Int           -- ^ @max_files@: hard ceiling above which Leiden runs instead (default 10000)
+  } deriving (Eq, Show, Generic)
+
+instance NFData AgglomerativeFileConfig
+
+defaultAgglomerativeFileConfig :: AgglomerativeFileConfig
+defaultAgglomerativeFileConfig = AgglomerativeFileConfig
+  { afLinkage  = LinkageSingle
+  , afDistance = DistanceCosine
+  , afDivisor  = 25
+  , afMaxFiles = 10000
+  }
+
+instance FromJSON AgglomerativeFileConfig where
+  parseJSON = withObject "AgglomerativeFileConfig" $ \v -> do
+    let d = defaultAgglomerativeFileConfig
+    linkage  <- v .:? "linkage"   .!= afLinkage d
+    distance <- v .:? "distance"  .!= afDistance d
+    divisor  <- v .:? "divisor"   .!= afDivisor d
+    maxFiles <- (<|>) <$> v .:? "max_files" <*> v .:? "maxFiles"
+    pure AgglomerativeFileConfig
+      { afLinkage  = linkage
+      , afDistance = distance
+      , afDivisor  = divisor
+      , afMaxFiles = maybe (afMaxFiles d) id maxFiles
+      }
 
 -- | Relations the Bunch MDG may never fold (bunch-real-projects D2): file
 -- structure, documentation links and edge-inference output.
@@ -151,6 +247,7 @@ data ClusteringConfig
     , ccAlgorithm            :: ClusteringAlgorithmName  -- ^ @clustering.algorithm@ (default leiden)
     , ccSeed                 :: Int                      -- ^ @clustering.seed@ (default 0)
     , ccBunch                :: BunchFileConfig          -- ^ @clustering.bunch.*@
+    , ccAgglomerative        :: AgglomerativeFileConfig  -- ^ @clustering.agglomerative.*@
     } deriving (Eq, Show, Generic)
 
 instance NFData ClusteringConfig
@@ -166,7 +263,8 @@ instance FromJSON ClusteringConfig where
     algo    <- v .:? "algorithm"              .!= ccAlgorithm d
     seed    <- v .:? "seed"                   .!= ccSeed d
     bunch   <- v .:? "bunch"                  .!= ccBunch d
-    pure $ ClusteringConfig frac enabled algo seed bunch
+    agg     <- v .:? "agglomerative"          .!= ccAgglomerative d
+    pure $ ClusteringConfig frac enabled algo seed bunch agg
 
 -- | Default clustering configuration: Leiden, cap any community above 5% of
 -- total nodes, with the cap enabled.
@@ -177,6 +275,7 @@ defaultClusteringConfig = ClusteringConfig
   , ccAlgorithm            = AlgoLeiden
   , ccSeed                 = 0
   , ccBunch                = defaultBunchFileConfig
+  , ccAgglomerative        = defaultAgglomerativeFileConfig
   }
 
 -- | Validating smart constructor: rejects a non-positive fraction (which would
@@ -209,8 +308,13 @@ validClusteringConfig c
           ++ " (contains, documents, depends_on and inferred are never folded)"
   | Just (t0, alpha) <- bfAnnealing b, t0 <= 0 || alpha <= 0 || alpha >= 1 =
       Left $ "clustering.bunch.annealing needs t0 > 0 and 0 < alpha < 1, got " ++ show (t0, alpha)
+  | afDivisor a < 1 =
+      Left $ "clustering.agglomerative.divisor must be >= 1, got " ++ show (afDivisor a)
+  | afMaxFiles a < 0 =
+      Left $ "clustering.agglomerative.max_files must be >= 0, got " ++ show (afMaxFiles a)
   | otherwise = Right c
   where b = ccBunch c
+        a = ccAgglomerative c
 
 -- | Resolve the effective clustering configuration from a CLI-derived project
 -- config layered on top of a base 'ClusteringConfig' (from graphos.yaml or
@@ -234,12 +338,20 @@ mergeClusteringConfig project global =
         , bfRelations     = pickB bfRelations
         , bfWeighted      = pickB bfWeighted
         }
+    , ccAgglomerative        = AgglomerativeFileConfig
+        { afLinkage  = pickA afLinkage
+        , afDistance = pickA afDistance
+        , afDivisor  = pickA afDivisor
+        , afMaxFiles = pickA afMaxFiles
+        }
     }
   where
     pick :: Eq a => (ClusteringConfig -> a) -> a
     pick f = if f project == f defaultClusteringConfig then f global else f project
     pickB :: Eq a => (BunchFileConfig -> a) -> a
     pickB f = pick (f . ccBunch)
+    pickA :: Eq a => (AgglomerativeFileConfig -> a) -> a
+    pickA f = pick (f . ccAgglomerative)
 
 -- | Build-command overrides of the clustering configuration. 'Nothing' (or
 -- 'False' for the switch) leaves the config value in place; a given value
@@ -254,6 +366,10 @@ data ClusteringOverrides = ClusteringOverrides
   , covMaxFiles      :: Maybe Int                      -- ^ @--bunch-max-files@
   , covMaxFilesPerRun :: Maybe Int                     -- ^ @--bunch-max-files-per-run@
   , covWeighted      :: Bool                           -- ^ @--bunch-weighted@
+  , covLinkage       :: Maybe LinkageName              -- ^ @--linkage@
+  , covDistance      :: Maybe DistanceName             -- ^ @--distance@
+  , covDivisor       :: Maybe Int                      -- ^ @--cluster-divisor@
+  , covAgglomerativeMaxFiles :: Maybe Int              -- ^ @--agglomerative-max-files@
   } deriving (Eq, Show, Generic)
 
 instance NFData ClusteringOverrides
@@ -261,6 +377,7 @@ instance NFData ClusteringOverrides
 noClusteringOverrides :: ClusteringOverrides
 noClusteringOverrides =
   ClusteringOverrides Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing False
+    Nothing Nothing Nothing Nothing
 
 -- | CLI values override the configuration.
 applyClusteringOverrides :: ClusteringOverrides -> ClusteringConfig -> ClusteringConfig
@@ -276,5 +393,12 @@ applyClusteringOverrides o c = c
       , bfMaxFilesPerRun = maybe (bfMaxFilesPerRun b) id (covMaxFilesPerRun o)
       , bfWeighted      = covWeighted o || bfWeighted b
       }
+  , ccAgglomerative = a
+      { afLinkage  = maybe (afLinkage a) id (covLinkage o)
+      , afDistance = maybe (afDistance a) id (covDistance o)
+      , afDivisor  = maybe (afDivisor a) id (covDivisor o)
+      , afMaxFiles = maybe (afMaxFiles a) id (covAgglomerativeMaxFiles o)
+      }
   }
   where b = ccBunch c
+        a = ccAgglomerative c

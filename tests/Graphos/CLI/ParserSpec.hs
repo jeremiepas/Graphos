@@ -8,7 +8,9 @@ import Options.Applicative.Help (renderHelp, parserHelp)
 import Graphos.UseCase.Query.Render (defaultCommonQueryOpts)
 import Graphos.CLI.Parser
 import Graphos.Domain.Types (PipelineConfig(..))
-import Graphos.Domain.Config.Clustering (ClusteringOverrides(..), ClusteringAlgorithmName(..), noClusteringOverrides)
+import Graphos.Domain.Config.Clustering
+  ( ClusteringOverrides(..), ClusteringAlgorithmName(..), LinkageName(..), DistanceName(..)
+  , noClusteringOverrides )
 import Graphos.Domain.Community.Landscape (RandomGraphSpec(..))
 
 parseServe :: [String] -> Either String Command
@@ -239,7 +241,9 @@ spec = do
         `shouldBe` Right ClusteringOverrides
           { covAlgorithm = Just AlgoBunch, covSeed = Just 7, covPopulation = Just 4
           , covThreshold = Just 50, covAnnealing = Just (100, 0.99)
-          , covMaxIterations = Just 200, covMaxFiles = Just 3000, covMaxFilesPerRun = Just 250, covWeighted = True }
+          , covMaxIterations = Just 200, covMaxFiles = Just 3000, covMaxFilesPerRun = Just 250, covWeighted = True
+          , covLinkage = Nothing, covDistance = Nothing, covDivisor = Nothing
+          , covAgglomerativeMaxFiles = Nothing }
 
     it "rejects --bunch-max-files-per-run below 2 (bunch-real-projects D3)" $
       fmap cfgClusteringOverrides (parsePipeline ["--bunch-max-files-per-run", "1"])
@@ -260,6 +264,40 @@ spec = do
       parsePipeline ["--bunch-sa", "100"] `shouldSatisfy` isLeft
       parsePipeline ["--bunch-sa", "100,1.5"] `shouldSatisfy` isLeft
       parsePipeline ["--bunch-sa", "0,0.9"] `shouldSatisfy` isLeft
+
+    it "accepts agglomerative and auto, and parses the agglomerative flags" $ do
+      fmap (covAlgorithm . cfgClusteringOverrides) (parsePipeline ["--cluster-algorithm", "agglomerative"])
+        `shouldBe` Right (Just AlgoAgglomerative)
+      fmap (covAlgorithm . cfgClusteringOverrides) (parsePipeline ["--cluster-algorithm", "auto"])
+        `shouldBe` Right (Just AlgoAuto)
+      let o = fmap cfgClusteringOverrides (parsePipeline
+                [ "--linkage", "average", "--distance", "manhattan"
+                , "--cluster-divisor", "10", "--agglomerative-max-files", "500" ])
+      fmap covLinkage o `shouldBe` Right (Just LinkageAverage)
+      fmap covDistance o `shouldBe` Right (Just DistanceManhattan)
+      fmap covDivisor o `shouldBe` Right (Just 10)
+      fmap covAgglomerativeMaxFiles o `shouldBe` Right (Just 500)
+      parsePipeline ["--linkage", "ward"] `shouldSatisfy` isLeft
+      parsePipeline ["--cluster-divisor", "0"] `shouldSatisfy` isLeft
+
+  describe "clustereval score / compare / sweep (4.1)" $ do
+    it "parses score with truth depth and JSON" $
+      parseWith commandOpts ["clustereval", "score", "--graph", "g.json", "--truth-depth", "3", "--json"]
+        `shouldSatisfy` \case
+          Right (ClusterEvalScoreCmd co) ->
+            ceoGraphs co == ["g.json"] && ceoTruthDepth co == Just 3 && ceoJson co
+          _ -> False
+
+    it "parses compare with two graphs and sweep with a ref graph" $ do
+      parseWith commandOpts ["clustereval", "compare", "--graph", "a.json", "--graph", "b.json"]
+        `shouldSatisfy` \case
+          Right (ClusterEvalCompareCmd co) -> ceoGraphs co == ["a.json", "b.json"]
+          _ -> False
+      parseWith commandOpts ["clustereval", "sweep", "--graph", "g.json", "--ref-graph", "r.json", "--truth", "t.json"]
+        `shouldSatisfy` \case
+          Right (ClusterEvalSweepCmd co) ->
+            ceoRefGraphs co == ["r.json"] && ceoTruth co == Just "t.json"
+          _ -> False
 
   describe "clustereval landscape (6.2)" $ do
     it "parses the documented options" $

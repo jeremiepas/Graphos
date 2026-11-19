@@ -82,7 +82,14 @@ import Graphos.UseCase.Detect (detectFilesWithExtensionsAndIgnore', detectMultiS
 import Graphos.UseCase.Extract (extractAll, collapseDetectedFiles)
 import Graphos.UseCase.Build (buildGraphFromExtractions, buildGraphFromExtractionsWithStats)
 import Graphos.Infrastructure.Extract.ImportResolution (loadPathsConfigs, resolveCorpusImports, ResolutionStats(..))
-import Graphos.UseCase.Cluster (joinCommunitiesToNodes, computeCommunityAggregates, runClustering, partitionQuality, clusterAlgorithmFromConfig, capPartition, isBunchPartition, stepFiveClustering)
+import Graphos.UseCase.Cluster
+  ( joinCommunitiesToNodes, computeCommunityAggregates, runClustering, partitionQuality
+  , clusterAlgorithmFromConfig, capPartition, isBunchPartition, stepFiveClustering
+  , ClusterAlgorithm(..), AutoSettings(..)
+  )
+import Graphos.UseCase.ClusterEval
+  ( sweepGraph, defaultSweepOptions, sweepReport, directoryTruthFor
+  , swAlgorithm, swSelected, soBunch, soAgglomerative )
 import Graphos.UseCase.Analyze (analyzeGraph)
 import Graphos.UseCase.Infer (inferNonSemanticEdgesWith, inferSemanticEdgesForMode, semanticMode, semanticModeName, SemanticMode(..))
 import Graphos.UseCase.Label (labelCommunities)
@@ -799,7 +806,17 @@ clusterGraph appEnv graph config _embeddingsPath = do
                            , resMinSize = cfgMinCommSize config
                            , resMergeInto = MergeToNeighbor
                            , resMaxIterations = cfgMaxLeidenIterations config }
-          algo = clusterAlgorithmFromConfig (gcClustering (cfgGraphosConfig config))
+          rawAlgo = clusterAlgorithmFromConfig (gcClustering (cfgGraphosConfig config))
+          (sweepResult, algo) = case rawAlgo of
+            AutoAlgorithm au ->
+              let sr = sweepGraph
+                         (defaultSweepOptions (directoryTruthFor 2 graph))
+                           { soBunch = auBunch au
+                           , soAgglomerative = auAgglomerative au
+                           }
+                         graph
+              in (Just sr, swAlgorithm (swSelected sr))
+            a -> (Nothing, a)
           step4@(commMap, cohesion, _) = runClustering algo res graph
       withHeapGuard lp mBudget "cluster" $ do
         _ <- evaluate (Map.size commMap + sum (map length (Map.elems commMap)))
@@ -844,9 +861,10 @@ clusterGraph appEnv graph config _embeddingsPath = do
             | isBunchPartition rawQuality = rawQuality
             | otherwise = partitionQuality (cqAlgorithm rawQuality) enrichedGraph' finalComm (cqSkip rawQuality)
           anal = (analyzeGraph enrichedGraph' finalComm finalCohes)
-                   { analysisPartitionQuality = Just quality }
+                   { analysisPartitionQuality = Just quality
+                   , analysisClusterEval = fmap sweepReport sweepResult }
       forM_ (cqSkip quality) $ \sk ->
-        lpLogWarn lp $ T.pack $ "Bunch skipped: " ++ show (skipFiles sk) ++ " files exceed --bunch-max-files "
+        lpLogWarn lp $ T.pack $ "Clustering skipped: " ++ show (skipFiles sk) ++ " files exceed the algorithm's file cap "
                              ++ show (skipCap sk) ++ "; running Leiden instead"
       forM_ (cqBunchRuns quality) $ \r ->
         lpLogInfo lp $ T.pack $ "  Bunch: " ++ show (length (briRuns r)) ++ " search run(s) over "

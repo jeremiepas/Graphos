@@ -30,6 +30,7 @@ spec = do
           , analysisArticulation = ["b"]
           , analysisBccCount     = 7
           , analysisPartitionQuality = Nothing
+          , analysisClusterEval = Nothing
           }
         report = generateReport g baseAnalysis defaultConfig detection Nothing
 
@@ -56,6 +57,21 @@ spec = do
           r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection Nothing
       r `shouldSatisfy` T.isInfixOf "Partition quality (bunch): MQ = 1.2500, modularity = 0.5000, intra-edge fraction = 0.7500"
       r `shouldNotSatisfy` T.isInfixOf "Bunch skipped"
+
+    it "prints the Configuration sweep ranking when auto selected a winner" $ do
+      let sweep = ClusterEvalReport
+            { cerTruth = "directory depth 2", cerTruthGroups = 2
+            , cerRows =
+                [ ClusterEvalRow "cosine_single_25" 90 4 1 0.31
+                , ClusterEvalRow "leiden" 80 6 3 0.42
+                ]
+            , cerSelected = "cosine_single_25"
+            , cerSkipped = []
+            }
+          r = generateReport g baseAnalysis { analysisClusterEval = Just sweep } defaultConfig detection Nothing
+      r `shouldSatisfy` T.isInfixOf "## Configuration sweep"
+      r `shouldSatisfy` T.isInfixOf "| 1 | cosine_single_25 | 90.00 | 4 | 1 | 0.31 |"
+      r `shouldSatisfy` T.isInfixOf "Selected: cosine_single_25"
 
     it "names the Bunch search runs and the refinement (bunch-real-projects D3)" $ do
       let q = ClusterQuality { cqAlgorithm = "bunch", cqMQ = 2, cqModularity = 0.4
@@ -116,6 +132,7 @@ spec = do
           , analysisArticulation = []
           , analysisBccCount     = 0
           , analysisPartitionQuality = Nothing
+          , analysisClusterEval = Nothing
           }
 
     it "reports files detected, files with structure, and the stubbed breakdown by extension" $ do

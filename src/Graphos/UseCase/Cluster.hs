@@ -22,7 +22,10 @@ module Graphos.UseCase.Cluster
     -- * Selectable clustering algorithm
   , ClusterAlgorithm(..)
   , BunchSettings(..)
+  , AgglomerativeSettings(..)
+  , AutoSettings(..)
   , defaultBunchSettings
+  , defaultAgglomerativeSettings
   , ClusterQuality(..)
   , BunchSkip(..)
   , runClustering
@@ -47,11 +50,24 @@ import Data.Maybe (listToMaybe)
 import Data.Ord (comparing)
 
 import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation(..), relationToText, extractionFromLists)
-import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..))
+import Graphos.Domain.Config.Clustering
+  ( ClusteringConfig(..)
+  , ClusteringAlgorithmName(..)
+  , BunchFileConfig(..)
+  , AgglomerativeFileConfig(..)
+  , LinkageName(..)
+  , DistanceName(..)
+  )
 import Graphos.Domain.Graph (Graph(..), buildGraph)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
 import Graphos.Domain.Community (detectCommunitiesWithResolution, Resolution(..), defaultResolution, scoreAllCohesion, undirectedView, modularity, capCommunitySizes)
 import Graphos.Domain.Community.MQ (Weighting(..), modularizationQuality, mqValue, mqIntraFraction)
+import Graphos.Domain.Community.Agglomerative
+  ( Distance(..)
+  , Linkage(..)
+  , agglomerate
+  , clusterCountFor
+  )
 import Graphos.Domain.Community.Bunch
   ( BunchConfig(..)
   , FileMDG(..)
@@ -217,8 +233,22 @@ computeCommunityAggregates graph commMap cohesionMap artPoints mLabels =
 -- is byte-identical to the pre-existing path; 'BunchAlgorithm' runs the
 -- seeded search over the file-level MDG and pushes the file partition back
 -- to every symbol node.
-data ClusterAlgorithm = Leiden | BunchAlgorithm BunchSettings
+data ClusterAlgorithm
+  = Leiden
+  | BunchAlgorithm BunchSettings
+  | AgglomerativeAlgorithm AgglomerativeSettings
+  | AutoAlgorithm AutoSettings
   deriving (Eq, Show)
+
+-- | Stage-level agglomerative settings: linkage, distance, the cut divisor
+-- (@K = ceil(F / divisor)@), the file cap and the MDG relations.
+data AgglomerativeSettings = AgglomerativeSettings
+  { asLinkage    :: Linkage   -- ^ single, average or complete
+  , asDistance   :: Distance  -- ^ euclidean, manhattan or cosine
+  , asDivisor    :: Int       -- ^ cut divisor (default 25)
+  , asMaxFiles   :: Int       -- ^ hard ceiling: file count above which Leiden runs instead (default 10,000)
+  , asRelations  :: [Relation] -- ^ relations folded into the MDG
+  } deriving (Eq, Show)
 
 -- | Stage-level Bunch settings: the Domain search configuration plus the
 -- two knobs that live above the search — the file cap and the weighting of
@@ -245,6 +275,18 @@ defaultBunchSettings :: BunchSettings
 defaultBunchSettings =
   BunchSettings defaultBunchConfig defaultBunchFileCap defaultBunchFilesPerRun defaultMDGRelations False
 
+-- | The two algorithm families the sweep needs when @auto@ runs.
+data AutoSettings = AutoSettings
+  { auBunch         :: BunchSettings
+  , auAgglomerative :: AgglomerativeSettings
+  } deriving (Eq, Show)
+
+-- | Default agglomerative settings (design D4): single linkage, cosine
+-- distance, divisor 25, cap 10,000, the default MDG relations.
+defaultAgglomerativeSettings :: AgglomerativeSettings
+defaultAgglomerativeSettings =
+  AgglomerativeSettings Single Cosine 25 10000 defaultMDGRelations
+
 -- | Run the stage for the selected algorithm. Pure and deterministic: the
 -- Leiden path is exactly 'clusterGraphWithResolution'; the Bunch path folds
 -- the file MDG over the configured relations, checks the hard ceiling
@@ -257,16 +299,22 @@ runClustering :: ClusterAlgorithm -> Resolution -> Graph
               -> (CommunityMap, CohesionMap, ClusterQuality)
 runClustering algo res g = case algo of
   Leiden -> leidenRun Nothing
+  AutoAlgorithm _ -> leidenRun Nothing
   BunchAlgorithm bs
     | n > bsMaxFiles bs -> leidenRun (Just (BunchSkip n (bsMaxFiles bs)))
     | otherwise         -> bunchRun bs mdg
+  AgglomerativeAlgorithm as
+    | n > asMaxFiles as -> leidenRun (Just (BunchSkip n (asMaxFiles as)))
+    | otherwise         -> agglomerativeRun as mdg
   where
     weighting = case algo of
       BunchAlgorithm bs | bsWeighted bs -> EdgeWeights
+      AgglomerativeAlgorithm _ -> EdgeWeights
       _ -> UnitWeights
     relations = case algo of
       BunchAlgorithm bs -> bsRelations bs
-      Leiden -> defaultMDGRelations
+      AgglomerativeAlgorithm as -> asRelations as
+      _ -> defaultMDGRelations
     mdg = foldToFileMDGWith relations weighting g
     n   = mdgFileCount mdg
 
@@ -289,6 +337,20 @@ runClustering algo res g = case algo of
       -- Cohesion is scored on the same undirected projection as for Leiden
       -- (per-community intra-edge density), so the analysis and aggregates
       -- downstream stay uniform across algorithms.
+
+    agglomerativeRun as mdg0 =
+      let links = agglomerate (asDistance as) (asLinkage as)
+                    (clusterCountFor (mdgFileCount mdg0) (asDivisor as)) mdg0
+          nodesByFile = Map.fromListWith (flip (++))
+            [ (nodeSourceFile nd, [nodeId nd]) | nd <- Map.elems (gNodes g) ]
+          searched = Map.fromList
+            [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
+                              (map (mdgFiles mdg0 V.!) members))
+            | (cid, members) <- zip [0 :: Int ..] links ]
+          comm = attachPlaceholderFiles (mdgRelations (asRelations as)) g mdg0 searched
+      in ( comm, scoreAllCohesion (undirectedView g) comm
+         , (partitionQuality "agglomerative" g comm Nothing)
+             { cqScoredRelations = Just (map relationToText (mdgRelations (asRelations as))) } )
 
 
 -- | Give a community to the nodes of files left out of the MDG (import-target
@@ -382,14 +444,20 @@ restrictToRelations rels g =
 -- a 5 % cap on a small graph allows one file per module.
 capPartition :: ClusterQuality -> Bool -> Double -> Graph -> CommunityMap -> CommunityMap
 capPartition q enabled frac g comm
-  | isBunchPartition q = comm
-  | enabled            = capCommunitySizes g comm frac
-  | otherwise          = comm
+  | isFilePartition q = comm
+  | enabled           = capCommunitySizes g comm frac
+  | otherwise         = comm
 
 -- | Whether a partition came from the Bunch search (not from Leiden, even when
 -- Bunch was selected and skipped above its hard ceiling).
 isBunchPartition :: ClusterQuality -> Bool
 isBunchPartition q = cqAlgorithm q == "bunch"
+
+-- | A file-level partition (Bunch or agglomerative) is never size-capped:
+-- its cluster count is the search's or the cut's result, and the cap would
+-- split it behind the algorithm's back.
+isFilePartition :: ClusterQuality -> Bool
+isFilePartition q = cqAlgorithm q `elem` ["bunch", "agglomerative"]
 
 -- | Step 5 of the pipeline (spec @pipeline-clustering@, bunch-real-projects
 -- D2): Leiden re-clusters the enriched graph; Bunch reuses its Step-4
@@ -410,24 +478,45 @@ stepFiveClustering algo res (comm4, _, q4) enriched
   where
     rels = case algo of
       BunchAlgorithm bs -> bsRelations bs
-      Leiden            -> defaultMDGRelations
+      AgglomerativeAlgorithm as -> asRelations as
+      _                 -> defaultMDGRelations
 
 -- | The stage algorithm selected by the effective clustering configuration
 -- (@graphos.yaml@ with CLI overrides applied).
 clusterAlgorithmFromConfig :: ClusteringConfig -> ClusterAlgorithm
 clusterAlgorithmFromConfig cc = case ccAlgorithm cc of
   AlgoLeiden -> Leiden
-  AlgoBunch  -> BunchAlgorithm BunchSettings
-    { bsConfig   = defaultBunchConfig
-        { bcSeed          = fromIntegral (ccSeed cc)
-        , bcPopulation    = bfPopulation b
-        , bcThreshold     = bfThreshold b
-        , bcAnnealing     = bfAnnealing b
-        , bcMaxIterations = bfMaxIterations b
-        }
-    , bsMaxFiles = bfMaxFiles b
-    , bsMaxFilesPerRun = bfMaxFilesPerRun b
-    , bsRelations = bfRelations b
-    , bsWeighted = bfWeighted b
+  AlgoAuto   -> AutoAlgorithm AutoSettings
+    { auBunch = bunchSettings
+    , auAgglomerative = aggSettings
     }
+  AlgoAgglomerative -> AgglomerativeAlgorithm aggSettings
+  AlgoBunch  -> BunchAlgorithm bunchSettings
   where b = ccBunch cc
+        a = ccAgglomerative cc
+        bunchSettings = BunchSettings
+          { bsConfig   = defaultBunchConfig
+              { bcSeed          = fromIntegral (ccSeed cc)
+              , bcPopulation    = bfPopulation b
+              , bcThreshold     = bfThreshold b
+              , bcAnnealing     = bfAnnealing b
+              , bcMaxIterations = bfMaxIterations b
+              }
+          , bsMaxFiles = bfMaxFiles b
+          , bsMaxFilesPerRun = bfMaxFilesPerRun b
+          , bsRelations = bfRelations b
+          , bsWeighted = bfWeighted b
+          }
+        aggSettings = AgglomerativeSettings
+          { asLinkage = toLinkage (afLinkage a)
+          , asDistance = toDistance (afDistance a)
+          , asDivisor = afDivisor a
+          , asMaxFiles = afMaxFiles a
+          , asRelations = bfRelations b
+          }
+        toLinkage LinkageSingle   = Single
+        toLinkage LinkageAverage  = Average
+        toLinkage LinkageComplete = Complete
+        toDistance DistanceEuclidean = Euclidean
+        toDistance DistanceManhattan = Manhattan
+        toDistance DistanceCosine    = Cosine

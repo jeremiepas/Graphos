@@ -6,7 +6,7 @@ import System.Exit (exitWith, ExitCode(..), exitSuccess)
 import Data.Text.Short (toText)
 import qualified Data.Text as T
 import Control.Concurrent.MVar (newMVar)
-import Control.Monad (forM_, when)
+import Control.Monad (forM, forM_, when)
 import Data.Maybe (isJust, fromMaybe)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
@@ -24,7 +24,15 @@ import qualified Data.Time.Format as TTF (formatTime, defaultTimeLocale)
 import Graphos.Infrastructure.Export.HTML (renderResearchHtml)
 
 import Graphos.CLI.Parser
-import Graphos.UseCase.ClusterEval (LandscapeInput(..), defaultLandscapeInput, landscapeReport, landscapeJSON, landscapeSummary)
+import Graphos.UseCase.ClusterEval
+  ( LandscapeInput(..), defaultLandscapeInput, landscapeReport, landscapeJSON, landscapeSummary
+  , ScoreResult(..), CompareResult(..)
+  , scoreGraph, compareGraphs, sweepGraph, defaultSweepOptions, soTruthLabel
+  , scoreJSON, compareJSON, sweepJSON, sweepMarkdown
+  , directoryTruthFor, multiRefTruth
+  )
+import Graphos.Infrastructure.ClusterEval.TruthFile (loadTruthFile)
+import Graphos.Domain.Community.Partition (mjScore)
 import Graphos.UseCase.Cluster (joinCommunitiesToNodes)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig)
 import Graphos.Infrastructure.FileSystem.AtomicWrite (writeFileAtomic)
@@ -123,6 +131,7 @@ emptyAnalysisForMigrate lr = Analysis
   , analysisArticulation  = []
   , analysisBccCount      = 0
   , analysisPartitionQuality = Nothing
+  , analysisClusterEval = Nothing
   }
 
 parseHeapSize :: String -> Maybe Int
@@ -1089,6 +1098,44 @@ main = do
           writeFileAtomic outPath json
           TIO.putStr (landscapeSummary rep)
           putStrLn $ "[graphos] clustereval: landscape written to " ++ outPath
+    ClusterEvalScoreCmd co -> do
+      gs <- loadEvalGraphs (ceoGraphs co)
+      case gs of
+        [] -> die' "clustereval score needs a --graph file"
+        (g : _) -> do
+          truth <- evalTruth co gs
+          let r = scoreGraph g truth
+          if ceoJson co
+            then BL.putStr (encode (scoreJSON r)) >> putStrLn ""
+            else TIO.putStrLn $ T.unlines
+              [ "MoJoFM: " <> T.pack (show (srScore r))
+              , "clusters: " <> T.pack (show (srClusters r))
+              , "truth groups: " <> T.pack (show (srTruthGroups r))
+              , "dropped: " <> T.pack (show (srDropped r))
+              ]
+    ClusterEvalCompareCmd co -> do
+      gs <- loadEvalGraphs (ceoGraphs co)
+      case gs of
+        (a : b : _) -> do
+          let r = compareGraphs a b
+          if ceoJson co
+            then BL.putStr (encode (compareJSON r)) >> putStrLn ""
+            else TIO.putStrLn $ T.unlines
+              [ "stability_ab: " <> T.pack (show (mjScore (crAB r)))
+              , "stability_ba: " <> T.pack (show (mjScore (crBA r)))
+              ]
+        _ -> die' "clustereval compare needs exactly two --graph files"
+    ClusterEvalSweepCmd co -> do
+      gs <- loadEvalGraphs (ceoGraphs co)
+      case gs of
+        [] -> die' "clustereval sweep needs a --graph file"
+        (g : _) -> do
+          truth <- evalTruth co gs
+          let sweepOpts = (defaultSweepOptions truth) { soTruthLabel = truthLabel co }
+              r = sweepGraph sweepOpts g
+          if ceoJson co
+            then BL.putStr (encode (sweepJSON r)) >> putStrLn ""
+            else TIO.putStr (sweepMarkdown r)
     ViewCmd sub -> do
       case sub of
         ViewChanges root -> do
@@ -1113,6 +1160,21 @@ main = do
      <> progDesc "Graphos - Universal knowledge graph builder using LSP"
      <> header "graphos - any input → knowledge graph → clustered communities → HTML + JSON + report"
       )
+    loadEvalGraphs paths = forM paths $ \p -> do
+      loadGraphFromFile p >>= \case
+        Left err -> die' ("clustereval: " ++ T.unpack err)
+        Right loaded -> pure (joinCommunitiesToNodes (lrGraph loaded) (lrCommunities loaded))
+    evalTruth co gs = case ceoTruth co of
+      Just f -> loadTruthFile f >>= either (die' . T.unpack) pure
+      Nothing ->
+        let d = fromMaybe 2 (ceoTruthDepth co)
+        in case gs of
+             [] -> die' "clustereval needs a --graph file for the ground truth"
+             (g : _) -> pure $ if length gs > 1 then fst (multiRefTruth d gs) else directoryTruthFor d g
+    truthLabel co = case ceoTruth co of
+      Just f  -> T.pack ("explicit file " ++ f)
+      Nothing -> T.pack ("directory depth " ++ show (fromMaybe 2 (ceoTruthDepth co)))
+    die' msg = hPutStrLn stderr msg >> exitWith (ExitFailure 1)
 
 -- ───────────────────────────────────────────────
 -- Helpers

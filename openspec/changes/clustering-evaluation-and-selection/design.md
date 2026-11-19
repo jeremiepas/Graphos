@@ -10,11 +10,12 @@ the missing measuring stick, a second algorithm family, and the selection loop.
 
 ```
 graph.json (any granularity)
-   │  fold to files (contains/defines collapse, all relations → file→file, counts)
+   │  Bunch file-level MDG (code files, clustering.bunch.relations, edge weights)
    ▼
-file dependency matrix W (F × F, symmetric: W = A + Aᵀ)
+file dependency matrix W (F × F, symmetric: the weighted MDG pairs)
    │
    ├──► Leiden (auto-tuned)  ─────────────┐
+   ├──► Bunch (clustering.bunch.*)  ───────┤
    ├──► agglomerative(dist, link, K) ×grid ┤──► candidate partitions P₁…Pₙ
    │                                       │
 directory ground truth T (depth d,         │
@@ -31,7 +32,7 @@ directory ground truth T (depth d,         │
 | Piece | Layer | Module |
 |---|---|---|
 | Partition type, ground truth, MoJo, MoJoFM, stability | Domain | `Graphos.Domain.Community.Partition` |
-| File folding, distance matrix, linkage, dendrogram cut | Domain | `Graphos.Domain.Community.Agglomerative` |
+| Distance matrix over the MDG's `W`, linkage, dendrogram cut (the fold is `Bunch.foldToFileMDGWith`) | Domain | `Graphos.Domain.Community.Agglomerative` |
 | Sweep, ranking, selection | UseCase | `Graphos.UseCase.ClusterEval` |
 | Algorithm dispatch in the cluster stage | UseCase | `Graphos.UseCase.Cluster` |
 | Load several graphs, write JSON / markdown report, CLI | Infrastructure | CLI parser, `app/Main.hs`, Export |
@@ -66,26 +67,40 @@ Alternatives: a2a / c2c (more recent architecture-recovery metrics; can be
 added later behind the same interface), NMI / ARI (not move/join-based, kept
 out to stay comparable with the paper).
 
-The closed form for `max(mno(∀A,B))` is taken from the paper and checked by
-brute force: for n ≤ 6 the test enumerates every partition A (Bell(6) = 203)
-and asserts the maximum of `mno` equals the closed form.
+Closed form used for `max(mno(∀A,B))`: with B's group sizes sorted
+descending `g₁ ≥ g₂ ≥ …`, `max(mno(∀A,B)) = n − h`, where `h` is the largest
+`k` with `gᵢ ≥ k − i + 1` for every `i ≤ k` (the longest "staircase" of group
+sizes; `h = 1` for one group or all singletons). It was derived by exhaustive
+search and is checked by brute force: for n ≤ 6 the test enumerates every
+partition A (Bell(6) = 203) for every reference B and asserts the maximum of
+`mno` equals the closed form (it was also checked for n = 7 when derived).
+`mno` itself is the optimal one-way MoJo: tag each cluster of A with a
+maximal-overlap group of B, `M` = elements outside their cluster's tag,
+`g` = maximum bipartite matching over the maximal-overlap pairs,
+`mno = M + l − g` with `l` the number of clusters of A.
 
 ### D4 — Agglomerative clustering
 
 | Parameter | Grid (defaults) |
 |---|---|
-| Feature vector of file i | row i of W (edge counts, both directions) |
+| Feature vector of file i | row i of W (summed edge weights, both directions) with `W[i][i]` = the row's largest weight — without it, two files that depend only on each other have orthogonal rows |
 | Distance | euclidean, manhattan, cosine (cosine of a zero row = 1) |
 | Linkage | single, average, complete |
 | Cut | K = ⌈F / q⌉ for q ∈ {5, 7, 10, 15, 20, 25} (the paper's configuration suffixes such as `cosine_single_25` are read as this divisor; configurable) |
 | Determinism | ties broken by smallest (cluster id, cluster id) pair |
 | Cap | F ≤ 10,000 (`--agglomerative-max-files`); above it the run is skipped with a reported reason |
 
-Algorithms: single linkage via a minimum spanning tree (Prim, O(F²) time,
-O(F) extra space over the distance matrix); average and complete via the
-nearest-neighbour-chain algorithm (O(F²) time, valid because both linkages
-are reducible). Distance matrix O(F²) memory — at F = 10,000 that is ~400 MB
-of `Double`s in an unboxed upper triangle, which is why the cap exists.
+Algorithm (all three linkages): the generic agglomerative algorithm with a
+cached nearest neighbour per cluster and Lance–Williams updates (min,
+size-weighted mean, max). Each step merges the globally closest pair by
+`(distance, cluster id, cluster id)` — exactly the naive O(F³) rule, so the
+result equals the naive reference, ties included; typical cost O(F²), O(F³)
+only in degenerate tie patterns. A minimum spanning tree cut (single) or the
+nearest-neighbour chain (average, complete) were the first plan; both resolve
+a tie at the cut differently from the cluster-id rule (found by the
+naive-reference property), so they were dropped. Distance matrix O(F²)
+memory — at F = 10,000 that is ~400 MB of `Double`s in an unboxed upper
+triangle, which is why the cap exists.
 
 Alternatives: naive O(F³) merging (rejected, too slow above a few thousand
 files); approximate/sparse linkage (deferred); clustering at function

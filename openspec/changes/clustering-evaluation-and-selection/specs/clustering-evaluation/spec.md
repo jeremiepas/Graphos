@@ -2,13 +2,11 @@
 
 ### Requirement: Directory ground truth
 
-The system SHALL derive a reference partition of file nodes in which each file
-belongs to the group named by its directory path truncated to depth `d` below
-the corpus root (default `d = 2`, overridden by `--truth-depth`). When given
-graphs from several refs, the system SHALL keep only files present in every
-graph and SHALL put two files in the same group if and only if they share a
-group in every ref. When `--truth FILE` is given, the system SHALL use that
-JSON file→group map instead. (PRD §5.1 via community-detection)
+The system SHALL derive a reference partition of file nodes by directory path
+truncated to depth `d` (default 2, overridden by `--truth-depth`). With several
+refs it SHALL keep only files present in every graph and put two files in the
+same group if and only if they share a group in every ref. `--truth FILE` SHALL
+replace it with a JSON file→group map. (PRD §5.1 via community-detection)
 
 #### Scenario: depth-2 grouping
 - **WHEN** the files are `src/a/x.ts`, `src/a/y.ts`, `src/b/z.ts` and `d = 2`
@@ -53,7 +51,8 @@ MoJoFM in both directions on their common nodes.
 
 ### Requirement: clustereval command
 
-The CLI SHALL provide `graphos clustereval score|compare|sweep` taking absolute
+Next to the existing `graphos clustereval landscape` (`search-landscape-evaluation`),
+the CLI SHALL provide `graphos clustereval score|compare|sweep` taking absolute
 or relative `--graph` paths, `--truth-depth`, `--truth`, repeated `--ref-graph`
 for multi-ref truth, and `--json`. `score` SHALL fold the stored node
 communities to files by majority community before scoring.
