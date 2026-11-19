@@ -2,20 +2,44 @@
 
 ## Purpose
 TBD - created by archiving change bunch-search-based-modularization. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: File-level module dependency graph
 
 The system SHALL fold a graph of any granularity to a module dependency graph
-whose nodes are the distinct `nodeSourceFile` values and whose undirected
-edges join two files when any edge of a relation other than `contains` links
-a node of one file to a node of the other. Self-pairs SHALL be dropped. The
-weight of a file pair SHALL be 1, or the sum of the folded edges' `edgeWeight`
-when `--bunch-weighted` is set. Files SHALL be indexed in ascending path order
-before any random draw. (PRD §5.1)
+whose nodes are the system's code files, and whose undirected
+edges join two files when an edge whose relation is in the Bunch relation
+allowlist links a node of one file to a node of the other. The allowlist SHALL
+be `clustering.bunch.relations`, default `imports`, `calls`, `references`,
+`extends`, `implements`. A code file is a `nodeSourceFile` with at least one
+`CodeFile` node that is not an import-target placeholder (kind `External`, or
+kind `Module` with no line span). Packages, builtins, paths outside the
+corpus, and documentation, image or office files SHALL NOT be MDG nodes, and
+edges into them add no pair. After the search, the nodes of such a file SHALL
+join the module holding most of their neighbours over the allowlisted
+relations and `documents`, ties to the lowest module id; a file with no such
+neighbour SHALL form a module of its own. It SHALL NEVER admit `contains`, `documents`,
+`depends_on`, `inferred` or any relation produced by edge inference. Self-pairs
+SHALL be dropped. The weight of a file pair SHALL be 1, or the sum of the
+folded edges' `edgeWeight` when `--bunch-weighted` is set. Files SHALL be
+indexed in ascending path order before any random draw. (PRD §5.1)
 
 #### Scenario: symbol edges fold to one file pair
 - **WHEN** functions in `a.ts` call functions in `b.ts` three times and `b.ts` imports `a.ts`
 - **THEN** the MDG has one edge `{a.ts, b.ts}` of weight 1, or weight 4 when weighted
+
+#### Scenario: packages and out-of-corpus targets are not modules
+- **WHEN** `a.ts` and `b.ts` import each other and both import the package `zod`, and `a.ts` imports `src/domain/x.ts`, which is not in the corpus
+- **THEN** the MDG files are `a.ts` and `b.ts` with one pair, and the `zod` and `src/domain/x.ts` placeholder nodes join the module of their importers
+
+#### Scenario: documentation is not a module
+- **WHEN** `docs/a.md` documents `a1.ts` and `a2.ts`, and edge inference later adds `references` edges from code to `specs/x.md` headers
+- **THEN** neither Markdown file is an MDG file; `docs/a.md` joins the module of `a1.ts`
+
+#### Scenario: measured subtree baseline
+- **WHEN** solario-core `14d86be28` `src/cli` (161 TS files) is clustered with Bunch
+- **THEN** the MDG has 161 files, not the 351 counted when each package and each `src/domain` target was a file, and no file with a dependency edge inside `src/cli` is a module of its own
 
 #### Scenario: contains-only graph
 - **WHEN** the only edges are `contains` edges from files to their symbols
@@ -24,6 +48,10 @@ before any random draw. (PRD §5.1)
 #### Scenario: node order does not matter
 - **WHEN** the same graph is folded from two different node orders
 - **THEN** the file indices and adjacency are identical
+
+#### Scenario: inferred and documentation edges are ignored
+- **WHEN** `a.ts` and `b.ts` are linked only by a `depends_on` edge from edge inference and `README.md` is linked to `a.ts` by a `documents` edge
+- **THEN** the MDG has no edge `{a.ts, b.ts}` and no edge involving `README.md`
 
 ### Requirement: Hill-climbing search over partitions
 
@@ -92,17 +120,77 @@ runs and across node orderings of the input graph.
 
 ### Requirement: File cap and symbol push-back
 
-The system SHALL skip Bunch and run Leiden when the MDG has more files than
-`--bunch-max-files` (default 5,000), logging the file count and the cap. When
-Bunch runs, every symbol node SHALL receive its file's cluster, the
-community-size cap post-pass SHALL apply as for Leiden, and
-`mergeSmallCommunities` SHALL NOT apply.
+The system SHALL run Bunch on any MDG up to `--bunch-max-files` (default
+50,000) files. Up to `--bunch-max-files-per-run` (default 500) files it SHALL
+run one search. Above that it SHALL run the partitioned search of the
+*Partitioned search* requirement. Above `--bunch-max-files` it SHALL skip Bunch
+and run Leiden, logging the file count and the ceiling. When Bunch runs, every
+symbol node SHALL receive its file's cluster. The community-size cap post-pass
+(`--max-community-fraction`) SHALL NOT apply to a Bunch partition, and neither
+SHALL `mergeSmallCommunities`.
 
 #### Scenario: cap exceeded
-- **WHEN** a graph folds to 6,000 files and the cap is 5,000
-- **THEN** the partition equals the Leiden partition of the same build and the log names the skip with 6,000 and 5,000
+- **WHEN** a graph folds to 60,000 files and `--bunch-max-files` is 50,000
+- **THEN** the partition equals the Leiden partition of the same build and the log names the skip with 60,000 and 50,000
 
 #### Scenario: symbols follow their file
 - **WHEN** Bunch places `a.ts` in cluster 3
 - **THEN** every node whose `nodeSourceFile` is `a.ts` has community 3 in `graph.json`
 
+#### Scenario: no size cap on small graphs
+- **WHEN** Bunch clusters a 29-file MDG (nestjs-realworld-example-app, 65 import pairs) with the default `--max-community-fraction 0.05`
+- **THEN** no module is split by the cap, the partition has fewer modules than files, and MQ is greater than 0 (it was 0, one file per module, before this change)
+
+### Requirement: Partitioned search
+
+When the MDG has more files than `--bunch-max-files-per-run`, the system SHALL
+split the files into directory sub-trees of at most that many files and run the
+Bunch search on each sub-tree's induced MDG:
+
+- A group above the maximum is split by its next path component.
+- Sibling groups smaller than one tenth of the maximum are pooled into one
+  sub-tree.
+- A group whose files share a single directory is cut into consecutive chunks
+  in ascending path order.
+- Sub-trees are processed in ascending order of their smallest file path, each
+  with the configured seed, population, threshold and annealing.
+- Module ids from successive sub-trees are offset so they never collide.
+
+The merged partition SHALL then go through the *Global refinement* pass. The
+report SHALL state the number of sub-tree runs and their sizes.
+
+#### Scenario: large graph is clustered, not skipped
+- **WHEN** a graph folds to 3,929 files with the default limits
+- **THEN** Bunch runs on sub-trees of at most 500 files, no Leiden fallback is logged, and the report lists the sub-tree runs
+
+#### Scenario: deterministic split
+- **WHEN** the same MDG is clustered twice with the same seed, or with its nodes in a different order
+- **THEN** the sub-trees, their order and the final `CommunityMap` are identical
+
+### Requirement: Global refinement
+
+After every Bunch search, the system SHALL run a refinement pass over the whole
+MDG, whether the search was single or partitioned. The pass visits files in
+ascending path order. For each file it considers moving the file to each module
+holding one of its MDG neighbours, evaluates the MQ change with all MDG edges
+(including edges between sub-trees), and applies the move with the largest gain
+when that gain exceeds 1e-12. Passes SHALL repeat until a pass applies no move,
+or until 50 passes. Every applied move SHALL strictly increase MQ, and the
+result SHALL remain a partition of the MDG files. The report SHALL state the
+number of moves and passes.
+
+#### Scenario: cross-sub-tree singletons are absorbed
+- **WHEN** a partitioned search leaves a file alone because all its imports point into other sub-trees
+- **THEN** after refinement the file belongs to a module holding one of its import neighbours, if that raises MQ
+
+#### Scenario: refinement never lowers MQ
+- **WHEN** the refinement pass runs on any partition
+- **THEN** the MQ after the pass is greater than or equal to the MQ before it
+
+#### Scenario: single search is already refined
+- **WHEN** an MDG small enough for one search is clustered
+- **THEN** the refinement pass applies zero moves or only moves that raise MQ, and the partition remains deterministic for the seed
+
+#### Scenario: measured large-repository baseline
+- **WHEN** the pc26 build (3,929 files, 17,292 import pairs) is clustered with the default limits
+- **THEN** at most 1 % of the modules are single files that have a dependency edge (a file with none cannot move under MQ), no Leiden fallback is logged, and the MQ in `GRAPH_REPORT.md` (scored over the Bunch MDG relations between code files) is at least 330 (the partitioned search without refinement gave 1,579 singletons)

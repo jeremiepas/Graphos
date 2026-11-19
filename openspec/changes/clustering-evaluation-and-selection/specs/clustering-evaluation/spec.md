@@ -53,7 +53,8 @@ MoJoFM in both directions on their common nodes.
 
 ### Requirement: clustereval command
 
-The CLI SHALL provide `graphos clustereval score|compare|sweep` taking absolute
+Next to the existing `graphos clustereval landscape` (`search-landscape-evaluation`),
+the CLI SHALL provide `graphos clustereval score|compare|sweep` taking absolute
 or relative `--graph` paths, `--truth-depth`, `--truth`, repeated `--ref-graph`
 for multi-ref truth, and `--json`. `score` SHALL fold the stored node
 communities to files by majority community before scoring.
