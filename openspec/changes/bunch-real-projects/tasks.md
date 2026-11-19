@@ -1,6 +1,6 @@
 ## 0. Prerequisites (see proposal *Dependencies*)
 
-- [ ] 0.1 `usable-graph-for-code-review` finished and archived (needed by D4 rule 1)
+- [x] 0.1 `usable-graph-for-code-review` finished and archived (needed by D4 rule 1). Archived 2026-11-18 in #265
 - [x] 0.2 `avi-1765` implemented and archived (Java import resolution; its `GrammarsSpec` failures fixed)
 - [x] 0.3 `avi-1440` implemented (its TypeScript `GrammarsSpec` failure fixed). Implemented in #88; archived 2026-11-18
 - [x] 0.4 `BoundedDeltaCommunitySpec` "small random graphs" property fixed or bounded, so the full suite terminates
@@ -27,7 +27,8 @@
 - [x] 3.2 Partitioned dispatch in `UseCase/Cluster.hs`: induced MDG per sub-tree, configured seed/population, offset module ids; `--bunch-max-files-per-run` (default 500) and `--bunch-max-files` default raised to 50,000. Check: `ClusterSpec` — 3-sub-tree fixture clustered without Leiden fallback; determinism and permutation invariance
 - [x] 3.3 `Bunch.hs` `refinePartition`: next-ascent single-file moves to neighbouring modules with the incremental µ/ε update of design D3, ascending path order, gain > 1e-12, ≤ 50 passes. Check: QuickCheck — MQ non-decreasing, result is a partition, idempotent on its own output; unit — a cross-sub-tree singleton is absorbed
 - [x] 3.4 Report: `Partition quality (bunch)` line gains `runs N (sizes …), refinement M moves / P passes`. Check: `ReportSpec`
-- [ ] 3.5 (optional Lean arm) `Bunch/Refine.lean`: an accepted move keeps a partition and strictly increases the exact MQ numerator; builds on `cf_moveTo`
+- [x] 3.5 (optional Lean arm) `Bunch/Refine.lean`: an accepted move keeps a partition and strictly increases the exact MQ numerator; builds on `cf_moveTo`
+  - `formalization/lean/GraphosFormalization/Bunch/Refine.lean` (v4.14.0, core only): `moveTo_covers` / `moveTo_other` (a move keeps a partition); `Accepted` = exact positive gain over the source and destination clusters, the refinement's test without rounding; `accepted_increases_mq` (via `cf_moveTo` and `fracLt_addLeft`): the exact MQ of the whole partition strictly increases; fixture `misplaced` on `twoTriangles`: the move is accepted, `52/40 → 84/49`. `lake build` clean; `#print axioms` lists only `propext`, `Quot.sound`.
 
 ## 4. D4 — Corpus-aware import resolution
 
@@ -47,9 +48,11 @@
 - [x] 5.2 solario-core `14d86be28` `src/cli`: MQ ≈ 18.37, 0 singletons (among files with a dependency edge)
   - Measured 2026-11-18 (`graphos src/cli --cluster-algorithm bunch`, seed 0): 161 files, 40 modules (workaround 38), **report MQ 18.79**, modularity 0.37, 6 s. One single-file module, `utils/governance-gate.ts`, has no dependency edge inside `src/cli` (all leave the subtree); 0 singletons among connected files. Before 2.5/4.4: 351 MDG files, 112 modules, 90 singletons, 60 s.
 - [x] 5.3 pc26 (3,929 files): ≤ 1 % singletons (among files with a dependency edge), MQ ≥ 330 as printed by the report (scored over the Bunch MDG relations between code files), no Leiden fallback; record wall time. First measured on `e23e44e` from a pre-D4 checkpoint (1,092 modules, MQ 332.33). Re-measured 2026-11-18 on a fresh build of solario-core `9a018285e` with D4, 2.5, 4.4, 4.5, seed 0: 17,137 imports resolved, 4,423 MDG code files, 1,419 modules, **report MQ 410.59**, modularity 0.213, 26 runs, 2,920 refinement moves in 12 passes, Bunch ≈ 370 s, no Leiden fallback; 97 single-file modules, of which 1 has a dependency edge (0.07 %), 96 have none
-- [ ] 5.4 Leiden `DeterminismSpec` / `PermutationSpec` unchanged; full `cabal test` green
+- [x] 5.4 Leiden `DeterminismSpec` / `PermutationSpec` unchanged; full `cabal test` green
+  - 2026-11-19 on `main` `0f60c2c` (after #264–#266): full `cabal test` 1,739 examples, 0 failures, no skips; `DeterminismSpec` (INV-DETERMINISTIC-CLUSTER, ARGMAX-TIE-BREAK-CANONICAL, mergeGraphsAndAnalyze determinism) and `PermutationSpec` (AVI-659 / T3, INV-PARTITION) green.
 
 ## 6. Close-out
 
-- [ ] 6.1 `openspec validate bunch-real-projects --strict`
+- [x] 6.1 `openspec validate bunch-real-projects --strict`
+  - Valid on 2026-11-19 (after the `report-consistency` delta took in the `modularity-undirected-view` scenarios).
 - [ ] 6.2 Replace the external workarounds (`graphos-out-bunch-dataset/c4_project.py`, `refine_record.py`, `dataset-discovery/scripts/c4/c4_build.py` resolvers) with plain `graphos … --cluster-algorithm bunch`; archive the change

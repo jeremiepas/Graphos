@@ -64,6 +64,8 @@
       Fig. 2 value `2/5`, intra-edge fraction `≤ 1`, no intra-edge ⇒
       `MQ = 0`, and single-move locality (`cf_moveTo`: only the source and
       destination clusters change — the O(1) incremental update).
+    * `GraphosFormalization.Bunch.Refine` — `bunch-real-projects` D3: an
+      accepted refinement move keeps a partition and strictly increases MQ.
     * `GraphosFormalization.Seam.UndirectedScoring` — Lean arm of the
       `modularity-undirected-view` change: today's report score mixes
       neighbour-set degrees with record-counted `σ_in`, and exceeds `Q ≤ 1`
@@ -92,4 +94,5 @@ import GraphosFormalization.Seam.SupportGraph
 
 import GraphosFormalization.AVI1677.Critique
 import GraphosFormalization.Bunch.MQ
+import GraphosFormalization.Bunch.Refine
 import GraphosFormalization.Seam.UndirectedScoring
