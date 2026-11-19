@@ -11,6 +11,7 @@
 module Main where
 
 import qualified Test.Hspec
+import qualified DocsSpec
 import qualified Graphos.Domain.TypesSpec
 import qualified Graphos.Domain.SpecCheckSpec
 import qualified Graphos.Domain.IntentGraphVerificationSpec
@@ -242,4 +243,5 @@ main = Test.Hspec.hspec $ do
   Graphos.Domain.Config.OutputSpec.spec
   Graphos.Infrastructure.FileSystem.OutputPlacementSpec.spec
   Graphos.Infrastructure.FileSystem.WatcherSpec.spec
+  DocsSpec.spec
 

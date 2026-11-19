@@ -85,7 +85,36 @@ Query the knowledge graph using BFS or DFS traversal.
 
 ---
 
-### 2. `get_node`
+### 2. `cypher_query`
+
+Run a read-only openCypher/GQL query (`MATCH`/`WHERE`/`RETURN`) against the graph. A Cypher label maps to the node kind (for example `MATCH (n:Module)`), a relationship type maps to the edge relation, and properties map to node/edge fields. Write clauses are rejected; use `cypher_mutate`.
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| query | string | **yes** | — | The Cypher query |
+| budget | integer | no | 2000 | Row budget |
+
+**Returns**: `columns`, `rows`, and a `truncated` flag.
+
+---
+
+### 3. `cypher_mutate`
+
+Run an openCypher statement that may mutate the graph (`CREATE`/`MERGE`/`SET`/`REMOVE`/`DELETE`, optionally with `MATCH`). Mutations apply in memory; set `persist=true` to write `graph.json` back (a timestamped backup is kept; the next extraction run discards mutations).
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| query | string | **yes** | — | The Cypher statement |
+| budget | integer | no | 2000 | Row budget |
+| persist | boolean | no | false | Write the mutated graph back to `graph.json` |
+
+**Returns**: a mutation summary plus any `RETURN` rows.
+
+---
+
+### 4. `get_node`
 
 Get details of a specific node by ID. Includes rich metadata from LSP extraction.
 
@@ -135,7 +164,7 @@ Get details of a specific node by ID. Includes rich metadata from LSP extraction
 
 ---
 
-### 3. `get_neighbors`
+### 5. `get_neighbors`
 
 Get all neighbor nodes of a given node.
 
@@ -148,7 +177,7 @@ Get all neighbor nodes of a given node.
 
 ---
 
-### 4. `get_community`
+### 6. `get_community`
 
 Get community membership for a node.
 
@@ -169,7 +198,7 @@ Get community membership for a node.
 
 ---
 
-### 5. `god_nodes`
+### 7. `god_nodes`
 
 Get highest-degree hub nodes in the graph.
 
@@ -182,7 +211,7 @@ Get highest-degree hub nodes in the graph.
 
 ---
 
-### 6. `graph_stats`
+### 8. `graph_stats`
 
 Get graph statistics.
 
@@ -199,7 +228,7 @@ Get graph statistics.
 
 ---
 
-### 7. `shortest_path`
+### 9. `shortest_path`
 
 Find shortest path between two nodes.
 
@@ -216,7 +245,7 @@ Find shortest path between two nodes.
 
 ---
 
-### 8. `bridge_nodes`
+### 10. `bridge_nodes`
 
 Find articulation points whose removal would disconnect the graph.
 
@@ -232,7 +261,7 @@ Find articulation points whose removal would disconnect the graph.
 
 ---
 
-### 9. `select_context`
+### 11. `select_context`
 
 Select relevant context from the graph for an LLM query. Returns compact markdown with key nodes, edges, communities, and bridge nodes.
 
@@ -317,7 +346,7 @@ This is the core tool for **LLM context optimization**: a small LLM classifies t
 
 ---
 
-### 10. `add_conversation`
+### 12. `add_conversation`
 
 Store a conversation exchange for persistent cross-session memory. The conversation is saved to `graphos-out/memory/` and placed in the chat history community (community 0).
 
@@ -358,7 +387,7 @@ Note: `in_chat_community` will be `true` on subsequent server starts (when conve
 
 ---
 
-### 11. `conversation_history`
+### 13. `conversation_history`
 
 Search past conversation exchanges matching a query. Checks both the in-memory chat community and disk storage.
 

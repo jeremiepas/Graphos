@@ -262,7 +262,7 @@ main = defaultMain
 > [`benchmarks/nway-fold-timing/`](../../benchmarks/nway-fold-timing/README.md)
 > (Haskell: times the shipped `foldl'`/`foldr` `mergeExtractions` over real
 > `Extraction`/`Data.Map` values, disjoint views of `viewSize = 1000`) and
-> [`formalization/lean/GraphosFormalization/Harness/Ac3Cost.lean`](../lean/GraphosFormalization/Harness/Ac3Cost.lean)
+> [`formalization/lean/GraphosFormalization/Harness/Ac3Cost.lean`](../../formalization/lean/GraphosFormalization/Harness/Ac3Cost.lean)
 > (Lean: evaluates `nwayFoldCost` on the same fixture, `lake exe ac3-cost`).
 > Recorded: Lean cost model `2.010/2.005/2.002` per doubling
 > (`cost = 3(n−1)` against the `3n` bound, i.e. §4 attained); shipped fold

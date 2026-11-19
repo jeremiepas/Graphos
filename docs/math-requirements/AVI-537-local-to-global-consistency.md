@@ -128,7 +128,7 @@ For each leg `ι_x` of the cocone over `M = mergeGraphs A B`:
 - **adjacency preserved:** `gAdjFwd(A)(v) ⊆ gAdjFwd(M)(ι_N(v))` (`Core.hs:160-163`), and symmetrically for `gAdjBack` and for `B`.
 - **directed flag:** `gDirected M = gDirected A || gDirected B` (canonical: directed iff either input is directed; order-independent, [AVI-658](/AVI/issues/AVI-658) M1 T1), constant across both legs.
 
-**Acceptance (property test).** For random small graphs `A, B` built via `buildGraph` from consistent extractions, assert for every edge `e ∈ gEdges A`: `edgeRelation, edgeWeight, edgeConfidence` of the surviving entry in `M` equal those of `e`; and `neighbors_M(ι_A v) ⊇ neighbors_A(v)` for all `v ∈ keys(gNodes A)`; likewise `B`. (This is [CT-R4 functoriality](AVI-511-colimit-merge.md#2-functoriality-of-the-pipeline) applied to the cocone legs.)
+**Acceptance (property test).** For random small graphs `A, B` built via `buildGraph` from consistent extractions, assert for every edge `e ∈ gEdges A`: `edgeRelation, edgeWeight, edgeConfidence` of the surviving entry in `M` equal those of `e`; and `neighbors_M(ι_A v) ⊇ neighbors_A(v)` for all `v ∈ keys(gNodes A)`; likewise `B`. (This is [CT-R4 functoriality](AVI-511-colimit-merge.md#5-functoriality-of-the-pipeline-preserved-vs-discarded) applied to the cocone legs.)
 
 ### LG-C2 — SHALL: shared nodes map identically under both cocone legs (primary acceptance)
 
@@ -200,7 +200,7 @@ The merged graph `M` is simultaneously (i) the colimit of extraction views (this
 - **Universal property with uniqueness:** LG-COLIM states the terminal-cocone property and uniqueness up to unique iso ([AVI-511](/AVI/issues/AVI-511) §3.1); LG-C2 is the operational SHALL.
 - **Property tests:** cocone legs as graph morphisms (LG-C1), shared-node identity under both legs (LG-C2, the issue's criterion), fiber-product / dedup identity (LG-C3), conflict counterexample (LG-C4), structural naturality (LG-C5).
 - **Boundary statement (diagram honesty):** pullback-on-labels holds ⟺ agreement; conflicts are a documented non-pullback (LG-C4).
-- **Haskell-constraint statement per requirement:** §2/§3 name the constrained surface for every `LG-C-*` ID; `LG-C3` carried a required [devhaskell](/AVI/agents/devhaskell) loop ([§6 O-LG1](AVI-537-local-to-global-consistency.md#6-open-items), AVI-647) — now closed, LG-C3 locked.
+- **Haskell-constraint statement per requirement:** §2/§3 name the constrained surface for every `LG-C-*` ID; `LG-C3` carried a required [devhaskell](/AVI/agents/devhaskell) loop ([§6 O-LG1](AVI-537-local-to-global-consistency.md#6-arbitration-log), AVI-647) — now closed, LG-C3 locked.
 - **Joint validation path:** JOINT-LG1/2/3 give the graph-theory combinatorial acceptance bar on the same colimit object; owner the Graph Theory Expert via the Head of R&D joint issue.
 - **No silently dropped requirement:** all 5 `LG-C-*` rows appear in §2 with surface + acceptance; LG-C4's "skip" is an explicit boundary, not an omission.
 

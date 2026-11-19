@@ -1,9 +1,11 @@
 -- | MCP (Model Context Protocol) server for graph access
 -- Implements JSON-RPC over stdio (line-delimited).
--- Exposes tools: query_graph, get_node, get_neighbors, get_community, god_nodes, graph_stats, shortest_path
---   bridge_nodes, select_context, add_conversation, conversation_history
+-- Exposes tools: query_graph, cypher_query, cypher_mutate, get_node, get_neighbors,
+--   get_community, god_nodes, graph_stats, shortest_path, bridge_nodes,
+--   select_context, add_conversation, conversation_history
 module Graphos.Infrastructure.Server.MCP
   ( startMCPServer
+  , allTools
   , startMCPServerFromFile
   , startMCPServerFromFileIn
   , defaultMCPMemoryDir

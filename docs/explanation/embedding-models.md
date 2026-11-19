@@ -84,7 +84,7 @@ the cache key and persisted source-hash.
 Throughput measurements per model/server/concurrency (and the oversized-input
 regression probe) are recorded in the
 `lfm-embedding-optimization` change's
-[`bench/BENCHMARK.md`](../openspec/changes/lfm-embedding-optimization/bench/BENCHMARK.md);
+[`bench/BENCHMARK.md`](../../openspec/changes/archive/2026-09-22-lfm-embedding-optimization/bench/BENCHMARK.md);
 the pinned default concurrency (1) cites its recorded sweep.
 
 ## Semantic Edge Inference
