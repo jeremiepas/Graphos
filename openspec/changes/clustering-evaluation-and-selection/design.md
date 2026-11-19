@@ -66,9 +66,17 @@ Alternatives: a2a / c2c (more recent architecture-recovery metrics; can be
 added later behind the same interface), NMI / ARI (not move/join-based, kept
 out to stay comparable with the paper).
 
-The closed form for `max(mno(∀A,B))` is taken from the paper and checked by
-brute force: for n ≤ 6 the test enumerates every partition A (Bell(6) = 203)
-and asserts the maximum of `mno` equals the closed form.
+Closed form used for `max(mno(∀A,B))`: with B's group sizes sorted
+descending `g₁ ≥ g₂ ≥ …`, `max(mno(∀A,B)) = n − h`, where `h` is the largest
+`k` with `gᵢ ≥ k − i + 1` for every `i ≤ k` (the longest "staircase" of group
+sizes; `h = 1` for one group or all singletons). It was derived by exhaustive
+search and is checked by brute force: for n ≤ 6 the test enumerates every
+partition A (Bell(6) = 203) for every reference B and asserts the maximum of
+`mno` equals the closed form (it was also checked for n = 7 when derived).
+`mno` itself is the optimal one-way MoJo: tag each cluster of A with a
+maximal-overlap group of B, `M` = elements outside their cluster's tag,
+`g` = maximum bipartite matching over the maximal-overlap pairs,
+`mno = M + l − g` with `l` the number of clusters of A.
 
 ### D4 — Agglomerative clustering
 

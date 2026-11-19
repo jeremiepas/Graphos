@@ -1,9 +1,13 @@
 ## 1. Partition foundation (Domain)
 
-- [ ] 1.1 `Graphos.Domain.Community.Partition`: `Partition` type, restriction to common nodes, meet of partitions. Check: QuickCheck — meet is commutative, idempotent, and refines both inputs
-- [ ] 1.2 Directory ground truth (depth d, multi-ref meet, JSON truth loader in Infrastructure). Check: the three `clustering-evaluation` ground-truth scenarios pass
-- [ ] 1.3 MoJo distance (tagging + maximum bipartite matching) and MoJoFM. Check: identity = 0 / 100, range [0, 100], brute-force maximum for n ≤ 6 equals the closed form
-- [ ] 1.4 Stability (both directions). Check: equal partitions → 100 / 100
+- [x] 1.1 `Graphos.Domain.Community.Partition`: `Partition` type, restriction to common nodes, meet of partitions. Check: QuickCheck — meet is commutative, idempotent, and refines both inputs
+  - `Graphos.Domain.Community.Partition`: `Partition` (element → group label), `fromAssignment`/`fromGroups`/`groups`, `restrictCommon` (with dropped counts), `meet`/`meetAll`, `refines`, `samePartition`. `PartitionSpec`: meet commutative, idempotent, refines both (QuickCheck).
+- [x] 1.2 Directory ground truth (depth d, multi-ref meet, JSON truth loader in Infrastructure). Check: the three `clustering-evaluation` ground-truth scenarios pass
+  - `directoryGroup`/`directoryTruth` (depth `d`, leading `./` ignored, shallow files keep their directory); multi-ref truth = `meetAll` with dropped count; `Graphos.Infrastructure.ClusterEval.TruthFile` reads `--truth FILE` (`{"file": "group"}`, non-string group rejected). The three spec scenarios pass.
+- [x] 1.3 MoJo distance (tagging + maximum bipartite matching) and MoJoFM. Check: identity = 0 / 100, range [0, 100], brute-force maximum for n ≤ 6 equals the closed form
+  - `mno` (optimal one-way MoJo: maximal-overlap tagging, Kuhn matching, `M + l − g`), `maxMno` (closed form `n − h`, see design D3), `mojoFM` with common/dropped counts. Identity 0 / 100, range [0, 100] (QuickCheck), brute force for every reference of n ≤ 6 equals the closed form, worked examples.
+- [x] 1.4 Stability (both directions). Check: equal partitions → 100 / 100
+  - `stability old new = (MoJoFM(old,new), MoJoFM(new,old))`; equal partitions 100 / 100 (QuickCheck).
 
 ## 2. Agglomerative clustering (Domain) — parallel with 1.2–1.4
 
