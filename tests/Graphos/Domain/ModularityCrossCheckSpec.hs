@@ -43,7 +43,7 @@ import Text.Read (readMaybe)
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (buildGraph, Graph(..), degree)
 import Graphos.Domain.Community
-  ( buildReverseIndex, detectCommunities, localMovesFrom, modularity )
+  ( buildReverseIndex, detectCommunities, localMovesFrom, modularity, supportPairs )
 
 -- | The contract's tolerance (§6): @eps = 2⁻²⁴@.
 eps :: Double
@@ -173,6 +173,24 @@ path6Singletons = communityMap [("p1", 0), ("p2", 1), ("p3", 2), ("p4", 3), ("p5
 path6AfterLocalMove :: CommunityMap
 path6AfterLocalMove = communityMap [("p1", 0), ("p2", 0), ("p3", 0), ("p4", 1), ("p5", 2), ("p6", 2)]
 
+-- | modularity-undirected-view witnesses (Lean @Seam/UndirectedScoring.lean@).
+-- @twoArcs@: arcs @n0 → n1@, @n2 → n3@ in a @--directed@ graph — out-degrees
+-- used to give @Q = 3/2@. @bothWays@: both orientations of @{n0,n1}@ and
+-- @{n2,n3}@ stored — record-counted @σ_in@ used to give @Q = 3/2@. The fixed
+-- score is @1/2@ on both.
+twoArcsGraph :: Graph
+twoArcsGraph = buildGraph True $
+  extractionFromLists (map testNode ["n0", "n1", "n2", "n3"])
+    [testEdge "n0" "n1", testEdge "n2" "n3"]
+
+bothWaysGraph :: Graph
+bothWaysGraph = buildGraph False $
+  extractionFromLists (map testNode ["n0", "n1", "n2", "n3"])
+    [testEdge "n0" "n1", testEdge "n1" "n0", testEdge "n2" "n3", testEdge "n3" "n2"]
+
+twoBlocks :: CommunityMap
+twoBlocks = communityMap [("n0", 0), ("n1", 0), ("n2", 1), ("n3", 1)]
+
 pinnedFixtures :: Map.Map (String, String) Pinned
 pinnedFixtures = Map.fromList
   [ (("1", "single"), Pinned triangleGraph triangleSingle 0)
@@ -189,6 +207,8 @@ pinnedFixtures = Map.fromList
   , (("5d", "split (leiden)"), Pinned twoCliquesGraph twoCliquesSplit (11 % 26))
   , (("6", "split (leiden)"), Pinned twoCliquesGraph twoCliquesSplit (11 % 26))
   , (("7", "split (leiden)"), Pinned twoCliquesGraph twoCliquesSplit (11 % 26))
+  , (("twoArcs", "two blocks"), Pinned twoArcsGraph twoBlocks (1 % 2))
+  , (("bothWays", "two blocks"), Pinned bothWaysGraph twoBlocks (1 % 2))
   ]
 
 ----------------------------------------
@@ -200,7 +220,7 @@ spec = do
   rows <- runIO loadLeanTable
 
   describe "AVI-618 §6 — Lean Q vs Haskell modularity (pinned fixtures)" $ do
-    it "the Lean harness table names exactly the 11 pinned (fixture, partition) rows" $ do
+    it "the Lean harness table names exactly the 13 pinned (fixture, partition) rows" $ do
       sort (map (\r -> (rowFixture r, rowPartition r)) rows)
         `shouldBe` sort (Map.keys pinnedFixtures)
 
@@ -269,7 +289,9 @@ checkRow r pin = do
       qHs     = modularity g cm
       qLean   = fromIntegral (rowNum r) / fromIntegral (rowDen r) :: Double
       leanExact = rowNum r % rowDen r
-      mHs     = Map.size (gEdges g)
+      -- m is the number of support pairs (modularity-undirected-view), which
+      -- equals the record count on the §5 fixtures and is 2, not 4, on bothWays.
+      mHs     = length (supportPairs g)
       -- The contract's own quantity, evaluated in exact rational arithmetic:
       -- @|Q_lean - toRational Q_hs|@.
       exactDiff = abs (toRational qHs - leanExact)

@@ -149,12 +149,28 @@ spec = do
       Set.member "a" (neighbors g "a") `shouldBe` False
       (degree g "a") `shouldBe` 0
 
+  describe "buildGraph duplicate (source,target) keys" $ do
+    it "keeps the imports edge over a calls edge on the same pair, whatever the edge ids" $ do
+      let mk eid rel = (testEdge "a" "b") { edgeId = EdgeId eid, edgeRelation = rel }
+          keep es = fmap edgeRelation (Map.lookup ("a", "b") (gEdges (buildGraph True (extractionFromLists [testNode "a", testNode "b"] es))))
+      keep [mk "z-call" Calls, mk "a-imp" Imports] `shouldBe` Just Imports
+      keep [mk "a-call" Calls, mk "z-imp" Imports] `shouldBe` Just Imports
+      keep [mk "x" Inferred, mk "y" References] `shouldBe` Just References
+
   describe "mergeExtractions" $ do
     it "deduplicates nodes by id" $ do
       let a = extractionFromLists [testNode "x"] []
           b = extractionFromLists [testNode "x", testNode "y"] []
           merged = mergeExtractions a b
       length (extractionNodes merged) `shouldBe` 2
+
+    it "a declared node wins over a line-less placeholder with the same id, in either order" $ do
+      let placeholder = testNode "m"
+          declared = (testNode "m") { nodeLineStart = Just 1, nodeLineEnd = Just 9 }
+          viaLeft = mergeExtractions (extractionFromLists [placeholder] []) (extractionFromLists [declared] [])
+          viaRight = mergeExtractions (extractionFromLists [declared] []) (extractionFromLists [placeholder] [])
+      fmap nodeLineStart (Map.lookup "m" (extractionNodes viaLeft)) `shouldBe` Just (Just 1)
+      fmap nodeLineStart (Map.lookup "m" (extractionNodes viaRight)) `shouldBe` Just (Just 1)
 
   describe "degree" $ do
     it "returns 0 for isolated nodes" $ do

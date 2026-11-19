@@ -293,8 +293,12 @@ placeholderOf c n =
       kind = fmap toText (nodeKind n)
   in case () of
        _ | kind == Just "External", Just s <- stripPrefix' "external:" fp -> Just (PExternal s)
+         -- A line-less module node is a placeholder unless it is the very
+         -- node of its file: the same file under another path form
+         -- (`src/x.ts` vs `./src/x.ts`) has another id and must be rewired.
          | kind == Just "Module", nodeLineStart n == Nothing
-         , not ("external:" `isPrefixOf` fp), not (Map.member (normalisePath fp) (cModules c)) -> Just (PRelative fp)
+         , not ("external:" `isPrefixOf` fp)
+         , Map.lookup (normalisePath fp) (cModules c) /= Just (nodeId n) -> Just (PRelative fp)
          | otherwise -> Nothing
   where
     stripPrefix' pre s = if pre `isPrefixOf` s then Just (drop (length pre) s) else Nothing

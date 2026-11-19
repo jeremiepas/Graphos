@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change fix-graph-quality-and-tracing. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: No truncated fragment nodes
 
 The Haskell stub extractor (PRD §3.2, node-schema spec) MUST NOT emit nodes whose label is a truncated prefix of a source line. When no valid identifier can be extracted from a candidate declaration line, the extractor SHALL skip the line instead of emitting a fallback label.
@@ -52,28 +54,29 @@ constant SHALL be referenced by tests so a change of value is a visible, intenti
 Import-like and re-export declarations SHALL be normalized before truncation so that the
 `from '<specifier>'` clause is preserved in the retained text: interior newlines and runs of
 whitespace are collapsed to single spaces, and when the normalized declaration still exceeds the
-truncation budget, the retained signature SHALL keep both the leading form and the trailing
-specifier clause (eliding the middle) rather than cutting the tail. The node label is the
-resolved specifier (see "Labels are identifiers and declaration text is the signature").
+truncation budget, the retained text SHALL keep both the leading form and the trailing
+specifier clause (eliding the middle) rather than cutting the tail. The retained text is stored
+in `nodeSignature`; the node label is the resolved specifier (see "Labels are identifiers and
+declaration text is the signature").
 
 #### Scenario: Multi-line import keeps its specifier in the signature
 
 - **WHEN** a `.ts` file contains a multi-line
   `import { loadAndProcessTemplate, loadTemplate, buildConfigVariables, … } from '../../templates/index.js';`
   whose flattened text exceeds the truncation budget
-- **THEN** the emitted node signature ends with `from '../../templates/index.js';` and contains an
-  elision marker in the middle, and its label is `../../templates/index.js`
+- **THEN** the emitted node's `nodeSignature` ends with `from '../../templates/index.js';` and
+  contains an elision marker in the middle, and its label is `../../templates/index.js`
 
 #### Scenario: Short declarations are unchanged
 
 - **WHEN** a declaration's normalized text is shorter than the truncation budget
-- **THEN** the label is the normalized text with no elision marker
+- **THEN** `nodeSignature` is the normalized text with no elision marker
 
 #### Scenario: No import node loses its specifier
 
 - **WHEN** the full pipeline runs on a TypeScript repository of at least 1,000 source files
-- **THEN** the number of `Import` nodes whose signature contains no `from '<specifier>'` clause
-  (for declarations that have one in source) is zero
+- **THEN** the number of `Import` nodes whose `nodeSignature` contains no `from '<specifier>'`
+  clause (for declarations that have one in source) is zero
 
 ### Requirement: Node identity is derived from path, kind and identifier
 
@@ -119,4 +122,3 @@ inner declaration is emitted once, marked exported in `nodeExtra`.
 #### Scenario: Module label is the file name
 - **WHEN** `./src/workers/workflow-task-worker.ts` is extracted
 - **THEN** its module node label is `workflow-task-worker.ts` and `nodeSignature` is `Nothing`
-

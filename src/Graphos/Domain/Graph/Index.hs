@@ -272,7 +272,17 @@ buildLabelIndex nodeMap =
         | (nid, n) <- Map.toList nodeMap
         , T.length (T.toLower (toText (nodeLabel n))) > 2
         ])
-  in Map.unionWith (++) splitTokens fullLabels
+      -- The identifier exactly as declared (identifier-resolution: "both
+      -- exactly and lowercased"), so an exact-case lookup (`dbGetById`) is a
+      -- hit before the case-insensitive fallback. Only added when it differs
+      -- from the lowercased key, which already holds the node.
+      exactLabels = Map.map reverse (Map.fromListWith (++)
+        [ (lbl, [nid])
+        | (nid, n) <- Map.toList nodeMap
+        , let lbl = toText (nodeLabel n)
+        , T.length lbl > 2, lbl /= T.toLower lbl
+        ])
+  in Map.unionsWith (++) [splitTokens, fullLabels, exactLabels]
 
 -- | Build path index from node source files.
 -- Splits each source file on '/' into segments and indexes each

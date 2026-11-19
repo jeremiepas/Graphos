@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change fix-graph-quality-and-tracing. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Canonical module node identity
 
 Haskell stub extraction (PRD §3.2 extract stage) MUST assign module nodes and import-target nodes a canonical node ID derived from the module name, such that an `import X` edge in any file resolves to the same node as the module node produced for the file that declares `module X`. The `Main` module SHALL be exempt and keep a directory-scoped ID to avoid collisions between distinct executables.
@@ -53,7 +55,7 @@ Stub extraction MUST emit `imports` edges only for targets parsed from import de
 
 Tree-sitter extraction SHALL parse the module specifier from every import-like declaration
 (`import_declaration`, `import_statement`, `import_from_statement`, `use_declaration`) from the
-declaration's string-literal child and retain it verbatim, independently of any signature truncation
+declaration's string-literal child and retain it verbatim, independently of any label truncation
 applied for display. The specifier SHALL be available to edge construction as structured data,
 not recovered by searching the node text for `from ` (PRD §3.2). A node that is not an import-like
 declaration SHALL never yield a specifier, whatever its text contains.
@@ -231,3 +233,16 @@ For each newly added grammar, the implementation SHALL ensure that any node of k
 - **THEN** every emitted `Import` node's enclosing file has at least one `imports` edge, or no `Import` nodes are emitted at all
 "
 
+### Requirement: An import edge is not shadowed by another relation on the same pair
+
+The graph keeps one edge per `(source, target)` pair. When several extracted edges share a pair,
+the system SHALL keep the most structural relation, in this order: `contains`, `imports`,
+`extends`, `implements`, `calls`, `references`, `tests`, `maps`, `documents`, the spec relations
+(`refines`, `satisfies`, `constrains`, `conflicts_with`, `supersedes`), then `depends_on` and
+`inferred`; between edges of the same relation, the larger edge id. A module's `imports` edge is
+therefore never replaced by a `calls` edge bound through the same import, so a chain of relative
+imports stays a path of `imports` hops (`lean/ReviewGraph.lean`, `chain_lifts`).
+
+#### Scenario: top-level call through an import
+- **WHEN** `index.ts` imports `dbGetById` from `./db` and calls it at top level, so the module node of `index.ts` has both an `imports` and a `calls` edge to the module node of `db.ts`
+- **THEN** the graph keeps the `imports` edge, and `graphos path index.ts db.ts` returns a path of `imports` hops

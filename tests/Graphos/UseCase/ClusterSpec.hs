@@ -4,15 +4,16 @@
 -- @bunch-clustering@).
 module Graphos.UseCase.ClusterSpec (spec) where
 
-import Data.List (sort)
+import Data.List (sort, nub)
+import Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Text.Short (fromText)
 import Test.Hspec
 
 import Graphos.Domain.Types
-import Graphos.Domain.Graph (Graph, buildGraph)
-import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes)
+import Graphos.Domain.Graph (Graph, buildGraph, gNodes, gEdges)
+import Graphos.Domain.Community (Resolution(..), MergeStrategy(..), modularity, capCommunitySizes, undirectedView)
 import Graphos.Domain.Community.Bunch (BunchConfig(..), defaultBunchConfig, foldToFileMDG, mdgFileCount, mdgEdgeCount, bunchCluster, BunchResult(..), BunchRun(..))
 import Graphos.Domain.Community.MQ (Weighting(..))
 import Graphos.UseCase.Cluster
@@ -136,6 +137,26 @@ bunchSpec = describe "runClustering (BunchAlgorithm …)" $ do
     mapM_ (\cid -> filesOf cid `shouldSatisfy` (not . null)) (Map.keys comm)
     Map.size comm `shouldSatisfy` (\k -> k >= 1 && k <= 3)
 
+  it "placeholder nodes join the community of their importers, and are covered" $ do
+    -- two triangles of files joined by one edge; package `p` is imported only
+    -- from the first triangle, package `q` by nobody
+    let tri xs = [ edgeOf Imports u v | (u, i) <- zip xs [0 :: Int ..], (v, j) <- zip xs [0 ..], i < j ]
+        files = ["a1", "a2", "a3", "b1", "b2", "b3"]
+        ph f k = (nodeIn ("external:" <> f) f) { nodeKind = Just (fromText k), nodeLineStart = Nothing }
+        nodes = [ nodeIn (f <> ".ts") f | f <- files ] ++ [ph "p" "External", ph "q" "External"]
+        edges = tri ["a1", "a2", "a3"] ++ tri ["b1", "b2", "b3"] ++ [edgeOf Imports "a3" "b1"]
+                ++ [ edgeOf Imports f "p" | f <- ["a1", "a2", "a3"] ]
+        g = buildGraph False (extractionFromLists nodes edges)
+        (comm, _, _) = runClustering (BunchAlgorithm settings) res g
+        cidOf nid = [ cid | (cid, ms) <- Map.toList comm, nid `elem` ms ]
+    sort (concatMap snd (Map.toList comm)) `shouldBe` sort (files ++ ["p", "q"])
+    cidOf "p" `shouldBe` cidOf "a1"
+    cidOf "a1" `shouldNotBe` cidOf "b1"
+    -- unreferenced `q` gets a community of its own
+    length (cidOf "q") `shouldBe` 1
+    cidOf "q" `shouldNotBe` cidOf "a1"
+    cidOf "q" `shouldNotBe` cidOf "b1"
+
 -- ───────────────────────────────────────────────
 -- File cap (5.1)
 -- ───────────────────────────────────────────────
@@ -213,8 +234,32 @@ enrichedTwoDir = buildGraph False $ extractionFromLists
   , edgeOf Imports "a3" "b1"
   , edgeOf DependsOn "a1" "b2", edgeOf DependsOn "a2" "b3", edgeOf DependsOn "a3" "b2" ]
 
+-- | A @--directed@ fixture whose report modularity used to leave [-1/2, 1]:
+-- two directed triangles joined by one arc, with two pairs also stored in the
+-- reverse orientation (modularity-undirected-view).
+directedFixture :: Graph
+directedFixture = buildGraph True $ extractionFromLists
+  [ nodeIn "a/1.ts" "a1", nodeIn "a/2.ts" "a2", nodeIn "a/3.ts" "a3"
+  , nodeIn "b/1.ts" "b1", nodeIn "b/2.ts" "b2", nodeIn "b/3.ts" "b3" ]
+  [ edgeOf Imports "a1" "a2", edgeOf Imports "a2" "a3", edgeOf Imports "a3" "a1"
+  , edgeOf Imports "b1" "b2", edgeOf Imports "b2" "b3", edgeOf Imports "b3" "b1"
+  , edgeOf Imports "a3" "b1"
+  , edgeOf Calls "a2" "a1", edgeOf Calls "b2" "b1" ]
+
 realProjectsSpec :: Spec
 realProjectsSpec = do
+  describe "report modularity on a --directed build (modularity-undirected-view 2.3)" $
+    forM_ [("leiden", Leiden), ("bunch", BunchAlgorithm defaultBunchSettings { bsConfig = defaultBunchConfig { bcSeed = 1 } })] $ \(name, algo) ->
+      it (name ++ ": cqModularity is in [-1/2, 1], equals the undirected score, and finalComm covers every node") $ do
+        let (rawComm, _, rawQ) = runClustering algo res directedFixture
+            finalComm = capPartition rawQ True 0.05 directedFixture rawComm
+            q = partitionQuality (cqAlgorithm rawQ) directedFixture finalComm (cqSkip rawQ)
+            members = concat (Map.elems finalComm)
+        sort members `shouldBe` sort (Map.keys (gNodes directedFixture))
+        length members `shouldBe` length (nub members)
+        cqModularity q `shouldSatisfy` (\m -> m >= -0.5 && m <= 1)
+        cqModularity q `shouldBe` modularity (undirectedView directedFixture) finalComm
+
   let bunch = BunchAlgorithm defaultBunchSettings { bsConfig = defaultBunchConfig { bcSeed = 1, bcPopulation = 2 } }
 
   describe "capPartition (D1)" $ do
@@ -257,6 +302,32 @@ realProjectsSpec = do
           q = bunchPartitionQuality [Imports] enrichedTwoDir comm
       cqMQ q `shouldBe` mqValue (modularizationQuality (restrictToRelations [Imports] enrichedTwoDir) comm)
       cqScoredRelations q `shouldBe` Just ["imports"]
+
+    it "inferred code→doc `references` edges change neither the MDG nor the score" $ do
+      -- semantic/bounded edge inference links code to doc headers with
+      -- `References` (an allowlisted relation); a doc file is not an MDG file
+      let doc f nid = (nodeIn f nid) { nodeFileType = DocFile }
+          withDocs = buildGraph False $ extractionFromLists
+            (Map.elems (gNodes twoDirGraph) ++ [doc "specs/x.md" "x.h1", doc "specs/y.md" "y.h1"])
+            (Map.elems (gEdges twoDirGraph)
+              ++ [ edgeOf References c d | c <- ["a1", "a2", "b3"], d <- ["x.h1", "y.h1"] ])
+          step4@(comm4, _, q4) = runClustering bunch res twoDirGraph
+          (comm5, _, q5) = stepFiveClustering bunch res step4 withDocs
+      foldToFileMDG UnitWeights withDocs `shouldBe` foldToFileMDG UnitWeights twoDirGraph
+      comm5 `shouldBe` comm4
+      (cqMQ q5, cqModularity q5, cqIntraFraction q5) `shouldBe` (cqMQ q4, cqModularity q4, cqIntraFraction q4)
+
+    it "doc files left out of the MDG join the module they document, or one of their own" $ do
+      let doc f nid = (nodeIn f nid) { nodeFileType = DocFile }
+          g = buildGraph False $ extractionFromLists
+            (Map.elems (gNodes twoDirGraph) ++ [doc "docs/a.md" "da", doc "docs/lone.md" "dl"])
+            (Map.elems (gEdges twoDirGraph) ++ [edgeOf Documents "da" "a1", edgeOf Documents "da" "a2"])
+          (comm, _, _) = runClustering bunch res g
+          cidOf nid = [ cid | (cid, ms) <- Map.toList comm, nid `elem` ms ]
+      cidOf "da" `shouldBe` cidOf "a1"
+      length (cidOf "dl") `shouldBe` 1
+      cidOf "dl" `shouldNotBe` cidOf "a1"
+      cidOf "dl" `shouldNotBe` cidOf "b1"
 
     it "Leiden quality still covers every edge" $ do
       let (_, _, q) = runClustering Leiden res twoDirGraph

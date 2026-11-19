@@ -35,6 +35,7 @@ import Control.DeepSeq (NFData(..))
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
 import Data.Bits (xor, shiftR, (.&.))
 import Data.List (sort)
+import Data.Maybe (isJust, isNothing)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -110,7 +111,7 @@ instance FromJSON Graph where
 --
 -- Dangling edges (referencing nodes not in extractionNodes) are dropped,
 -- self-edges (edgeSource e == edgeTarget e) are dropped as well, and duplicate
--- (source,target) edges are collapsed by 'Map.fromList'. This keeps the support
+-- (source,target) edges are collapsed to one ('keepStronger'). This keeps the support
 -- graph G_s irreflexive, satisfying the Phase 1 SupportGraph contract (adj v v
 -- == False) and the Lean seam NoSelfLoops (AVI-1324).
 buildGraphWithStats :: Bool -> Extraction -> (Graph, (Int, Int))
@@ -124,7 +125,7 @@ buildGraphWithStats directed extraction =
                        , edgeSource e /= edgeTarget e
                        , Map.member (edgeSource e) nodes
                        , Map.member (edgeTarget e) nodes ]
-      candidateMap = Map.fromList [ ((edgeSource e, edgeTarget e), e) | e <- validEdges ]
+      candidateMap = Map.fromListWith keepStronger [ ((edgeSource e, edgeTarget e), e) | e <- validEdges ]
       duplicateDropCount = length validEdges - Map.size candidateMap
       edgeMap = candidateMap
       fwdAdj = Map.fromListWith Set.union
@@ -156,6 +157,41 @@ buildGraphWithStats directed extraction =
 buildGraph :: Bool -> Extraction -> Graph
 buildGraph directed extraction = fst (buildGraphWithStats directed extraction)
 
+-- | Of two edges sharing a @(source,target)@ key, the one the graph keeps: the
+-- more structural relation ('relationPrecedence'), then the larger 'EdgeId'
+-- (the former last-wins order). A module's @imports@ edge is therefore never
+-- shadowed by a @calls@ edge bound through the same import, so an import chain
+-- stays a path of @imports@ hops (lean/ReviewGraph.lean @chain_lifts@).
+keepStronger :: Edge -> Edge -> Edge
+keepStronger new old
+  | rank new < rank old = new
+  | rank new > rank old = old
+  | edgeId new >= edgeId old = new
+  | otherwise = old
+  where rank = relationPrecedence . edgeRelation
+
+-- | Rank of a relation when two edges collapse onto one key (lower wins):
+-- structure, then declared dependencies, then usage, then documentation and
+-- spec links, then inference.
+relationPrecedence :: Relation -> Int
+relationPrecedence r = case r of
+  Contains      -> 0
+  Imports       -> 1
+  Extends       -> 2
+  Implements    -> 3
+  Calls         -> 4
+  References    -> 5
+  Tests         -> 6
+  Maps          -> 7
+  Documents     -> 8
+  Refines       -> 9
+  Satisfies     -> 10
+  Constrains    -> 11
+  ConflictsWith -> 12
+  Supersedes    -> 13
+  DependsOn     -> 14
+  Inferred      -> 15
+
 -- | Convenience accessors for the edge-drop counts.
 buildGraphStats :: Bool -> Extraction -> (Int, Int)
 buildGraphStats directed = snd . buildGraphWithStats directed
@@ -179,12 +215,24 @@ duplicateKeyDropCount = snd . edgeDropCounts
 -- where foldr mergeExtractions over 1000+ files causes OOM.
 mergeExtractions :: Extraction -> Extraction -> Extraction
 mergeExtractions a b =
-  let mergedNodes = extNodes a `Map.union` extNodes b
+  let mergedNodes = Map.unionWith preferDeclared (extNodes a) (extNodes b)
       mergedEdges = extEdges a `Map.union` extEdges b
   in Extraction
     { extractionNodes = mergedNodes
     , extractionEdges = mergedEdges
     }
+
+-- | On an id present in both extractions, keep the left node unless only the
+-- right one is a declaration (has a line span). An importer emits a
+-- placeholder for its import target under the target file's module-node id,
+-- with no line span; whichever file merged first used to win, so a real
+-- module node could be replaced by the placeholder (27 of 161 files of
+-- solario-core `src/cli`). For consistent extractions (equal nodes on shared
+-- ids) this is the plain left-biased union.
+preferDeclared :: Node -> Node -> Node
+preferDeclared l r
+  | isNothing (nodeLineStart l), isJust (nodeLineStart r) = r
+  | otherwise = l
 
 -- | Merge two graphs (old graph takes precedence for overlapping nodes;
 -- the new graph's exclusive keys are unioned in). `Data.Map.union` / `<>`

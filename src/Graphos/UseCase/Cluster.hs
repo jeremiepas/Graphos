@@ -43,9 +43,10 @@ import qualified Data.Text as T
 import Data.Text.Short (toText)
 import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
+import Data.Maybe (listToMaybe)
 import Data.Ord (comparing)
 
-import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation, relationToText, extractionFromLists)
+import Graphos.Domain.Types (CommunityAggregate(..), CommunityId, CommunityMap, CohesionMap, NodeId, Node(..), Edge(..), ClusterQuality(..), BunchSkip(..), BunchRunInfo(..), Relation(..), relationToText, extractionFromLists)
 import Graphos.Domain.Config.Clustering (ClusteringConfig(..), ClusteringAlgorithmName(..), BunchFileConfig(..))
 import Graphos.Domain.Graph (Graph(..), buildGraph)
 import Graphos.Domain.Graph.Query (breadthFirstSearch, subgraph)
@@ -61,6 +62,7 @@ import Graphos.Domain.Community.Bunch
   , forbiddenMDGRelations
   , foldToFileMDGWith
   , mdgFileCount
+  , mdgFileSet
   )
 import qualified Data.Set as Set
 import qualified Data.Vector as V
@@ -276,10 +278,11 @@ runClustering algo res g = case algo of
       let result = bunchClusterPartitioned (bsMaxFilesPerRun bs) (bsConfig bs) mdg0
           nodesByFile = Map.fromListWith (flip (++))
             [ (nodeSourceFile nd, [nodeId nd]) | nd <- Map.elems (gNodes g) ]
-          comm = Map.fromList
+          searched = Map.fromList
             [ (cid, concatMap (\f -> Map.findWithDefault [] f nodesByFile)
                               (map (mdgFiles mdg0 V.!) members))
             | (cid, members) <- zip [0 :: Int ..] (prPartition result) ]
+          comm = attachPlaceholderFiles (Documents : mdgRelations (bsRelations bs)) g mdg0 searched
           info = BunchRunInfo { briRuns = prRuns result, briMoves = prMoves result, briPasses = prPasses result }
       in ( comm, scoreAllCohesion (undirectedView g) comm
          , (bunchPartitionQuality (bsRelations bs) g comm) { cqBunchRuns = Just info } )
@@ -288,10 +291,45 @@ runClustering algo res g = case algo of
       -- downstream stay uniform across algorithms.
 
 
+-- | Give a community to the nodes of files left out of the MDG (import-target
+-- placeholders: packages, paths outside the corpus; documentation, image and
+-- office files). Each such file joins the
+-- community holding most of its neighbours over @rels@, ties to the lowest
+-- id; a file with no such neighbour gets a community of its own, in
+-- ascending path order after the searched ones.
+attachPlaceholderFiles :: [Relation] -> Graph -> FileMDG -> CommunityMap -> CommunityMap
+attachPlaceholderFiles rels g mdg searched =
+  let inMDG = Set.fromList (V.toList (mdgFiles mdg))
+      cidOf = Map.fromList [ (nid, cid) | (cid, nids) <- Map.toList searched, nid <- nids ]
+      leftOut = Map.fromListWith (flip (++))
+        [ (nodeSourceFile nd, [nodeId nd]) | nd <- Map.elems (gNodes g)
+        , not (nodeSourceFile nd `Set.member` inMDG) ]
+      fileOfNode = Map.map nodeSourceFile (gNodes g)
+      votes = Map.fromListWith (Map.unionWith (+))
+        [ (f, Map.singleton cid (1 :: Int))
+        | e <- Map.elems (gEdges g), edgeRelation e `elem` rels
+        , (other, mine) <- [(edgeSource e, edgeTarget e), (edgeTarget e, edgeSource e)]
+        , Just f <- [Map.lookup mine fileOfNode], Map.member f leftOut
+        , Just cid <- [Map.lookup other cidOf] ]
+      best f = do
+        vs <- Map.lookup f votes
+        let top = maximum (Map.elems vs)
+        listToMaybe [ c | (c, v) <- Map.toAscList vs, v == top ]
+      next = if Map.null searched then 0 else fst (Map.findMax searched) + 1
+      (_, assigned) = foldl step (next, []) (Map.toAscList leftOut)
+      step (k, acc) (f, nids) = case best f of
+        Just c  -> (k, (c, nids) : acc)
+        Nothing -> (k + 1, (k, nids) : acc)
+  in Map.unionWith (++) searched (Map.fromListWith (++) assigned)
+
 -- | Score a partition of the graph: MQ (unit weights), modularity and
 -- intra-edge fraction, tagged with the algorithm name and the skip entry.
 -- The pipeline re-scores the partition after the size-cap post-pass so the
--- report describes exactly the communities the export writes.
+-- report describes exactly the communities the export writes. Modularity is
+-- scored on the simple undirected support graph inside 'modularity' itself
+-- (modularity-undirected-view), so a @--directed@ graph, or one storing both
+-- orientations of a pair, is passed as is and still yields a value in
+-- @[-1/2, 1]@.
 partitionQuality :: Text -> Graph -> CommunityMap -> Maybe BunchSkip -> ClusterQuality
 partitionQuality name g cm skip =
   let mq = modularizationQuality g cm
@@ -314,7 +352,13 @@ partitionQuality name g cm skip =
 bunchPartitionQuality :: [Relation] -> Graph -> CommunityMap -> ClusterQuality
 bunchPartitionQuality rels g cm =
   let scored = mdgRelations rels
-  in (partitionQuality "bunch" (restrictToRelations scored g) cm Nothing)
+      inMDG = mdgFileSet g
+      fileOf nid = fmap nodeSourceFile (Map.lookup nid (gNodes g))
+      bothInMDG e = all (maybe False (`Set.member` inMDG) . fileOf) [edgeSource e, edgeTarget e]
+      scope = buildGraph (gDirected g) $ extractionFromLists
+        (Map.elems (gNodes g))
+        [ e | e <- Map.elems (gEdges g), edgeRelation e `elem` scored, bothInMDG e ]
+  in (partitionQuality "bunch" scope cm Nothing)
        { cqScoredRelations = Just (map relationToText scored) }
 
 -- | The relations a Bunch MDG folds: the configured ones minus
