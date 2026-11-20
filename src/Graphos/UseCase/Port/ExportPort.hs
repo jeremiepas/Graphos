@@ -41,6 +41,7 @@ data ExportPort = ExportPort
     epExportHTML        :: Graph -> Analysis -> Maybe (Map CommunityId Text) -> [CommunityAggregate] -> FilePath -> IO ()
   , epExportObsidian    :: Graph -> Analysis -> FilePath -> IO ()
   , epExportReport      :: Text -> FilePath -> IO ()
+  , epExportClusterEval :: Value -> FilePath -> IO ()
   , epExportCypher      :: Graph -> FilePath -> IO ()
   , epExportMemgraphCypher :: Graph -> FilePath -> IO ()
     -- | Neo4j push functions

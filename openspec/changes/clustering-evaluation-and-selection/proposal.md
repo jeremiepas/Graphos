@@ -82,3 +82,23 @@ No PRD.md exists in this repository; section references below point to the
   (default F ≤ 10,000, beyond that the sweep skips it and says so). Function
   or fine granularity graphs are folded to files first.
 - Workflow docs: 01-full-pipeline (cluster stage), 04-query (new subcommand).
+
+## Rebased on the merged Bunch requirements (2026-11-19)
+
+`bunch-search-based-modularization` and `bunch-real-projects` shipped the
+`--cluster-algorithm` option (`leiden|bunch`), the file-level MDG and a
+file-count cap with a Leiden fallback. This change now builds on them instead
+of restating them:
+
+- `agglomerative` and `auto` extend the existing `--cluster-algorithm` /
+  `clustering.algorithm` vocabulary;
+- the file dependency matrix `W` is the Bunch MDG folded with edge weights
+  (same code files and relation allowlist), not a second fold of every
+  non-`contains` relation;
+- the agglomerative file cap falls back to Leiden and reports the skip, like
+  `--bunch-max-files`;
+- `clustereval score|compare|sweep` sit beside the existing `landscape`;
+- the sweep and `auto` rank Bunch alongside Leiden and the agglomerative grid.
+
+MoJo/MoJoFM, directory ground truth, stability, the linkage algorithms and
+`cluster_eval.json` are unchanged.

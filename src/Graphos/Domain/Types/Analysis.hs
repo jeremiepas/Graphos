@@ -4,6 +4,8 @@ module Graphos.Domain.Types.Analysis
   ( -- * Analysis types
     Analysis(..)
   , ClusterQuality(..)
+  , ClusterEvalRow(..)
+  , ClusterEvalReport(..)
   , BunchSkip(..)
   , BunchRunInfo(..)
   , GodNode(..)
@@ -40,6 +42,9 @@ data Analysis = Analysis
   , analysisPartitionQuality :: !(Maybe ClusterQuality)
     -- ^ Quality of 'analysisCommunities' and the algorithm that produced it
     -- (bunch-search-based-modularization); 'Nothing' when not clustered
+  , analysisClusterEval :: !(Maybe ClusterEvalReport)
+    -- ^ Ranking of the configuration sweep when @--cluster-algorithm auto@
+    -- ran (clustering-selection); 'Nothing' for every other algorithm
   } deriving (Eq, Show, Generic)
 
 instance NFData Analysis
@@ -77,6 +82,64 @@ data ClusterQuality = ClusterQuality
   } deriving (Eq, Show, Generic)
 
 instance NFData ClusterQuality
+
+-- | One row of the configuration sweep ranking (clustering-selection): the
+-- configuration name, its external score and the shape of its partition.
+data ClusterEvalRow = ClusterEvalRow
+  { cerConfig     :: !Text    -- ^ @leiden@, @bunch@ or @<distance>_<linkage>_<divisor>@
+  , cerMojofm     :: !Double  -- ^ MoJoFM against the ground truth
+  , cerClusters   :: !Int     -- ^ cluster count
+  , cerSingletons :: !Int     -- ^ singleton clusters
+  , cerModularity :: !Double  -- ^ modularity of the partition
+  } deriving (Eq, Show, Generic)
+
+instance NFData ClusterEvalRow
+
+instance ToJSON ClusterEvalRow where
+  toJSON r = object
+    [ "config"     .= cerConfig r
+    , "mojofm"     .= cerMojofm r
+    , "clusters"   .= cerClusters r
+    , "singletons" .= cerSingletons r
+    , "modularity" .= cerModularity r
+    ]
+
+instance FromJSON ClusterEvalRow where
+  parseJSON = withObject "ClusterEvalRow" $ \v -> ClusterEvalRow
+    <$> v .: "config"
+    <*> v .: "mojofm"
+    <*> v .: "clusters"
+    <*> v .: "singletons"
+    <*> v .: "modularity"
+
+-- | The complete sweep result written to @cluster_eval.json@ and rendered as
+-- a ranking section in @GRAPH_REPORT.md@.
+data ClusterEvalReport = ClusterEvalReport
+  { cerTruth        :: !Text           -- ^ ground-truth source (directory depth or file)
+  , cerTruthGroups  :: !Int            -- ^ groups in the ground truth
+  , cerRows         :: ![ClusterEvalRow]
+  , cerSelected     :: !Text           -- ^ config name applied to node communities
+  , cerSkipped      :: ![Text]         -- ^ configurations skipped (file cap), with the reason
+  } deriving (Eq, Show, Generic)
+
+instance NFData ClusterEvalReport
+
+instance ToJSON ClusterEvalReport where
+  toJSON r = object
+    [ "truth"        .= cerTruth r
+    , "truth_groups" .= cerTruthGroups r
+    , "selected"     .= cerSelected r
+    , "rows"         .= cerRows r
+    , "skipped"      .= cerSkipped r
+    ]
+
+instance FromJSON ClusterEvalReport where
+  parseJSON = withObject "ClusterEvalReport" $ \v -> ClusterEvalReport
+    <$> v .: "truth"
+    <*> v .: "truth_groups"
+    <*> v .: "rows"
+    <*> v .: "selected"
+    <*> v .: "skipped"
 
 -- | A god node (high-degree hub)
 data GodNode = GodNode

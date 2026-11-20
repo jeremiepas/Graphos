@@ -29,6 +29,7 @@ spec = describe "exportAll" $ do
             , analysisArticulation  = []
             , analysisBccCount      = 0
             , analysisPartitionQuality = Nothing
+            , analysisClusterEval = Nothing
             }
           detection = Detection
             { detectionTotalFiles = 0
@@ -44,6 +45,7 @@ spec = describe "exportAll" $ do
             { epExportHTML = \_g _analysis mLbl _aggregates _path -> modifyIORef ref (const (Just mLbl))
             , epExportObsidian = \_ _ _ -> pure ()
             , epExportReport = \_ _ -> pure ()
+            , epExportClusterEval = \_ _ -> pure ()
             , epExportCypher = \_ _ -> pure ()
             , epExportMemgraphCypher = \_ _ -> pure ()
             , epPushToNeo4jFull = \_ _ _ _ _ _ -> pure ("", 0, 0)
@@ -89,6 +91,7 @@ spec = describe "exportAll" $ do
               , analysisArticulation  = []
               , analysisBccCount      = 0
               , analysisPartitionQuality = Nothing
+              , analysisClusterEval = Nothing
               }
             path = tmpDir ++ "/graph.json"
         exportGraph g analysis path

@@ -106,6 +106,8 @@ library
                     Graphos.Domain.Community
                     Graphos.Domain.Community.MQ
                     Graphos.Domain.Community.Bunch
+                    Graphos.Domain.Community.Partition
+                    Graphos.Domain.Community.Agglomerative
                     Graphos.Domain.Community.Landscape
                     Graphos.Domain.Random
                    Graphos.Domain.Analysis
@@ -185,6 +187,7 @@ library
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
                            Graphos.Infrastructure.Extract.TreeSitter.Imports
                            Graphos.Infrastructure.Extract.ImportResolution
+                           Graphos.Infrastructure.ClusterEval.TruthFile
                            Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
                       Graphos.Infrastructure.Extract.Pdf
@@ -427,6 +430,8 @@ test-suite graphos-test
     Graphos.Domain.Community.ClusterInvarianceSpec
     Graphos.Domain.Community.DeterminismSpec
     Graphos.Domain.Community.PermutationSpec
+    Graphos.Domain.Community.PartitionSpec
+    Graphos.Domain.Community.AgglomerativeSpec
     Graphos.Domain.Community.MQSpec
     Graphos.Domain.Community.BunchSpec
     Graphos.Domain.Community.LandscapeSpec

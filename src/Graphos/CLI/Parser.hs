@@ -4,6 +4,7 @@ module Graphos.CLI.Parser
     Command(..)
   , ViewSubcommand(..)
   , LandscapeOpts(..)
+  , ClusterEvalOpts(..)
     -- * Parsers
   , pipelineOpts
   , queryOpts
@@ -26,6 +27,7 @@ module Graphos.CLI.Parser
   , granularityReader
   , clusteringOverridesOpts
   , landscapeOpts
+  , clusterEvalOptsP
     -- * Install-skill target
   , InstallSkillTarget(..)
     -- * Command reference rendering
@@ -44,7 +46,13 @@ import Graphos.UseCase.Query.Render (CommonQueryOpts(..))
 import Graphos.UseCase.Scaffold (InstallSkillTarget(..))
 import Graphos.Domain.Config (Granularity(..), defaultGraphosConfig, defaultIngestConfig)
 import Graphos.Domain.Config.Detection (DetectionMode(..))
-import Graphos.Domain.Config.Clustering (ClusteringOverrides(..), parseAlgorithmName, defaultAnnealing)
+import Graphos.Domain.Config.Clustering
+  ( ClusteringOverrides(..)
+  , parseAlgorithmName
+  , parseLinkageName
+  , parseDistanceName
+  , defaultAnnealing
+  )
 import Graphos.Domain.Community.Landscape (RandomGraphSpec, parseRandomGraphSpec)
 import qualified Data.Text as T
 import Graphos.Infrastructure.Observability.SDK (OtelConfig(..), defaultOtelConfig)
@@ -69,6 +77,9 @@ data Command
   | ImpactCmd FilePath FilePath [Text] (Maybe Text) (Maybe Text) Bool Bool
   | ViewCmd ViewSubcommand
   | ClusterEvalLandscapeCmd LandscapeOpts
+  | ClusterEvalScoreCmd ClusterEvalOpts
+  | ClusterEvalCompareCmd ClusterEvalOpts
+  | ClusterEvalSweepCmd ClusterEvalOpts
   | LServers
  | Serve FilePath FilePath Int Bool Bool String
 
@@ -171,6 +182,10 @@ clusteringOverridesOpts = ClusteringOverrides
   <*> optional (option (boundedIntReader "--bunch-max-files" 0 maxBound) (long "bunch-max-files" <> metavar "N" <> help "Bunch: hard ceiling, file count above which Leiden runs instead (default: 50000)"))
   <*> optional (option (boundedIntReader "--bunch-max-files-per-run" 2 maxBound) (long "bunch-max-files-per-run" <> metavar "N" <> help "Bunch: files per search run; larger graphs are split by directory sub-tree, then refined as a whole (default: 500)"))
   <*> switch (long "bunch-weighted" <> help "Bunch: weight the file graph by summed edge weights instead of one per file pair")
+  <*> optional (option (eitherReader parseLinkageName) (long "linkage" <> metavar "LINKAGE" <> help "Agglomerative linkage: single|average|complete (default: single)"))
+  <*> optional (option (eitherReader parseDistanceName) (long "distance" <> metavar "DISTANCE" <> help "Agglomerative distance: euclidean|manhattan|cosine (default: cosine)"))
+  <*> optional (option (boundedIntReader "--cluster-divisor" 1 maxBound) (long "cluster-divisor" <> metavar "Q" <> help "Agglomerative cut divisor: K = ceil(F / Q) (default: 25)"))
+  <*> optional (option (boundedIntReader "--agglomerative-max-files" 0 maxBound) (long "agglomerative-max-files" <> metavar "N" <> help "Agglomerative hard ceiling: file count above which Leiden runs instead (default: 10000)"))
 
 -- | Integer reader rejecting values outside @[lo, hi]@.
 boundedIntReader :: String -> Int -> Int -> ReadM Int
@@ -187,6 +202,24 @@ annealingReader = eitherReader $ \s -> case map toLower s of
     (t0s, ',' : as) | Just t0 <- readMaybe t0s, Just a <- readMaybe as
                     , t0 > 0, a > 0, a < 1 -> Right (t0, a)
     _ -> Left ("--bunch-sa expects T0,ALPHA with T0 > 0 and 0 < ALPHA < 1 (e.g. 100,0.99), got: " ++ s)
+
+-- | Options shared by @graphos clustereval score|compare|sweep@
+-- (clustering-evaluation-and-selection, design D2/D5).
+data ClusterEvalOpts = ClusterEvalOpts
+  { ceoGraphs     :: [FilePath]   -- ^ @--graph@ (two for @compare@)
+  , ceoRefGraphs  :: [FilePath]   -- ^ repeated @--ref-graph@ for multi-ref truth
+  , ceoTruthDepth :: Maybe Int    -- ^ @--truth-depth@ (default 2)
+  , ceoTruth      :: Maybe FilePath -- ^ @--truth FILE@ explicit ground truth
+  , ceoJson       :: Bool         -- ^ @--json@
+  } deriving (Show, Eq)
+
+clusterEvalOptsP :: Parser ClusterEvalOpts
+clusterEvalOptsP = ClusterEvalOpts
+  <$> some (strOption (long "graph" <> metavar "GRAPH_JSON" <> help "Graph file to evaluate (repeat once for compare)"))
+  <*> many (strOption (long "ref-graph" <> metavar "GRAPH_JSON" <> help "Additional graph for multi-ref directory truth (repeatable)"))
+  <*> optional (option (boundedIntReader "--truth-depth" 0 maxBound) (long "truth-depth" <> metavar "N" <> help "Directory depth of the ground truth (default: 2)"))
+  <*> optional (strOption (long "truth" <> metavar "FILE" <> help "Explicit JSON truth file {file: group}"))
+  <*> switch (long "json" <> help "Print one JSON object on stdout")
 
 -- | Options of @graphos clustereval landscape@ (search-landscape-evaluation).
 data LandscapeOpts = LandscapeOpts
@@ -220,6 +253,9 @@ landscapeOpts = LandscapeOpts
 clusterEvalOpts :: Parser Command
 clusterEvalOpts = hsubparser
   ( command "landscape" (info (ClusterEvalLandscapeCmd <$> landscapeOpts) (progDesc "Run N seeded Bunch searches and report basins, edge similarity, a random baseline and the Leiden point" <> footer "Example: graphos clustereval landscape --graph graphos-out/graph.json --runs 100"))
+ <> command "score" (info (ClusterEvalScoreCmd <$> clusterEvalOptsP) (progDesc "Score a graph's stored partition against directory (or explicit) ground truth" <> footer "Example: graphos clustereval score --graph graphos-out/graph.json --truth-depth 2 --json"))
+ <> command "compare" (info (ClusterEvalCompareCmd <$> clusterEvalOptsP) (progDesc "Stability of two builds' partitions, both directions" <> footer "Example: graphos clustereval compare --graph a.json --graph b.json --json"))
+ <> command "sweep" (info (ClusterEvalSweepCmd <$> clusterEvalOptsP) (progDesc "Rank Leiden, Bunch and the agglomerative grid by MoJoFM against the ground truth" <> footer "Example: graphos clustereval sweep --graph graphos-out/graph.json --json"))
   )
 
 

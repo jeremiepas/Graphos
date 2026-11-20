@@ -74,6 +74,7 @@ generateReport g analysis config detection mLabels =
           , ""
           , questionsSection (analysisQuestions analysis)
           ]
+       ++ clusterEvalSection (analysisClusterEval analysis)
      )
   where
     artPoints = analysisArticulation analysis
@@ -104,6 +105,29 @@ partitionQualityLines (Just q) =
       _ | length rs <= 8 -> intercalateComma (map show rs)
         | otherwise -> intercalateComma (map show (take 8 rs)) ++ ", …"
     intercalateComma = foldr1 (\a b -> a ++ ", " ++ b)
+
+-- | The @Configuration sweep@ section of an @auto@ build
+-- (clustering-selection): the ranking written to @cluster_eval.json@, the
+-- selected configuration and any configuration skipped above its file cap.
+clusterEvalSection :: Maybe ClusterEvalReport -> [Text]
+clusterEvalSection Nothing = []
+clusterEvalSection (Just r) =
+  [ ""
+  , "## Configuration sweep"
+  , ""
+  , T.pack ("Ground truth: " ++ T.unpack (cerTruth r) ++ " (" ++ show (cerTruthGroups r) ++ " groups)")
+  , ""
+  , "| Rank | Configuration | MoJoFM | Clusters | Singletons | Modularity |"
+  , "|------|---------------|--------|----------|------------|------------|"
+  ]
+  ++ [ T.pack ("| " ++ show i ++ " | " ++ T.unpack (cerConfig row) ++ " | "
+        ++ showTwo (cerMojofm row) ++ " | " ++ show (cerClusters row) ++ " | "
+        ++ show (cerSingletons row) ++ " | " ++ showTwo (cerModularity row) ++ " |")
+     | (i, row) <- zip [1 :: Int ..] (cerRows r) ]
+  ++ [ "", T.pack ("Selected: " ++ T.unpack (cerSelected r)) ]
+  ++ [ T.pack ("Skipped: " ++ T.unpack s) | s <- cerSkipped r ]
+  where
+    showTwo x = showFFloat (Just 2) x ""
 
 -- | Render the "Extraction Coverage" section lines (extraction-quality:
 -- "Extraction coverage is reported in GRAPH_REPORT.md"): files detected,
