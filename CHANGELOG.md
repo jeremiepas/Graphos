@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-20
+
 ### Documentation
 - **Documentation overhaul (Diátaxis + drift guard).** `docs/` is restructured
   into Tutorials, How-to/Workflows, Reference, and Explanation with
