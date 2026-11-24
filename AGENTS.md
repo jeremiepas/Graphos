@@ -68,3 +68,17 @@ A run is **not** done until all of the following hold, and the verification resu
 ## Weekly fluidity metrics (branch-guardian audit)
 
 Targets published weekly: open PRs ≤ 5; median PR age open→merge < 48 h; merged < 24 h after green+approved = 100%; conflicting PRs > 24 h = 0; red-CI PRs without a remediation task = 0; zombie issues = 0; done-issues with open PR = 0.
+
+## mnemo memory graph — the `graphos` space
+
+Mnemo (the harness at `/home/jeremie/Documents/perso/poc-graphos/mnemo`) keeps a memory graph for this repository in Neo4j (`http://localhost:7477`), in the space **`graphos`** — its own space, never `homelab`.
+
+`7477` is **one** Neo4j instance and therefore one console (`http://localhost:7477`) for every space: `homelab`, `graphos`, `console`, `eval` and the rest live side by side in it, told apart by the `space` property (`MATCH (n) WHERE n.space = 'graphos' RETURN n LIMIT 100`). Do not start a Neo4j or a console per space. The `mnemo web` UI is a different thing: it renders exactly one space per process and has no space switcher, so a second view is a second process, not a second database.
+
+- **Config file:** `~/.config/mnemo/graphos.yaml`, selected with `MNEMO_CONFIG=$HOME/.config/mnemo/graphos.yaml`. The default `~/.config/mnemo/config.yaml` is the homelab space (its delivery board, its runs): never edit it for Graphos.
+- **Wrapper:** `mnemo-graphos <command>` exports `MNEMO_CONFIG` and runs the pinned build, so `mnemo-graphos status`, `mnemo-graphos anchors check` and `mnemo-graphos web` all act on the `graphos` space. The Graphos console defaults to `127.0.0.1:7481` and the homelab one to `7480` — only because two `mnemo web` processes need two ports; the graph itself is always the single `7477`.
+- **Code graph:** this repository is pushed as project `Graphos` into the perso Neo4j (`http://localhost:7474`, shared with the other perso projects). Rebuild it with `mnemo-graphos-project Graphos /home/jeremie/Documents/perso/Graphos`; `poc-graphos` is pushed the same way. graphos' own `--neo4j-push` does not write the `project` property mnemo reads — use the wrapper.
+- **Ingest:** `mnemo-ingest-graphos` reads `.opencode/skills/*/SKILL.md`, `.opencode/commands/*.md` and `AGENTS.md` into the space. Its root is the symlink mirror `~/.local/share/mnemo/ingest/graphos`: ingesting the checkout directly would see the duplicate skills of `.worktrees/` and refuse. Run it after editing a skill, a command or this file; a second run is a no-op.
+- **Anchors:** `mnemo-graphos anchors add --project Graphos <repo-relative paths>` links memory to code. `anchors check` re-resolves a project in one query capped at 2,000 rows, so keep the anchor set small — 36 anchors resolve cleanly, the whole `src/` tree is reported falsely stale. Verify with `mnemo-graphos anchors check` and expect `stale anchors: 0`.
+- **No delivery here:** the `graphos` config has no `delivery` section on purpose. The delivery board (canvas, catalogue, workspaces) is the solario/i2p work in space `homelab`; do not run `mnemo delivery` against `graphos`.
+- **Credentials** stay in `~/.config/mnemo/env` (mode 600); no secret goes in either YAML, and no config is ever copied over another.
