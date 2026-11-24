@@ -9,32 +9,10 @@ import System.Directory
 import Test.Hspec
 
 import OpenSpecView.ChangeList
+import OpenSpecView.TestSupport (combine', findChangesRoot)
 
-combine' :: FilePath -> FilePath -> FilePath
-combine' a b
-  | not (null a) && last a == '/' = a ++ b
-  | null a = b
-  | otherwise = a ++ "/" ++ b
-
-takeParent :: FilePath -> FilePath
-takeParent p =
-  let stripped = drop 1 (dropWhile (/= '/') (reverse p))
-      parent = reverse stripped
-  in if null parent then "." else parent
-
-findChangesRoot :: IO FilePath
-findChangesRoot = go =<< getCurrentDirectory
-  where
-    go d = do
-      let cand = combine' d "openspec/changes"
-      exists <- doesDirectoryExist cand
-      if exists
-        then pure cand
-        else
-          let parent = takeParent d
-          in if parent == "." || parent == d
-               then error ("Could not locate openspec/changes under " ++ d)
-               else go parent
+noWorkspace :: Expectation
+noWorkspace = pendingWith "no openspec/changes workspace above the working directory"
 
 valid :: ChangeInfo -> Bool
 valid info =
@@ -91,29 +69,38 @@ spec = do
       (changeStatus info) `shouldBe` "complete"
 
   it "parses every existing change under openspec/changes correctly" $ do
-    root <- findChangesRoot
-    infos <- readAllChangeInfos root
-    realDirs <- filterM (\e -> do
-                          isDir <- doesDirectoryExist (combine' root e)
-                          pure (isDir && e /= "archive"))
-      =<< listDirectory root
-    length infos `shouldBe` length realDirs
-    infos `shouldSatisfy` (all valid)
+    mroot <- findChangesRoot
+    case mroot of
+      Nothing -> noWorkspace
+      Just root -> do
+        infos <- readAllChangeInfos root
+        realDirs <- filterM (\e -> do
+                              isDir <- doesDirectoryExist (combine' root e)
+                              pure (isDir && e /= "archive"))
+          =<< listDirectory root
+        length infos `shouldBe` length realDirs
+        infos `shouldSatisfy` (all valid)
 
   it "orders changes by lastModified descending, ties by name ascending" $ do
-    root <- findChangesRoot
-    infos <- readAllChangeInfos root
-    infos `shouldBe` expectedOrder infos
+    mroot <- findChangesRoot
+    case mroot of
+      Nothing -> noWorkspace
+      Just root -> do
+        infos <- readAllChangeInfos root
+        infos `shouldBe` expectedOrder infos
 
   it "includes changes without tasks.md as no-tasks" $ do
-    root <- findChangesRoot
-    infos <- readAllChangeInfos root
-    let byName = Map.fromList [(changeName c, c) | c <- infos]
-    case Map.lookup "streaming-embeddings" byName of
-      Just c -> do
-        (changeTotal c) `shouldBe` 0
-        (changeStatus c) `shouldBe` "no-tasks"
-      Nothing -> error "streaming-embeddings change missing from parsed list"
+    mroot <- findChangesRoot
+    case mroot of
+      Nothing -> noWorkspace
+      Just root -> do
+        infos <- readAllChangeInfos root
+        let byName = Map.fromList [(changeName c, c) | c <- infos]
+        case Map.lookup "streaming-embeddings" byName of
+          Just c -> do
+            (changeTotal c) `shouldBe` 0
+            (changeStatus c) `shouldBe` "no-tasks"
+          Nothing -> error "streaming-embeddings change missing from parsed list"
 
   it "parses known changes with the expected task counts" $ do
     -- Hermetic: build a fixture under the current working directory with known

@@ -91,6 +91,7 @@ import qualified Graphos.Infrastructure.LLM.EmbeddingCacheSpec
 import qualified Graphos.Infrastructure.Observability.SDKSpec
 import qualified Graphos.Infrastructure.Server.MCPQuerySpec
 import qualified Graphos.Infrastructure.Server.QueryAPISpec
+import qualified Graphos.Infrastructure.Server.StaticSpec
 import qualified Graphos.Infrastructure.FileSystem.OfficeConvertSpec
 import qualified Graphos.Infrastructure.FileSystem.IgnoreSpec
 import qualified Graphos.Infrastructure.FileSystem.AtomicWriteSpec
@@ -116,10 +117,6 @@ import qualified Graphos.UseCase.InferBetweennessWiringSpec
 import qualified Graphos.UseCase.IngestSpec
 import qualified Graphos.Infrastructure.FileSystem.CacheSpec
 import qualified Graphos.UseCase.LabelCacheSpec
-import qualified OpenSpecView.ChangeListSpec
-import qualified OpenSpecView.ArtifactViewSpec
-import qualified OpenSpecView.SpecDiffSpec
-import qualified OpenSpecView.StateDashboardSpec
 import qualified Graphos.UseCase.UpdateConfluenceSpec
 import qualified Graphos.UseCase.ClusterOnlySpec
 import qualified Graphos.UseCase.WatchCacheSpec
@@ -210,6 +207,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Infrastructure.Observability.SDKSpec.spec
   Graphos.Infrastructure.Server.MCPQuerySpec.spec
   Graphos.Infrastructure.Server.QueryAPISpec.spec
+  Graphos.Infrastructure.Server.StaticSpec.spec
   Graphos.Infrastructure.FileSystem.OfficeConvertSpec.spec
   Graphos.Infrastructure.FileSystem.IgnoreSpec.spec
   Graphos.Infrastructure.FileSystem.AtomicWriteSpec.spec
@@ -235,10 +233,6 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.IngestSpec.spec
   Graphos.Infrastructure.FileSystem.CacheSpec.spec
   Graphos.UseCase.LabelCacheSpec.spec
-  OpenSpecView.ChangeListSpec.spec
-  OpenSpecView.ArtifactViewSpec.spec
-  OpenSpecView.SpecDiffSpec.spec
-  OpenSpecView.StateDashboardSpec.spec
   Graphos.UseCase.UpdateConfluenceSpec.spec
   Graphos.UseCase.ClusterOnlySpec.spec
   Graphos.UseCase.WatchCacheSpec.spec

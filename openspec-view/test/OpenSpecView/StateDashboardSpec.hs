@@ -4,6 +4,7 @@ import Test.Hspec
 
 import OpenSpecView.ChangeList (ChangeInfo(..))
 import OpenSpecView.StateDashboard
+import OpenSpecView.TestSupport (findChangesRoot)
 
 mk :: String -> String -> Int -> Int -> ChangeInfo
 mk name status done total =
@@ -125,6 +126,10 @@ spec = do
 
   describe "showDashboard" $ do
     it "reads the openspec/changes root and renders the dashboard" $ do
-      out <- showDashboard "openspec/changes"
-      out `shouldContain` "OpenSpec State Dashboard"
-      out `shouldContain` "Summary"
+      mroot <- findChangesRoot
+      case mroot of
+        Nothing -> pendingWith "no openspec/changes workspace above the working directory"
+        Just root -> do
+          out <- showDashboard root
+          out `shouldContain` "OpenSpec State Dashboard"
+          out `shouldContain` "Summary"
