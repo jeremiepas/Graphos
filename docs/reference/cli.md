@@ -144,7 +144,10 @@ edge similarity, a random baseline, and the Leiden point. Flags: `--graph`,
 ### `serve`
 
 `graphos serve` — serve the HTML viewer and JSON query API. Flags: `--dir DIR`,
-`--graph FILE`, `--port N`, `--api-only`, `--no-api`.
+`--frontend-dir DIR` (the `graphos-studio` bundle holding the Studio output and
+the viewer assets; auto-detected from `graphos-studio/public` or
+`../graphos-studio/public` when omitted), `--graph FILE`, `--port N`,
+`--api-only`, `--no-api`.
 
 ### `init`
 
