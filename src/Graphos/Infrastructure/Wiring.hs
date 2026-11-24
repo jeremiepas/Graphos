@@ -30,7 +30,7 @@ import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
 
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
-import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
+import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..), LSPHandle(..), SymbolResult(..))
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -44,6 +44,7 @@ import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
+import qualified Graphos.Infrastructure.Extract.Command as Cmd
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
 import qualified Graphos.Infrastructure.Export.Obsidian as ExportObsidian
@@ -231,6 +232,13 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
             pure ()
   , epLanguageServerCommands = Cfg.effectiveLSPServerCommands graphosCfg
   , epHasTreeSitterGrammar = isJust . getGrammarPtr
+  , epExtractCommandFiles = \gate ec files ->
+      Cmd.runCommandExtraction
+        (Cmd.commandSpecFromConfig ec)
+        (cgRoot gate)
+        (cgEnabled gate)
+        (cgPatterns gate)
+        files
   }
 
 -- | Production export port — delegates to Infrastructure.Export.* modules.

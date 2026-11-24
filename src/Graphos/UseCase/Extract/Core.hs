@@ -5,6 +5,7 @@ module Graphos.UseCase.Extract.Core
   , pushExtractionStreaming
   , partitionByExtractor
   , extractorForExt
+  , commandGateFor
   , resolveGranularity
   , granularityForFile
   , granularityName
@@ -47,8 +48,8 @@ import Graphos.Domain.Config (PdfExtractionMode(..))
 import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, gcPdfExtraction, Granularity(..), VisionConfig(..)  , NodeId, Node(..), Edge(..), EdgeId(..), FileType(..)  , bitNodeKind, bitNodeExtra, bitNodeSource, relationToText, setFieldPresent)
 import Graphos.Domain.Graph (mergeExtractions)
 import Graphos.UseCase.AppEnv (AppEnv(..))
-import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
-import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
+import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern)
+import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
@@ -520,6 +521,19 @@ extractorForExt config ext =
   case Map.lookup ext (gcExtractors (cfgGraphosConfig config)) of
     Just ec -> ecMode ec
     Nothing -> ExtractStub
+
+-- | Gate for external command extractors (custom-extractors 3.4).
+--
+-- Combines the @allow_command_extractors@ switch (CLI default 'True', library
+-- default 'False') with the ignore patterns that must also stop a command from
+-- running: the patterns loaded for the scan root plus the CLI @--ignore@
+-- patterns. The runner consults it /before/ spawning any process.
+commandGateFor :: PipelineConfig -> FilePath -> [AnnotatedPattern] -> CommandGate
+commandGateFor config root patterns = CommandGate
+  { cgEnabled  = cfgAllowCommandExtractors config
+  , cgRoot     = root
+  , cgPatterns = patterns ++ cfgIgnorePatterns config
+  }
 
 -- | Resolve the effective granularity for a file extension.
 resolveGranularity :: Maybe Granularity -> GraphosConfig -> String -> Granularity

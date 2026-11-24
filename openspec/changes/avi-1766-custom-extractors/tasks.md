@@ -17,11 +17,11 @@
 
 ## 3. Command extractor infrastructure
 
-- [ ] 3.1 Create Infrastructure/Extract/Command.hs runner (System.Process.proc, timeout, no shell)
-- [ ] 3.2 Implement {file}/{files} substitution and batch mode
-- [ ] 3.3 Decode stdout to Node/Edge, prefix ids, merge, record errors, stub fallback
-- [ ] 3.4 Wire ignore/sensitive gating and allow_command_extractors
-- [ ] 3.5 Check: unit tests + property test id uniqueness
+- [x] 3.1 Create Infrastructure/Extract/Command.hs runner (System.Process.proc, timeout, no shell)
+- [x] 3.2 Implement {file}/{files} substitution and batch mode
+- [x] 3.3 Decode stdout to Node/Edge, prefix ids, merge, record errors, stub fallback
+- [x] 3.4 Wire ignore/sensitive gating and allow_command_extractors
+- [x] 3.5 Check: unit tests + property test id uniqueness
 
 ## 4. Runtime tree-sitter grammar loader
 

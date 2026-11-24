@@ -4,6 +4,9 @@ module Graphos.Domain.Extraction
     Extractor(..)
   , ExtractionResult(..)
 
+    -- * External command extraction outcomes
+  , CommandOutcome(..)
+
     -- * Validation
   , validateExtraction
 
@@ -27,6 +30,20 @@ data ExtractionResult a = ExtractionResult
   { resultData    :: a
   , resultTokens  :: (Int, Int)
   } deriving (Eq, Show)
+
+-- | Outcome of one external-command extraction (custom-extractors 3.3).
+--
+-- 'CommandProduced' carries the decoded, id-qualified extraction; the other
+-- constructors say why a file contributed nothing: it was gated (sensitive,
+-- ignored, or command extractors disabled — no process was spawned) or the
+-- invocation failed (non-zero exit, timeout, oversized/malformed output). The
+-- build never aborts on either: the caller records the error on the result
+-- and falls back to a stub node for that file.
+data CommandOutcome
+  = CommandProduced Extraction
+  | CommandSkipped Text
+  | CommandFailed ExtractionError
+  deriving (Eq, Show)
 
 validateExtraction :: Extraction -> Either [Text] Extraction
 validateExtraction ext =

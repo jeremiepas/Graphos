@@ -190,6 +190,8 @@ library
                       Graphos.Infrastructure.Extract.Image
                       Graphos.Infrastructure.Extract.Office
                       Graphos.Infrastructure.Extract.Markdown
+                      -- Infrastructure - External command extractor
+                      Graphos.Infrastructure.Extract.Command
                       -- Infrastructure - FileSystem
                        Graphos.Infrastructure.FileSystem.AtomicWrite
                        Graphos.Infrastructure.FileSystem.Fd
@@ -478,6 +480,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
     Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
     Graphos.Infrastructure.Extract.ImportResolutionSpec
+    Graphos.Infrastructure.Extract.CommandSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec

@@ -167,6 +167,8 @@ pipelineOpts = PipelineConfig
       <*> optional (option fractionReader (long "max-community-fraction" <> metavar "FRAC" <> help "Post-Leiden community-size cap as a fraction of total nodes (0,1]; supersedes the config file"))
       <*> switch (long "no-community-cap" <> help "Disable the post-Leiden community-size cap (keep raw Leiden communities)")
       <*> clusteringOverridesOpts
+      <*> flag True False (long "no-command-extractors"
+             <> help "Disable external command extractors declared with `mode: command` in graphos.yaml (default: enabled)")
 
 -- | Build flags selecting and tuning the clustering algorithm
 -- (bunch-search-based-modularization D7). Every value is optional: an
