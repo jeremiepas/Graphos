@@ -5,6 +5,22 @@
 #   lsp          — use Language Server Protocol (requires server installed)
 #   tree-sitter   — use tree-sitter CLI for fast AST parsing (no server needed)
 #   stub          — create a single node per file (no parsing)
+#   command       — run an external argv command and ingest its graph.json
+#                   output (no shell; {file} / {files} substituted)
+#
+# Runtime grammars (tree-sitter) and declarative import resolution:
+#   ".php":
+#     mode: tree-sitter
+#     grammar_path: ~/.local/lib/tree-sitter-php.so   # ABI 9-11
+#     queries: ~/.config/graphos/queries/php/         # optional .scm dir
+#   ".pl":
+#     mode: command
+#     command: ["my-perl-extractor", "{file}"]
+#     timeout: 60
+#
+# resolve:                      # built-in import resolvers per extension
+#   ".java": { kind: package, roots: ["src/main/java"] }
+#   ".php":  { kind: psr4, roots: ["src"] }
 #
 # Override any extension below. Missing extensions use defaults.
 

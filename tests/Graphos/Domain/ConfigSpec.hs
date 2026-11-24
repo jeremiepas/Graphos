@@ -281,3 +281,97 @@ spec = do
     it "defaults extraction errors to [] when the key is absent" $
       (decode "{\"nodes\":{},\"edges\":{}}" :: Maybe Extraction)
         `shouldBe` Just emptyExtraction
+
+  describe "custom extractors config validation (avi-1766 2.1-2.2)" $ do
+    it "rejects a command entry without command, naming extension and field" $ do
+      let errs = sectionErrors "{\"extractors\":{\".x\":{\"mode\":\"command\"}}}"
+      errs `shouldSatisfy` (not . null)
+      concat errs `shouldContain` "\".x\""
+      concat errs `shouldContain` "command"
+
+    it "rejects an empty command argv" $
+      sectionErrors "{\"extractors\":{\".x\":{\"mode\":\"command\",\"command\":[]}}}"
+        `shouldSatisfy` (not . null)
+
+    it "rejects an empty argv element" $
+      sectionErrors "{\"extractors\":{\".x\":{\"mode\":\"command\",\"command\":[\"extract\",\"\"]}}}"
+        `shouldSatisfy` (not . null)
+
+    it "rejects tree-sitter grammar_path under mode command" $ do
+      let errs = sectionErrors
+            "{\"extractors\":{\".x\":{\"mode\":\"command\",\"command\":[\"e\"],\"grammar_path\":\"g.so\"}}}"
+      errs `shouldSatisfy` (not . null)
+      concat errs `shouldContain` "grammar_path"
+
+    it "rejects a tree-sitter entry without grammar or grammar_path" $ do
+      let errs = sectionErrors "{\"extractors\":{\".x\":{\"mode\":\"tree-sitter\"}}}"
+      errs `shouldSatisfy` (not . null)
+      concat errs `shouldContain` "grammar"
+
+    it "rejects a command field under mode tree-sitter" $ do
+      let errs = sectionErrors
+            "{\"extractors\":{\".x\":{\"mode\":\"tree-sitter\",\"grammar\":\"perl\",\"command\":[\"e\"]}}}"
+      concat errs `shouldContain` "command"
+
+    it "rejects a non-positive command timeout" $ do
+      let errs = sectionErrors
+            "{\"extractors\":{\".x\":{\"mode\":\"command\",\"command\":[\"e\"],\"timeout\":0}}}"
+      concat errs `shouldContain` "timeout"
+
+    it "accepts a valid command entry" $
+      sectionErrors
+        "{\"extractors\":{\".pl\":{\"mode\":\"command\",\"command\":[\"perl-graphos-extract\",\"{file}\"],\"batch\":true,\"timeout\":30}}}"
+        `shouldBe` []
+
+    it "accepts a runtime tree-sitter entry" $
+      sectionErrors
+        "{\"extractors\":{\".php\":{\"mode\":\"tree-sitter\",\"grammar_path\":\"php.so\",\"queries\":\"q/\"}}}"
+        `shouldBe` []
+
+    it "rejects an unknown extractor mode naming extension and mode" $ do
+      let errs = sectionErrors "{\"extractors\":{\".x\":{\"mode\":\"frobnicate\"}}}"
+      errs `shouldSatisfy` (not . null)
+      concat errs `shouldContain` ".x"
+      concat errs `shouldContain` "frobnicate"
+
+    it "rejects an unknown resolve kind naming extension and kind" $ do
+      let errs = sectionErrors "{\"resolve\":{\".x\":{\"kind\":\"frobnicate\"}}}"
+      errs `shouldSatisfy` (not . null)
+      concat errs `shouldContain` ".x"
+      concat errs `shouldContain` "frobnicate"
+
+    it "rejects a package resolve entry without roots" $ do
+      let errs = sectionErrors "{\"resolve\":{\".java\":{\"kind\":\"package\"}}}"
+      concat errs `shouldContain` "roots"
+
+    it "rejects a module-path resolve entry without source_of_truth" $ do
+      let errs = sectionErrors "{\"resolve\":{\".kt\":{\"kind\":\"module-path\"}}}"
+      concat errs `shouldContain` "source_of_truth"
+
+    it "accepts valid resolve entries for every kind" $
+      sectionErrors
+        "{\"resolve\":{\
+        \\".java\":{\"kind\":\"package\",\"roots\":[\"src/main/java\"]},\
+        \\".php\":{\"kind\":\"psr4\",\"roots\":[\"src\"]},\
+        \\".kt\":{\"kind\":\"module-path\",\"source_of_truth\":\"settings.gradle\"},\
+        \\".go\":{\"kind\":\"path-prefix\"}}}"
+        `shouldBe` []
+
+    it "accepts a config without extractors/resolve sections" $
+      sectionErrors "{}" `shouldBe` []
+
+    it "reports every offending entry, not just the first" $ do
+      let errs = sectionErrors
+            "{\"extractors\":{\".a\":{\"mode\":\"command\"},\".b\":{\"mode\":\"tree-sitter\"}}}"
+      length errs `shouldBe` 2
+
+    it "accepts every built-in extractor through the typed validator" $
+      mapM_ (\(ext, ec) -> validateExtractorEntry ext ec `shouldBe` Right ())
+            (Map.toList defaultExtractors)
+
+-- | Errors the loader would report for a raw config document.
+sectionErrors :: String -> [String]
+sectionErrors json =
+  case eitherDecode json :: Either String Value of
+    Right v -> configSectionErrors v
+    Left e  -> ["<invalid test JSON: " ++ e ++ ">"]

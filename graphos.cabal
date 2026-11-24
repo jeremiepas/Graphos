@@ -258,6 +258,7 @@ library
                        Graphos.Domain.Config.Observability
                        Graphos.Domain.Config.Output
                        Graphos.Domain.Config.Resolve
+                       Graphos.Domain.Config.Validation
                        Graphos.Domain.Config.Source
                        Graphos.Domain.Config.Vision
                        -- Domain - Embedding preparation
