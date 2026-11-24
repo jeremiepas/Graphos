@@ -8,6 +8,7 @@ module Graphos.Domain.Config.Extraction
     ExtractorMode(..)
   , ExtractorConfig(..)
   , defaultExtractors
+  , defaultCommandTimeoutSeconds
 
     -- * Extraction granularity
   , Granularity(..)
@@ -30,13 +31,14 @@ module Graphos.Domain.Config.Extraction
   , lowerFirst
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), genericParseJSON, genericToJSON, withObject, (.:?), (.!=))
+import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), genericParseJSON, genericToJSON, withObject, (.:), (.:?), (.!=), object, (.=))
+import Data.Aeson.Key (Key)
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Data.Aeson.Types (defaultOptions, fieldLabelModifier)
+import Data.Aeson.Types (Object, Parser, defaultOptions, fieldLabelModifier)
 
 -- ───────────────────────────────────────────────
 -- Extractor Mode
@@ -46,22 +48,28 @@ import Data.Aeson.Types (defaultOptions, fieldLabelModifier)
 --   'ExtractLSP' uses a Language Server Protocol server (requires the server to be installed).
 --   'ExtractTreeSitter' uses tree-sitter via C FFI for fast, reliable AST parsing (no server needed).
 --   'ExtractStub' creates a single node per file (no parsing).
+--   'ExtractCommand' runs a user-declared external command (argv, no shell) and
+--   ingests its graph.json-shaped stdout (custom-extractors 1.1).
 data ExtractorMode
   = ExtractLSP
   | ExtractTreeSitter
   | ExtractStub
+  | ExtractCommand
   deriving (Eq, Show, Generic)
 
 instance ToJSON ExtractorMode where
   toJSON ExtractLSP        = "lsp"
   toJSON ExtractTreeSitter = "tree-sitter"
   toJSON ExtractStub       = "stub"
+  toJSON ExtractCommand    = "command"
 
 instance FromJSON ExtractorMode where
   parseJSON (String "lsp")         = pure ExtractLSP
   parseJSON (String "tree-sitter") = pure ExtractTreeSitter
   parseJSON (String "stub")        = pure ExtractStub
-  parseJSON v = fail $ "Unknown extractor mode: " ++ show v ++ ". Expected lsp, tree-sitter, or stub"
+  parseJSON (String "command")     = pure ExtractCommand
+  parseJSON v = fail $ "Unknown extractor mode: " ++ show v
+    ++ ". Expected lsp, tree-sitter, stub, or command"
 
 -- ───────────────────────────────────────────────
 -- Extraction Granularity
@@ -134,18 +142,68 @@ defaultPdfExtractionMode :: PdfExtractionMode
 defaultPdfExtractionMode = PdfMedium
 
 -- | Per-extension extractor configuration.
+--
+--   * @command@ / @batch@ / @timeout@ belong to 'ExtractCommand': the argv to
+--     run (no shell), whether one invocation serves every file, and the
+--     per-invocation timeout (the runner applies 'defaultCommandTimeoutSeconds'
+--     when unset).
+--   * @grammar_path@ / @queries@ belong to 'ExtractTreeSitter': a user-supplied
+--     shared library loaded at runtime plus the directory holding the optional
+--     @definitions.scm@ / @imports.scm@ / @calls.scm@ queries.
 data ExtractorConfig = ExtractorConfig
-  { ecMode        :: ExtractorMode
-  , ecGrammar     :: Maybe String   -- ^ tree-sitter grammar name (e.g. "typescript")
-  , ecLanguageId  :: Maybe Text      -- ^ LSP language ID (e.g. "typescript")
-  , ecGranularity :: Maybe Granularity  -- ^ per-extension granularity override
+  { ecMode           :: ExtractorMode
+  , ecGrammar        :: Maybe String   -- ^ tree-sitter grammar name (e.g. "typescript")
+  , ecLanguageId     :: Maybe Text      -- ^ LSP language ID (e.g. "typescript")
+  , ecGranularity    :: Maybe Granularity  -- ^ per-extension granularity override
+  , ecCommand        :: Maybe [String]  -- ^ argv for 'ExtractCommand' ({file}/{files} placeholders, no shell)
+  , ecBatch          :: Maybe Bool      -- ^ command mode: one invocation for all files
+  , ecTimeoutSeconds :: Maybe Int       -- ^ command mode: per-invocation timeout
+  , ecGrammarPath    :: Maybe FilePath  -- ^ tree-sitter shared library loaded at runtime
+  , ecQueries        :: Maybe FilePath  -- ^ directory of optional runtime .scm queries
   } deriving (Eq, Show, Generic)
 
-instance ToJSON ExtractorConfig where
-  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 2 }
+-- | Default timeout for one command-extractor invocation (seconds).
+defaultCommandTimeoutSeconds :: Int
+defaultCommandTimeoutSeconds = 60
 
+instance ToJSON ExtractorConfig where
+  toJSON ec = object $ concat
+    [ [ "mode"          .= ecMode ec ]
+    , maybeField "grammar"       (ecGrammar ec)
+    , maybeField "language_id"   (ecLanguageId ec)
+    , maybeField "granularity"   (ecGranularity ec)
+    , maybeField "command"       (ecCommand ec)
+    , maybeField "batch"         (ecBatch ec)
+    , maybeField "timeout"       (ecTimeoutSeconds ec)
+    , maybeField "grammar_path"  (ecGrammarPath ec)
+    , maybeField "queries"       (ecQueries ec)
+    ]
+    where
+      maybeField _ Nothing  = []
+      maybeField k (Just x) = [ k .= x ]
+
+-- | Parse both the documented snake_case keys (@language_id@, @grammar_path@)
+-- and their camelCase spellings, defaulting every optional field.
 instance FromJSON ExtractorConfig where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 2 }
+  parseJSON = withObject "ExtractorConfig" $ \v -> ExtractorConfig
+    <$> v .:  "mode"
+    <*> v .:? "grammar"
+    <*> optionalAlias v ["language_id", "languageId"]
+    <*> v .:? "granularity"
+    <*> v .:? "command"
+    <*> v .:? "batch"
+    <*> v .:? "timeout"
+    <*> optionalAlias v ["grammar_path", "grammarPath"]
+    <*> v .:? "queries"
+
+-- | First present optional key among @keys@.
+optionalAlias :: FromJSON a => Object -> [Key] -> Parser (Maybe a)
+optionalAlias _ []       = pure Nothing
+optionalAlias v (k : ks) = do
+  mv <- v .:? k
+  case mv of
+    Just x  -> pure (Just x)
+    Nothing -> optionalAlias v ks
 
 -- | Lowercase the first character of a string.
 lowerFirst :: String -> String
@@ -158,62 +216,75 @@ lowerFirst (c:cs) = toLower c : cs
 defaultExtractors :: Map String ExtractorConfig
 defaultExtractors = Map.fromList
   [ -- TypeScript: tree-sitter (fast, reliable AST parsing; uncomment for LSP)
-    (".ts",   ExtractorConfig ExtractTreeSitter (Just "typescript") (Just "typescript") Nothing)
-  , (".tsx",  ExtractorConfig ExtractTreeSitter (Just "tsx")       (Just "typescriptreact") Nothing)
-  , (".js",  ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascript") Nothing)
-  , (".jsx", ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascriptreact") Nothing)
-  , (".mjs", ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascript") Nothing)
-  , (".cjs", ExtractorConfig ExtractTreeSitter (Just "javascript") (Just "javascript") Nothing)
+    ts ".ts"   "typescript" "typescript"
+  , ts ".tsx"  "tsx"        "typescriptreact"
+  , ts ".js"   "javascript" "javascript"
+  , ts ".jsx"  "javascript" "javascriptreact"
+  , ts ".mjs"  "javascript" "javascript"
+  , ts ".cjs"  "javascript" "javascript"
     -- Haskell: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".hs",  ExtractorConfig ExtractTreeSitter (Just "haskell") (Just "haskell") Nothing)
-  , (".lhs", ExtractorConfig ExtractTreeSitter (Just "haskell") (Just "haskell") Nothing)
+  , ts ".hs"   "haskell"    "haskell"
+  , ts ".lhs"  "haskell"    "haskell"
     -- Go: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".go",  ExtractorConfig ExtractTreeSitter (Just "go") (Just "go") Nothing)
+  , ts ".go"   "go"         "go"
     -- Rust: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".rs",  ExtractorConfig ExtractTreeSitter (Just "rust") (Just "rust") Nothing)
+  , ts ".rs"   "rust"       "rust"
     -- Python: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".py",  ExtractorConfig ExtractTreeSitter (Just "python") (Just "python") Nothing)
-  , (".pyw", ExtractorConfig ExtractTreeSitter (Just "python") (Just "python") Nothing)
+  , ts ".py"   "python"     "python"
+  , ts ".pyw"  "python"     "python"
     -- C/C++: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".c",   ExtractorConfig ExtractTreeSitter (Just "c")   (Just "c") Nothing)
-  , (".cpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
-  , (".h",   ExtractorConfig ExtractTreeSitter (Just "c")   (Just "c") Nothing)
-  , (".hpp", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
-  , (".cc",  ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
-  , (".cxx", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
-  , (".hh",  ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
-  , (".hxx", ExtractorConfig ExtractTreeSitter (Just "cpp") (Just "cpp") Nothing)
+  , ts ".c"    "c"          "c"
+  , ts ".cpp"  "cpp"        "cpp"
+  , ts ".h"    "c"          "c"
+  , ts ".hpp"  "cpp"        "cpp"
+  , ts ".cc"   "cpp"        "cpp"
+  , ts ".cxx"  "cpp"        "cpp"
+  , ts ".hh"   "cpp"        "cpp"
+  , ts ".hxx"  "cpp"        "cpp"
     -- Nix: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".nix", ExtractorConfig ExtractTreeSitter (Just "nix") (Just "nix") Nothing)
+  , ts ".nix"  "nix"        "nix"
     -- Ruby: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".rb",  ExtractorConfig ExtractTreeSitter (Just "ruby") (Just "ruby") Nothing)
+  , ts ".rb"   "ruby"       "ruby"
     -- Java: tree-sitter (zero-dependency; uncomment for LSP)
-  , (".java",ExtractorConfig ExtractTreeSitter (Just "java") (Just "java") Nothing)
+  , ts ".java" "java"       "java"
     -- PHP: tree-sitter
-  , (".php", ExtractorConfig ExtractTreeSitter (Just "php") (Just "php") Nothing)
+  , ts ".php"  "php"        "php"
     -- Kotlin
-  , (".kt",  ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
-  , (".kts", ExtractorConfig ExtractTreeSitter (Just "kotlin") (Just "kotlin") Nothing)
+  , ts ".kt"   "kotlin"     "kotlin"
+  , ts ".kts"  "kotlin"     "kotlin"
     -- Perl
-  , (".pl",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
-  , (".pm",  ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
-  , (".psgi",ExtractorConfig ExtractTreeSitter (Just "perl") (Just "perl") Nothing)
+  , ts ".pl"   "perl"       "perl"
+  , ts ".pm"   "perl"       "perl"
+  , ts ".psgi" "perl"       "perl"
     -- C#
-  , (".cs",  ExtractorConfig ExtractTreeSitter (Just "csharp") (Just "csharp") Nothing)
+  , ts ".cs"   "csharp"     "csharp"
     -- JSON: tree-sitter parser; data files collapse to one node per file
     -- so lock files and config JSON do not inflate the graph
-  , (".json",ExtractorConfig ExtractTreeSitter (Just "json") (Just "json") (Just GranularityFile))
+  , atFileGranularity (ts ".json" "json" "json")
     -- YAML: same data-file treatment as JSON (one node per document stream)
-  , (".yaml",ExtractorConfig ExtractTreeSitter (Just "yaml") (Just "yaml") (Just GranularityFile))
-  , (".yml", ExtractorConfig ExtractTreeSitter (Just "yaml") (Just "yaml") (Just GranularityFile))
+  , atFileGranularity (ts ".yaml" "yaml" "yaml")
+  , atFileGranularity (ts ".yml"  "yaml" "yaml")
     -- SQL: tree-sitter (DDL statements become tables/functions/types)
-  , (".sql", ExtractorConfig ExtractTreeSitter (Just "sql") (Just "sql") Nothing)
+  , ts ".sql"  "sql"        "sql"
     -- Markdown: use tree-sitter mode with built-in parser
     -- (no external LSP server needed for docs)
-  , (".md",  ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "markdown") Nothing)
-  , (".rst", ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "rest") Nothing)
-  , (".adoc",ExtractorConfig ExtractTreeSitter (Just "markdown") (Just "asciidoc") Nothing)
+  , ts ".md"   "markdown"   "markdown"
+  , ts ".rst"  "markdown"   "rest"
+  , ts ".adoc" "markdown"   "asciidoc"
   ]
+  where
+    ts ext grammar lang = (ext, ExtractorConfig
+      { ecMode           = ExtractTreeSitter
+      , ecGrammar        = Just grammar
+      , ecLanguageId     = Just lang
+      , ecGranularity    = Nothing
+      , ecCommand        = Nothing
+      , ecBatch          = Nothing
+      , ecTimeoutSeconds = Nothing
+      , ecGrammarPath    = Nothing
+      , ecQueries        = Nothing
+      })
+    atFileGranularity (ext, ec) = (ext, ec { ecGranularity = Just GranularityFile })
 
 -- ───────────────────────────────────────────────
 -- LSP Server Configuration

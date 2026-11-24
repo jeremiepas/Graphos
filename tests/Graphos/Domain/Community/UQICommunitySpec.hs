@@ -91,7 +91,7 @@ spec = do
       let a = buildGraph False (extractionFromLists [mkNode "x", mkNode "y"] [mkEdge "x" "y"])
           b = buildGraph False (extractionFromLists [mkNode "y", mkNode "z"] [mkEdge "y" "z"])
           merged = mergeGraphs a b
-          rebuilt = buildGraph (gDirected merged) (Extraction { extractionNodes = gNodes merged, extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges merged)] })
+          rebuilt = buildGraph (gDirected merged) (Extraction { extractionNodes = gNodes merged, extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges merged)], extractionErrors = [] })
           cm = detectCommunitiesWithResolution merged defaultResolution
       scoreAllCohesion merged cm `shouldBe` scoreAllCohesion rebuilt cm
 

@@ -62,6 +62,7 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                                , IngestConfig(..)
                                , MemoryConfig(..)
                                , SourceConfig(..)
+                               , ResolveConfig(..)
                                , CacheConfig(..)
                                , validateEmbeddingConfig
    , defaultGraphosConfig
@@ -96,6 +97,7 @@ data ConfigFile = ConfigFile
     , cfClustering        :: Maybe ClusteringConfig
    , cfMemory            :: Maybe MemoryConfig
    , cfSources           :: Maybe [SourceConfig]
+   , cfResolve           :: Maybe (Map String ResolveConfig)
    , cfOutput            :: Maybe FilePath
    , cfCache             :: Maybe CacheConfig
    } deriving (Eq, Show)
@@ -120,6 +122,7 @@ instance FromJSON ConfigFile where
       <*> v .:? "clustering"
      <*> v .:? "memory"
      <*> v .:? "sources"
+     <*> v .:? "resolve"
      <*> v .:? "output"
      <*> v .:? "cache"
 
@@ -261,6 +264,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcSources = case cfSources cfgFile of
       Just srcs -> srcs
       Nothing   -> gcSources defaults
+  , gcResolve = case cfResolve cfgFile of
+      Just res -> Map.union res (gcResolve defaults)
+      Nothing  -> gcResolve defaults
   , gcOutput = case cfOutput cfgFile of
       Just out -> Just out
       Nothing  -> gcOutput defaults

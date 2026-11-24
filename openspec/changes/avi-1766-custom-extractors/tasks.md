@@ -2,11 +2,11 @@
 
 ## 1. Domain types and config schema
 
-- [ ] 1.1 Add ExtractCommand to ExtractorMode with JSON mappings
-- [ ] 1.2 Extend ExtractorConfig with command/runtime-grammar fields
-- [ ] 1.3 Add ResolveKind/ResolveConfig and resolve map on GraphosConfig
-- [ ] 1.4 Add ExtractionError and extractionErrors field to Extraction
-- [ ] 1.5 Check: cabal build --flag dev green under -Wall -Werror
+- [x] 1.1 Add ExtractCommand to ExtractorMode with JSON mappings
+- [x] 1.2 Extend ExtractorConfig with command/runtime-grammar fields
+- [x] 1.3 Add ResolveKind/ResolveConfig and resolve map on GraphosConfig
+- [x] 1.4 Add ExtractionError and extractionErrors field to Extraction
+- [x] 1.5 Check: cabal build --flag dev green under -Wall -Werror
 
 ## 2. Config loader validation
 

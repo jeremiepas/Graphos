@@ -37,6 +37,7 @@ import Graphos.Domain.Config.Cache (CacheConfig(..), defaultCacheConfig)
 import Graphos.Domain.Config.Memory (MemoryConfig(..), defaultMemoryConfig)
 import Graphos.Domain.Config.Observability (ObservabilityConfig(..), defaultObservabilityConfig, mergeObservabilityConfig)
 import qualified Graphos.Domain.Config.Output
+import Graphos.Domain.Config.Resolve (ResolveConfig, defaultResolveConfigs)
 import Graphos.Domain.Config.Vision
 import Graphos.Domain.Config.Detection (DetectionConfig(..), defaultDetectionConfig)
 import Graphos.Domain.Config.Clustering (ClusteringConfig(..), defaultClusteringConfig, mergeClusteringConfig)
@@ -68,6 +69,7 @@ data GraphosConfig = GraphosConfig
    , gcMemory           :: MemoryConfig                  -- ^ Memory budget settings (memory.budget: auto|off|<size>)
    , gcCache            :: CacheConfig                   -- ^ Content-cache eviction policy (cache.max_mb; 0 = unlimited)
    , gcSources          :: [SourceConfig]                -- ^ Named multi-source roots ([] = single positional path)
+   , gcResolve          :: Map String ResolveConfig      -- ^ extension → declarative import-resolution rules
    , gcOutput           :: Maybe FilePath                -- ^ Graph output directory override (Nothing = "graphos-out")
    } deriving (Eq, Show, Generic)
 
@@ -93,6 +95,7 @@ defaultGraphosConfig = GraphosConfig
    , gcMemory           = defaultMemoryConfig
    , gcCache            = defaultCacheConfig
    , gcSources          = []
+   , gcResolve          = defaultResolveConfigs
    , gcOutput           = Nothing
    }
 
@@ -155,6 +158,7 @@ mergeGraphosConfig global project = GraphosConfig
    , gcSources = if null (gcSources project)
                    then gcSources global
                    else gcSources project
+   , gcResolve = Map.union (gcResolve project) (gcResolve global)
    , gcOutput = maybe (gcOutput global) Just (gcOutput project)
    }
 -- ───────────────────────────────────────────────
@@ -200,5 +204,6 @@ instance ToJSON GraphosConfig where
     , "memory"          .= gcMemory cfg
     , "cache"           .= gcCache cfg
     , "sources"         .= gcSources cfg
+    , "resolve"         .= gcResolve cfg
     , "output"          .= gcOutput cfg
     ]

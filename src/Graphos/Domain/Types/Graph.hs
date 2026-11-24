@@ -2,6 +2,7 @@
 module Graphos.Domain.Types.Graph
   ( -- * Extraction types
     Extraction(..)
+  , ExtractionError(..)
   , emptyExtraction
   , extractionFromLists
   , extNodes
@@ -28,7 +29,7 @@ module Graphos.Domain.Types.Graph
   ) where
 
 import Control.DeepSeq (NFData(..))
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), withObject, withText, Value(..))
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), (.!=), withObject, withText, Value(..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -68,22 +69,51 @@ instance FromJSON NullModel where
 instance NFData NullModel
 
 data Extraction = Extraction
-  { extractionNodes :: !(Map NodeId Node)
-  , extractionEdges :: !(Map EdgeId Edge)
+  { extractionNodes  :: !(Map NodeId Node)
+  , extractionEdges  :: !(Map EdgeId Edge)
+  , extractionErrors :: ![ExtractionError]
   } deriving (Eq, Show, Generic)
 
 instance NFData Extraction
+
+-- | A non-fatal extraction failure for one file (custom-extractors 1.4).
+--
+-- Recorded on 'Extraction' instead of aborting the build: one file's failing
+-- extractor must never prevent the other files from contributing. The message
+-- is human-readable (non-zero exit, timeout, invalid JSON, ABI mismatch, …).
+data ExtractionError = ExtractionError
+  { eeFile      :: !FilePath  -- ^ repository-relative path of the failing file
+  , eeExtractor :: !Text      -- ^ extractor that failed (mode name, grammar, or extension)
+  , eeMessage   :: !Text      -- ^ human-readable failure reason
+  } deriving (Eq, Show, Generic)
+
+instance NFData ExtractionError
+
+instance ToJSON ExtractionError where
+  toJSON err = object
+    [ "file"      .= eeFile err
+    , "extractor" .= eeExtractor err
+    , "message"   .= eeMessage err
+    ]
+
+instance FromJSON ExtractionError where
+  parseJSON = withObject "ExtractionError" $ \v -> ExtractionError
+    <$> v .: "file"
+    <*> v .: "extractor"
+    <*> v .: "message"
 
 emptyExtraction :: Extraction
 emptyExtraction = Extraction
   { extractionNodes = Map.empty
   , extractionEdges = Map.empty
+  , extractionErrors = []
   }
 
 extractionFromLists :: [Node] -> [Edge] -> Extraction
 extractionFromLists nodes edges = Extraction
   { extractionNodes = Map.fromList [(nodeId n, n) | n <- nodes]
   , extractionEdges = Map.fromList [(edgeId e, e) | e <- edges]
+  , extractionErrors = []
   }
 
 extNodes :: Extraction -> Map NodeId Node
@@ -93,15 +123,16 @@ extEdges :: Extraction -> Map EdgeId Edge
 extEdges = extractionEdges
 
 instance ToJSON Extraction where
-  toJSON e = object
+  toJSON e = object $
     [ "nodes" .= extractionNodes e
     , "edges" .= extractionEdges e
-    ]
+    ] ++ [ "errors" .= extractionErrors e | not (null (extractionErrors e)) ]
 
 instance FromJSON Extraction where
   parseJSON = withObject "Extraction" $ \v -> Extraction
     <$> v .: "nodes"
     <*> v .: "edges"
+    <*> v .:? "errors" .!= []
 
 data LabeledGraph = LabeledGraph
   { gNodes  :: !(Map NodeId Node)

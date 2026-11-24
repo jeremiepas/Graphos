@@ -448,6 +448,9 @@ partitionByExtractor config files = foldr go ([], [], []) files
       ExtractTreeSitter -> (fp:ts, lsp, stub)
       ExtractLSP       -> (ts, fp:lsp, stub)
       ExtractStub      -> (ts, lsp, fp:stub)
+      -- custom-extractors 1.1: command files have their own dispatch route in
+      -- 5.1; until then they keep the stub fallback so the build stays total.
+      ExtractCommand   -> (ts, lsp, fp:stub)
 
 -- | Sequential concatMapM
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]

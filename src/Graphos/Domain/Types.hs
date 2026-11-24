@@ -31,6 +31,7 @@ module Graphos.Domain.Types
 
     -- * Extraction types
   , Extraction(..)
+  , ExtractionError(..)
   , emptyExtraction
   , extractionFromLists
   , extNodes
@@ -135,7 +136,7 @@ import Graphos.Domain.Types.Writer (IncrementalWriter(..))
 import Graphos.Domain.Types.Edge (EdgeId(..), Edge(..), Relation(..), relationToText, textToRelation, Confidence(..))
 import Graphos.Domain.Types.GraphFile (graphFileSchemaVersion, graphFileTopLevelKeys, graphFileRequiredKeys)
 import Graphos.Domain.Types.JGF
-import Graphos.Domain.Types.Graph (Extraction(..), emptyExtraction, extractionFromLists, extNodes, extEdges, LabeledGraph, CommunityId, CommunityMap, CohesionMap, NullModel(..), PushMode(..), GraphDiff(..), Hyperedge(..))
+import Graphos.Domain.Types.Graph (Extraction(..), ExtractionError(..), emptyExtraction, extractionFromLists, extNodes, extEdges, LabeledGraph, CommunityId, CommunityMap, CohesionMap, NullModel(..), PushMode(..), GraphDiff(..), Hyperedge(..))
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), EdgeDensity(..), defaultConfig, Detection(..), FileClass(..), isSourceClass, ExclusionCounts(..), emptyExclusionCounts, FileCategory(..))
 import Graphos.Domain.Types.Analysis (Analysis(..), ClusterQuality(..), ClusterEvalRow(..), ClusterEvalReport(..), BunchSkip(..), BunchRunInfo(..), GodNode(..), SurprisingConnection(..), SuggestedQuestion(..), CommunityAggregate(..))
 import Graphos.Domain.Types.Ingest (IngestResult(..), IngestEmbedding(..), emptyIngestEmbedding, IngestIndex(..), emptyIngestIndex, addToIndex, lookupEmbedding, mergeIndex, lookupIndex, indexSize, isFileUpToDate)

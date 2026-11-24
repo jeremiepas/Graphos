@@ -30,7 +30,7 @@ reindexGraph g =
                } )
         | e <- Map.elems (gEdges g)
         ]
-  in buildGraph (gDirected g) (Extraction { extractionNodes = nodes', extractionEdges = edges' })
+  in buildGraph (gDirected g) (Extraction { extractionNodes = nodes', extractionEdges = edges', extractionErrors = [] })
 
 spec :: Spec
 spec = do
@@ -65,7 +65,7 @@ spec = do
   describe "UQI-2 structural and modularity reads use disjoint fields" $ do
     it "rebuilding adjacency from gNodes/gEdges leaves structural reads unchanged" $ property $
       \(g :: Graph) ->
-        let rebuilt = buildGraph (gDirected g) (Extraction { extractionNodes = gNodes g, extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges g)] })
+        let rebuilt = buildGraph (gDirected g) (Extraction { extractionNodes = gNodes g, extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges g)], extractionErrors = [] })
         in conjoin
              [ gNodes rebuilt == gNodes g
              , gEdges rebuilt == gEdges g
@@ -74,7 +74,7 @@ spec = do
              ]
     it "rebuilding adjacency leaves modularity support readings unchanged" $ property $
       \(g :: Graph) ->
-        let rebuilt = buildGraph (gDirected g) (Extraction { extractionNodes = gNodes g, extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges g)] })
+        let rebuilt = buildGraph (gDirected g) (Extraction { extractionNodes = gNodes g, extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges g)], extractionErrors = [] })
         in counterexample "deg" (property
              ( Map.size (gNodes rebuilt) == Map.size (gNodes g)
              && and [ degree rebuilt v == degree g v | v <- Map.keys (gNodes g) ]))

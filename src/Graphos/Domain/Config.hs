@@ -97,6 +97,11 @@ module Graphos.Domain.Config
   , CacheConfig(..)
   , defaultCacheConfig
 
+     -- * Declarative import resolution
+  , ResolveKind(..)
+  , ResolveConfig(..)
+  , defaultResolveConfigs
+
      -- * Output directory resolution
   , defaultOutputDirName
   , resolveOutputDir
@@ -111,5 +116,6 @@ import Graphos.Domain.Config.Ingest
 import Graphos.Domain.Config.Memory
 import Graphos.Domain.Config.Observability
 import Graphos.Domain.Config.Output
+import Graphos.Domain.Config.Resolve
 import Graphos.Domain.Config.Source
 import Graphos.Domain.Config.Vision

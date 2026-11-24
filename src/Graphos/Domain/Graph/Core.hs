@@ -220,6 +220,7 @@ mergeExtractions a b =
   in Extraction
     { extractionNodes = mergedNodes
     , extractionEdges = mergedEdges
+    , extractionErrors = extractionErrors a ++ extractionErrors b
     }
 
 -- | On an id present in both extractions, keep the left node unless only the

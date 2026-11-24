@@ -353,4 +353,4 @@ resolveCorpusImports cfgs ext =
         , rsDropped = Set.size dropped }
   in if Map.null placeholders
        then (ext, ResolutionStats 0 0 0 0)
-       else (Extraction { extractionNodes = nodes', extractionEdges = edges' }, stats)
+       else (Extraction { extractionNodes = nodes', extractionEdges = edges', extractionErrors = extractionErrors ext }, stats)

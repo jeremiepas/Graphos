@@ -9,6 +9,7 @@ import qualified Data.Map.Strict as Map
 import Graphos.Domain.Config
 import Graphos.Domain.Config.Clustering
 import Graphos.Domain.Types.Edge (Relation(..))
+import Graphos.Domain.Types.Graph (Extraction(..), ExtractionError(..), emptyExtraction)
 
 spec :: Spec
 spec = do
@@ -223,3 +224,60 @@ spec = do
           global  = defaultClusteringConfig { ccSeed = 5 }
           merged  = mergeClusteringConfig project global
       (ccAlgorithm merged, ccSeed merged) `shouldBe` (AlgoBunch, 5)
+
+  describe "custom extractors domain schema (avi-1766 1.1-1.4)" $ do
+    it "maps the command extractor mode to and from JSON" $ do
+      (decode "\"command\"" :: Maybe ExtractorMode) `shouldBe` Just ExtractCommand
+      encode ExtractCommand `shouldBe` "\"command\""
+      (decode "\"tree-sitter\"" :: Maybe ExtractorMode) `shouldBe` Just ExtractTreeSitter
+
+    it "parses a command entry with argv, batch and timeout" $
+      (eitherDecode "{\"mode\":\"command\",\"command\":[\"perl-graphos-extract\",\"{file}\"],\"batch\":true,\"timeout\":30}"
+        :: Either String ExtractorConfig)
+        `shouldBe` Right ExtractorConfig
+          { ecMode = ExtractCommand
+          , ecGrammar = Nothing
+          , ecLanguageId = Nothing
+          , ecGranularity = Nothing
+          , ecCommand = Just ["perl-graphos-extract", "{file}"]
+          , ecBatch = Just True
+          , ecTimeoutSeconds = Just 30
+          , ecGrammarPath = Nothing
+          , ecQueries = Nothing
+          }
+
+    it "parses runtime-grammar fields from snake_case keys" $
+      fmap (\ec -> (ecGrammarPath ec, ecQueries ec))
+        (decode "{\"mode\":\"tree-sitter\",\"grammar_path\":\"php.so\",\"queries\":\"q/\"}"
+          :: Maybe ExtractorConfig)
+        `shouldBe` Just (Just "php.so", Just "q/")
+
+    it "round-trips an extractor entry through encode/decode" $ do
+      let ec = ExtractorConfig ExtractTreeSitter (Just "php") Nothing Nothing
+                 Nothing Nothing Nothing (Just "php.so") (Just "q/")
+      (decode (encode ec) :: Maybe ExtractorConfig) `shouldBe` Just ec
+
+    it "maps every resolve kind to and from JSON" $ do
+      let kinds :: [(ResolveKind, String)]
+          kinds = [ (ResolvePackage, "package"), (ResolvePSR4, "psr4")
+                  , (ResolveModulePath, "module-path"), (ResolvePathPrefix, "path-prefix") ]
+      mapM_ (\(k, s) -> do
+               encode k `shouldBe` encode s
+               (decode (encode k) :: Maybe ResolveKind) `shouldBe` Just k) kinds
+
+    it "parses a package resolve entry with roots" $
+      (eitherDecode "{\"kind\":\"package\",\"roots\":[\"src/main/java\"]}" :: Either String ResolveConfig)
+        `shouldBe` Right (ResolveConfig ResolvePackage ["src/main/java"] Nothing)
+
+    it "rejects an unknown resolve kind" $
+      (eitherDecode "{\"kind\":\"frobnicate\"}" :: Either String ResolveConfig)
+        `shouldSatisfy` either (const True) (const False)
+
+    it "carries extraction errors on an Extraction and round-trips them" $ do
+      let err = ExtractionError "a.pl" "command" "malformed JSON"
+          ex = emptyExtraction { extractionErrors = [err] }
+      (decode (encode ex) :: Maybe Extraction) `shouldBe` Just ex
+
+    it "defaults extraction errors to [] when the key is absent" $
+      (decode "{\"nodes\":{},\"edges\":{}}" :: Maybe Extraction)
+        `shouldBe` Just emptyExtraction

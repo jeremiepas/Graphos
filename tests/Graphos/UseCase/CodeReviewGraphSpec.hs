@@ -96,7 +96,7 @@ toyGraph = withSystemTempDirectory "graphos-toy" $ \root -> do
                  ts <- maybe (fail "parse") pure =<< parseWithGrammar lang src
                  pure (tsNodesToExtraction (mkSourceFile rel "") GranularityFunction defaultTruncationBudget ts))
               toyCorpus
-  let merged = Extraction (Map.unions (map extractionNodes exs)) (Map.unions (map extractionEdges exs))
+  let merged = Extraction (Map.unions (map extractionNodes exs)) (Map.unions (map extractionEdges exs)) []
   pure (buildGraph False (fst (resolveCorpusImports [] merged)))
 
 spec :: Spec
