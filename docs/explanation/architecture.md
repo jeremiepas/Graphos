@@ -440,7 +440,7 @@ Graph {
 |-----------|------|----------|---------|
 | MCP Server | stdio | MCP | Model Context Protocol |
 | Query API | configurable | HTTP/REST | Graph queries |
-| Static Server | configurable | HTTP | Serve assets/viewer |
+| Static Server | configurable | HTTP | Serve the graph output and the graphos-studio frontend bundle (`--frontend-dir`) |
 
 ---
 

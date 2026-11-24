@@ -91,6 +91,7 @@ import qualified Graphos.Infrastructure.LLM.EmbeddingCacheSpec
 import qualified Graphos.Infrastructure.Observability.SDKSpec
 import qualified Graphos.Infrastructure.Server.MCPQuerySpec
 import qualified Graphos.Infrastructure.Server.QueryAPISpec
+import qualified Graphos.Infrastructure.Server.StaticSpec
 import qualified Graphos.Infrastructure.FileSystem.OfficeConvertSpec
 import qualified Graphos.Infrastructure.FileSystem.IgnoreSpec
 import qualified Graphos.Infrastructure.FileSystem.AtomicWriteSpec
@@ -210,6 +211,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Infrastructure.Observability.SDKSpec.spec
   Graphos.Infrastructure.Server.MCPQuerySpec.spec
   Graphos.Infrastructure.Server.QueryAPISpec.spec
+  Graphos.Infrastructure.Server.StaticSpec.spec
   Graphos.Infrastructure.FileSystem.OfficeConvertSpec.spec
   Graphos.Infrastructure.FileSystem.IgnoreSpec.spec
   Graphos.Infrastructure.FileSystem.AtomicWriteSpec.spec

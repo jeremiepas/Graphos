@@ -1,13 +1,13 @@
-{-# LANGUAGE TemplateHaskell #-}
 -- | HTML export - multi-depth LOD (level-of-detail) graph visualization
--- Embeds an interned, style-free JSON payload inline for self-contained HTML.
--- Streams to handle to reduce peak memory (avoids building full HTML Text in memory).
+-- Embeds an interned, style-free JSON payload inline so the document needs no
+-- data fetch. Streams to handle to reduce peak memory (avoids building full
+-- HTML Text in memory).
 --
--- The viewer application (assets/viewer/viewer.js), its stylesheet
--- (assets/viewer/viewer.css) and the vendored rendering bundle
--- (assets/viewer/vis-network.min.js) are embedded at compile time with
--- 'file-embed' — this module contains only document assembly and payload
--- projection, never viewer JavaScript or CSS as string literals.
+-- The viewer application, its stylesheet and the vendored rendering bundle are
+-- owned by the @graphos-studio@ frontend repository and served at runtime by
+-- @graphos serve --frontend-dir@; this module contains only document assembly
+-- and payload projection, never viewer JavaScript or CSS as string literals,
+-- and no viewer asset is embedded into the binary at compile time.
 --
 -- Community aggregates are NOT computed here. They are produced once by
 -- 'Graphos.UseCase.Cluster.computeCommunityAggregates' and passed in via the
@@ -25,7 +25,6 @@ module Graphos.Infrastructure.Export.HTML
   ) where
 
 import Data.Aeson (ToJSON(..), object, (.=), encode, eitherDecode, Value)
-import Data.FileEmbed (embedFile)
 import GHC.Generics (Generic)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Aeson.Key as Key
@@ -64,38 +63,35 @@ convertAggregate ca = VisCommunityAggregate
   , vcaCodeDocEdges           = caCodeDocEdges ca
   }
 
--- | Viewer assets, embedded at compile time so the emitted document is
--- self-contained. These are source files, not string literals.
-viewerCss :: BSL.ByteString
-viewerCss = BSL.fromStrict $(embedFile "assets/viewer/viewer.css")
-
-viewerJs :: BSL.ByteString
-viewerJs = BSL.fromStrict $(embedFile "assets/viewer/viewer.js")
-
-visNetworkBundle :: BSL.ByteString
-visNetworkBundle = BSL.fromStrict $(embedFile "assets/viewer/vis-network.min.js")
-
--- | Export graph as interactive HTML with multi-depth LOD viewer
+-- | Export graph as interactive HTML with multi-depth LOD viewer.
+--
+-- The emitted document keeps the payload inline but references the viewer
+-- assets by relative URL (@viewer.css@, @vendor/vis-network.min.js@,
+-- @viewer.js@), which @graphos serve --frontend-dir@ resolves from the
+-- @graphos-studio@ bundle. Relative references keep the only network origin
+-- the local serve origin (no CDN).
 exportHTML :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate] -> FilePath -> IO ()
 exportHTML g analysis mLabels aggregates htmlPath = do
   let payload = computePayload g analysis mLabels aggregates
   -- Stream into a temp file and rename over the target only when complete.
   withAtomicHandle htmlPath $ \h -> do
-    -- Document head + body skeleton (static markup and asset containers)
+    -- Document head + body skeleton (static markup and asset references)
     hPutStr h $ T.unpack htmlDocStart
-    BSL.hPut h visNetworkBundle
-    hPutStr h "</script>\n"
-    hPutStr h "<style>\n"
-    BSL.hPut h viewerCss
-    hPutStr h "\n</style>\n"
     hPutStr h $ T.unpack (htmlBodySkeleton g analysis)
     -- Stream payload JSON directly to handle
     BSL.hPut h (encode payload)
-    -- Close the payload script, embed the viewer application, close the document
-    hPutStr h ";\n</script>\n<script>\n"
-    BSL.hPut h viewerJs
-    hPutStr h "\n</script>\n</body></html>\n"
+    -- Close the payload script, load the runtime-served renderer and viewer
+    hPutStr h payloadClose
     hFlush h
+
+-- | Everything after the inline payload: close the payload script, then load
+-- the vendored renderer followed by the viewer application from the bundle.
+payloadClose :: String
+payloadClose =
+  ";\n</script>\n"
+  ++ "<script src='vendor/vis-network.min.js'></script>\n"
+  ++ "<script src='viewer.js'></script>\n"
+  ++ "</body></html>\n"
 
 -- | Compute the interned, style-free payload for the viewer.
 computePayload :: Graph -> Analysis -> Maybe (Map.Map CommunityId Text) -> [VisCommunityAggregate] -> VisPayload
@@ -181,12 +177,12 @@ htmlDocStart =
     , "<meta name='viewport' content='width=device-width, initial-scale=1'>"
     , "<title>Graphos Knowledge Graph</title>"
     , "<meta name='graphos-renderer' content='vis-network 10.1.1'>"
-    , "<script>"
+    , "<link rel='stylesheet' href='viewer.css'>"
     ]
 
--- | Body skeleton: the stylesheet, static markup and the payload bootstrap.
--- The stylesheet and renderer bundle are streamed as separate handle writes
--- between 'htmlDocStart' and this text (see 'exportHTML').
+-- | Body skeleton: the static markup and the payload bootstrap. The viewer
+-- stylesheet is linked from the head (see 'htmlDocStart'); the renderer bundle
+-- and the viewer script are loaded after the payload (see 'payloadClose').
 htmlBodySkeleton :: Graph -> Analysis -> Text
 htmlBodySkeleton g analysis =
   T.unlines
@@ -254,7 +250,7 @@ htmlBodySkeleton g analysis =
     , "  </div>"
     , "</div>"
     , "<script>"
-    , "  // Graphos embedded payload (self-contained HTML, no fetch needed)"
+    , "  // Graphos inline payload (no data fetch; viewer assets are served beside this file)"
     , "  const _payloadData = "
     ]
   where

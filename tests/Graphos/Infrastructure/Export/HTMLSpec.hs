@@ -18,9 +18,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.List as L
 import System.Directory (findExecutable)
 import System.Process (readProcessWithExitCode)
-import System.IO.Temp (withSystemTempDirectory)
 import System.Exit (ExitCode(..))
-import System.FilePath ((</>))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph, gNodes, gEdges)
@@ -209,7 +207,7 @@ spec = do
       perNode `shouldSatisfy` (<= 200.0)
       perEdge `shouldSatisfy` (<= 24.0)
 
-  describe "exportHTML produces a self-contained document" $ do
+  describe "exportHTML produces a document that references runtime-served viewer assets" $ do
     it "writes a syntactically closed HTML document" $ do
       let nodes = [mkNode "x" "label-x" "src/X.hs" Nothing]
           g = buildGraph False (extractionFromLists nodes [])
@@ -237,10 +235,12 @@ spec = do
         cohesion = scoreAllCohesion g commMap
         analysis = analyze g commMap cohesion
 
-    it "embeds the vendored renderer and reports its version" $ do
+    it "references the runtime viewer assets and reports the renderer version" $ do
       raw <- exportFixture g analysis
       T.isInfixOf "<meta name='graphos-renderer' content='vis-network 10.1.1'>" raw `shouldBe` True
-      T.isInfixOf "vis-network" raw `shouldBe` True
+      T.isInfixOf "<script src='vendor/vis-network.min.js'></script>" raw `shouldBe` True
+      T.isInfixOf "<link rel='stylesheet' href='viewer.css'>" raw `shouldBe` True
+      T.isInfixOf "<script src='viewer.js'></script>" raw `shouldBe` True
 
     it "references no external origin in any src/href attribute" $ do
       raw <- exportFixture g analysis
@@ -252,12 +252,11 @@ spec = do
           externals = filter isExternal attrs
       externals `shouldBe` []
 
-    it "embeds the viewer stylesheet and script byte-identically" $ do
+    it "does not inline the viewer stylesheet or script" $ do
       raw <- exportFixture g analysis
-      cssOk <- TIO.readFile "assets/viewer/viewer.css"
-      jsOk <- TIO.readFile "assets/viewer/viewer.js"
-      T.isInfixOf cssOk raw `shouldBe` True
-      T.isInfixOf jsOk raw `shouldBe` True
+      T.isInfixOf "function neighborhoodNodeIds" raw `shouldBe` False
+      T.isInfixOf ".legend-item" raw `shouldBe` False
+      T.isInfixOf "<style>" raw `shouldBe` False
 
     it "contains no back-button element or handler" $ do
       raw <- exportFixture g analysis
@@ -300,7 +299,7 @@ spec = do
     it "does not duplicate viewer code as string literals in the Haskell module" $ do
       hsSource <- TIO.readFile "src/Graphos/Infrastructure/Export/HTML.hs"
       -- distinctive JS/CSS tokens that would only appear in the module as
-      -- duplicated string literals (all embedded via file-embed instead)
+      -- duplicated string literals (the viewer lives in graphos-studio now)
       mapM_
         (\tok -> T.isInfixOf (T.pack tok) hsSource `shouldBe` False)
         [ "function neighborhoodNodeIds"
@@ -310,10 +309,13 @@ spec = do
         , ".legend-item.active"
         , ".search-verdict"
         ]
-      -- the assets must be pulled in from their source files at compile time
-      T.isInfixOf "embedFile \"assets/viewer/viewer.css\"" hsSource `shouldBe` True
-      T.isInfixOf "embedFile \"assets/viewer/viewer.js\"" hsSource `shouldBe` True
-      T.isInfixOf "embedFile \"assets/viewer/vis-network.min.js\"" hsSource `shouldBe` True
+      -- the module must not pull viewer assets into the binary at compile time
+      T.isInfixOf "embedFile" hsSource `shouldBe` False
+      T.isInfixOf "Data.FileEmbed" hsSource `shouldBe` False
+      T.isInfixOf "file-embed" hsSource `shouldBe` False
+      -- and it must point at the runtime-served bundle instead
+      T.isInfixOf "vendor/vis-network.min.js" hsSource `shouldBe` True
+      T.isInfixOf "viewer.js" hsSource `shouldBe` True
 
     it "defines the renderer options exactly once with interaction keys in place" $ do
       js <- TIO.readFile "assets/viewer/viewer.js"
@@ -344,30 +346,13 @@ spec = do
           missing = filter (`notElem` cssClasses) jsClasses
       missing `shouldBe` []
 
-    it "emitted viewer script parses under node --check" $ do
+    it "viewer script parses under node --check" $ do
       node <- findExecutable "node"
       case node of
         Nothing -> pendingWith "node is not installed"
         Just nodePath -> do
-          let cg = buildGraph False (extractionFromLists
-                [ mkNode "a" "label-a" "src/A.hs" (Just "Function")
-                , mkNode "b" "label-b" "src/A.hs" (Just "Function")
-                , mkNode "c" "label-c" "src/B.hs" Nothing
-                , mkNode "d" "doc-1" "doc/readme.md" Nothing
-                ]
-                [ mkEdge "a" "b" Calls
-                , mkEdge "b" "c" Imports
-                , mkEdge "a" "d" Contains
-                ])
-              ccm = detectCommunities cg
-              cco = scoreAllCohesion cg ccm
-              can = analyze cg ccm cco
-          raw <- exportFixture cg can
-          withSystemTempDirectory "graphos-js" $ \dir -> do
-            let path = dir </> "viewer.js"
-            TIO.writeFile path (extractViewerScript raw)
-            (code, _, _) <- readProcessWithExitCode nodePath ["--check", path] ""
-            code `shouldBe` ExitSuccess
+          (code, _, _) <- readProcessWithExitCode nodePath ["--check", "assets/viewer/viewer.js"] ""
+          code `shouldBe` ExitSuccess
 
 -- Helpers for asset conformance checks
 
@@ -385,15 +370,6 @@ extractPayload raw = do
       body = T.drop (T.length marker) rest
       (jsonTxt, _) = T.breakOn ";\n</script>" body
   if T.null jsonTxt then Nothing else Just jsonTxt
-
--- | Extract the viewer script between the payload script and the footer.
-extractViewerScript :: Text -> Text
-extractViewerScript raw =
-  let marker = "/* Graphos HTML viewer."
-      (_, rest) = T.breakOn marker raw
-      fromMarker = marker `T.append` T.drop (T.length marker) rest
-      (script, _) = T.breakOn "</script>\n</body></html>" fromMarker
-  in script
 
 -- | Collect distinct class tokens from `class="..."` literals in JS.
 classesInHtml :: Text -> [Text]
