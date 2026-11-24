@@ -82,6 +82,7 @@ import qualified Graphos.Domain.Query.Cypher.EvalSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
+import qualified Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
 import qualified Graphos.Infrastructure.Extract.ImportResolutionSpec
 import qualified Graphos.Infrastructure.Extract.CommandSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitterSpec
@@ -199,6 +200,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec.spec
   Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec.spec
   Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec.spec
+  Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec.spec
   Graphos.Infrastructure.Extract.ImportResolutionSpec.spec
   Graphos.Infrastructure.Extract.CommandSpec.spec
   Graphos.Infrastructure.Extract.TreeSitterSpec.spec

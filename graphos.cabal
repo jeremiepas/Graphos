@@ -178,6 +178,7 @@ library
                           -- Infrastructure - TreeSitter
                            Graphos.Infrastructure.Extract.TreeSitter.Core
                            Graphos.Infrastructure.Extract.TreeSitter.Grammar
+                           Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
                            Graphos.Infrastructure.Extract.TreeSitter.Convert
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
                            Graphos.Infrastructure.Extract.TreeSitter.Imports
@@ -284,7 +285,8 @@ library
   include-dirs:     vendor/tree-sitter-cpp/src
                     vendor/tree-sitter-perl/src
                     vendor/tree-sitter-c-sharp/src
-  c-sources:        vendor/tree-sitter-cpp/src/parser.c
+  c-sources:        cbits/runtime_grammar.c
+                    vendor/tree-sitter-cpp/src/parser.c
                     vendor/tree-sitter-yaml/src/parser.c
                     vendor/tree-sitter-sql/src/parser.c
                     vendor/tree-sitter-perl/src/parser.c
@@ -479,6 +481,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
     Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
     Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
+    Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
     Graphos.Infrastructure.Extract.ImportResolutionSpec
     Graphos.Infrastructure.Extract.CommandSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec

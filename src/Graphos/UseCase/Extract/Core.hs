@@ -55,7 +55,9 @@ import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
 import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
-import Graphos.UseCase.Extract.TreeSitter (extractViaTreeSitterFFI, grammarForFile)
+import Graphos.UseCase.Extract.TreeSitter
+  ( extractViaTreeSitterFFI, grammarForFile
+  , grammarSelectionForFile, hasRuntimeGrammar )
 import Data.Aeson (object, (.=))
 
 -- | Extract entities from all detected files.
@@ -115,10 +117,11 @@ extractAll appEnv config detection mProvenance = do
         Just (hits, misses) -> (hits, misses)
         Nothing             -> ([], treeSitterFiles)
   let hasSpecialHandler g = g == "markdown" || g == "haskell"
-      grammarAvailable g = hasSpecialHandler g || epHasTreeSitterGrammar ep g
+      grammarAvailable g fp = hasSpecialHandler g || hasRuntimeGrammar config fp
+        || epHasTreeSitterGrammar ep g
       missingGrammars = nubBy (\(g1, _) (g2, _) -> g1 == g2)
         $ sortBy (comparing fst)
-        $ filter (\(g, _) -> not (grammarAvailable g))
+        $ filter (\(g, fp) -> not (grammarAvailable g fp))
         $ fmap (\fp -> (grammarForFile config fp, takeExtension fp)) treeSitterFiles
   unless (null missingGrammars) $
     lpLogWarn lp $ T.pack $ "  [extract] WARNING: No tree-sitter grammar binding for: "
@@ -206,7 +209,7 @@ extractAll appEnv config detection mProvenance = do
 
     extractTS :: FilePath -> IO ()
     extractTS fp = do
-      ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
+      ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
       fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
       produce ext
 
@@ -669,7 +672,7 @@ extractChangedFiles appEnv config changedFiles = do
       (tsFiles, lspFiles, stubFiles) = partitionByExtractor config changedFiles
 
   tsExtractions <- mapM (\fp -> do
-    ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
+    ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
     fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
     pure ext) tsFiles
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) tsExtractions
@@ -719,7 +722,7 @@ countExtractedNodes
 countExtractedNodes appEnv config fp = do
    let (tsFiles, _, stubFiles) = partitionByExtractor config [fp]
    ext <- if not (null tsFiles)
-         then extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarForFile config fp) fp
+         then extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
        else if not (null stubFiles)
          then pure (extractionFromLists [makeStubNode fp] [])
         else do

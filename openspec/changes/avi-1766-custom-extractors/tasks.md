@@ -25,11 +25,11 @@
 
 ## 4. Runtime tree-sitter grammar loader
 
-- [ ] 4.1 Create Infrastructure/Extract/TreeSitter/RuntimeGrammar.hs with dynamic loader + ABI guard
-- [ ] 4.2 Resolve entry symbol, return Ptr Language, warn+stub on failure
-- [ ] 4.3 Plumb through grammarForFile/extractor while reusing convert/imports
-- [ ] 4.4 Load optional definitions/imports/calls .scm; disable missing kind with warning
-- [ ] 4.5 Check: ABI guard tests and optional fixture test
+- [x] 4.1 Create Infrastructure/Extract/TreeSitter/RuntimeGrammar.hs with dynamic loader + ABI guard
+- [x] 4.2 Resolve entry symbol, return Ptr Language, warn+stub on failure
+- [x] 4.3 Plumb through grammarForFile/extractor while reusing convert/imports
+- [x] 4.4 Load optional definitions/imports/calls .scm; disable missing kind with warning
+- [x] 4.5 Check: ABI guard tests and optional fixture test
 
 ## 5. Dispatch, fingerprint, cache
 

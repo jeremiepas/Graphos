@@ -40,7 +40,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Yaml (FromJSON(..), withObject, (.:?))
 import System.Directory (doesFileExist, findExecutable, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
 import System.Exit (exitWith, ExitCode(..))
-import System.FilePath ((</>))
+import System.FilePath (isAbsolute, takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
 import qualified Data.Yaml as Yaml
 
@@ -232,7 +232,25 @@ loadConfigFrom path = do
             ++ key ++ "\": " ++ show val ++ " (must be >= 1)"
           exitWith (ExitFailure 1)
         Right () ->
-          pure $ mergeConfig cfgFile defaultGraphosConfig
+          pure $ mergeConfig (resolveConfigPaths (takeDirectory path) cfgFile)
+                             defaultGraphosConfig
+
+-- | Resolve runtime-grammar paths from a config file relative to that file's
+-- directory (custom-extractors 4.1). Absolute paths and @~@-prefixed paths are
+-- left untouched: the loader expands @~@ and the OS handles absolutes.
+resolveConfigPaths :: FilePath -> ConfigFile -> ConfigFile
+resolveConfigPaths base cfgFile = cfgFile
+  { cfExtractors = fmap (Map.map resolveEntry) (cfExtractors cfgFile) }
+  where
+    resolveEntry ec = ec
+      { ecGrammarPath = fmap (resolve p) (ecGrammarPath ec)
+      , ecQueries = fmap (resolve p) (ecQueries ec)
+      }
+    p = if null base then "." else base
+    resolve dir path
+      | isAbsolute path = path
+      | take 1 path == "~" = path
+      | otherwise = dir </> path
 
 -- | Merge user config overrides onto defaults.
 -- User values take precedence; missing fields fall back to defaults.

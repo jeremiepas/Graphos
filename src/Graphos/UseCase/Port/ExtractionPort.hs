@@ -60,8 +60,11 @@ data ExtractionPort = ExtractionPort
   , epExtractViaLSP        :: LSPHandle -> FilePath -> IO Extraction
   , epHasWorkspaceSymbols  :: LSPHandle -> IO Bool
   , epExtractWorkspaceSymbols :: LSPHandle -> IO (Either Text (Map FilePath SymbolResult))
-    -- TreeSitter extraction
-  , epParseWithGrammar     :: Granularity -> String -> FilePath -> ByteString -> IO (Maybe Extraction)
+    -- TreeSitter extraction. The two 'Maybe FilePath' arguments are the
+    -- optional runtime grammar library and optional .scm query directory
+    -- (custom-extractors 4.1–4.4); 'Nothing' keeps the compiled-in binding.
+  , epParseWithGrammar     :: Granularity -> String -> Maybe FilePath -> Maybe FilePath
+                           -> FilePath -> ByteString -> IO (Maybe Extraction)
     -- File-level extraction (delegates to sub-modules)
   , epExtractDocFile       :: FilePath -> IO Extraction
   , epExtractOfficeFile    :: PipelineConfig -> FilePath -> IO Extraction
