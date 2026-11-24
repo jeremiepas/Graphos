@@ -4,6 +4,7 @@ import Data.Char (toLower)
 import Test.Hspec
 
 import OpenSpecView.SpecDiff
+import OpenSpecView.TestSupport (combine', findChangesRoot)
 
 normBody :: String -> String
 normBody = unwords . map (map toLower) . words
@@ -89,13 +90,15 @@ spec = do
 
   describe "OpenSpecView.SpecDiff.diffPaths" $ do
     it "diffs real delta and main spec files from disk" $ do
-      result <- diffPaths
-        "openspec/changes/openspec-view/specs/openspec-spec-diff/spec.md"
-        "openspec/changes/openspec-view/specs/openspec-spec-diff/spec.md"
-      case result of
-        Left err -> error ("diffPaths failed: " ++ err)
-        Right changes -> do
-          map specChangeType changes `shouldBe` []
+      mroot <- findChangesRoot
+      case mroot of
+        Nothing -> pendingWith "no openspec/changes workspace above the working directory"
+        Just root -> do
+          let path = combine' root "openspec-view/specs/openspec-spec-diff/spec.md"
+          result <- diffPaths path path
+          case result of
+            Left err -> error ("diffPaths failed: " ++ err)
+            Right changes -> map specChangeType changes `shouldBe` []
 
     it "reports a missing file as a Left" $ do
       result <- diffPaths "does-not-exist-a.md" "does-not-exist-b.md"

@@ -130,23 +130,27 @@ spec = do
 
   describe "serveOpts" $ do
     it "parses default serve command" $ do
-      parseServe [] `shouldBe` Right (Serve "graphos-out" "graphos-out/graph.json" 8080 False False "127.0.0.1")
+      parseServe [] `shouldBe` Right (Serve "graphos-out" Nothing "graphos-out/graph.json" 8080 False False "127.0.0.1")
 
     it "parses --graph" $ do
       parseServe ["--graph", "other/graph.json"] `shouldBe`
-        Right (Serve "graphos-out" "other/graph.json" 8080 False False "127.0.0.1")
+        Right (Serve "graphos-out" Nothing "other/graph.json" 8080 False False "127.0.0.1")
+
+    it "parses --frontend-dir" $ do
+      parseServe ["--frontend-dir", "../graphos-studio/public"] `shouldBe`
+        Right (Serve "graphos-out" (Just "../graphos-studio/public") "graphos-out/graph.json" 8080 False False "127.0.0.1")
 
     it "parses --api-only" $ do
       parseServe ["--api-only"] `shouldBe`
-        Right (Serve "graphos-out" "graphos-out/graph.json" 8080 True False "127.0.0.1")
+        Right (Serve "graphos-out" Nothing "graphos-out/graph.json" 8080 True False "127.0.0.1")
 
     it "parses --no-api" $ do
       parseServe ["--no-api"] `shouldBe`
-        Right (Serve "graphos-out" "graphos-out/graph.json" 8080 False True "127.0.0.1")
+        Right (Serve "graphos-out" Nothing "graphos-out/graph.json" 8080 False True "127.0.0.1")
 
     it "parses combined flags" $ do
       parseServe ["--dir", "static", "--graph", "g.json", "--port", "9090", "--api-only"] `shouldBe`
-        Right (Serve "static" "g.json" 9090 True False "127.0.0.1")
+        Right (Serve "static" Nothing "g.json" 9090 True False "127.0.0.1")
 
   describe "pipelineOpts semantic-edges flags" $ do
     it "defaults both flags to False" $ do

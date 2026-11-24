@@ -32,7 +32,9 @@ ls graphos-out/
 graphos query "how does authentication work?"
 ```
 
-The first run builds the graph; open `graph.html` to browse it, read
+The first run builds the graph; run `graphos serve` and open
+`http://localhost:8080/graph.html` to browse it (the viewer assets are served
+from the `graphos-studio` frontend bundle, not embedded in the binary), read
 `GRAPH_REPORT.md` for the summary, and query `graph.json` with the CLI, Cypher,
 the MCP server, or any JGF reader.
 
@@ -42,7 +44,7 @@ the MCP server, or any JGF reader.
 graphos-out/
 ├── graph.json             # JGF-format graph — query it, migrate it, parse it with any JGF tool
 ├── GRAPH_REPORT.md        # Summary, extraction coverage, communities, god nodes, bridges, questions
-├── graph.html             # Interactive viewer (skip with --no-viz)
+├── graph.html             # Interactive viewer (serve it; skip with --no-viz)
 └── cache/                 # Content-hash cache — reruns only re-process changed files
 ```
 

@@ -15,11 +15,7 @@ maintainer:    graphos@dev
 build-type:    Simple
 extra-doc-files: README.md
                  CHANGELOG.md
-extra-source-files: assets/viewer/viewer.css
-                    assets/viewer/viewer.js
-                    assets/viewer/vis-network.min.js
-                    assets/viewer/VIS-NETWORK-LICENSE
-                    vendor/README.md
+extra-source-files: vendor/README.md
                     vendor/tree-sitter-cpp/LICENSE
                     vendor/tree-sitter-cpp/src/tree_sitter/parser.h
                     vendor/tree-sitter-yaml/LICENSE
@@ -356,25 +352,17 @@ library
     , base64-bytestring     >= 1.0
       , cryptohash-sha256    >= 0.11
       , cryptohash-sha1      >= 0.11
-     , file-embed            >= 0.0.15
      , text-short            >= 0.1
      , unix                  >= 2.8
 
 -- ───────────────────────────────────────────────
--- openspec-view: workspace metadata viewer (base-only)
+-- openspec-view is extracted into its own package (openspec-view/)
 -- ───────────────────────────────────────────────
-library openspec-view
-  import:          shared
-  hs-source-dirs:  openspec-view
-  exposed-modules:
-                    OpenSpecView
-                    OpenSpecView.ChangeList
-                    OpenSpecView.ArtifactView
-                    OpenSpecView.SpecDiff
-                     OpenSpecView.StateDashboard
-  build-depends:   base
-                  , directory
-                  , time
+-- It used to be a `base`-only sub-library here. It now lives in its own
+-- cabal package (see openspec-view/openspec-view.cabal, listed in
+-- cabal.project) so the `graphos` executable depends on it as a normal
+-- package instead of an in-repo sub-library (openspec change
+-- split-graphos-studio, decision D3).
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -497,6 +485,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Observability.SDKSpec
     Graphos.Infrastructure.Server.MCPQuerySpec
     Graphos.Infrastructure.Server.QueryAPISpec
+    Graphos.Infrastructure.Server.StaticSpec
     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
      Graphos.Infrastructure.FileSystem.IgnoreSpec
      Graphos.Infrastructure.FileSystem.AtomicWriteSpec
@@ -523,10 +512,6 @@ test-suite graphos-test
     Graphos.Infrastructure.FileSystem.CacheSpec
     Graphos.UseCase.LabelCacheSpec
     Graphos.Infrastructure.FileSystem.WatcherSpec
-      OpenSpecView.ChangeListSpec
-      OpenSpecView.ArtifactViewSpec
-      OpenSpecView.SpecDiffSpec
-      OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
@@ -538,7 +523,6 @@ test-suite graphos-test
   build-depends:
        base
      , graphos
-     , openspec-view
      , hspec                >= 2.10
     , QuickCheck           >= 2.14
     , aeson
