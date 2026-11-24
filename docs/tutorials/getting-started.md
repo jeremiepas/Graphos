@@ -36,7 +36,7 @@ ls graphos-out/
 |------|------------|
 | `graph.json` | The graph itself, in JSON Graph Format. Query it, migrate it, or read it with any JGF tool. |
 | `GRAPH_REPORT.md` | Plain-language summary: extraction coverage, communities, god nodes, bridges, suggested questions. |
-| `graph.html` | Interactive viewer. Open it in a browser; skip it with `--no-viz`. |
+| `graph.html` | Interactive viewer, served by `graphos serve` from the `graphos-studio` bundle; skip it with `--no-viz`. |
 | `cache/` | Content-hash cache. The next run only re-processes changed files. |
 
 Start with `GRAPH_REPORT.md` — it tells you what Graphos found and what it

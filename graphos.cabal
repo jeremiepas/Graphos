@@ -15,11 +15,7 @@ maintainer:    graphos@dev
 build-type:    Simple
 extra-doc-files: README.md
                  CHANGELOG.md
-extra-source-files: assets/viewer/viewer.css
-                    assets/viewer/viewer.js
-                    assets/viewer/vis-network.min.js
-                    assets/viewer/VIS-NETWORK-LICENSE
-                    vendor/README.md
+extra-source-files: vendor/README.md
                     vendor/tree-sitter-cpp/LICENSE
                     vendor/tree-sitter-cpp/src/tree_sitter/parser.h
                     vendor/tree-sitter-yaml/LICENSE
@@ -356,7 +352,6 @@ library
     , base64-bytestring     >= 1.0
       , cryptohash-sha256    >= 0.11
       , cryptohash-sha1      >= 0.11
-     , file-embed            >= 0.0.15
      , text-short            >= 0.1
      , unix                  >= 2.8
 
@@ -490,6 +485,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Observability.SDKSpec
     Graphos.Infrastructure.Server.MCPQuerySpec
     Graphos.Infrastructure.Server.QueryAPISpec
+    Graphos.Infrastructure.Server.StaticSpec
     Graphos.Infrastructure.FileSystem.OfficeConvertSpec
      Graphos.Infrastructure.FileSystem.IgnoreSpec
      Graphos.Infrastructure.FileSystem.AtomicWriteSpec
