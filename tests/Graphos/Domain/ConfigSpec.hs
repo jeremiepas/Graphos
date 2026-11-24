@@ -2,8 +2,9 @@
 module Graphos.Domain.ConfigSpec where
 
 import Test.Hspec
-import Data.Aeson (decode, encode, eitherDecode, Value(..))
+import Data.Aeson (decode, encode, eitherDecode, eitherDecodeStrict', Value(..))
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 
 import Graphos.Domain.Config
@@ -370,8 +371,8 @@ spec = do
             (Map.toList defaultExtractors)
 
 -- | Errors the loader would report for a raw config document.
-sectionErrors :: String -> [String]
+sectionErrors :: BS.ByteString -> [String]
 sectionErrors json =
-  case eitherDecode json :: Either String Value of
+  case eitherDecodeStrict' json :: Either String Value of
     Right v -> configSectionErrors v
     Left e  -> ["<invalid test JSON: " ++ e ++ ">"]
