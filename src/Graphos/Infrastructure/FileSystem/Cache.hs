@@ -11,7 +11,9 @@
 -- config hits the same slot, and any change to either the bytes or the
 -- fingerprinted config values invalidates the entry. The fingerprint serializes
 -- the effective per-extension granularity (with CLI override), the extractor
--- mode per extension, and the pdf extraction level.
+-- mode per extension, the pdf extraction level, command argv/batch/timeout,
+-- runtime grammar and query file stamps, and declarative resolve entries
+-- (custom-extractors 5.3).
 module Graphos.Infrastructure.FileSystem.Cache
   ( loadCached
   , saveCached
@@ -34,7 +36,7 @@ module Graphos.Infrastructure.FileSystem.Cache
   ) where
 
 import Control.Exception (SomeException, catch)
-import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.=), object, eitherDecode, encode)
+import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.:?), (.!=), (.=), object, eitherDecode, encode)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Char (ord)
@@ -242,31 +244,38 @@ cacheEntries dir = do
 -- Internal cached extraction type (with JSON instances)
 -- ───────────────────────────────────────────────
 
--- | Serializable representation for caching
+-- | Serializable representation for caching. Non-fatal extraction errors are
+-- persisted alongside the graph records (custom-extractors 5.4): a cache hit
+-- must reproduce the recorded error set, not silently drop it. Entries written
+-- before this field existed decode with an empty error list.
 data CachedExtraction = CachedExtraction
   { ceNodes      :: [Node]
   , ceEdges      :: [Edge]
+  , ceErrors     :: [ExtractionError]
   } deriving (Eq, Show)
 
 instance ToJSON CachedExtraction where
-  toJSON ce = object
+  toJSON ce = object $
     [ "nodes"      .= ceNodes ce
     , "edges"      .= ceEdges ce
-    ]
+    ] ++ [ "errors" .= ceErrors ce | not (null (ceErrors ce)) ]
 
 instance FromJSON CachedExtraction where
   parseJSON = withObject "CachedExtraction" $ \v -> CachedExtraction
     <$> v .: "nodes"
     <*> v .: "edges"
+    <*> v .:? "errors" .!= []
 
 extractionToCached :: Extraction -> CachedExtraction
 extractionToCached e = CachedExtraction
   { ceNodes      = Map.elems (extNodes e)
   , ceEdges      = Map.elems (extEdges e)
+  , ceErrors     = extractionErrors e
   }
 
 cachedToExtraction :: CachedExtraction -> Extraction
-cachedToExtraction c = extractionFromLists (ceNodes c) (ceEdges c)
+cachedToExtraction c = (extractionFromLists (ceNodes c) (ceEdges c))
+  { extractionErrors = ceErrors c }
 
 -- ───────────────────────────────────────────────
 -- Helpers

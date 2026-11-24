@@ -443,6 +443,7 @@ test-suite graphos-test
      Graphos.UseCase.DocLinkParitySpec
      Graphos.UseCase.Extract.HaskellSpec
     Graphos.UseCase.Extract.ImageSpec
+    Graphos.UseCase.Extract.CacheSoundnessSpec
     Graphos.UseCase.QuerySpec
     Graphos.UseCase.ClusterSpec
     Graphos.UseCase.ClusterEvalSpec

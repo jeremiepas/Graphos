@@ -26,10 +26,10 @@ module Graphos.UseCase.Extract.Core
   ) where
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
-import Control.Concurrent.Async (concurrently, mapConcurrently)
+import Control.Concurrent.Async (concurrently, mapConcurrently, mapConcurrently_)
 import Control.Exception (bracket_, evaluate)
-import Control.Monad (forM, unless, void, when)
-import Data.List (nubBy, sortBy, intercalate, maximumBy)
+import Control.Monad (forM, forM_, unless, void, when)
+import Data.List (nub, nubBy, sortBy, intercalate, maximumBy)
 import Data.Ord (comparing)
 import Data.Bits ((.|.))
 import qualified Data.List as List (foldl')
@@ -39,14 +39,16 @@ import qualified Data.Text as T
 import Data.Text (Text)
 import Data.Map (Map)
 import Data.Text.Short (fromText, toText)
-import System.Directory (canonicalizePath)
-import System.FilePath (takeExtension, takeFileName)
+import System.Directory (canonicalizePath, doesFileExist)
+import System.FilePath (takeExtension, takeFileName, (</>))
 import Data.Char (toLower)
 import System.Mem (performGC)
+import System.Posix.Files (getFileStatus, fileSize, modificationTime)
 
-import Graphos.Domain.Config (PdfExtractionMode(..))
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, gcPdfExtraction, Granularity(..), VisionConfig(..)  , NodeId, Node(..), Edge(..), EdgeId(..), FileType(..)  , bitNodeKind, bitNodeExtra, bitNodeSource, relationToText, setFieldPresent)
+import Graphos.Domain.Config (PdfExtractionMode(..), ResolveConfig(..))
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), ExtractionError(..), emptyExtraction, extractionFromLists, Detection(..), FileCategory(..), FileClass(..), isSourceClass, ExtractorMode(..), ExtractorConfig(..), ecMode, GraphosConfig(..), gcExtractors, gcGranularity, gcVision, gcPdfExtraction, gcResolve, Granularity(..), VisionConfig(..)  , NodeId, Node(..), Edge(..), EdgeId(..), FileType(..)  , bitNodeKind, bitNodeExtra, bitNodeSource, relationToText, setFieldPresent)
 import Graphos.Domain.Graph (mergeExtractions)
+import Graphos.Domain.Extraction (CommandOutcome(..))
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..), AnnotatedPattern)
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..))
@@ -54,6 +56,8 @@ import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
 import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
+import Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
+  ( QueryKind(..), queryKindFile, resolveRuntimePath )
 import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter
   ( extractViaTreeSitterFFI, grammarForFile
@@ -92,30 +96,38 @@ extractAll appEnv config detection mProvenance = do
     Just _  -> " (CLI override)"
     Nothing -> ""
 
-  let (treeSitterFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
+  let (treeSitterFiles, lspFiles, commandFiles, stubFiles) = partitionByExtractor config codeFiles
 
-  -- Extraction cache (wire-incremental-update 4.2, D1): code files consult the
-  -- persistent content+config cache before any extractor runs. `--fresh`
-  -- bypasses the consult (cold rebuild); misses and fresh runs still write
-  -- through (cache writes remain permitted under --fresh per the spec).
-  -- LSP extraction is a live-server query (not per-file deterministic across
-  -- runs), so only the tree-sitter and stub paths participate for now; their
-  -- results are the deterministic parse tree products the cache soundness
-  -- theorem covers.
+  -- Extraction cache (wire-incremental-update 4.2, D1; custom-extractors 5.4):
+  -- code files consult the persistent content+config cache before any extractor
+  -- runs. `--fresh` bypasses the consult (cold rebuild); misses and fresh runs
+  -- still write through (cache writes remain permitted under --fresh per the
+  -- spec). LSP extraction is a live-server query (not per-file deterministic
+  -- across runs), so only the tree-sitter, command and stub paths participate;
+  -- their results are the deterministic products the cache soundness theorem
+  -- covers. A command file only reaches the cache after a /successful/
+  -- invocation — failures and skips are stub-extracted but not persisted, so a
+  -- transient failure cannot pin a stub into the cache.
   let cacheEnabled = not (cfgFresh config)
-      fingerprint  = extractionConfigFingerprint config
-  cachedTS <- if cacheEnabled
-    then do
-      results <- forM treeSitterFiles $ \fp -> do
-        mExt <- fspLoadCachedExtraction fsp fingerprint fp (cfgOutputDir config)
-        pure (fp, mExt)
-      let hits = [(fp, ext) | (fp, Just ext) <- results]
-          misses = [fp | (fp, Nothing) <- results]
-      pure (Just (hits, misses))
-    else pure Nothing
+  fingerprint <- extractionConfigFingerprint config
+  let consultCache :: [FilePath] -> IO (Maybe ([(FilePath, Extraction)], [FilePath]))
+      consultCache files
+        | not cacheEnabled = pure Nothing
+        | otherwise = do
+            results <- forM files $ \fp -> do
+              mExt <- fspLoadCachedExtraction fsp fingerprint fp (cfgOutputDir config)
+              pure (fp, mExt)
+            let hits = [(fp, ext) | (fp, Just ext) <- results]
+                misses = [fp | (fp, Nothing) <- results]
+            pure (Just (hits, misses))
+  cachedTS  <- consultCache treeSitterFiles
+  cachedCmd <- consultCache commandFiles
   let (cachedTSHits, treeSitterFiles') = case cachedTS of
         Just (hits, misses) -> (hits, misses)
         Nothing             -> ([], treeSitterFiles)
+      (cachedCmdHits, commandFiles') = case cachedCmd of
+        Just (hits, misses) -> (hits, misses)
+        Nothing             -> ([], commandFiles)
   let hasSpecialHandler g = g == "markdown" || g == "haskell"
       grammarAvailable g fp = hasSpecialHandler g || hasRuntimeGrammar config fp
         || epHasTreeSitterGrammar ep g
@@ -132,8 +144,19 @@ extractAll appEnv config detection mProvenance = do
     logInfo $ T.pack $ "  tree-sitter: " ++ show (length treeSitterFiles) ++ " files"
   unless (null lspFiles) $
     logInfo $ T.pack $ "  LSP: " ++ show (length lspFiles) ++ " files"
+  unless (null commandFiles) $
+    logInfo $ T.pack $ "  command: " ++ show (length commandFiles) ++ " files"
   mapM_ (\msg -> logInfo $ T.pack $ "  [extract] WARNING: " ++ msg)
-    (stubCoverageWarning (stubCoverage (treeSitterFiles ++ lspFiles) stubFiles))
+    (stubCoverageWarning (stubCoverage (treeSitterFiles ++ lspFiles ++ commandFiles) stubFiles))
+
+  -- Command extractors are gated before any process is spawned (custom-extractors
+  -- 3.4): the scan-root ignore patterns are loaded once, only when a command file
+  -- survives partitioning.
+  commandIgnorePatterns <- if null commandFiles'
+    then pure []
+    else fspLoadIgnorePatterns fsp absRoot
+  let commandGate = commandGateFor config absRoot commandIgnorePatterns
+      commandGroups = commandFileGroups config commandFiles'
 
   let docThreads = min 8 (max 1 numThreads)
 
@@ -213,6 +236,34 @@ extractAll appEnv config detection mProvenance = do
       fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
       produce ext
 
+    -- One command-mode extension at a time (a batch invocation spans only the
+    -- files of one declared command). Successful outputs are cached; failures
+    -- and gate skips fall back to a stub node, record the reason where it is an
+    -- error, and are deliberately not written to the cache.
+    runCommandGroup :: (ExtractorConfig, [FilePath]) -> IO ()
+    runCommandGroup (ec, fps) = do
+      outcomes <- epExtractCommandFiles ep commandGate ec fps
+      forM_ fps $ \fp -> do
+        handleCommandOutcome fp $ case Map.lookup fp outcomes of
+          Just outcome -> outcome
+          Nothing      -> CommandFailed (ExtractionError fp "command"
+                            "the extractor reported no outcome for this file")
+        logProgress
+
+    handleCommandOutcome :: FilePath -> CommandOutcome -> IO ()
+    handleCommandOutcome fp (CommandProduced ext) = do
+      fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+      produce ext
+    handleCommandOutcome fp (CommandFailed err) = do
+      lpLogWarn lp $ T.pack $ "  [command] " ++ fp ++ ": " ++ T.unpack (eeMessage err)
+      produce (commandStub fp [err])
+    handleCommandOutcome fp (CommandSkipped reason) = do
+      logDebug $ T.pack $ "  [command] " ++ fp ++ ": skipped (" ++ T.unpack reason ++ ")"
+      produce (commandStub fp [])
+
+    commandStub fp errs =
+      (extractionFromLists [makeStubNode fp] []) { extractionErrors = errs }
+
   void $ concurrently
     (void $ concurrently
       (do
@@ -239,6 +290,20 @@ extractAll appEnv config detection mProvenance = do
           _ <- evaluate n
           performGC
           ) tsChunks
+
+        -- Cached command extractions are served without spawning anything.
+        mapM_ (\ext -> produce ext >> logProgress) (map snd cachedCmdHits)
+
+        let commandConcurrency = max 1 (min 4 numThreads)
+        if commandConcurrency <= 1
+          then mapM_ runCommandGroup commandGroups
+          else do
+            sem <- newQSemN commandConcurrency
+            mapConcurrently_ (\grp -> bracket_
+              (waitQSemN sem 1)
+              (signalQSemN sem 1)
+              (runCommandGroup grp)) commandGroups
+        performGC
 
         let fileGroups = groupByLSPServer (epLanguageServerCommands ep) lspFiles
             numGroups = length fileGroups
@@ -391,8 +456,8 @@ extractAll appEnv config detection mProvenance = do
 
   -- Cache hit/miss report (wire-incremental-update 4.3): how much of the code
   -- stage was served from the persistent extraction cache.
-  let cacheHits = length cachedTSHits
-      cacheMisses = length treeSitterFiles'
+  let cacheHits = length cachedTSHits + length cachedCmdHits
+      cacheMisses = length treeSitterFiles' + length commandFiles'
   when cacheEnabled $ unless (cacheHits == 0 && cacheMisses == 0) $
     logInfo $ T.pack $ "  [cache] reused " ++ show cacheHits ++ " file extraction(s), re-extracted "
                        ++ show cacheMisses
@@ -444,17 +509,35 @@ pushExtractionStreaming :: ExtractionPort -> PipelineConfig -> Extraction -> IO 
 pushExtractionStreaming ep config extraction =
   epPushExtractionStreaming ep config extraction
 
--- | Partition code files by their configured extractor mode.
-partitionByExtractor :: PipelineConfig -> [FilePath] -> ([FilePath], [FilePath], [FilePath])
-partitionByExtractor config files = foldr go ([], [], []) files
+-- | Partition code files by their configured extractor mode, in declaration
+-- order: @(tree-sitter, LSP, command, stub)@.
+--
+-- A tree-sitter entry carrying @grammar_path@ stays on the tree-sitter route
+-- (custom-extractors 5.2): dispatch, fingerprinting and caching treat it as
+-- tree-sitter, and only the loader selected inside
+-- 'Graphos.UseCase.Extract.TreeSitter.extractViaTreeSitterFFI' differs.
+--
+-- Command entries get their own route (5.1): they are no longer stubbed, and
+-- 'Extract/Core.hs' runs the declared argv through the command port.
+partitionByExtractor :: PipelineConfig -> [FilePath] -> ([FilePath], [FilePath], [FilePath], [FilePath])
+partitionByExtractor config files = foldr go ([], [], [], []) files
   where
-    go fp (ts, lsp, stub) = case extractorForExt config (takeExtension fp) of
-      ExtractTreeSitter -> (fp:ts, lsp, stub)
-      ExtractLSP       -> (ts, fp:lsp, stub)
-      ExtractStub      -> (ts, lsp, fp:stub)
-      -- custom-extractors 1.1: command files have their own dispatch route in
-      -- 5.1; until then they keep the stub fallback so the build stays total.
-      ExtractCommand   -> (ts, lsp, fp:stub)
+    go fp (ts, lsp, cmd, stub) = case extractorForExt config (takeExtension fp) of
+      ExtractTreeSitter -> (fp:ts, lsp, cmd, stub)
+      ExtractLSP        -> (ts, fp:lsp, cmd, stub)
+      ExtractCommand    -> (ts, lsp, fp:cmd, stub)
+      ExtractStub       -> (ts, lsp, cmd, fp:stub)
+
+-- | Group command-mode files by extension so each declared command gets its own
+-- invocation plan: @batch@ spans the files of one extension only, and the
+-- runner receives that extension's 'ExtractorConfig'.
+commandFileGroups :: PipelineConfig -> [FilePath] -> [(ExtractorConfig, [FilePath])]
+commandFileGroups config files =
+  [ (ec, fps)
+  | ext <- nub [ takeExtension fp | fp <- files ]
+  , Just ec <- [ Map.lookup ext (gcExtractors (cfgGraphosConfig config)) ]
+  , let fps = [ fp | fp <- files, takeExtension fp == ext ]
+  ]
 
 -- | Sequential concatMapM
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
@@ -612,36 +695,98 @@ stubCoverageWarning sc
 
 -- | Canonical fingerprint text of every extraction-affecting configuration
 -- value: the effective per-extension granularity under the CLI override, the
--- extractor mode per extension, and the pdf extraction level. The key-sorting
+-- extractor mode per extension, the pdf extraction level, the command argv /
+-- batch / timeout of every command extractor, the runtime grammar library and
+-- query fingerprints, and the declarative @resolve:@ entries. The key-sorting
 -- makes the serialization canonical so identical configs always fingerprint
 -- identically.
 --
 -- INV-CACHE-SOUND (AVI-521 §1.2): any future extraction-affecting config value
 -- MUST be added here — an unfingerprinted config change would serve stale
 -- cached extractions. Documented in the cache module header contract.
-extractionConfigFingerprint :: PipelineConfig -> Text
-extractionConfigFingerprint config = T.pack . unwords $
-  concat
-    [ [ "granularity=" ++ show (gcGranularity gcfg)
-      , "cliGranularity=" ++ maybe "none" show (cfgGranularity config)
-      , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
-        -- bump when tree-sitter extraction output changes for unchanged files
-      , "treesitter-imports=go,rust,ruby:1"
-      , "jsxGrammar=tsx-aa950f5"  -- .tsx/.js/.jsx/.mjs/.cjs parsed with the vendored TSX grammar
-        -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
-      , "nodeIdentity=av1452-bounded-ids"
-      , "idScheme=3"  -- 3: nameless definitions keyed `anonymous`, nameless const/var lists not emitted
+--
+-- Runtime inputs (grammar shared library, @.scm@ queries, @source_of_truth@
+-- index) are fingerprinted by their on-disk size and mtime, so replacing or
+-- editing one invalidates every cached extraction that used it
+-- (custom-extractors 5.3 / runtime-tree-sitter-grammar: "Grammar change
+-- invalidates cache").
+extractionConfigFingerprint :: PipelineConfig -> IO Text
+extractionConfigFingerprint config = do
+  extractorEntries <- mapM extractorEntry (Map.toAscList (gcExtractors gcfg))
+  resolveEntries   <- mapM resolveEntry   (Map.toAscList (gcResolve gcfg))
+  pure . T.pack . unwords $
+    concat
+      [ [ "granularity=" ++ show (gcGranularity gcfg)
+        , "cliGranularity=" ++ maybe "none" show (cfgGranularity config)
+        , "pdf=" ++ pdfLevelName (gcPdfExtraction gcfg)
+          -- bump when tree-sitter extraction output changes for unchanged files
+        , "treesitter-imports=go,rust,ruby:1"
+        , "jsxGrammar=tsx-aa950f5"  -- .tsx/.js/.jsx/.mjs/.cjs parsed with the vendored TSX grammar
+          -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
+        , "nodeIdentity=av1452-bounded-ids"
+        , "idScheme=3"  -- 3: nameless definitions keyed `anonymous`, nameless const/var lists not emitted
+          -- command extractors change the output of an unchanged file when the
+          -- gate or their invocation plan changes (custom-extractors 5.3)
+        , "allowCommand=" ++ show (cfgAllowCommandExtractors config)
+        , "commandExtract=1"  -- bump when command id-bucketing / decoding changes
+        ]
+      , extractorEntries
+      , resolveEntries
       ]
-    , [ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
-            ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)
-      | (ext, ec) <- Map.toAscList (gcExtractors gcfg)
-      ]
-    ]
   where
     gcfg = cfgGraphosConfig config
     pdfLevelName PdfSmall  = "small"
     pdfLevelName PdfMedium = "medium"
     pdfLevelName PdfLarge  = "large"
+
+    extractorEntry (ext, ec) = do
+      extra <- modeExtra ec
+      pure $ "extractor." ++ ext ++ "=" ++ show (ecMode ec)
+        ++ ";granularity=" ++ maybe "auto" show (ecGranularity ec)
+        ++ extra
+
+    -- Mode-specific fields that change extraction output for unchanged bytes.
+    modeExtra ec = case ecMode ec of
+      ExtractCommand -> pure $
+        ";command=" ++ show (ecCommand ec)
+          ++ ";batch=" ++ maybe "false" show (ecBatch ec)
+          ++ ";timeout=" ++ maybe "default" show (ecTimeoutSeconds ec)
+      ExtractTreeSitter -> do
+        grammarStamp <- maybe (pure "none") fileStamp (ecGrammarPath ec)
+        queriesStamp <- maybe (pure "none") queryDirStamp (ecQueries ec)
+        pure $ ";grammarPath=" ++ maybe "none" id (ecGrammarPath ec)
+          ++ ";grammarStamp=" ++ grammarStamp
+          ++ ";queries=" ++ maybe "none" id (ecQueries ec)
+          ++ ";queriesStamp=" ++ queriesStamp
+      _ -> pure ""
+
+    -- One stamp per recognised query file, in a fixed order, so adding,
+    -- deleting or editing any of them changes the fingerprint.
+    queryDirStamp dir = do
+      stamps <- mapM (\kind -> fileStamp (dir </> queryKindFile kind))
+                     [ QueryDefinitions, QueryImports, QueryCalls ]
+      pure (intercalate "," stamps)
+
+    resolveEntry (ext, rc) = do
+      sotStamp <- maybe (pure "none") fileStamp (rcSourceOfTruth rc)
+      pure $ "resolve." ++ ext ++ "=" ++ show (rcKind rc)
+        ++ ";roots=" ++ intercalate "," (rcRoots rc)
+        ++ ";sourceOfTruth=" ++ maybe "none" id (rcSourceOfTruth rc)
+        ++ ";sourceOfTruthStamp=" ++ sotStamp
+
+-- | Size+mtime stamp of a runtime input file (grammar library, @.scm@ query,
+-- resolve source-of-truth index). A missing file fingerprints as @missing@, so
+-- creating or deleting it always changes the extraction fingerprint.
+fileStamp :: FilePath -> IO String
+fileStamp raw = do
+  path <- resolveRuntimePath raw
+  exists <- doesFileExist path
+  if not exists
+    then pure "missing"
+    else do
+      st <- getFileStatus path
+      pure $ show (fileSize st) ++ "@"
+        ++ show (realToFrac (modificationTime st) :: Double)
 
 -- | Classify whether an Extraction represents a stub (single file node, no edges).
 isStubExtraction :: Extraction -> Bool
@@ -668,8 +813,8 @@ extractChangedFiles appEnv config changedFiles = do
       logDebug = lpLogDebug lp
 
   absRoot <- canonicalizePath (cfgInputPath config)
-  let fingerprint = extractionConfigFingerprint config
-      (tsFiles, lspFiles, stubFiles) = partitionByExtractor config changedFiles
+  fingerprint <- extractionConfigFingerprint config
+  let (tsFiles, lspFiles, commandFiles, stubFiles) = partitionByExtractor config changedFiles
 
   tsExtractions <- mapM (\fp -> do
     ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
@@ -681,6 +826,30 @@ extractChangedFiles appEnv config changedFiles = do
   lspExtractions <- concatMapM (extractGroup appEnv absRoot config) fileGroups
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) lspExtractions
 
+  -- Command route (custom-extractors 5.1): same gate, same cache write-through
+  -- for successful outputs as the full extraction path.
+  commandIgnorePatterns <- if null commandFiles
+    then pure []
+    else fspLoadIgnorePatterns fsp absRoot
+  let commandGate = commandGateFor config absRoot commandIgnorePatterns
+  commandExtractions <- fmap concat $ forM (commandFileGroups config commandFiles) $ \(ec, fps) -> do
+    outcomes <- epExtractCommandFiles ep commandGate ec fps
+    forM fps $ \fp -> case Map.lookup fp outcomes of
+      Just (CommandProduced ext) -> do
+        fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+        pure ext
+      Just (CommandFailed err) -> do
+        lpLogWarn lp $ T.pack $ "  [command] " ++ fp ++ ": " ++ T.unpack (eeMessage err)
+        pure ((extractionFromLists [makeStubNode fp] []) { extractionErrors = [err] })
+      Just (CommandSkipped reason) -> do
+        logDebug $ T.pack $ "  [command] " ++ fp ++ ": skipped (" ++ T.unpack reason ++ ")"
+        pure (extractionFromLists [makeStubNode fp] [])
+      Nothing ->
+        pure ((extractionFromLists [makeStubNode fp] [])
+               { extractionErrors = [ ExtractionError fp "command"
+                   "the extractor reported no outcome for this file" ] })
+  mapM_ (\ext -> epPushExtractionStreaming ep config ext) commandExtractions
+
   stubExtractions <- mapM (\fp -> do
     logDebug $ T.pack $ "  [stub] " ++ fp
     let ext = extractionFromLists [makeStubNode fp] []
@@ -690,7 +859,7 @@ extractChangedFiles appEnv config changedFiles = do
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) stubExtractions
 
   let merged = List.foldl' mergeExtractions emptyExtraction
-                  (tsExtractions ++ lspExtractions ++ stubExtractions)
+                  (tsExtractions ++ lspExtractions ++ commandExtractions ++ stubExtractions)
   logInfo $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
   pure merged
 
@@ -720,9 +889,13 @@ collapseDetectedFiles appEnv config classification = do
 countExtractedNodes
   :: AppEnv -> PipelineConfig -> FilePath -> IO Int
 countExtractedNodes appEnv config fp = do
-   let (tsFiles, _, stubFiles) = partitionByExtractor config [fp]
+   let (tsFiles, _, commandFiles, stubFiles) = partitionByExtractor config [fp]
    ext <- if not (null tsFiles)
          then extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
+       else if not (null commandFiles)
+         -- A collapsed command-mode file is represented by its stub node:
+         -- counting does not spawn the external extractor a second time.
+         then pure (extractionFromLists [makeStubNode fp] [])
        else if not (null stubFiles)
          then pure (extractionFromLists [makeStubNode fp] [])
         else do

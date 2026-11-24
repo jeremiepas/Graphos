@@ -33,11 +33,11 @@
 
 ## 5. Dispatch, fingerprint, cache
 
-- [ ] 5.1 Update partitionByExtractor and extract entrypoints for command route
-- [ ] 5.2 Keep runtime grammars on tree-sitter path selecting loader
-- [ ] 5.3 Extend extractionConfigFingerprint with command templates, grammar path/mtime, queries, resolve
-- [ ] 5.4 Ensure cache save/load for new paths
-- [ ] 5.5 Check: cache-soundness suite; no stale cache across config change
+- [x] 5.1 Update partitionByExtractor and extract entrypoints for command route
+- [x] 5.2 Keep runtime grammars on tree-sitter path selecting loader
+- [x] 5.3 Extend extractionConfigFingerprint with command templates, grammar path/mtime, queries, resolve
+- [x] 5.4 Ensure cache save/load for new paths
+- [x] 5.5 Check: cache-soundness suite; no stale cache across config change
 
 ## 6. Declarative import resolution
 
