@@ -20,7 +20,8 @@ reviewable.
 
 - Add an explicit **status gate** to the `product-owner-graphos` spec: a `blocked` task
   returns to `backlog` only when every child task and every `blockedByIssueIds`
-  blocker reports completed; otherwise it stays (or is placed) in `blocked`.
+  blocker has reached a terminal state (`done` or `cancelled`); otherwise it stays (or
+  is placed) in `blocked`.
 - Require the PO to re-run that gate on every triage pass and record the resulting
   transition — or the explicit reason a task stays blocked — durably (comment or
   document), so the decision is not held only in chat.
