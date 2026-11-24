@@ -10,10 +10,10 @@
 
 ## 2. Config loader validation
 
-- [ ] 2.1 Validate extractor entries; reject inconsistent/missing fields
-- [ ] 2.2 Validate resolve entries; unknown kind fails load
-- [ ] 2.3 Document new keys in graphos.yaml example and templates
-- [ ] 2.4 Check: Hspec config cases; cabal test green
+- [x] 2.1 Validate extractor entries; reject inconsistent/missing fields
+- [x] 2.2 Validate resolve entries; unknown kind fails load
+- [x] 2.3 Document new keys in graphos.yaml example and templates
+- [x] 2.4 Check: Hspec config cases; cabal test green
 
 ## 3. Command extractor infrastructure
 
