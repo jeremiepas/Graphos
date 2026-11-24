@@ -318,7 +318,6 @@ spec = do
       T.isInfixOf "vendor/vis-network.min.js" hsSource `shouldBe` True
       T.isInfixOf "viewer.js" hsSource `shouldBe` True
 
--- Helpers for conformance checks
 
 -- | Export the small conformance fixture and return its text.
 exportFixture :: Graph -> Analysis -> IO Text

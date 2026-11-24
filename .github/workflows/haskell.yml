@@ -240,7 +240,7 @@ jobs:
   # artifact through the Elm studio decoders is gone with the studio sources:
   # `studio/` now lives in the graphos-studio repository, which runs that same
   # fixture through its own decoders in its CI (openspec change
-  # split-graphos-studio, D4). This workflow keeps the `fixture` job below so
+  # split-graphos-studio, D4). This workflow keeps the `fixture` job above so
   # the graph.json fixture is still emitted and can be fed to that check.
 
   haddock:

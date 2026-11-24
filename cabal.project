@@ -1,1 +1,10 @@
 packages: .
+
+-- `openspec-view` (the `graphos view` backend) is its own package in the
+-- graphos-studio repository, not vendored here (openspec change
+-- split-graphos-studio, decision D3). Fetch it from the frontend repo.
+source-repository-package
+  type: git
+  location: https://github.com/jeremiepas/graphos-studio.git
+  tag: 23c232cdae66b6760a004f9414f33a042279f7cb
+  subdir: openspec-view

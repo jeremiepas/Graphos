@@ -10,9 +10,12 @@
   `elm-format`, or `elm-review`, the in-repo `Studio CI` workflow and the
   `studio-contract` job are gone (the `fixture` job still emits `graph.json` for
   the frontend's contract check), and `graphos serve` resolves the viewer from
-  the `--frontend-dir` bundle as before. `README.md` and `CONTRIBUTING.md` now
+  the `--frontend-dir` bundle as before. The `graphos view` backend
+  (`openspec-view`) is no longer vendored here either: it is its own package in
+  `graphos-studio`, fetched through `cabal.project`'s
+  `source-repository-package` stanza. `README.md` and `CONTRIBUTING.md` now
   document the frontend setup against `graphos-studio`
-  (openspec change `split-graphos-studio`, D5).
+  (openspec change `split-graphos-studio`, D3/D5).
 
 ## 0.3.0 - 2026-11-20
 
