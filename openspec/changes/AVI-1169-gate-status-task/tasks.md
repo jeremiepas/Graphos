@@ -54,5 +54,5 @@ required because this change is additive to the `product-owner-graphos` spec.
   - Check criteria: PR opened against `origin/main`; branch is not silently abandoned.
   - Done: artifacts landed on `main` in commit `0f343c4` via PR #59; this close-out
     commit ticks the tasks with their evidence on branch
-    `feature/AVI-1169-gate-status-task` and opens a PR against `main`.
+    `feature/AVI-1169-gate-status-task` and is opened as PR #284 against `main`.
   - Blocks: task 3.
