@@ -16,9 +16,6 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import qualified Data.List as L
-import System.Directory (findExecutable)
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, buildGraph, gNodes, gEdges)
@@ -260,11 +257,9 @@ spec = do
 
     it "contains no back-button element or handler" $ do
       raw <- exportFixture g analysis
-      js <- TIO.readFile "assets/viewer/viewer.js"
       T.isInfixOf "btnBack" raw `shouldBe` False
       T.isInfixOf "Back to overview" raw `shouldBe` False
       T.isInfixOf "backToOverview" raw `shouldBe` False
-      T.isInfixOf "btnBack" js `shouldBe` False
 
     it "offers the four depth levels with Overview default" $ do
       raw <- exportFixture g analysis
@@ -295,7 +290,13 @@ spec = do
           length (fromMaybe [] edges) `shouldSatisfy` (> 0)
           length (fromMaybe [] aggs) `shouldSatisfy` (> 0)
 
-  describe "viewer source conformance" $ do
+  -- The viewer's own source (viewer.js/viewer.css) lives in graphos-studio and
+  -- its internal conformance checks (renderer options, sessionStorage, BFS,
+  -- CSS class coverage, `node --check`) run with that repository's sources.
+  -- What is asserted here is only the boundary this module owns: no viewer code
+  -- is compiled into the binary and the exported document points at the
+  -- runtime-served bundle.
+  describe "viewer asset boundary (sources live in graphos-studio)" $ do
     it "does not duplicate viewer code as string literals in the Haskell module" $ do
       hsSource <- TIO.readFile "src/Graphos/Infrastructure/Export/HTML.hs"
       -- distinctive JS/CSS tokens that would only appear in the module as
@@ -317,44 +318,7 @@ spec = do
       T.isInfixOf "vendor/vis-network.min.js" hsSource `shouldBe` True
       T.isInfixOf "viewer.js" hsSource `shouldBe` True
 
-    it "defines the renderer options exactly once with interaction keys in place" $ do
-      js <- TIO.readFile "assets/viewer/viewer.js"
-      T.count (T.pack "var BASE_OPTIONS = {") js `shouldBe` 1
-      T.count (T.pack "new vis.Network(") js `shouldBe` 1
-      T.count (T.pack "hideEdgesOnDrag: true") js `shouldBe` 1
-      T.count (T.pack "hideEdgesOnZoom: true") js `shouldBe` 1
-      let withinInteraction = T.isInfixOf
-            (T.pack "interaction: {\n      hover: true, tooltipDelay: 200, navigationButtons: false, keyboard: true,\n      zoomView: true, dragView: true,\n      hideEdgesOnDrag: true, hideEdgesOnZoom: true\n    }")
-            js
-      withinInteraction `shouldBe` True
-
-    it "persists state via sessionStorage with a stale-reference fallback" $ do
-      js <- TIO.readFile "assets/viewer/viewer.js"
-      T.isInfixOf "sessionStorage.setItem" js `shouldBe` True
-      T.isInfixOf "sessionStorage.getItem" js `shouldBe` True
-      T.isInfixOf "4096" js `shouldBe` True
-
-    it "implements client-side N-hop BFS for Custom depth" $ do
-      js <- TIO.readFile "assets/viewer/viewer.js"
-      T.isInfixOf "function neighborhoodNodeIds(startId, hops)" js `shouldBe` True
-
-    it "has a CSS rule for every class written by the viewer JS" $ do
-      js <- TIO.readFile "assets/viewer/viewer.js"
-      css <- TIO.readFile "assets/viewer/viewer.css"
-      let jsClasses = nubSorted (classesInHtml js)
-          cssClasses = nubSorted (classesInCss css)
-          missing = filter (`notElem` cssClasses) jsClasses
-      missing `shouldBe` []
-
-    it "viewer script parses under node --check" $ do
-      node <- findExecutable "node"
-      case node of
-        Nothing -> pendingWith "node is not installed"
-        Just nodePath -> do
-          (code, _, _) <- readProcessWithExitCode nodePath ["--check", "assets/viewer/viewer.js"] ""
-          code `shouldBe` ExitSuccess
-
--- Helpers for asset conformance checks
+-- Helpers for conformance checks
 
 -- | Export the small conformance fixture and return its text.
 exportFixture :: Graph -> Analysis -> IO Text
@@ -370,41 +334,3 @@ extractPayload raw = do
       body = T.drop (T.length marker) rest
       (jsonTxt, _) = T.breakOn ";\n</script>" body
   if T.null jsonTxt then Nothing else Just jsonTxt
-
--- | Collect distinct class tokens from `class="..."` literals in JS.
-classesInHtml :: Text -> [Text]
-classesInHtml = go
-  where
-    go t =
-      case T.breakOn "class=\"" t of
-        (_, rest) | T.null rest -> []
-        (_, rest) ->
-          let afterQuotes = T.drop 7 rest
-              (cls, more) = T.breakOn "\"" afterQuotes
-          in filter isClass (T.words cls) ++ go (T.drop 1 more)
-
-    isClass w = not (T.null w)
-      && isAlpha (T.head w)
-      && T.all isClassChar w
-
-    isClassChar c = isAlpha c || (c >= '0' && c <= '9') || c == '-' || c == '_'
-    isAlpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-
--- | Collect distinct class tokens from CSS selectors (`.foo`, `.foo.bar`).
-classesInCss :: Text -> [Text]
-classesInCss = go
-  where
-    go t
-      | T.null t = []
-      | otherwise =
-          let (_, rest) = T.breakOn "." t
-          in if T.null rest
-               then []
-               else let afterDot = T.drop 1 rest
-                        cls = T.takeWhile (\c -> c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') afterDot
-                     in if T.null cls
-                          then go afterDot
-                          else cls : go (T.drop (T.length cls) afterDot)
-
-nubSorted :: Ord a => [a] -> [a]
-nubSorted = L.sort . L.nub
