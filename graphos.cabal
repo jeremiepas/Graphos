@@ -356,20 +356,13 @@ library
      , unix                  >= 2.8
 
 -- ───────────────────────────────────────────────
--- openspec-view: workspace metadata viewer (base-only)
+-- openspec-view is extracted into its own package (openspec-view/)
 -- ───────────────────────────────────────────────
-library openspec-view
-  import:          shared
-  hs-source-dirs:  openspec-view
-  exposed-modules:
-                    OpenSpecView
-                    OpenSpecView.ChangeList
-                    OpenSpecView.ArtifactView
-                    OpenSpecView.SpecDiff
-                     OpenSpecView.StateDashboard
-  build-depends:   base
-                  , directory
-                  , time
+-- It used to be a `base`-only sub-library here. It now lives in its own
+-- cabal package (see openspec-view/openspec-view.cabal, listed in
+-- cabal.project) so the `graphos` executable depends on it as a normal
+-- package instead of an in-repo sub-library (openspec change
+-- split-graphos-studio, decision D3).
 
 -- ───────────────────────────────────────────────
 -- Executable
@@ -519,10 +512,6 @@ test-suite graphos-test
     Graphos.Infrastructure.FileSystem.CacheSpec
     Graphos.UseCase.LabelCacheSpec
     Graphos.Infrastructure.FileSystem.WatcherSpec
-      OpenSpecView.ChangeListSpec
-      OpenSpecView.ArtifactViewSpec
-      OpenSpecView.SpecDiffSpec
-      OpenSpecView.StateDashboardSpec
     Graphos.UseCase.UpdateConfluenceSpec
     Graphos.UseCase.ClusterOnlySpec
     Graphos.UseCase.WatchCacheSpec
@@ -534,7 +523,6 @@ test-suite graphos-test
   build-depends:
        base
      , graphos
-     , openspec-view
      , hspec                >= 2.10
     , QuickCheck           >= 2.14
     , aeson
