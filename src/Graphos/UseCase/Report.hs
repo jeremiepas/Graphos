@@ -39,8 +39,8 @@ generateReport g analysis config detection mLabels =
         [] -> []
         ts -> [ T.pack $ "Sources: " ++ unwords [(T.unpack k ++ "=" ++ show v) | (k, v) <- ts] ]
       codeFiles = Map.findWithDefault [] CodeFiles (detectionFiles detection)
-      (tsFiles, lspFiles, stubFiles) = partitionByExtractor config codeFiles
-      coverage = stubCoverage (tsFiles ++ lspFiles) stubFiles
+      (tsFiles, lspFiles, commandFiles, stubFiles) = partitionByExtractor config codeFiles
+      coverage = stubCoverage (tsFiles ++ lspFiles ++ commandFiles) stubFiles
   in T.unlines
      ( [ "# Graph Report"
        , ""

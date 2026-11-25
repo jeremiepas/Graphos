@@ -35,7 +35,8 @@ extractTree root rels = do
   exs <- mapM one rels
   pure Extraction
     { extractionNodes = Map.unions (map extractionNodes exs)
-    , extractionEdges = Map.unions (map extractionEdges exs) }
+    , extractionEdges = Map.unions (map extractionEdges exs)
+    , extractionErrors = [] }
   where
     one rel = do
       let path = root </> rel
@@ -143,7 +144,7 @@ spec = describe "Corpus-aware import resolution (bunch-real-projects D4)" $ do
             ts <- maybe (fail "parse") pure =<< parseWithGrammar lang src
             pure (tsNodesToExtraction (mkSourceFile ("./" ++ rel) "") GranularityFunction defaultTruncationBudget ts)
       exs <- mapM (one . fst) files
-      let ex = Extraction (Map.unions (map extractionNodes exs)) (Map.unions (map extractionEdges exs))
+      let ex = Extraction (Map.unions (map extractionNodes exs)) (Map.unions (map extractionEdges exs)) []
           (ex', stats) = resolveCorpusImports [] ex
           targets = [ toText (nodeSourceFile n) <> maybe "" (const "+line") (nodeLineStart n)
                     | e <- Map.elems (extractionEdges ex'), edgeRelation e == Imports

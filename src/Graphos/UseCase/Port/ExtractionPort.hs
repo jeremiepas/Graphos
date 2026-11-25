@@ -4,6 +4,8 @@
 module Graphos.UseCase.Port.ExtractionPort
   ( -- * Extraction port
     ExtractionPort(..)
+    -- * External command extractor gate
+  , CommandGate(..)
     -- * Opaque LSP handle
   , LSPHandle(..)
   , SymbolResult(..)
@@ -14,8 +16,10 @@ import Data.Dynamic (Dynamic)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Graphos.Domain.Types (Extraction, Node, Edge)
-import Graphos.Domain.Config.Extraction (Granularity)
+import Graphos.Domain.Config.Extraction (ExtractorConfig, Granularity)
+import Graphos.Domain.Extraction (CommandOutcome)
 import Graphos.Domain.Types.Pipeline (PipelineConfig)
+import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
 
 -- | Opaque handle to an LSP server connection.
 -- Internally stores the real Infrastructure.LSP.Client as Dynamic.
@@ -33,6 +37,16 @@ data SymbolResult = SymbolResult
   , srEdges :: [Edge]
   }
 
+-- | Gate applied before any external command extractor is spawned
+-- (custom-extractors 3.4). Carrying it as one record keeps the "disabled",
+-- "sensitive" and "ignored" decisions in a single place that is evaluated
+-- before 'System.Process.proc'.
+data CommandGate = CommandGate
+  { cgEnabled  :: Bool               -- ^ @allow_command_extractors@ (CLI default true, library default false)
+  , cgRoot     :: FilePath           -- ^ scan root the ignore patterns are relative to
+  , cgPatterns :: [AnnotatedPattern] -- ^ ignore patterns that also gate command extraction
+  } deriving (Eq, Show)
+
 -- | Record-of-functions port for extraction operations.
 -- Provides fine-grained primitives that UseCase.Extract uses
 -- to orchestrate the extraction workflow.
@@ -46,8 +60,11 @@ data ExtractionPort = ExtractionPort
   , epExtractViaLSP        :: LSPHandle -> FilePath -> IO Extraction
   , epHasWorkspaceSymbols  :: LSPHandle -> IO Bool
   , epExtractWorkspaceSymbols :: LSPHandle -> IO (Either Text (Map FilePath SymbolResult))
-    -- TreeSitter extraction
-  , epParseWithGrammar     :: Granularity -> String -> FilePath -> ByteString -> IO (Maybe Extraction)
+    -- TreeSitter extraction. The two 'Maybe FilePath' arguments are the
+    -- optional runtime grammar library and optional .scm query directory
+    -- (custom-extractors 4.1–4.4); 'Nothing' keeps the compiled-in binding.
+  , epParseWithGrammar     :: Granularity -> String -> Maybe FilePath -> Maybe FilePath
+                           -> FilePath -> ByteString -> IO (Maybe Extraction)
     -- File-level extraction (delegates to sub-modules)
   , epExtractDocFile       :: FilePath -> IO Extraction
   , epExtractOfficeFile    :: PipelineConfig -> FilePath -> IO Extraction
@@ -66,4 +83,8 @@ data ExtractionPort = ExtractionPort
     -- | Check whether a tree-sitter grammar is available for the given language.
     -- Returns True if the port can parse this language via tree-sitter.
   , epHasTreeSitterGrammar :: String -> Bool
+    -- | External command extractor (custom-extractors 3.1–3.4): run the
+    -- declared argv for every file, honouring @batch@, and report one outcome
+    -- per file. Never throws; gated files are reported as skipped.
+  , epExtractCommandFiles :: CommandGate -> ExtractorConfig -> [FilePath] -> IO (Map FilePath CommandOutcome)
   }

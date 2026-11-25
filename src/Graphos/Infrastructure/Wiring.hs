@@ -15,22 +15,26 @@ module Graphos.Infrastructure.Wiring
   , getGrammarPtr
   ) where
 
-import Control.Monad (when)
+import Control.Exception (finally)
+import Control.Monad (void, when)
+import Data.ByteString (ByteString)
 import Data.Dynamic (toDyn, fromDynamic)
 import Data.Maybe (isJust)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Foreign.Ptr (Ptr)
+import System.IO (hPutStrLn, stderr)
 
 
 import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
-import Graphos.Domain.Config (GraphosConfig, defaultGraphosConfig)
+import Graphos.Domain.Config (GraphosConfig, Granularity, defaultGraphosConfig)
 
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
-import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
+import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..), LSPHandle(..), SymbolResult(..))
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -44,6 +48,8 @@ import qualified Graphos.Infrastructure.LSP.Protocol as LSPProtocol
 import Graphos.Infrastructure.Extract.TreeSitter.Core (parseWithGrammar, mkSourceFile, defaultTruncationBudget)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (tsNodesToExtraction)
 import Graphos.Infrastructure.Extract.TreeSitter.Imports (withImportEdges)
+import qualified Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar as RG
+import qualified Graphos.Infrastructure.Extract.Command as Cmd
 import qualified Graphos.Infrastructure.Export.Neo4j as Neo4j
 import qualified Graphos.Infrastructure.Export.HTML as ExportHTML
 import qualified Graphos.Infrastructure.Export.Obsidian as ExportObsidian
@@ -201,15 +207,8 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
                 ) fileMap
             Left err -> pure $ Left err
         Nothing -> pure $ Left "wiring: extractWorkspaceSymbols type mismatch"
-  , epParseWithGrammar = \gran grammar filePath content ->
-      case getGrammarPtr grammar of
-        Nothing -> pure Nothing
-        Just lang -> do
-          result <- parseWithGrammar lang content
-          case result of
-            Nothing -> pure Nothing
-            Just nodes -> Just <$> withImportEdges grammar filePath nodes
-                                     (tsNodesToExtraction (mkSourceFile filePath "") gran defaultTruncationBudget nodes)
+  , epParseWithGrammar = \gran grammar mGrammarPath mQueries filePath content ->
+      parseWithConfiguredGrammar gran grammar mGrammarPath mQueries filePath content
   , epExtractDocFile = \filePath -> extractDocFile logEnv filePath
   , epExtractOfficeFile = \config fp -> extractOfficeFile config logEnv fp
   , epExtractPdfFile = \config fp -> Pdf.extractPdfFile logEnv config fp
@@ -231,6 +230,13 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
             pure ()
   , epLanguageServerCommands = Cfg.effectiveLSPServerCommands graphosCfg
   , epHasTreeSitterGrammar = isJust . getGrammarPtr
+  , epExtractCommandFiles = \gate ec files ->
+      Cmd.runCommandExtraction
+        (Cmd.commandSpecFromConfig ec)
+        (cgRoot gate)
+        (cgEnabled gate)
+        (cgPatterns gate)
+        files
   }
 
 -- | Production export port — delegates to Infrastructure.Export.* modules.
@@ -321,6 +327,62 @@ convertEntity e = Entity
   { entityLabel = Vision.entityLabel e
   , entityType  = Vision.entityType e
   }
+
+-- | Parse one file with either a compiled-in grammar or a user-supplied
+-- runtime grammar, applying optional .scm queries and reusing the normal
+-- conversion + import-edge pipeline on success (custom-extractors 4.1–4.4).
+-- Any loader/ABI/query failure is reported and yields 'Nothing', which the
+-- caller turns into a stub extraction rather than aborting the build.
+parseWithConfiguredGrammar
+  :: Granularity -> String -> Maybe FilePath -> Maybe FilePath
+  -> FilePath -> ByteString -> IO (Maybe Extraction)
+parseWithConfiguredGrammar gran grammar mGrammarPath mQueries filePath content =
+  case mGrammarPath of
+    Just path -> do
+      loaded <- RG.loadRuntimeGrammar path
+      case loaded of
+        Left err -> do
+          hPutStrLn stderr $ "[tree-sitter] " ++ RG.rgePath err ++ ": "
+            ++ T.unpack (RG.rgeMessage err) ++ "; falling back to stub"
+          pure Nothing
+        Right runtime ->
+          finally (parseWithLang (RG.rgLanguage runtime) mQueries)
+                  (RG.unloadRuntimeGrammar runtime)
+    Nothing -> case getGrammarPtr grammar of
+      Nothing -> pure Nothing
+      Just lang -> parseWithLang lang mQueries
+  where
+    warn text = hPutStrLn stderr ("[tree-sitter] " ++ T.unpack text)
+
+    parseWithLang lang mq = do
+      mQueriesLoaded <- case mq of
+        Nothing -> pure Nothing
+        Just dir -> do
+          (queries, warnings) <- RG.loadRuntimeQueries lang dir
+          mapM_ warn warnings
+          pure (Just queries)
+      case mQueriesLoaded of
+        Nothing -> parseAndConvert lang Nothing
+        Just queries ->
+          finally (parseAndConvert lang (Just queries))
+                  (RG.deleteRuntimeQueries queries)
+
+    parseAndConvert lang mq = do
+      result <- parseWithGrammar lang content
+      case result of
+        Nothing -> pure Nothing
+        Just nodes -> do
+          -- Compile/apply the optional runtime queries against the same file
+          -- content. Their captures are currently advisory; the conversion
+          -- below still uses the shared whitelist traversal.
+          case mq of
+            Just queries ->
+              mapM_ (\q -> void (RG.runRuntimeQuery lang content q))
+                    (RG.runtimeQueryList queries)
+            Nothing -> pure ()
+          extraction <- withImportEdges grammar filePath nodes
+            (tsNodesToExtraction (mkSourceFile filePath "") gran defaultTruncationBudget nodes)
+          pure (Just extraction)
 
 -- | Get the tree-sitter language pointer for a grammar name.
 getGrammarPtr :: String -> Maybe (Ptr TS_LANG.Language)

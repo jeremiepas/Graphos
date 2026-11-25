@@ -88,6 +88,7 @@ spec = do
           ex = Extraction
             { extractionNodes = extractionNodes exA `Map.union` extractionNodes exB
             , extractionEdges = extractionEdges exA `Map.union` extractionEdges exB
+            , extractionErrors = []
             }
           configNodeId = nodeId $ NE.head $ NE.fromList $ filter (\n -> nodeLabel n == fromText "Graphos.Config") (Map.elems $ extractionNodes ex)
           importEdges = filter (\e -> edgeRelation e == Imports) (Map.elems $ extractionEdges ex)
@@ -101,6 +102,7 @@ spec = do
           ex = Extraction
             { extractionNodes = extractionNodes exA `Map.union` extractionNodes exB
             , extractionEdges = extractionEdges exA `Map.union` extractionEdges exB
+            , extractionErrors = []
             }
           mainNodes = filter (\n -> nodeLabel n == fromText "Main") (Map.elems $ extractionNodes ex)
       length mainNodes `shouldBe` 2

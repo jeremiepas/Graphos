@@ -1,0 +1,96 @@
+# Workflow definition for the OpenSpec change `split-graphos-studio`.
+# Imported once into the `graphos` space with `mnemo-graphos workflow import`.
+# The five steps mirror the five task groups of the change's tasks.md; the
+# final step is a human gate, so the run stops waiting for `mnemo approve`.
+
+workflow: split-graphos-studio
+params: [graph_project]
+
+steps:
+  - id: scaffold-studio
+    executor: delegate
+    target: opencode-deepseek
+    instruction: >-
+      Task 1 of the change: create the graphos-studio repository next to this
+      repo, give it a devenv.nix with the Elm toolchain (elm, elm-test,
+      elm-format, elm-review, Elm 0.19.2 pin), copy studio/ and assets/viewer/
+      into it, and move .github/workflows/studio.yml there with paths
+      retargeted away from the studio/ prefix and the github.actor guard
+      dropped. Report what you created.
+    focus:
+      - studio/README.md
+      - studio/elm.json
+      - .github/workflows/studio.yml
+      - devenv.nix
+
+  - id: extract-openspec-view
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [scaffold-studio]
+    instruction: >-
+      Task 2 of the change: create a standalone base-only openspec-view.cabal
+      package from the openspec-view/ sources and tests, move those sources
+      into graphos-studio, re-wire the view subcommand wiring in app/Main.hs
+      and Graphos.CLI.Parser to depend on the extracted package, and remove
+      the openspec-view sub-library plus its test-suite entry from
+      graphos.cabal. cabal build and cabal test must stay green.
+    focus:
+      - openspec-view/OpenSpecView.hs
+      - graphos.cabal
+      - app/Main.hs
+      - tests/OpenSpecView
+
+  - id: serve-viewer-runtime
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [extract-openspec-view]
+    instruction: >-
+      Task 3 of the change: add a --frontend-dir flag to the static server in
+      src/Graphos/Infrastructure/Server/Static.hs so it serves the frontend
+      bundle from graphos-studio at runtime, remove every embedFile /
+      file-embed viewer usage from src/Graphos/Infrastructure/Export/HTML.hs,
+      remove the viewer entries from extra-source-files in graphos.cabal and
+      drop the file-embed dependency if nothing else uses it. No viewer CSS or
+      JavaScript may remain in the Haskell binary.
+    focus:
+      - src/Graphos/Infrastructure/Server/Static.hs
+      - src/Graphos/Infrastructure/Export/HTML.hs
+      - graphos.cabal
+
+  - id: haskell-cleanup
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [serve-viewer-runtime]
+    instruction: >-
+      Task 4 of the change: remove studio/, assets/viewer/ and openspec-view/
+      from this repo, drop the Elm toolchain lines from devenv.nix, and update
+      README.md plus the dev docs so frontend setup points at graphos-studio
+      instead of the in-repo studio.
+    focus:
+      - devenv.nix
+      - README.md
+      - CONTRIBUTING.md
+
+  - id: split-ci-contract
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [haskell-cleanup]
+    instruction: >-
+      Task 5 of the change: remove the in-repo studio-contract job from
+      .github/workflows/haskell.yml but keep a fixture-emission step that
+      produces graph.json, add the matching contract job to graphos-studio
+      reusing generate-contract-fixtures.sh and elm-test, and wire both repos
+      so a graph-json-contract change triggers the contract check on both
+      sides.
+    focus:
+      - .github/workflows/haskell.yml
+      - studio/tests/generate-contract-fixtures.sh
+
+  - id: sign-off
+    executor: human
+    depends_on: [split-ci-contract]
+    instruction: >-
+      Review the split: a fresh graphos-studio clone builds and tests the
+      studio on its own, the Haskell repo still builds and tests green, the
+      viewer is served at runtime with no viewer code in the binary, and both
+      CI workflows match. Then approve.

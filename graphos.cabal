@@ -178,10 +178,12 @@ library
                           -- Infrastructure - TreeSitter
                            Graphos.Infrastructure.Extract.TreeSitter.Core
                            Graphos.Infrastructure.Extract.TreeSitter.Grammar
+                           Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
                            Graphos.Infrastructure.Extract.TreeSitter.Convert
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
                            Graphos.Infrastructure.Extract.TreeSitter.Imports
                            Graphos.Infrastructure.Extract.ImportResolution
+                           Graphos.Infrastructure.Extract.Resolve
                            Graphos.Infrastructure.ClusterEval.TruthFile
                            Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
@@ -190,6 +192,8 @@ library
                       Graphos.Infrastructure.Extract.Image
                       Graphos.Infrastructure.Extract.Office
                       Graphos.Infrastructure.Extract.Markdown
+                      -- Infrastructure - External command extractor
+                      Graphos.Infrastructure.Extract.Command
                       -- Infrastructure - FileSystem
                        Graphos.Infrastructure.FileSystem.AtomicWrite
                        Graphos.Infrastructure.FileSystem.Fd
@@ -253,6 +257,8 @@ library
                        Graphos.Domain.Config.Memory
                        Graphos.Domain.Config.Observability
                        Graphos.Domain.Config.Output
+                       Graphos.Domain.Config.Resolve
+                       Graphos.Domain.Config.Validation
                        Graphos.Domain.Config.Source
                        Graphos.Domain.Config.Vision
                        -- Domain - Embedding preparation
@@ -280,7 +286,8 @@ library
   include-dirs:     vendor/tree-sitter-cpp/src
                     vendor/tree-sitter-perl/src
                     vendor/tree-sitter-c-sharp/src
-  c-sources:        vendor/tree-sitter-cpp/src/parser.c
+  c-sources:        cbits/runtime_grammar.c
+                    vendor/tree-sitter-cpp/src/parser.c
                     vendor/tree-sitter-yaml/src/parser.c
                     vendor/tree-sitter-sql/src/parser.c
                     vendor/tree-sitter-perl/src/parser.c
@@ -437,6 +444,7 @@ test-suite graphos-test
      Graphos.UseCase.DocLinkParitySpec
      Graphos.UseCase.Extract.HaskellSpec
     Graphos.UseCase.Extract.ImageSpec
+    Graphos.UseCase.Extract.CacheSoundnessSpec
     Graphos.UseCase.QuerySpec
     Graphos.UseCase.ClusterSpec
     Graphos.UseCase.ClusterEvalSpec
@@ -475,7 +483,10 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitter.ConvertSpec
     Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
     Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
+    Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
     Graphos.Infrastructure.Extract.ImportResolutionSpec
+    Graphos.Infrastructure.Extract.ResolveSpec
+    Graphos.Infrastructure.Extract.CommandSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec

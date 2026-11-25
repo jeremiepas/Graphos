@@ -50,6 +50,7 @@ mergeGraphsAndAnalyze graphA graphB density res seCfg force =
              [Extraction
                { extractionNodes = gNodes merged
                , extractionEdges = Map.fromList [(edgeId e, e) | e <- Map.elems (gEdges merged) ++ allInferred]
+               , extractionErrors = []
                }]
 
       -- Step 4: Re-cluster on enriched graph and analyze

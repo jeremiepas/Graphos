@@ -29,6 +29,8 @@ module Graphos.Infrastructure.Config
 
 import Control.Exception (catch, SomeException(..))
 import Control.Monad (when)
+import Data.Aeson (Value(..))
+import Data.Aeson.Types (parseEither)
 import qualified Data.ByteString as BS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -38,7 +40,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Yaml (FromJSON(..), withObject, (.:?))
 import System.Directory (doesFileExist, findExecutable, getHomeDirectory, getXdgDirectory, XdgDirectory(..))
 import System.Exit (exitWith, ExitCode(..))
-import System.FilePath ((</>))
+import System.FilePath (isAbsolute, takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
 import qualified Data.Yaml as Yaml
 
@@ -62,6 +64,8 @@ import Graphos.Domain.Config ( PdfExtractionMode(..)
                                , IngestConfig(..)
                                , MemoryConfig(..)
                                , SourceConfig(..)
+                               , ResolveConfig(..)
+                               , configSectionErrors
                                , CacheConfig(..)
                                , validateEmbeddingConfig
    , defaultGraphosConfig
@@ -96,6 +100,7 @@ data ConfigFile = ConfigFile
     , cfClustering        :: Maybe ClusteringConfig
    , cfMemory            :: Maybe MemoryConfig
    , cfSources           :: Maybe [SourceConfig]
+   , cfResolve           :: Maybe (Map String ResolveConfig)
    , cfOutput            :: Maybe FilePath
    , cfCache             :: Maybe CacheConfig
    } deriving (Eq, Show)
@@ -120,6 +125,7 @@ instance FromJSON ConfigFile where
       <*> v .:? "clustering"
      <*> v .:? "memory"
      <*> v .:? "sources"
+     <*> v .:? "resolve"
      <*> v .:? "output"
      <*> v .:? "cache"
 
@@ -172,9 +178,19 @@ loadConfigWithGlobal' verbose projectPath = do
       pure merged
 
 -- | Load Graphos configuration from a specific file path.
--- Falls back to defaults if the file doesn't exist or has parse errors,
--- EXCEPT for semantically invalid values (e.g. @embedding.batchSize < 1@),
--- which fail the load outright with an error naming the offending key.
+-- Falls back to defaults if the file doesn't exist or is not valid YAML,
+-- EXCEPT for semantically invalid values, which fail the load outright and
+-- name the offending key/entry:
+--
+--   * @embedding.batchSize@/@embedding.concurrency@ below 1;
+--   * an inconsistent @extractors:@ entry (e.g. @mode: command@ without a
+--     @command@ argv, @mode: tree-sitter@ without a grammar, or a field that
+--     belongs to another mode);
+--   * an inconsistent or unknown @resolve:@ entry (e.g. @kind: frobnicate@).
+--
+-- Validation runs on the raw parsed document ('configSectionErrors') so a
+-- mistyped extractor/resolve entry is never silently dropped in favour of the
+-- compiled-in defaults.
 loadConfigFrom :: FilePath -> IO GraphosConfig
 loadConfigFrom path = do
   exists <- doesFileExist path
@@ -184,7 +200,7 @@ loadConfigFrom path = do
       result <- catch
         (do content <- BS.readFile path
             case Yaml.decodeEither' content of
-              Right (cfg :: ConfigFile) -> pure $ Right cfg
+              Right (value :: Value) -> pure $ Right value
               Left err -> pure $ Left $ "YAML parse error: " ++ show err
         )
         $ \(e :: SomeException) -> pure $ Left $ "Config read error: " ++ show e
@@ -192,16 +208,49 @@ loadConfigFrom path = do
         Left err -> do
           putStrLn $ "[config] " ++ path ++ ": " ++ err ++ " — using defaults"
           pure defaultGraphosConfig
-        Right cfgFile ->
-          case validateEmbeddingConfig (cfEmbeddingOrDefault cfgFile) of
-            Left (key, val) -> do
-              hPutStrLn stderr $ "[config] " ++ path ++ ": invalid value for key \""
-                ++ key ++ "\": " ++ show val ++ " (must be >= 1)"
+        Right value ->
+          case configSectionErrors value of
+            [] ->
+              case (parseEither parseJSON value :: Either String ConfigFile) of
+                Left err -> do
+                  putStrLn $ "[config] " ++ path ++ ": YAML parse error: "
+                    ++ err ++ " — using defaults"
+                  pure defaultGraphosConfig
+                Right cfgFile -> applyConfigFile cfgFile
+            errs -> do
+              mapM_ (\msg -> hPutStrLn stderr $ "[config] " ++ path ++ ": " ++ msg) errs
+              hPutStrLn stderr $ "[config] " ++ path
+                ++ ": extractor/resolve entries rejected before build"
               exitWith (ExitFailure 1)
-            Right () ->
-              pure $ mergeConfig cfgFile defaultGraphosConfig
   where
     cfEmbeddingOrDefault cfgFile = maybe defaultEmbeddingConfig id (cfEmbedding cfgFile)
+
+    applyConfigFile cfgFile =
+      case validateEmbeddingConfig (cfEmbeddingOrDefault cfgFile) of
+        Left (key, val) -> do
+          hPutStrLn stderr $ "[config] " ++ path ++ ": invalid value for key \""
+            ++ key ++ "\": " ++ show val ++ " (must be >= 1)"
+          exitWith (ExitFailure 1)
+        Right () ->
+          pure $ mergeConfig (resolveConfigPaths (takeDirectory path) cfgFile)
+                             defaultGraphosConfig
+
+-- | Resolve runtime-grammar paths from a config file relative to that file's
+-- directory (custom-extractors 4.1). Absolute paths and @~@-prefixed paths are
+-- left untouched: the loader expands @~@ and the OS handles absolutes.
+resolveConfigPaths :: FilePath -> ConfigFile -> ConfigFile
+resolveConfigPaths base cfgFile = cfgFile
+  { cfExtractors = fmap (Map.map resolveEntry) (cfExtractors cfgFile) }
+  where
+    resolveEntry ec = ec
+      { ecGrammarPath = fmap (resolve p) (ecGrammarPath ec)
+      , ecQueries = fmap (resolve p) (ecQueries ec)
+      }
+    p = if null base then "." else base
+    resolve dir path
+      | isAbsolute path = path
+      | take 1 path == "~" = path
+      | otherwise = dir </> path
 
 -- | Merge user config overrides onto defaults.
 -- User values take precedence; missing fields fall back to defaults.
@@ -261,6 +310,9 @@ mergeConfig cfgFile defaults = GraphosConfig
   , gcSources = case cfSources cfgFile of
       Just srcs -> srcs
       Nothing   -> gcSources defaults
+  , gcResolve = case cfResolve cfgFile of
+      Just res -> Map.union res (gcResolve defaults)
+      Nothing  -> gcResolve defaults
   , gcOutput = case cfOutput cfgFile of
       Just out -> Just out
       Nothing  -> gcOutput defaults
@@ -315,6 +367,40 @@ configDocComments = unlines
   , "# Where graph.json, the HTML view, cache, manifest, and conversations are"
   , "# written. Default: graphos-out/. The CLI flag -o/--output overrides this."
   , "# output: my-graph-out"
+  , ""
+  , "# ──── Custom extractors ───────────────────────"
+  , "# Besides lsp / tree-sitter / stub, an extension can run an external command"
+  , "# that prints graph.json-shaped nodes/edges on stdout. The command is an"
+  , "# argv list (no shell); {file} is replaced with the file path, {files} with"
+  , "# every path in batch mode. Failures are recorded per file and never abort"
+  , "# the build. Required: a non-empty `command` for `mode: command`."
+  , "# extractors:"
+  , "#   \".pl\":"
+  , "#     mode: command"
+  , "#     command: [\"my-perl-extractor\", \"{file}\"]"
+  , "#     batch: false        # one invocation for all files ({files})"
+  , "#     timeout: 60         # seconds per invocation (default 60)"
+  , ""
+  , "# ──── Runtime tree-sitter grammars ────────────"
+  , "# A tree-sitter entry may load a user-supplied grammar shared library"
+  , "# (ABI 9-11) plus optional definitions/imports/calls .scm queries. Relative"
+  , "# paths resolve against this config file's directory. Required: `grammar`"
+  , "# or `grammar_path` for `mode: tree-sitter`."
+  , "# extractors:"
+  , "#   \".php\":"
+  , "#     mode: tree-sitter"
+  , "#     grammar_path: ~/.local/lib/tree-sitter-php.so"
+  , "#     queries: ~/.config/graphos/queries/php/"
+  , ""
+  , "# ──── Declarative import resolution ───────────"
+  , "# Map an extension to a built-in resolver kind: package, psr4, module-path,"
+  , "# or path-prefix. roots are relative to the config directory; every kind"
+  , "# accepts them, package/psr4 require them, module-path requires"
+  , "# source_of_truth. An unknown kind fails config loading."
+  , "# resolve:"
+  , "#   \".java\": { kind: package, roots: [\"src/main/java\"] }"
+  , "#   \".php\":  { kind: psr4, roots: [\"src\"] }"
+  , "#   \".kt\":   { kind: module-path, source_of_truth: settings.gradle }"
   ]
 
 -- | The full documented init template: the rendered default config followed

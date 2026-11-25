@@ -25,9 +25,11 @@
 -- dropped. The pass reads nothing but the extraction and the parsed configs,
 -- and executes nothing.
 --
--- These are the built-in @path-alias@ / @tsconfig-paths@ resolvers that the
--- @resolve:@ framework of @avi-1766-custom-extractors@ will register; until it
--- lands there is no user override to consult.
+-- These are the built-in @path-alias@ / @tsconfig-paths@ resolvers registered
+-- by the @resolve:@ framework of @avi-1766-custom-extractors@; the declarative
+-- pass in @Graphos.Infrastructure.Extract.Resolve@ runs alongside this one and
+-- applies the user's @resolve:@ entries (or the built-in they override) to the
+-- remaining @external:@ targets.
 module Graphos.Infrastructure.Extract.ImportResolution
   ( PathsConfig(..)
   , ResolutionStats(..)
@@ -36,6 +38,7 @@ module Graphos.Infrastructure.Extract.ImportResolution
   , loadPathsConfigs
   , jsFamilyExtensions
   , stripJsonComments
+  , normalisePath
   ) where
 
 import Control.Exception (IOException, try)
@@ -353,4 +356,4 @@ resolveCorpusImports cfgs ext =
         , rsDropped = Set.size dropped }
   in if Map.null placeholders
        then (ext, ResolutionStats 0 0 0 0)
-       else (Extraction { extractionNodes = nodes', extractionEdges = edges' }, stats)
+       else (Extraction { extractionNodes = nodes', extractionEdges = edges', extractionErrors = extractionErrors ext }, stats)
