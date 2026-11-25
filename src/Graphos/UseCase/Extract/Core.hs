@@ -55,6 +55,9 @@ import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
+import Graphos.Infrastructure.Extract.Resolve
+  ( resolveExtraction, resolveOverrideWarnings, resolveTotal
+  , ResolveStats(..) )
 import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
   ( QueryKind(..), queryKindFile, resolveRuntimePath )
@@ -454,6 +457,22 @@ extractAll appEnv config detection mProvenance = do
   running <- readIORef runningRef
   let merged = running
 
+  -- Declarative import resolution (custom-extractors 6.1–6.4): a config
+  -- `resolve:` entry (or the built-in registration it overrides) rewrites the
+  -- external placeholder targets of the merged corpus to real module nodes.
+  -- Runs before multi-source tagging so the rules see the on-disk paths.
+  let resolveCfg = gcResolve (cfgGraphosConfig config)
+  mapM_ (\msg -> lpLogWarn lp (T.pack ("  [resolve] WARNING: " ++ msg)))
+        (resolveOverrideWarnings resolveCfg)
+  (resolved, resolveStats) <- resolveExtraction resolveCfg merged
+  when (resolveTotal resolveStats > 0) $
+    logInfo $ T.pack $ "  [resolve] " ++ show (resolveTotal resolveStats)
+      ++ " import target(s) resolved (package " ++ show (rsPackage resolveStats)
+      ++ ", psr4 " ++ show (rsPSR4 resolveStats)
+      ++ ", module-path " ++ show (rsModulePath resolveStats)
+      ++ ", path-prefix " ++ show (rsPathPrefix resolveStats) ++ "; "
+      ++ show (rsDropped resolveStats) ++ " placeholder node(s) dropped)"
+
   -- Cache hit/miss report (wire-incremental-update 4.3): how much of the code
   -- stage was served from the persistent extraction cache.
   let cacheHits = length cachedTSHits + length cachedCmdHits
@@ -462,8 +481,8 @@ extractAll appEnv config detection mProvenance = do
     logInfo $ T.pack $ "  [cache] reused " ++ show cacheHits ++ " file extraction(s), re-extracted "
                        ++ show cacheMisses
 
-  logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges"
-  pure (applyTaggingSources mProvenance merged)
+  logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes resolved)) ++ " nodes, " ++ show (Map.size (extractionEdges resolved)) ++ " edges"
+  pure (applyTaggingSources mProvenance resolved)
 
 -- | Tag an extraction with multi-source provenance.
 --
@@ -860,8 +879,10 @@ extractChangedFiles appEnv config changedFiles = do
 
   let merged = List.foldl' mergeExtractions emptyExtraction
                   (tsExtractions ++ lspExtractions ++ commandExtractions ++ stubExtractions)
-  logInfo $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes merged)) ++ " nodes, " ++ show (Map.size (extractionEdges merged)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
-  pure merged
+  -- Declarative import resolution over the batch of changed files (6.4).
+  (resolved, _) <- resolveExtraction (gcResolve (cfgGraphosConfig config)) merged
+  logInfo $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes resolved)) ++ " nodes, " ++ show (Map.size (extractionEdges resolved)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
+  pure resolved
 
 -- | In collapse mode, produce one representative node per detected
 -- (non-'Source') file. Each node carries 'childCount' = the number of nodes

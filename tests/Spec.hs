@@ -85,6 +85,7 @@ import qualified Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
 import qualified Graphos.Infrastructure.Extract.ImportResolutionSpec
+import qualified Graphos.Infrastructure.Extract.ResolveSpec
 import qualified Graphos.Infrastructure.Extract.CommandSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitterSpec
 import qualified Graphos.Infrastructure.LSP.ClientSpec
@@ -204,6 +205,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec.spec
   Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec.spec
   Graphos.Infrastructure.Extract.ImportResolutionSpec.spec
+  Graphos.Infrastructure.Extract.ResolveSpec.spec
   Graphos.Infrastructure.Extract.CommandSpec.spec
   Graphos.Infrastructure.Extract.TreeSitterSpec.spec
   Graphos.Infrastructure.LSP.ClientSpec.spec

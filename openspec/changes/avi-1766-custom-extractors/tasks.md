@@ -41,11 +41,11 @@
 
 ## 6. Declarative import resolution
 
-- [ ] 6.1 Implement resolver kinds driven by ResolveConfig
-- [ ] 6.2 Package/PSR4/ModulePath/PathPrefix resolvers
-- [ ] 6.3 Config precedence over built-in with warning
-- [ ] 6.4 Thread resolve through extract
-- [ ] 6.5 Check: Hspec scenarios + override warning
+- [x] 6.1 Implement resolver kinds driven by ResolveConfig
+- [x] 6.2 Package/PSR4/ModulePath/PathPrefix resolvers
+- [x] 6.3 Config precedence over built-in with warning
+- [x] 6.4 Thread resolve through extract
+- [x] 6.5 Check: Hspec scenarios + override warning
 
 ## 7. Error recording and reporting
 

@@ -183,6 +183,7 @@ library
                            Graphos.Infrastructure.Extract.TreeSitter.Resolver
                            Graphos.Infrastructure.Extract.TreeSitter.Imports
                            Graphos.Infrastructure.Extract.ImportResolution
+                           Graphos.Infrastructure.Extract.Resolve
                            Graphos.Infrastructure.ClusterEval.TruthFile
                            Graphos.Infrastructure.Extract.TreeSitter.Vendored
                       -- Infrastructure - PDF
@@ -484,6 +485,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
     Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
     Graphos.Infrastructure.Extract.ImportResolutionSpec
+    Graphos.Infrastructure.Extract.ResolveSpec
     Graphos.Infrastructure.Extract.CommandSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
