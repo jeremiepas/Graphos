@@ -44,10 +44,15 @@ product capability.
     `openspec check`.
   - *Alternative considered:* a Paperclip board automation rule — rejected because the
     board's status machine is out of the PO's authority; the PO only triages.
-- **Resolve-on-completion semantics** (a blocker counts as resolved only when the
-  blocking issue reports completed, not merely "in progress" or "review").
+- **Terminal-state dependency semantics** (a child task or blocker counts as resolved
+  only when it reaches a terminal state — `done` or `cancelled` — never while it is
+  `todo`, `in_progress`, `in_review`, `backlog`, or `blocked`), matching the
+  blocked ↔ backlog gate recorded in the repository `AGENTS.md`.
   - *Alternative considered:* treat in-review blockers as resolved — rejected, it can
     prematurely unblock work whose blocker is still under review.
+  - *Alternative considered:* count only `done` and leave `cancelled` blockers forever
+    blocking — rejected, a cancelled dependency is resolved by definition and would
+    otherwise strand the dependent task; it also contradicts `AGENTS.md`.
 - **All-or-nothing gating** (a partially resolved dependency set does NOT unblock a
   task).
   - *Alternative considered:* unblock when the majority of blockers resolve — rejected,
@@ -59,10 +64,13 @@ product capability.
 
 ## Verification
 
-- Manual schema validation (no `openspec` CLI in this environment): every requirement
-  uses `SHALL`/`MUST`, and every scenario uses exactly four `####` headers with
-  `WHEN`/`THEN`.
+- `openspec validate AVI-1169-gate-status-task --strict` (openspec 1.8.0) MUST report
+  `Change 'AVI-1169-gate-status-task' is valid`: every requirement uses `SHALL`/`MUST`,
+  and every scenario uses exactly four `####` headers with `WHEN`/`THEN`.
 - Manual read-through confirms the gate logic matches the AVI-1169 objective and is
   consistent with the existing `product-owner-graphos` requirements (no contradictions,
-  no modified requirements).
-- No Haskell build/test is required; the change is spec-only.
+  no modified requirements) and with the blocked ↔ backlog gate in `AGENTS.md`.
+- The diff MUST remain purely additive to the `product-owner-graphos` delta: `## ADDED
+  Requirements` only, no `## MODIFIED`/`## REMOVED` section.
+- No Haskell build/test is required; the change is spec-only, so `cabal build`/`cabal
+  test` are not verification gates for it.
