@@ -6,32 +6,10 @@ import System.Directory
 import Test.Hspec
 
 import OpenSpecView.ArtifactView
+import OpenSpecView.TestSupport (combine', findChangesRoot)
 
-combine' :: FilePath -> FilePath -> FilePath
-combine' a b
-  | not (null a) && last a == '/' = a ++ b
-  | null a = b
-  | otherwise = a ++ "/" ++ b
-
-takeParent :: FilePath -> FilePath
-takeParent p =
-  let stripped = drop 1 (dropWhile (/= '/') (reverse p))
-      parent = reverse stripped
-  in if null parent then "." else parent
-
-findChangesRoot :: IO FilePath
-findChangesRoot = go =<< getCurrentDirectory
-  where
-    go d = do
-      let cand = combine' d "openspec/changes"
-      exists <- doesDirectoryExist cand
-      if exists
-        then pure cand
-        else
-          let parent = takeParent d
-          in if parent == "." || parent == d
-               then error ("Could not locate openspec/changes under " ++ d)
-               else go parent
+noWorkspace :: Expectation
+noWorkspace = pendingWith "no openspec/changes workspace above the working directory"
 
 sampleChangeArtifacts :: ChangeArtifacts
 sampleChangeArtifacts =
@@ -79,19 +57,25 @@ spec = do
       mArt `shouldBe` Nothing
 
     it "lists spec directories for a real change" $ do
-      root <- findChangesRoot
-      specs <- listSpecs (combine' root "consumable-graph-outputs/specs")
-      specs `shouldSatisfy` (all (not . null))
-      length specs `shouldBe` 5
+      mroot <- findChangesRoot
+      case mroot of
+        Nothing -> noWorkspace
+        Just root -> do
+          specs <- listSpecs (combine' root "consumable-graph-outputs/specs")
+          specs `shouldSatisfy` (all (not . null))
+          length specs `shouldBe` 5
 
     it "displays all artifacts for a real change" $ do
-      root <- findChangesRoot
-      ca <- readChangeArtifacts (combine' root "consumable-graph-outputs")
-      artifactsName ca `shouldBe` "consumable-graph-outputs"
-      changeProposal ca `shouldSatisfy` isJust
-      changeDesign ca `shouldSatisfy` isJust
-      changeTasks ca `shouldSatisfy` isJust
-      map artifactKind (changeSpecs ca) `shouldSatisfy` (all (not . null))
+      mroot <- findChangesRoot
+      case mroot of
+        Nothing -> noWorkspace
+        Just root -> do
+          ca <- readChangeArtifacts (combine' root "consumable-graph-outputs")
+          artifactsName ca `shouldBe` "consumable-graph-outputs"
+          changeProposal ca `shouldSatisfy` isJust
+          changeDesign ca `shouldSatisfy` isJust
+          changeTasks ca `shouldSatisfy` isJust
+          map artifactKind (changeSpecs ca) `shouldSatisfy` (all (not . null))
 
     it "renders the sample change with a header and no missing markers" $ do
       let out = renderChangeArtifacts sampleChangeArtifacts

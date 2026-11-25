@@ -81,7 +81,7 @@ data Command
   | ClusterEvalCompareCmd ClusterEvalOpts
   | ClusterEvalSweepCmd ClusterEvalOpts
   | LServers
- | Serve FilePath FilePath Int Bool Bool String
+ | Serve FilePath (Maybe FilePath) FilePath Int Bool Bool String
 
   | MigrateGraphCmd FilePath (Maybe FilePath)
 
@@ -383,6 +383,8 @@ explainOpts = ExplainCmd
 serveOpts :: Parser Command
 serveOpts = Serve
   <$> strOption (long "dir" <> value "graphos-out" <> help "Directory to serve (default: graphos-out)")
+  <*> optional (strOption (long "frontend-dir" <> metavar "DIR"
+        <> help "graphos-studio frontend bundle to serve (Studio output + viewer assets; default: auto-detect graphos-studio/public or ../graphos-studio/public)"))
   <*> strOption (long "graph" <> value "graphos-out/graph.json" <> help "Path to graph.json (default: graphos-out/graph.json)")
   <*> option auto (long "port" <> short 'p' <> value 8080 <> help "Port to serve on (default: 8080)")
   <*> switch (long "api-only" <> help "Serve only the query API, not static files")

@@ -9,8 +9,16 @@
 ## 1. Public OSS project bootstrap (bridge repository only — no new Graphos repo; AVI-1677-D7)
 - [x] 1.1 Create the public repository (name, org, license decided): https://github.com/jeremiepas/graphos-lean-critique (MIT, personal org)
 - [x] 1.2 Pin the Lean toolchain (leanprover/lean4:v4.29.1)
-- [ ] 1.3 Build Lean + selected libraries, export a stable C ABI, publish versioned releases
-- [ ] 1.4 CI, docs, governance
+- [x] 1.3 Build Lean + selected libraries, export a stable C ABI, publish versioned releases
+  - [x] Static (`libgraphoslean.a`) and shared (`libgraphoslean.so`) libraries from one extracted module; selected Lean runtime libraries (Init/Std/Lean/leanrt/leancpp) captured in `graphos-lean-critique.pc` `Libs.private`
+  - [x] Stable C ABI layer `src/abi_shim.c` defines the public entry points (`graphos_lean_critique_abi_version`, `graphos_lean_critique_semver`, `graphos_surprise_score`); Lean exports renamed to `*_impl` scalars, argument normalisation in one reviewed place
+  - [x] Fixed the ABI v0 version query: a nullary `@[export]` is a Lean data symbol written by the module initialiser, so the header's function declaration was UB. Version exports now return literals (`graphos_surprise_score` unchanged)
+  - [x] `VERSION` is the single source of truth; `graphos-lean-critique v0.2.1` published (tag + release with header, `.a`, `.so`, `.pc`, docs bundle, SHA256SUMS): https://github.com/jeremiepas/graphos-lean-critique/releases/tag/v0.2.1
+- [x] 1.4 CI, docs, governance
+  - [x] CI: `lake build` with warnings as errors, no `sorry`/`admit`, ABI module stays import-free, header valid as C99 + C++17, ABI smoke test over the full input domain, pkg-config validation, bundle build
+  - [x] Release workflow: tag must equal `VERSION`, extracted bundle is re-linked and run before publishing, checksums attached
+  - [x] Docs: `docs/abi.md` (frozen contract), `docs/building.md`, `docs/releasing.md`, `docs/governance.md` (SemVer + ABI compatibility + deprecation), `SECURITY.md`, `CHANGELOG.md`
+  - [x] Executable `#guard` fixtures and spec theorems gate the ABI surface at build time (no CI-only guarantees)
 
 ## 2. Contract inventory
 - [x] 2.1 Freeze decision IDs, Haskell source references, theorem obligations (contract-inventory.md)

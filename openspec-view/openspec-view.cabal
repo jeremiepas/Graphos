@@ -1,0 +1,56 @@
+cabal-version:      3.0
+name:               openspec-view
+version:            0.1.0.0
+synopsis:           Reader and renderer for OpenSpec change workspaces
+description:        Standalone, base-only package that reads an OpenSpec
+                    workspace (proposals, designs, tasks, delta specs) and
+                    renders change lists, artifact views, spec diffs, and a
+                    state dashboard as plain text. Extracted from the
+                    graphos repository (openspec change split-graphos-studio)
+                    so the graphos CLI can depend on it as a normal package
+                    instead of an in-repo sub-library.
+category:           Development
+license:            MIT
+license-file:       LICENSE
+author:             Graphos Contributors
+maintainer:         graphos@dev
+build-type:         Simple
+extra-doc-files:    README.md
+
+common shared
+  default-language:    Haskell2010
+  default-extensions:  LambdaCase
+                       DeriveGeneric
+                       OverloadedStrings
+                       TypeApplications
+  ghc-options:         -Wall -Wcompat -Wincomplete-uni-patterns
+                       -Wincomplete-record-updates -Wredundant-constraints
+
+library
+  import:          shared
+  hs-source-dirs:  src
+  exposed-modules: OpenSpecView
+                   OpenSpecView.ChangeList
+                   OpenSpecView.ArtifactView
+                   OpenSpecView.SpecDiff
+                   OpenSpecView.StateDashboard
+  build-depends:   base      >= 4.17 && < 5
+                 , containers >= 0.6
+                 , directory  >= 1.3
+                 , time      >= 1.11
+
+test-suite openspec-view-test
+  import:          shared
+  type:            exitcode-stdio-1.0
+  main-is:         Spec.hs
+  hs-source-dirs:  test
+  other-modules:   OpenSpecView.TestSupport
+                   OpenSpecView.ChangeListSpec
+                   OpenSpecView.ArtifactViewSpec
+                   OpenSpecView.SpecDiffSpec
+                   OpenSpecView.StateDashboardSpec
+  build-depends:   base
+                 , openspec-view
+                 , containers >= 0.6
+                 , directory  >= 1.3
+                 , hspec     >= 2.10
