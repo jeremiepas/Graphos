@@ -18,6 +18,10 @@
 -- extension; 'resolveOverrideWarnings' names the extension and the overridden
 -- kind so the build can log it (6.3).
 --
+-- Relative @roots@ and @source-of-truth@ paths are read against the project
+-- root the extraction was started from (the corpus keys are the extraction's
+-- own, usually absolute, source paths).
+--
 -- The pass mirrors 'Graphos.Infrastructure.Extract.ImportResolution': it walks
 -- the merged extraction once, rewrites the @imports@ edges whose target is an
 -- @external:@ placeholder to the module node of the corpus file the specifier
@@ -54,7 +58,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text.Short (toText)
 import qualified Data.Text.IO as TIO
-import System.FilePath (takeDirectory, takeExtension, (</>))
+import System.FilePath (isAbsolute, takeDirectory, takeExtension, (</>))
 
 import Graphos.Domain.Config (ResolveConfig(..), ResolveKind(..))
 import Graphos.Domain.Types (Edge(..), Extraction(..), Node(..), NodeId)
@@ -175,14 +179,15 @@ trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 -- | Read the source-of-truth index of every @module-path@ entry, keyed by
--- extension. Missing or unreadable files yield an empty index (resolution
--- simply leaves the specifier external).
-loadModuleIndexes :: Map String ResolveConfig -> IO (Map String ModuleIndex)
-loadModuleIndexes cfgs = fmap Map.fromList $ fmap concat $ mapM loadOne (Map.toList cfgs)
+-- extension. A relative @source-of-truth@ is taken against the project root
+-- (@root@), the same base the @roots@ of a resolver use. Missing or unreadable
+-- files yield an empty index (resolution simply leaves the specifier external).
+loadModuleIndexes :: FilePath -> Map String ResolveConfig -> IO (Map String ModuleIndex)
+loadModuleIndexes root cfgs = fmap Map.fromList $ fmap concat $ mapM loadOne (Map.toList cfgs)
   where
     loadOne (ext, rc) = case (rcKind rc, rcSourceOfTruth rc) of
       (ResolveModulePath, Just f) | not (null f) -> do
-        r <- try (TIO.readFile f) :: IO (Either IOException T.Text)
+        r <- try (TIO.readFile (absAgainst root f)) :: IO (Either IOException T.Text)
         pure $ case r of
           Right src ->
             let entries = parseModuleIndex (T.unpack src)
@@ -223,19 +228,21 @@ externalSpec n
 -- ───────────────────────────────────────────────
 
 -- | Resolve one specifier for one importer under one rule. Pure: the answer
--- is the first candidate present in the corpus.
+-- is the first candidate present in the corpus. @root@ is the project root
+-- that relative @roots@ / module directories are joined against (the corpus
+-- keys are the extraction's own, possibly absolute, source paths).
 resolveSpec
-  :: Corpus -> ModuleIndex -> ResolveConfig -> FilePath -> String -> Maybe FilePath
-resolveSpec corpus index rc importer spec = case rcKind rc of
-  ResolvePackage    -> packageResolver corpus (rootsFor rc importer) (takeExtension importer) spec
-  ResolvePSR4       -> psr4Resolver corpus (filter (not . null) (rcRoots rc)) spec
-  ResolveModulePath -> modulePathResolver corpus index (filter (not . null) (rcRoots rc)) importer spec
-  ResolvePathPrefix -> pathPrefixResolver corpus (rcRoots rc) importer spec
+  :: FilePath -> Corpus -> ModuleIndex -> ResolveConfig -> FilePath -> String -> Maybe FilePath
+resolveSpec root corpus index rc importer spec = case rcKind rc of
+  ResolvePackage    -> packageResolver corpus (rootsFor root rc importer) (takeExtension importer) spec
+  ResolvePSR4       -> psr4Resolver corpus (rooted root (rcRoots rc)) spec
+  ResolveModulePath -> modulePathResolver corpus (Map.map (absAgainst root) index) (rooted root (rcRoots rc)) importer spec
+  ResolvePathPrefix -> pathPrefixResolver root corpus (rooted root (rcRoots rc)) importer spec
 
 -- | Configured roots, or the importing file's conventional JVM roots when the
 -- entry lists none (the built-in behaviour).
-rootsFor :: ResolveConfig -> FilePath -> [FilePath]
-rootsFor rc importer = case filter (not . null) (rcRoots rc) of
+rootsFor :: FilePath -> ResolveConfig -> FilePath -> [FilePath]
+rootsFor root rc importer = case rooted root (rcRoots rc) of
   [] -> conventionalJvmRoots importer
   rs -> rs
 
@@ -325,11 +332,11 @@ modulePathResolver corpus index roots importer spec =
 -- | @path-prefix@: the specifier itself is the path, an extension is appended
 -- when it has none (importer extension, then the TS/JS family, then an
 -- @index@ file).
-pathPrefixResolver :: Corpus -> [FilePath] -> FilePath -> String -> Maybe FilePath
-pathPrefixResolver corpus roots importer spec =
+pathPrefixResolver :: FilePath -> Corpus -> [FilePath] -> FilePath -> String -> Maybe FilePath
+pathPrefixResolver root corpus roots importer spec =
   let p = normalisePath (dropStatic spec)
-      rs = case filter (not . null) roots of
-        [] -> ["."]
+      rs = case roots of
+        [] -> [absAgainst root "."]
         r -> r
       exts = nub (takeExtension importer : jsFamilyExtensions)
       hasExt = not (null (takeExtension p))
@@ -357,11 +364,13 @@ resolveTotal :: ResolveStats -> Int
 resolveTotal s = rsPackage s + rsPSR4 s + rsModulePath s + rsPathPrefix s
 
 -- | Rewrite @external:@ import targets to the corpus module nodes the
--- @resolve:@ rules denote (see the module header). Returns the extraction
--- unchanged when it has no @external:@ placeholder at all.
+-- @resolve:@ rules denote (see the module header). @root@ is the project root
+-- relative @roots@ and module @source-of-truth@ files are resolved against.
+-- Returns the extraction unchanged when it has no @external:@ placeholder at
+-- all.
 resolveDeclarativeImports
-  :: Map String ResolveConfig -> Map String ModuleIndex -> Extraction -> (Extraction, ResolveStats)
-resolveDeclarativeImports userCfg indexes ext =
+  :: FilePath -> Map String ResolveConfig -> Map String ModuleIndex -> Extraction -> (Extraction, ResolveStats)
+resolveDeclarativeImports root userCfg indexes ext =
   let rules = effectiveResolveConfigs userCfg
       corpus = buildCorpus ext
       nodes = extractionNodes ext
@@ -373,7 +382,7 @@ resolveDeclarativeImports userCfg indexes ext =
         importer <- importerOf (edgeSource e)
         let extOf = takeExtension importer
         rule <- Map.lookup extOf rules
-        targetPath <- resolveSpec corpus (Map.findWithDefault Map.empty extOf indexes) rule importer spec
+        targetPath <- resolveSpec root corpus (Map.findWithDefault Map.empty extOf indexes) rule importer spec
         target <- Map.lookup targetPath (cFiles corpus)
         guard (target /= edgeSource e)
         pure (target, rcKind rule)
@@ -398,12 +407,13 @@ resolveDeclarativeImports userCfg indexes ext =
        else (ext { extractionNodes = nodes', extractionEdges = edges' }, stats)
 
 -- | Load the module indexes the config needs, then run the pass. This is the
--- entry point the extraction orchestration uses.
+-- entry point the extraction orchestration uses; @root@ is the canonical
+-- project root the config-relative paths are based on.
 resolveExtraction
-  :: Map String ResolveConfig -> Extraction -> IO (Extraction, ResolveStats)
-resolveExtraction userCfg ext = do
-  indexes <- loadModuleIndexes (effectiveResolveConfigs userCfg)
-  pure (resolveDeclarativeImports userCfg indexes ext)
+  :: FilePath -> Map String ResolveConfig -> Extraction -> IO (Extraction, ResolveStats)
+resolveExtraction root userCfg ext = do
+  indexes <- loadModuleIndexes root (effectiveResolveConfigs userCfg)
+  pure (resolveDeclarativeImports root userCfg indexes ext)
 
 -- ───────────────────────────────────────────────
 -- Helpers
@@ -426,3 +436,15 @@ joinRoot :: FilePath -> FilePath -> FilePath
 joinRoot r p
   | r == "." || null r = normalisePath p
   | otherwise          = normalisePath (r ++ "/" ++ p)
+
+-- | Drop empty entries of a config list (YAML may leave them) and make each
+-- entry relative to the project @root@ unless it is already absolute.
+rooted :: FilePath -> [FilePath] -> [FilePath]
+rooted root = map (absAgainst root) . filter (not . null)
+
+-- | @p@ against @root@: absolute (and @.@-rooted) paths are kept as written,
+-- otherwise the project root prefixes the entry.
+absAgainst :: FilePath -> FilePath -> FilePath
+absAgainst root p
+  | isAbsolute p || root == "." || null root = p
+  | otherwise                                = normalisePath (root ++ "/" ++ p)

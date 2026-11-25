@@ -84,7 +84,7 @@ targetsOf src ex = sort
   , Just n <- [Map.lookup (edgeTarget e) (extractionNodes ex)] ]
 
 run :: Map.Map String ResolveConfig -> Map.Map String ModuleIndex -> Extraction -> (Extraction, ResolveStats)
-run cfg indexes = resolveDeclarativeImports cfg indexes
+run cfg indexes = resolveDeclarativeImports "." cfg indexes
 
 -- ───────────────────────────────────────────────
 -- Spec
@@ -130,6 +130,19 @@ spec = describe "Declarative import resolution (custom-extractors 6)" $ do
           (ex', _) = run cfg Map.empty ex
       targetsOf "src/main/java/org/example/App.java" ex'
         `shouldBe` ["src/main/java/org/example/util/Money.java"]
+
+    it "resolves relative config roots against the project root" $ do
+      let ex = mkExtraction
+            [ moduleNode "/proj/code/com/example/App.java"
+            , moduleNode "/proj/other/com/example/Foo.java"
+            , externalNode "com.example.Foo" ]
+            [ importEdge "/proj/code/com/example/App.java" "com.example.Foo" ]
+          cfg = Map.fromList
+            [ (".java", ResolveConfig ResolvePackage ["other"] Nothing) ]
+          (ex', stats) = resolveDeclarativeImports "/proj" cfg Map.empty ex
+      targetsOf "/proj/code/com/example/App.java" ex'
+        `shouldBe` ["/proj/other/com/example/Foo.java"]
+      rsPackage stats `shouldBe` 1
 
     it "leaves an unresolved package external" $ do
       let ex = mkExtraction
