@@ -136,10 +136,10 @@ jobs:
 
   fixture:
     # graphos-fixture (AVI-1071): run the binary built by `build` over the
-    # test corpus and upload the resulting graph.json files, 
-    # contract test can validate its decoders against real binary output
-    # (not the hand-written fixture). No build happens here — the binary
-    # comes from the build-products artifact.
+    # test corpus and upload the resulting graph.json files, so the frontend
+    # contract check in graphos-studio can validate its decoders against real
+    # binary output (not the hand-written fixture). No build happens here —
+    # the binary comes from the build-products artifact.
     if: github.actor == 'jeremiepas'
     needs: build
     runs-on: ubuntu-latest
@@ -236,7 +236,17 @@ jobs:
           path: graphos-fixture/
           retention-days: 14
 
+  # The `studio-contract` job (AVI-1071) that decoded the `graphos-fixture`
+  # artifact through the Elm studio decoders is gone with the studio sources:
+  # `studio/` now lives in the graphos-studio repository, which runs that same
+  # fixture through its own decoders in its CI (openspec change
+  # split-graphos-studio, D4). This workflow keeps the `fixture` job above so
+  # the graph.json fixture is still emitted and can be fed to that check.
+
   haddock:
+    # Pinned to ubuntu-24.04: `ubuntu-latest` began rolling out Ubuntu 26.04 on
+    # Oct 19, 2026 and broke `cabal haddock all` (build/test still
+    # passed on 26, so this is the Ubuntu 26 image, not the Node 24 action
     # runtimes, which were already default since June 2026). No Haskell source
     # changed between the green and red runs, so this is purely environmental.
     runs-on: ubuntu-24.04
