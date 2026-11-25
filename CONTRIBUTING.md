@@ -43,6 +43,31 @@ cabal build
 cabal test
 ```
 
+### Frontend (graphos-studio)
+
+The Elm Studio SPA and the HTML viewer assets are **not** in this repository —
+they live in `graphos-studio`, which carries its own `devenv.nix` with the Elm
+0.19.2 toolchain (`elm`, `elm-test`, `elm-format`, `elm-review`), its own tests,
+and its own CI. This shell deliberately has no Elm packages.
+
+```bash
+# once: clone the frontend repository beside this checkout, named graphos-studio
+git clone <graphos-studio-url> ../graphos-studio
+
+# in graphos-studio: build the studio bundle and run its tests
+cd ../graphos-studio
+devenv shell
+elm make src/Main.elm --optimize --output=public/studio.js
+elm-test
+
+# back in Graphos: serve the graph against that bundle
+cd ../Graphos
+cabal run graphos -- serve graphos-out --frontend-dir ../graphos-studio/public
+```
+
+`graphos serve` auto-detects `graphos-studio/public` or
+`../graphos-studio/public`, so the flag is only needed for a bundle elsewhere.
+
 ### Runtime notes
 
 - Extraction talks to language servers via LSP. For end-to-end manual testing,

@@ -92,6 +92,22 @@ Language-server requirements and per-extension setup live in
 [Workflow 16](docs/workflows/16-agent-scaffolding.md) and the
 [CLI reference](docs/reference/cli.md).
 
+## Frontend
+
+The frontend is not in this repository. The Elm **Graphos Studio** SPA and the
+HTML viewer assets (`viewer.js`, `viewer.css`, the vendored vis-network
+renderer) live in the separate `graphos-studio` repository, which owns their Elm
+0.19.2 toolchain, build, tests, and CI.
+
+- `graphos serve` reads the built bundle from `--frontend-dir` (defaults to
+  `graphos-studio/public` or `../graphos-studio/public`, so a sibling checkout
+  works with no flags). No viewer code is compiled into the binary.
+- To work on the Studio or the viewer, clone `graphos-studio` beside this
+  checkout and follow its README; the local setup is also described in
+  [CONTRIBUTING.md](CONTRIBUTING.md#frontend-graphos-studio).
+- The two repositories meet only at the `graph-json-contract` shape and the
+  `graphos serve` slice/query API.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment, commit
