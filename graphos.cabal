@@ -356,13 +356,13 @@ library
      , unix                  >= 2.8
 
 -- ───────────────────────────────────────────────
--- openspec-view is extracted into its own package (openspec-view/)
+-- openspec-view is an external package (graphos-studio repository)
 -- ───────────────────────────────────────────────
 -- It used to be a `base`-only sub-library here. It now lives in its own
--- cabal package (see openspec-view/openspec-view.cabal, listed in
--- cabal.project) so the `graphos` executable depends on it as a normal
--- package instead of an in-repo sub-library (openspec change
--- split-graphos-studio, decision D3).
+-- cabal package in the graphos-studio repository, fetched through
+-- cabal.project's `source-repository-package` stanza, so the `graphos`
+-- executable depends on it as a normal package instead of an in-repo
+-- sub-library (openspec change split-graphos-studio, decision D3).
 
 -- ───────────────────────────────────────────────
 -- Executable

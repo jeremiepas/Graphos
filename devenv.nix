@@ -18,11 +18,9 @@ let
     vscode-langservers-extracted
     openspec
     llama-cpp
-    # Graphos Studio toolchain (studio/, Elm SPA — openspec/changes/elm-graph-studio)
-    elmPackages.elm
-    elmPackages.elm-test
-    elmPackages.elm-format
-    elmPackages.elm-review
+    # The Elm/Studio toolchain is not here: the frontend (Elm Studio + HTML
+    # viewer assets) lives in the graphos-studio repository, whose own
+    # devenv.nix pins Elm 0.19.2 (openspec change split-graphos-studio, D5).
   ];
 in
 {
