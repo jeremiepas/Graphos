@@ -60,6 +60,28 @@ Proof-only helpers must be noncomputable or excluded from the `@[export]` surfac
 ## ABI v0 (frozen)
 
 Header: `spikes/avi-1677-lean-critique/include/graphos_lean_critique.h`.
+Canonical implementation of this header since Stage 1:
+`graphos-lean-critique` v0.2.1, `include/graphos_lean_critique.h`
+(https://github.com/jeremiepas/graphos-lean-critique/releases/tag/v0.2.1).
+The spike copy is the frozen Stage-0 reference and stays unchanged.
+
+### Implementation status (Stage 1, library 0.2.1)
+
+- The public C ABI is defined by `src/abi_shim.c` in the library repository,
+  not by raw Lean `@[export]` symbols: Lean exports are `*_impl` scalar
+  functions and the shim owns normalisation (confidence clamped to `0..10`,
+  flags other than `1` treated as `0`). `graphos_surprise_score` is unchanged
+  for consumers.
+- A nullary `@[export]` (the Stage-0 `graphos_lean_critique_abi_version`) is a
+  writable Lean data symbol initialised only by the Lean module initialiser, so
+  the function declaration in this frozen header was undefined behaviour when
+  called through `foreign import ccall`. The shim now provides real functions
+  and the version exports return literals.
+- `graphos_lean_critique_semver()` (packed `major*10000 + minor*100 + patch`,
+  `201` for 0.2.1) and the `GRAPHOS_LEAN_CRITIQUE_VERSION{,_MAJOR,_MINOR,_PATCH}`
+  / `GRAPHOS_LEAN_CRITIQUE_SEMVER` macros are additive; consumers use them to
+  detect a stale build. ABI version stays `0`.
+
 
 ```c
 uint64_t graphos_surprise_score(uint8_t confX10,
@@ -122,7 +144,7 @@ No heap allocation occurs in v0, so no ownership transfer occurs in v0.
 
 ## Linkage (Stage 4 summary)
 
-Build producing `Critique.o`:
+Build producing `Critique.o` (Stage-0 spike recipe):
 ```
 lean -c Critique.c Critique.lean
 leanc -c Critique.c -o Critique.o
@@ -132,9 +154,26 @@ Link inputs (from `leanc --print-ldflags`):
 `libInit`, `libStd`, `libLean`, `libleanrt`, `libleancpp`, `libgmp`,
 `libuv`, plus `stdc++`, `m`, `dl`, `pthread`.
 
+Stage 1 library (`make`, v0.2.1) produces `libgraphoslean.a` (extracted
+`GraphosLeanCritique/Critique.lean` + `src/abi_shim.c`) and
+`graphos-lean-critique.pc`, whose `Libs.private` carries exactly those linker
+inputs. Graphos should link through pkg-config (`--static`) or the equivalent
+`Extra-libraries`/`Extra-lib-dirs`, with `Include-dirs` pointing at the release
+`include/`. `gmp` and `libuv` remain system dependencies (NixOS: `pkgs.gmp`,
+`pkgs.libuv`).
+
+
 ## Files touched by this contract
 
 - `spikes/avi-1677-lean-critique/include/graphos_lean_critique.h`
 - `spikes/avi-1677-lean-critique/Critique.lean`
 - `spikes/avi-1677-lean-critique/README.md`
 - `openspec/changes/AVI-1677-lean4-critique-replacement/tasks.md`
+
+Bridge repository (public, `graphos-lean-critique`):
+
+- `include/graphos_lean_critique.h` — canonical public header
+- `src/abi_shim.c` — public C ABI layer (normalisation, version functions)
+- `GraphosLeanCritique/Critique.lean` — extracted predicates (`*_impl`)
+- `docs/abi.md`, `docs/governance.md`, `docs/releasing.md` — contract, ABI
+  policy and release process
