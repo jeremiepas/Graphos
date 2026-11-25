@@ -1,5 +1,13 @@
 # AVI-1677 Stage 0 feasibility spike
 
+> **Historical spike.** The canonical implementation of this ABI now lives in
+> the public OSS repository
+> [`jeremiepas/graphos-lean-critique`](https://github.com/jeremiepas/graphos-lean-critique)
+> (release [v0.2.1](https://github.com/jeremiepas/graphos-lean-critique/releases/tag/v0.2.1)),
+> which adds the stable C ABI layer, version queries, pkg-config, tests and
+> governance. This directory is the frozen Stage-0 reference kept for the
+> contract inventory; do not build Graphos against it.
+
 Lean 4 computation mirroring the numeric arm of
 `Graphos.Domain.Analysis.surpriseScore` (see `src/Graphos/Domain/Analysis.hs`),
 compiled with `@[export]` and consumed from GHC via `foreign import ccall`,
