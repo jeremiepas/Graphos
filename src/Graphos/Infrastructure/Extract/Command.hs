@@ -285,13 +285,24 @@ withDefault name value km
 -- same raw id (@fn:main@) still merge into two distinct nodes.
 commandFileBucket :: FilePath -> Text
 commandFileBucket fp =
-  sourceDirHash (mkSourceFile fp "") <> "_" <> stem <> "_" <> extTag <> "_"
+  sourceDirHash (mkSourceFile fp "") <> "_" <> stem <> "_" <> extTag <> lossTag <> "_"
   where
-    stem = sanitize (T.pack (takeBaseName fp))
-    extTag = case sanitize (T.pack (drop 1 (takeExtension fp))) of
+    rawStem = T.pack (takeBaseName fp)
+    rawExt  = T.pack (drop 1 (takeExtension fp))
+    stem    = sanitize rawStem
+    extTag  = case sanitize rawExt of
       "" -> "noext"
       e  -> e
+    -- Sanitising /drops/ characters, so two distinct files in one directory
+    -- would otherwise collapse to the same bucket ("x y.pl" vs "xy.pl", both
+    -- "xy"). When anything was dropped, append a hash of the path to restore
+    -- uniqueness; ordinary ids keep their short readable form.
+    lossTag
+      | sanitize rawStem == rawStem && sanitize rawExt == rawExt = ""
+      | otherwise = "_" <> shortHash (T.pack fp)
     sanitize = T.filter (\c -> isAlphaNum c || c `elem` ("-." :: String))
+    shortHash = T.pack . show . (`mod` (65536 :: Int))
+      . T.foldl' (\acc c -> acc * 31 + fromEnum c) 0
 
 -- | Prefix an emitted id with @bucket@ unless it already carries it, so
 -- re-extraction of already-qualified output is idempotent.
@@ -440,7 +451,12 @@ routeByFile files out =
         let p = normalise (T.unpack (toText (nodeSourceFile n)))
         in if Set.member p allowed
              then Just p
-             else Map.lookup (takeFileName p) byBasename
+             -- An ambiguous basename is mapped to "" by 'ambiguous'; it must
+             -- not count as routed, or the record would vanish without a
+             -- recorded per-file error.
+             else case Map.lookup (takeFileName p) byBasename of
+                    Just q | not (null q) -> Just q
+                    _                     -> Nothing
       keyedNodes = [(k, n) | n <- coNodes out, Just k <- [keyOf n]]
       owner = Map.fromList [(nodeId n, k) | (k, n) <- keyedNodes]
       keyedEdges = [(k, e) | e <- coEdges out, Just k <- [Map.lookup (edgeSource e) owner]]
