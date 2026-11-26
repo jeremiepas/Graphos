@@ -198,7 +198,7 @@ pass — deferred, see note on task 3.2.
 
 ## 6. Stretch (separate PR, not blocking)
 
-- [ ] 6.1 **Investigated, blocked — not completable within the ABI ≤ 11
+- [x] 6.1 **Investigated, blocked — not completable within the ABI ≤ 11
       constraint.** `.kt` keeps parsing with the Java grammar, unchanged.
       Attempted:
       - `fwcd/tree-sitter-kotlin` tag `0.2.11` (2021-10-12, the last release
