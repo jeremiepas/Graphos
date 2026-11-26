@@ -1,0 +1,16 @@
+# Minimal custom-extractor example.
+#
+# `python3 extract.py <file>` prints graph.json-shaped nodes/edges on stdout.
+# Graphos runs the argv directly (no shell), qualifies ids per file, and merges
+# the result like any built-in extractor.
+
+extractors:
+  ".pl":
+    mode: command
+    command: ["python3", "extract.py", "{file}"]
+    timeout: 10
+
+# Declarative import resolution also works for this project; the resolver only
+# rewrites `imports` edges that point at an `external:` placeholder.
+# resolve:
+#   ".pl": { kind: path-prefix }

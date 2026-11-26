@@ -62,6 +62,11 @@ If no path exists, a "no path found" message is returned.
 
 Requires an existing `graph.json`. Run the full pipeline first.
 
+The graph may come from any extractor route — built-in tree-sitter, LSP, a
+runtime grammar, or a `mode: command` external extractor. Custom extractors
+make `path` work for languages Graphos has no compiled-in binding for; see
+[Workflow 01](01-full-pipeline.md#custom-extractors).
+
 ---
 
 ## Configuration

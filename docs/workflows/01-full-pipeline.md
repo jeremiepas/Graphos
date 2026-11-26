@@ -53,7 +53,11 @@ Code Files ──┬─▶ LSP Extraction      (Infrastructure/LSP/*.hs)
              │    Spawn server → initialize → documentSymbol → references → shutdown
              │
              ├─▶ Tree-sitter Extraction (Infrastructure/Extract/TS/*.hs)
-             │    Run tree-sitter CLI → parse CST → convert to Domain types
+             │    Built-in or runtime grammar → parse CST → convert to Domain types
+             │
+             ├─▶ Command Extraction (Infrastructure/Extract/Command.hs)
+             │    Spawn declared argv → decode graph.json-shaped stdout → qualify ids
+             │    (no shell; {file}/{files}; timeout; per-file error isolation)
              │
              └─▶ Stub Extraction (one node per file, last resort)
 
@@ -64,9 +68,37 @@ Images     ──▶ LLM vision (descriptions + relationships)
 Video/Audio▶ Whisper transcription → LLM extraction
 ```
 
-**SHA256 Cache**: Each file's hash is checked. If unchanged since last run, extraction is skipped.
+### Custom extractors
 
-**Output**: `Extraction { nodes: [Node], edges: [Edge] }`
+Per extension, `graphos.yaml` can replace the compiled-in binding:
+
+- **`mode: command`** runs an external argv (never a shell string) and reads
+  graph.json-shaped `nodes`/`edges` from stdout. `{file}` is substituted with
+  the file being extracted; `{files}` splices every batch input as its own argv
+  element. `batch: true` makes one invocation serve all files of that
+  extension, and `timeout` caps each invocation (60 s by default). Output is
+  schema-validated, node ids are prefixed with a per-file directory bucket, and
+  the extraction merges like any other.
+- **`mode: tree-sitter` + `grammar_path`** loads a user-supplied grammar `.so`
+  at runtime (tree-sitter ABI 9-11) and optionally applies
+  `definitions.scm` / `imports.scm` / `calls.scm` from `queries`.
+- **`resolve:`** maps an extension to a built-in import resolver (`package`,
+  `psr4`, `module-path`, `path-prefix`), replacing hardcoded per-language
+  import handling. A config entry overrides the built-in resolver for that
+  extension and logs a warning.
+
+Every command/grammar failure is recorded as an `ExtractionError` and the file
+is stub-extracted; other files and the rest of the pipeline continue. Command
+extractors are gated by `allow_command_extractors` (on in the CLI, off in the
+library; `--no-command-extractors` disables them) and are never spawned for
+sensitive or ignored paths.
+
+**SHA256 Cache**: Each file's hash is checked. If unchanged since last run, extraction is skipped.
+The config fingerprint also covers command argv/batch/timeout, the command
+gate, runtime grammar library size and mtime, query stamps, and `resolve:`
+entries, so changing any of them invalidates cached extractions.
+
+**Output**: `Extraction { nodes: [Node], edges: [Edge], errors: [ExtractionError] }`
 
 ---
 

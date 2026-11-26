@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Declarative import resolution (custom-extractors 6.1–6.5): one case per
 -- scenario of the @import-resolution@ delta, on hand-built extractions.
-module Graphos.Infrastructure.Extract.ResolveSpec (spec) where
+module Graphos.Infrastructure.Extract.ResolveConfigSpec (spec) where
 
 import Test.Hspec
 import Data.Bits ((.|.))
@@ -10,6 +10,8 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 
 import Graphos.Domain.Config (ResolveConfig(..), ResolveKind(..))
 import Graphos.Domain.Types
@@ -189,6 +191,22 @@ spec = describe "Declarative import resolution (custom-extractors 6)" $ do
       parseModuleIndex
         "include ':app', ':core'\n// comment\n<module>web</module>\nplain lib\n"
         `shouldBe` [ ("app", "app"), ("core", "core"), ("web", "web"), ("plain", "lib") ]
+
+    it "reads the source-of-truth file relative to the project root (8.1)" $
+      withSystemTempDirectory "graphos-resolve-config" $ \root -> do
+        writeFile (root </> "settings.gradle") "include ':app', ':core'\n"
+        let cfgs = Map.fromList
+              [ (".java", ResolveConfig ResolveModulePath [] (Just "settings.gradle")) ]
+        indexes <- loadModuleIndexes root cfgs
+        indexes `shouldBe` Map.fromList
+          [ (".java", Map.fromList [ ("app", "app"), ("core", "core") ]) ]
+
+    it "leaves the index empty when the source-of-truth file is missing" $
+      withSystemTempDirectory "graphos-resolve-config" $ \root -> do
+        let cfgs = Map.fromList
+              [ (".java", ResolveConfig ResolveModulePath [] (Just "settings.gradle")) ]
+        indexes <- loadModuleIndexes root cfgs
+        indexes `shouldBe` Map.empty
 
   describe "path-prefix resolver" $ do
     it "concatenates the import path with the importer extension" $ do

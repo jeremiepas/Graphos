@@ -4,7 +4,7 @@
 -- id bucketing, gating) and the runner itself, spawned against small shell
 -- scripts so the @no shell@ / @timeout@ / @error isolation@ guarantees are
 -- exercised rather than assumed.
-module Graphos.Infrastructure.Extract.CommandSpec (spec) where
+module Graphos.Infrastructure.Extract.CommandExtractorSpec (spec) where
 
 import Control.Monad (forM_)
 import qualified Data.ByteString as BS
@@ -32,6 +32,8 @@ import Graphos.Domain.Types
   , Edge(..)
   , EdgeId(..)
   , ExtractionError(..)
+  , ExtractorConfig(..)
+  , ExtractorMode(..)
   , FileType(..)
   , Node(..)
   , Relation(..)
@@ -259,6 +261,36 @@ spec = describe "custom extractors command runner (avi-1766 3.1-3.5)" $ do
 
     it "lets a plain source file through" $
       gateCommandFile root True [] plain `shouldBe` Nothing
+
+  describe "commandSpecFromConfig (8.1)" $ do
+    let entry = ExtractorConfig
+          { ecMode           = ExtractCommand
+          , ecGrammar        = Nothing
+          , ecLanguageId     = Nothing
+          , ecGranularity    = Nothing
+          , ecCommand        = Just ["extract", "{file}"]
+          , ecBatch          = Nothing
+          , ecTimeoutSeconds = Nothing
+          , ecGrammarPath    = Nothing
+          , ecQueries        = Nothing
+          }
+
+    it "applies the documented defaults for omitted fields" $ do
+      let spec' = commandSpecFromConfig entry
+      csArgv spec' `shouldBe` ["extract", "{file}"]
+      csBatch spec' `shouldBe` False
+      csTimeoutSeconds spec' `shouldBe` 60
+      csMaxOutputBytes spec' `shouldBe` defaultMaxCommandOutputBytes
+
+    it "keeps an explicit batch flag and timeout" $ do
+      let spec' = commandSpecFromConfig entry
+            { ecBatch = Just True, ecTimeoutSeconds = Just 5 }
+      csBatch spec' `shouldBe` True
+      csTimeoutSeconds spec' `shouldBe` 5
+
+    it "floors a non-positive timeout instead of disabling the cap" $ do
+      let spec' = commandSpecFromConfig entry { ecTimeoutSeconds = Just 0 }
+      csTimeoutSeconds spec' `shouldBe` 1
 
   describe "runner (3.1)" $ do
     it "runs the argv for one file and decodes its nodes" $

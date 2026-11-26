@@ -55,10 +55,10 @@
 
 ## 8. Tests and docs
 
-- [ ] 8.1 Add Hspec suites CommandExtractorSpec, RuntimeGrammarSpec, ResolveConfigSpec
-- [ ] 8.2 Update README/workflow docs 05-path, 16-lsp-discovery and example
-- [ ] 8.3 Validate openspec change
-- [ ] 8.4 Check: cabal build/test green
+- [x] 8.1 Add Hspec suites CommandExtractorSpec, RuntimeGrammarSpec, ResolveConfigSpec
+- [x] 8.2 Update README/workflow docs 05-path, 16-lsp-discovery and example
+- [x] 8.3 Validate openspec change
+- [x] 8.4 Check: cabal build/test green
 
 ## 9. Review gate
 

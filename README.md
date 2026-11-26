@@ -57,7 +57,7 @@ Opt-in outputs: `obsidian/` (`--obsidian`), `graph.cypher` (`--neo4j`),
 
 | Area | What works today |
 |------|------------------|
-| Extraction | tree-sitter for Go, Rust, TypeScript/JavaScript, Ruby, Java, Kotlin, PHP, Perl, C#, Python, Haskell, C/C++, JSON/YAML/SQL/Markdown, plus docs, Office, PDF, and optional vision for images. See [supported file types](docs/reference/supported-file-types.md) for the honest per-language edge coverage. |
+| Extraction | tree-sitter for Go, Rust, TypeScript/JavaScript, Ruby, Java, Kotlin, PHP, Perl, C#, Python, Haskell, C/C++, JSON/YAML/SQL/Markdown, plus docs, Office, PDF, and optional vision for images. Any other language can plug in an external `mode: command` extractor or a runtime tree-sitter grammar. See [supported file types](docs/reference/supported-file-types.md) for the honest per-language edge coverage. |
 | Graph | `contains`, `imports`, `calls`, and inferred doc/code edges; name-matched calls are syntactic, not a semantic call graph. |
 | Clustering | Leiden community detection with configurable resolution, minimum size, and iteration cap; Bunch modularization is available via `--cluster-algorithm bunch`. |
 | Query | `graphos query`, `path`, `explain`, `symbols`, `neighbors`, and a real openCypher/GQL engine (`graphos cypher`, read-only unless `--write`). |
@@ -74,6 +74,46 @@ The full documentation index is [docs/README.md](docs/README.md).
 | [Workflows](docs/workflows/README.md) | All 18 task-oriented guides |
 | [Reference](docs/reference/cli.md) | [CLI](docs/reference/cli.md), [MCP tools](docs/reference/mcp-tools.md), [file types](docs/reference/supported-file-types.md), [graph.json](docs/reference/graph-json.md), [release policy](docs/reference/release-policy.md) |
 | [Explanation](docs/explanation/architecture.md) | [Architecture](docs/explanation/architecture.md), [pipeline flow](docs/explanation/flow-diagram.md), [decision tree](docs/explanation/decision-tree.md), [embedding models](docs/explanation/embedding-models.md) |
+
+## Custom extractors
+
+Adding a language does not require patching Graphos. Three per-extension
+mechanisms are available in `graphos.yaml`:
+
+```yaml
+extractors:
+  # 1. External command: declared argv (no shell), graph.json-shaped stdout.
+  ".pl":
+    mode: command
+    command: ["my-perl-extractor", "{file}"]   # {files} for batch mode
+    batch: false                                # one invocation per file by default
+    timeout: 60                                 # seconds per invocation
+
+  # 2. Runtime tree-sitter grammar: a user-supplied .so plus optional .scm queries.
+  ".php":
+    mode: tree-sitter
+    grammar_path: ~/.local/lib/tree-sitter-php.so   # ABI 9-11
+    queries: ~/.config/graphos/queries/php/         # definitions/imports/calls.scm
+
+# 3. Declarative import resolution: pick a built-in resolver per extension.
+resolve:
+  ".java": { kind: package, roots: ["src/main/java"] }
+  ".php":  { kind: psr4, roots: ["src"] }
+```
+
+A command extractor prints `{"nodes": [...], "edges": [...]}` (or a JGF
+envelope); Graphos validates each record, prefixes ids with a per-file bucket,
+and merges the result like any other extractor. A non-zero exit, timeout, or
+malformed output records a per-file error and falls back to a stub node — one
+bad file never aborts the build.
+
+Command extractors run the argv directly, never through a shell, are gated by
+the `allow_command_extractors` setting (CLI default on, library default off;
+disable with `--no-command-extractors`), and are never spawned for sensitive or
+ignored files. Runtime grammars must report tree-sitter ABI 9-11; an unreadable
+library or incompatible ABI falls back to the stub with a warning. See
+[Workflow 01](docs/workflows/01-full-pipeline.md) and
+[supported file types](docs/reference/supported-file-types.md) for details.
 
 ## LSP security notes
 
