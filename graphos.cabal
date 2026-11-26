@@ -438,6 +438,7 @@ test-suite graphos-test
      Graphos.UseCase.LabelSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
+     Graphos.UseCase.ExtractErrorReportingSpec
      Graphos.UseCase.CodeReviewGraphSpec
      Graphos.UseCase.InferSpec
      Graphos.UseCase.InferDocumentSpec
@@ -485,8 +486,8 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
     Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
     Graphos.Infrastructure.Extract.ImportResolutionSpec
-    Graphos.Infrastructure.Extract.ResolveSpec
-    Graphos.Infrastructure.Extract.CommandSpec
+    Graphos.Infrastructure.Extract.ResolveConfigSpec
+    Graphos.Infrastructure.Extract.CommandExtractorSpec
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec

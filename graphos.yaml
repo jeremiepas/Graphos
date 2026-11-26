@@ -181,7 +181,7 @@ extractors:
 # Map file extension → built-in resolver kind, so import edges follow the
 # project's real module layout instead of the relative-path default.
 # Kinds: package, psr4, module-path, path-prefix.
-#   package / psr4     require `roots` (relative to this file's directory)
+#   package / psr4     require `roots` (relative to the project/input root)
 #   module-path        requires `source_of_truth` (e.g. settings.gradle)
 #   path-prefix        no required field (relative-path behaviour, explicit)
 # An unknown kind or a missing required field fails config loading.

@@ -73,7 +73,7 @@ spec = describe "exportAll" $ do
             , epExportAll = undefined
             }
           config = defaultConfig { cfgOutputDir = tmpDir, cfgNoViz = False }
-      _ <- exportAll port g analysis config detection labels []
+      _ <- exportAll port g analysis config detection [] labels []
       recorded <- readIORef ref
       recorded `shouldBe` Just labels
 

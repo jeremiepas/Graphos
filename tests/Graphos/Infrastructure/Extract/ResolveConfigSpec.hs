@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Declarative import resolution (custom-extractors 6.1–6.5): one case per
 -- scenario of the @import-resolution@ delta, on hand-built extractions.
-module Graphos.Infrastructure.Extract.ResolveSpec (spec) where
+module Graphos.Infrastructure.Extract.ResolveConfigSpec (spec) where
 
 import Test.Hspec
 import Data.Bits ((.|.))
@@ -10,6 +10,8 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Short (fromText, toText)
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 
 import Graphos.Domain.Config (ResolveConfig(..), ResolveKind(..))
 import Graphos.Domain.Types
@@ -84,7 +86,7 @@ targetsOf src ex = sort
   , Just n <- [Map.lookup (edgeTarget e) (extractionNodes ex)] ]
 
 run :: Map.Map String ResolveConfig -> Map.Map String ModuleIndex -> Extraction -> (Extraction, ResolveStats)
-run cfg indexes = resolveDeclarativeImports cfg indexes
+run cfg indexes = resolveDeclarativeImports "." cfg indexes
 
 -- ───────────────────────────────────────────────
 -- Spec
@@ -130,6 +132,19 @@ spec = describe "Declarative import resolution (custom-extractors 6)" $ do
           (ex', _) = run cfg Map.empty ex
       targetsOf "src/main/java/org/example/App.java" ex'
         `shouldBe` ["src/main/java/org/example/util/Money.java"]
+
+    it "resolves relative config roots against the project root" $ do
+      let ex = mkExtraction
+            [ moduleNode "/proj/code/com/example/App.java"
+            , moduleNode "/proj/other/com/example/Foo.java"
+            , externalNode "com.example.Foo" ]
+            [ importEdge "/proj/code/com/example/App.java" "com.example.Foo" ]
+          cfg = Map.fromList
+            [ (".java", ResolveConfig ResolvePackage ["other"] Nothing) ]
+          (ex', stats) = resolveDeclarativeImports "/proj" cfg Map.empty ex
+      targetsOf "/proj/code/com/example/App.java" ex'
+        `shouldBe` ["/proj/other/com/example/Foo.java"]
+      rsPackage stats `shouldBe` 1
 
     it "leaves an unresolved package external" $ do
       let ex = mkExtraction
@@ -177,6 +192,22 @@ spec = describe "Declarative import resolution (custom-extractors 6)" $ do
         "include ':app', ':core'\n// comment\n<module>web</module>\nplain lib\n"
         `shouldBe` [ ("app", "app"), ("core", "core"), ("web", "web"), ("plain", "lib") ]
 
+    it "reads the source-of-truth file relative to the project root (8.1)" $
+      withSystemTempDirectory "graphos-resolve-config" $ \root -> do
+        writeFile (root </> "settings.gradle") "include ':app', ':core'\n"
+        let cfgs = Map.fromList
+              [ (".java", ResolveConfig ResolveModulePath [] (Just "settings.gradle")) ]
+        indexes <- loadModuleIndexes root cfgs
+        indexes `shouldBe` Map.fromList
+          [ (".java", Map.fromList [ ("app", "app"), ("core", "core") ]) ]
+
+    it "leaves the index empty when the source-of-truth file is missing" $
+      withSystemTempDirectory "graphos-resolve-config" $ \root -> do
+        let cfgs = Map.fromList
+              [ (".java", ResolveConfig ResolveModulePath [] (Just "settings.gradle")) ]
+        indexes <- loadModuleIndexes root cfgs
+        indexes `shouldBe` Map.empty
+
   describe "path-prefix resolver" $ do
     it "concatenates the import path with the importer extension" $ do
       let ex = mkExtraction
@@ -191,10 +222,28 @@ spec = describe "Declarative import resolution (custom-extractors 6)" $ do
       rsPathPrefix stats `shouldBe` 1
 
   describe "precedence" $ do
-    it "warns when a config entry overrides a built-in resolver, naming extension and kind" $
+    it "warns when a config entry overrides a built-in resolver, naming extension and both kinds" $
       resolveOverrideWarnings
         (Map.fromList [ (".java", ResolveConfig ResolvePathPrefix [] Nothing) ])
-        `shouldBe` ["resolve[\".java\"]: config overrides the built-in path-prefix resolver"]
+        `shouldBe`
+          [ "resolve[\".java\"]: config path-prefix resolver overrides the built-in package resolver" ]
+
+    it "the pass applies the config resolver, not the overridden built-in one" $ do
+      let ex = mkExtraction
+            [ moduleNode "src/main/java/com/example/App.java"
+            , moduleNode "src/main/java/com/example/Foo.java"
+            , moduleNode "other/com/example/Foo.java"
+            , externalNode "com/example/Foo" ]
+            [ importEdge "src/main/java/com/example/App.java" "com/example/Foo" ]
+          cfg = Map.fromList
+            [ (".java", ResolveConfig ResolvePathPrefix ["other"] Nothing) ]
+          (ex', stats) = run cfg Map.empty ex
+      -- The built-in package resolver would pick src/main/java/com/example/Foo.java
+      -- from the dotted spelling; the config path-prefix rule wins instead.
+      targetsOf "src/main/java/com/example/App.java" ex'
+        `shouldBe` ["other/com/example/Foo.java"]
+      rsPathPrefix stats `shouldBe` 1
+      rsPackage stats `shouldBe` 0
 
     it "does not warn for an extension with no built-in resolver" $
       resolveOverrideWarnings

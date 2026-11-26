@@ -16,7 +16,7 @@ import System.Directory (canonicalizePath)
 import System.FilePath (makeRelative, takeExtension, isAbsolute)
 import System.FilePath ((</>))
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), extractionFromLists)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), ExtractionError(..), extractionFromLists)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -24,6 +24,13 @@ import Graphos.Domain.Graph (makeStubNode)
 
 -- | A group of files sharing the same LSP server command
 type FileGroup = (String, [FilePath])
+
+-- | A stub extraction that records why @fp@ contributed nothing
+-- (custom-extractors 7.1): an LSP failure is per-file, never fatal.
+lspFailure :: FilePath -> T.Text -> Extraction
+lspFailure fp msg =
+  (extractionFromLists [makeStubNode fp] [])
+    { extractionErrors = [ExtractionError fp "lsp" msg] }
 
 -- | Group files by their LSP server command
 groupByLSPServer :: Map.Map String (String, [String]) -> [FilePath] -> [FileGroup]
@@ -43,6 +50,7 @@ extractGroup appEnv absRoot _config (serverCmd, files) =
   in if serverCmd == "stub"
     then mapM (\fp -> do
       logDebug $ T.pack $ "  [stub] " ++ fp
+      -- A stub mode is a deliberate fallback, not a failure: no error recorded.
       pure (extractionFromLists [makeStubNode fp] [])
     ) files
     else doExtractWithSharedLSP appEnv absRoot serverCmd files
@@ -60,7 +68,7 @@ doExtractWithSharedLSP appEnv absRoot serverCmd files = do
   case mbLSPOpts of
     Nothing -> mapM (\fp -> do
       logWarn $ T.pack $ "  LSP " ++ serverCmd ++ " disappeared for " ++ fp
-      pure (extractionFromLists [makeStubNode fp] [])
+      pure (lspFailure fp ("LSP server '" <> T.pack serverCmd <> "' is no longer available"))
       ) files
     Just (cmd, args) -> do
       logDebug $ T.pack $ "  [lsp] Connecting to " ++ cmd ++ " for " ++ show (length files) ++ " files"
@@ -68,7 +76,7 @@ doExtractWithSharedLSP appEnv absRoot serverCmd files = do
       case result of
         Left err -> do
           logWarn $ T.pack $ "  [lsp] Connection failed: " ++ T.unpack err
-          mapM (\fp -> pure (extractionFromLists [makeStubNode fp] [])) files
+          mapM (\fp -> pure (lspFailure fp ("connection to '" <> T.pack serverCmd <> "' failed: " <> err))) files
         Right handle -> do
           hasWsSym <- epHasWorkspaceSymbols ep handle
           extractions <- if hasWsSym
@@ -127,7 +135,7 @@ extractFilesWithLSP appEnv handle (fp:fps) = do
   let ep = extractionPort appEnv
   alive <- epIsServerConnected ep handle
   if not alive
-    then pure [extractionFromLists [makeStubNode f] [] | f <- fp:fps]
+    then pure [lspFailure f "LSP server disconnected before this file was extracted" | f <- fp:fps]
     else do
       ext <- epExtractViaLSP ep handle fp
       rest <- extractFilesWithLSP appEnv handle fps

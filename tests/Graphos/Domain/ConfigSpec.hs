@@ -304,6 +304,12 @@ spec = do
       errs `shouldSatisfy` (not . null)
       concat errs `shouldContain` "grammar_path"
 
+    it "rejects a tree-sitter grammar name under mode command" $ do
+      let errs = sectionErrors
+            "{\"extractors\":{\".x\":{\"mode\":\"command\",\"command\":[\"e\"],\"grammar\":\"perl\"}}}"
+      errs `shouldSatisfy` (not . null)
+      concat errs `shouldContain` "grammar"
+
     it "rejects a tree-sitter entry without grammar or grammar_path" $ do
       let errs = sectionErrors "{\"extractors\":{\".x\":{\"mode\":\"tree-sitter\"}}}"
       errs `shouldSatisfy` (not . null)

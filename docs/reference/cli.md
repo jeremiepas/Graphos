@@ -40,6 +40,7 @@ and exports to `graphos-out/`.
 | `--max-leiden-iterations N` | `50` | Leiden iteration cap |
 | `--cluster-algorithm NAME` | `leiden` | `leiden` or `bunch` |
 | `--ignore GLOB` | — | Extra ignore pattern (repeatable) |
+| `--no-command-extractors` | command extractors on | Disable external `mode: command` extractors declared in `graphos.yaml` |
 | `--verbose, -v`, `--debug` | off | DEBUG / TRACE logging |
 
 ## Subcommands
@@ -139,7 +140,9 @@ edge similarity, a random baseline, and the Leiden point. Flags: `--graph`,
 
 ### `lservers`
 
-`graphos lservers` — list language servers detected on `PATH`.
+`graphos lservers` — list language servers detected on `PATH`. This is only
+needed for `mode: lsp`; tree-sitter, runtime-grammar, and `mode: command`
+extractors work without a language server.
 
 ### `serve`
 

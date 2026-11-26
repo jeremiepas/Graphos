@@ -8,6 +8,7 @@
 module Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec (spec) where
 
 import Data.Either (isLeft)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (isNothing)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -16,8 +17,22 @@ import System.IO.Temp (withSystemTempDirectory)
 
 import Test.Hspec
 
+import Graphos.Domain.Types
+  ( ExtractorConfig(..)
+  , ExtractorMode(..)
+  , GraphosConfig(..)
+  , PipelineConfig(..)
+  , defaultConfig
+  , defaultGraphosConfig
+  )
 import Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
 import Graphos.Infrastructure.Wiring (getGrammarPtr)
+import Graphos.UseCase.Extract.TreeSitter
+  ( GrammarSelection(..)
+  , grammarForFile
+  , grammarSelectionForFile
+  , hasRuntimeGrammar
+  )
 
 spec :: Spec
 spec = describe "runtime tree-sitter grammar loader (avi-1766 4.1-4.5)" $ do
@@ -66,6 +81,14 @@ spec = describe "runtime tree-sitter grammar loader (avi-1766 4.1-4.5)" $ do
             rgeMessage err `shouldSatisfy` T.isInfixOf "not found"
           Right _ -> expectationFailure "expected a missing library to fail"
 
+    it "refuses a grammar path under the sensitive-file policy" $
+      withSystemTempDirectory "graphos-runtime-sensitive" $ \dir -> do
+        let path = dir </> ".ssh" </> "libtree-sitter-x.so"
+        result <- loadRuntimeGrammar path
+        case result of
+          Left err -> rgeMessage err `shouldSatisfy` T.isInfixOf "sensitive"
+          Right _ -> expectationFailure "expected a sensitive grammar path to be refused"
+
   describe "optional runtime queries (4.4)" $ do
     it "loads definitions/imports and warns only about the missing calls kind" $
       withSystemTempDirectory "graphos-queries" $ \dir -> do
@@ -107,3 +130,49 @@ spec = describe "runtime tree-sitter grammar loader (avi-1766 4.1-4.5)" $ do
           rqDefinitions queries `shouldSatisfy` isNothing
           warnings `shouldSatisfy` any (T.isInfixOf "invalid definitions query")
           deleteRuntimeQueries queries
+
+  describe "grammar selection plumbing (4.3)" $ do
+    let treeSitterEntry grammarPath queries = ExtractorConfig
+          { ecMode           = ExtractTreeSitter
+          , ecGrammar        = Just "php"
+          , ecLanguageId     = Just "php"
+          , ecGranularity    = Nothing
+          , ecCommand        = Nothing
+          , ecBatch          = Nothing
+          , ecTimeoutSeconds = Nothing
+          , ecGrammarPath    = grammarPath
+          , ecQueries        = queries
+          }
+        withEntry ext ec = defaultConfig
+          { cfgGraphosConfig = defaultGraphosConfig
+              { gcExtractors = Map.insert ext ec
+                  (gcExtractors defaultGraphosConfig) } }
+
+    it "carries grammar_path and queries from the per-extension config" $ do
+      let cfg = withEntry ".php"
+            (treeSitterEntry (Just "/lib/tree-sitter-php.so")
+                             (Just "/conf/queries/php"))
+          selection = grammarSelectionForFile cfg "src/App.php"
+      gsGrammarName selection `shouldBe` "php"
+      gsGrammarPath selection `shouldBe` Just "/lib/tree-sitter-php.so"
+      gsQueriesPath selection `shouldBe` Just "/conf/queries/php"
+      grammarForFile cfg "src/App.php" `shouldBe` "php"
+      hasRuntimeGrammar cfg "src/App.php" `shouldBe` True
+
+    it "keeps a compiled-in grammar when no grammar_path is configured" $ do
+      let cfg = withEntry ".php" (treeSitterEntry Nothing Nothing)
+      gsGrammarPath (grammarSelectionForFile cfg "App.php") `shouldBe` Nothing
+      gsQueriesPath (grammarSelectionForFile cfg "App.php") `shouldBe` Nothing
+      hasRuntimeGrammar cfg "App.php" `shouldBe` False
+
+    it "falls back to the extension name for unconfigured files" $ do
+      let cfg = withEntry ".php" (treeSitterEntry Nothing Nothing)
+          selection = grammarSelectionForFile cfg "script.zzz"
+      gsGrammarName selection `shouldBe` "zzz"
+      gsGrammarPath selection `shouldBe` Nothing
+      grammarForFile cfg "script.zzz" `shouldBe` "zzz"
+      hasRuntimeGrammar cfg "script.zzz" `shouldBe` False
+
+    it "ignores a runtime grammar configured for a different extension" $ do
+      let cfg = withEntry ".php" (treeSitterEntry (Just "/lib/php.so") Nothing)
+      hasRuntimeGrammar cfg "src/App.py" `shouldBe` False

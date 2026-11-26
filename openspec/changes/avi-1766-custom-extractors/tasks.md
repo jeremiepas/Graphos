@@ -49,19 +49,19 @@
 
 ## 7. Error recording and reporting
 
-- [ ] 7.1 Append ExtractionError on failures without aborting
-- [ ] 7.2 Summarise per-extractor errors in log/report
-- [ ] 7.3 Check: integration fixture with one failing extractor completes and records error
+- [x] 7.1 Append ExtractionError on failures without aborting
+- [x] 7.2 Summarise per-extractor errors in log/report
+- [x] 7.3 Check: integration fixture with one failing extractor completes and records error
 
 ## 8. Tests and docs
 
-- [ ] 8.1 Add Hspec suites CommandExtractorSpec, RuntimeGrammarSpec, ResolveConfigSpec
-- [ ] 8.2 Update README/workflow docs 05-path, 16-lsp-discovery and example
-- [ ] 8.3 Validate openspec change
-- [ ] 8.4 Check: cabal build/test green
+- [x] 8.1 Add Hspec suites CommandExtractorSpec, RuntimeGrammarSpec, ResolveConfigSpec
+- [x] 8.2 Update README/workflow docs 05-path, 16-lsp-discovery and example
+- [x] 8.3 Validate openspec change
+- [x] 8.4 Check: cabal build/test green
 
 ## 9. Review gate
 
-- [ ] 9.1 head-of-graphos architecture review
-- [ ] 9.2 security-expert review (argv, ignore, ABI)
-- [ ] 9.3 Record verification; promote done via run-id PATCH
+- [x] 9.1 head-of-graphos architecture review
+- [x] 9.2 security-expert review (argv, ignore, ABI)
+- [ ] 9.3 Record verification; promote done via run-id PATCH — verification recorded in REVIEW.md; Paperclip run-id PATCH unavailable in the delegate environment

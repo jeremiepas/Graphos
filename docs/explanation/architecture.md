@@ -286,7 +286,14 @@ granularity: string       # fine | function | file (default: function)
 
 extractors:               # file extension → extractor config
   ".ts": { mode, grammar, language_id }
+  # custom extractors (all optional per entry):
+  #   mode: command   → command: [argv, ...], batch: bool, timeout: seconds
+  #   mode: tree-sitter → grammar_path: path.so, queries: dir (ABI 9-11)
   # ... (see graphos.yaml for full list)
+
+resolve:                  # per-extension built-in import resolver
+  ".java": { kind: package, roots: ["src/main/java"] }
+  # kinds: package | psr4 | module-path | path-prefix; config overrides built-ins
 
 pdf_extraction: string    # small | medium | large (default: medium)
 

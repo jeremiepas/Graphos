@@ -7,12 +7,14 @@ module Graphos.UseCase.Extract.TreeSitter
   , hasRuntimeGrammar
   ) where
 
+import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, tryJust)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import Data.Text (Text)
 import System.FilePath (takeExtension)
 
-import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), extractionFromLists, GraphosConfig(..), gcExtractors, ExtractorConfig(..), ecGrammar, ecGrammarPath, ecQueries, Granularity)
+import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), ExtractionError(..), extractionFromLists, GraphosConfig(..), gcExtractors, ExtractorConfig(..), ecGrammar, ecGrammarPath, ecQueries, Granularity)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -64,14 +66,33 @@ extractViaTreeSitterFFI appEnv gran selection filePath = do
   let ep = extractionPort appEnv
       lp = loggingPort appEnv
       grammar = gsGrammarName selection
-  content <- BS.readFile filePath
-  result <- epParseWithGrammar ep gran grammar (gsGrammarPath selection) (gsQueriesPath selection) filePath content
-  case result of
-    Nothing -> do
-      lpLogWarn lp $ T.pack $ "  [tree-sitter] No grammar for " ++ grammar ++ " or parse failed for " ++ filePath
-      pure (extractionFromLists [makeStubNode filePath] [])
-    Just extraction -> do
-      let nNodes = Map.size (extractionNodes extraction)
-          nEdges = Map.size (extractionEdges extraction)
-      lpLogDebug lp $ T.pack $ "  [tree-sitter] " ++ filePath ++ " → " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
-      pure extraction
+      -- Per-file failure isolation (custom-extractors 7.1): a read or parse
+      -- failure yields a stub carrying an 'ExtractionError', never an exception
+      -- that would abort the whole extraction. Async cancellation is left to
+      -- propagate.
+      failed msg = do
+        lpLogWarn lp $ T.pack $ "  [tree-sitter] " ++ filePath ++ ": " ++ T.unpack msg
+        pure ((extractionFromLists [makeStubNode filePath] [])
+                { extractionErrors = [ExtractionError filePath (T.pack grammar) msg] })
+  readResult <- tryJust synchronousFailure (BS.readFile filePath)
+  case readResult of
+    Left msg -> failed ("could not read file: " <> msg)
+    Right content -> do
+      parseResult <- tryJust synchronousFailure $
+        epParseWithGrammar ep gran grammar (gsGrammarPath selection) (gsQueriesPath selection) filePath content
+      case parseResult of
+        Left msg -> failed ("parse failed: " <> msg)
+        Right Nothing ->
+          failed ("no grammar for '" <> T.pack grammar <> "' or parse failed")
+        Right (Just extraction) -> do
+          let nNodes = Map.size (extractionNodes extraction)
+              nEdges = Map.size (extractionEdges extraction)
+          lpLogDebug lp $ T.pack $ "  [tree-sitter] " ++ filePath ++ " → " ++ show nNodes ++ " nodes, " ++ show nEdges ++ " edges"
+          pure extraction
+
+-- | The text of a synchronous failure, or 'Nothing' for thread cancellation,
+-- which must keep propagating so 'mapConcurrently' can unwind its siblings.
+synchronousFailure :: SomeException -> Maybe Text
+synchronousFailure e = case fromException e :: Maybe SomeAsyncException of
+  Just _  -> Nothing
+  Nothing -> Just (T.pack (displayException e))

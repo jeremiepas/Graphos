@@ -91,7 +91,7 @@ keyText = T.unpack . Key.toText
 -- | Validate one per-extension extractor entry.
 --
 --   * @command@: requires a non-empty @command@ argv list; forbids the
---     tree-sitter @grammar_path@ / @queries@ fields.
+--     tree-sitter @grammar@ / @grammar_path@ / @queries@ fields.
 --   * @tree-sitter@: requires @grammar@ or @grammar_path@; forbids @command@,
 --     @batch@ and @timeout@.
 --   * @lsp@ / @stub@: forbid the command and runtime-grammar fields.
@@ -125,6 +125,7 @@ validateExtractorEntry ext ec = firstLeft $ case ecMode ec of
           Just []                  -> Left $ prefix ++ "mode \"command\" requires a non-empty \"command\" argv list"
           Just argv | any null argv -> Left $ prefix ++ "\"command\" argv entries must not be empty"
           Just _                   -> Right ()
+      , forbid "command" "grammar" (ecGrammar ec)
       , forbid "command" "grammar_path" (ecGrammarPath ec)
       , forbid "command" "queries" (ecQueries ec)
       , timeoutRule

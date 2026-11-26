@@ -32,7 +32,7 @@ spec = do
           , analysisPartitionQuality = Nothing
           , analysisClusterEval = Nothing
           }
-        report = generateReport g baseAnalysis defaultConfig detection Nothing
+        report = generateReport g baseAnalysis defaultConfig detection [] Nothing
 
     it "prints the cohesion value from the analysis map (no recomputation)" $
       -- 0.42 is deliberately NOT the structural cohesion of the fixture
@@ -54,7 +54,7 @@ spec = do
       let q = ClusterQuality { cqAlgorithm = "bunch", cqMQ = 1.25, cqModularity = 0.5
                              , cqIntraFraction = 0.75, cqClusters = 1, cqSkip = Nothing, cqBunchRuns = Nothing
                              , cqScoredRelations = Nothing }
-          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection Nothing
+          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection [] Nothing
       r `shouldSatisfy` T.isInfixOf "Partition quality (bunch): MQ = 1.2500, modularity = 0.5000, intra-edge fraction = 0.7500"
       r `shouldNotSatisfy` T.isInfixOf "Bunch skipped"
 
@@ -68,7 +68,7 @@ spec = do
             , cerSelected = "cosine_single_25"
             , cerSkipped = []
             }
-          r = generateReport g baseAnalysis { analysisClusterEval = Just sweep } defaultConfig detection Nothing
+          r = generateReport g baseAnalysis { analysisClusterEval = Just sweep } defaultConfig detection [] Nothing
       r `shouldSatisfy` T.isInfixOf "## Configuration sweep"
       r `shouldSatisfy` T.isInfixOf "| 1 | cosine_single_25 | 90.00 | 4 | 1 | 0.31 |"
       r `shouldSatisfy` T.isInfixOf "Selected: cosine_single_25"
@@ -78,7 +78,7 @@ spec = do
                              , cqIntraFraction = 0.5, cqClusters = 3, cqSkip = Nothing
                              , cqBunchRuns = Just (BunchRunInfo [500, 420, 77] 12 3)
                              , cqScoredRelations = Just ["imports", "calls"] }
-          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection Nothing
+          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection [] Nothing
       r `shouldSatisfy` T.isInfixOf "Bunch runs: 3 (500, 420, 77 files), refinement: 12 moves in 3 passes"
       r `shouldSatisfy` T.isInfixOf "Partition quality (bunch, scored over imports, calls): MQ = 2.0000"
 
@@ -86,7 +86,7 @@ spec = do
       let q = ClusterQuality { cqAlgorithm = "leiden", cqMQ = 1, cqModularity = 0.5
                              , cqIntraFraction = 0.75, cqClusters = 1, cqSkip = Just (BunchSkip 6000 5000)
                              , cqBunchRuns = Nothing, cqScoredRelations = Nothing }
-          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection Nothing
+          r = generateReport g baseAnalysis { analysisPartitionQuality = Just q } defaultConfig detection [] Nothing
       r `shouldSatisfy` T.isInfixOf "Partition quality (leiden)"
       r `shouldSatisfy` T.isInfixOf "Bunch skipped: 6000 files exceed the cap of 5000"
 
@@ -95,7 +95,7 @@ spec = do
 
     it "renders the no-articulation message when the shared list is empty" $ do
       let analysis' = baseAnalysis { analysisArticulation = [] }
-          report' = generateReport g analysis' defaultConfig detection Nothing
+          report' = generateReport g analysis' defaultConfig detection [] Nothing
       report' `shouldSatisfy` T.isInfixOf "No articulation points found"
 
     it "caps the bridge table at bridgeTableCap, drops degree ≤ 1, and totals the rest" $ do
@@ -139,13 +139,13 @@ spec = do
       -- .ts is a recognized default extractor (structural); .scala has none
       -- (#158) and routes to ExtractStub.
       let codeFiles = replicate 8 "a.ts" ++ replicate 34 "a.scala"
-          report = generateReport g baseAnalysis defaultConfig (detectionWithCode codeFiles) Nothing
+          report = generateReport g baseAnalysis defaultConfig (detectionWithCode codeFiles) [] Nothing
       report `shouldSatisfy` T.isInfixOf "Files detected: 42"
       report `shouldSatisfy` T.isInfixOf "Files with structure: 8"
       report `shouldSatisfy` T.isInfixOf "Stubbed: 34 (.scala 34)"
 
     it "reports zero stubbed when every code file resolves to a real extractor" $ do
-      let report = generateReport g baseAnalysis defaultConfig (detectionWithCode (replicate 5 "a.ts")) Nothing
+      let report = generateReport g baseAnalysis defaultConfig (detectionWithCode (replicate 5 "a.ts")) [] Nothing
       report `shouldSatisfy` T.isInfixOf "Files detected: 5"
       report `shouldSatisfy` T.isInfixOf "Files with structure: 5"
       report `shouldSatisfy` T.isInfixOf "Stubbed: 0"

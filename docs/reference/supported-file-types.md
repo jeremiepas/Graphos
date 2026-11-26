@@ -26,6 +26,33 @@ languages above whose grammars happen to use those exact node names. A language
 server's `callHierarchy` (opt-in LSP mode) is the only genuinely semantic
 cross-file call graph Graphos can produce, for any language with a server.
 
+## Adding a language without patching Graphos
+
+Any extension can be bound in `graphos.yaml` instead of the compiled-in table:
+
+```yaml
+extractors:
+  ".pl":
+    mode: command
+    command: ["my-perl-extractor", "{file}"]   # argv, no shell; {files} for batch
+    batch: false
+    timeout: 60
+  ".php":
+    mode: tree-sitter
+    grammar_path: ~/.local/lib/tree-sitter-php.so   # ABI 9-11
+    queries: ~/.config/graphos/queries/php/         # optional .scm dir
+
+resolve:
+  ".java": { kind: package, roots: ["src/main/java"] }
+```
+
+A command extractor prints graph.json-shaped `nodes` and `edges`; Graphos
+validates every record, prefixes ids per file, records a per-file error on
+failure, and stub-extracts that file without aborting the run. Runtime grammar
+and command paths are fingerprinted, so a replaced `.so`, an edited query, or a
+changed command invalidates the cache. Command extractors honour
+ignore/sensitive filtering and the `allow_command_extractors` gate.
+
 ## Non-code
 
 | Type | Extensions | What actually happens |

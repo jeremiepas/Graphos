@@ -43,6 +43,7 @@ import qualified Graphos.Domain.ContextSpec
 import qualified Graphos.UseCase.PipelineSpec
 import qualified Graphos.UseCase.StagingSpec
 import qualified Graphos.UseCase.ExtractSpec
+import qualified Graphos.UseCase.ExtractErrorReportingSpec
 import qualified Graphos.UseCase.CodeReviewGraphSpec
 import qualified Graphos.UseCase.InferSpec
 import qualified Graphos.UseCase.InferDocumentSpec
@@ -85,8 +86,8 @@ import qualified Graphos.Infrastructure.Extract.TreeSitter.GrammarsSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec
 import qualified Graphos.Infrastructure.Extract.ImportResolutionSpec
-import qualified Graphos.Infrastructure.Extract.ResolveSpec
-import qualified Graphos.Infrastructure.Extract.CommandSpec
+import qualified Graphos.Infrastructure.Extract.ResolveConfigSpec
+import qualified Graphos.Infrastructure.Extract.CommandExtractorSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitterSpec
 import qualified Graphos.Infrastructure.LSP.ClientSpec
 import qualified Graphos.Infrastructure.LSP.TransportSpec
@@ -163,6 +164,7 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.PipelineSpec.spec
   Graphos.UseCase.StagingSpec.spec
   Graphos.UseCase.ExtractSpec.spec
+  Graphos.UseCase.ExtractErrorReportingSpec.spec
   Graphos.UseCase.CodeReviewGraphSpec.spec
   Graphos.UseCase.InferSpec.spec
   Graphos.UseCase.InferDocumentSpec.spec
@@ -205,8 +207,8 @@ main = Test.Hspec.hspec $ do
   Graphos.Infrastructure.Extract.TreeSitter.ImportsSpec.spec
   Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammarSpec.spec
   Graphos.Infrastructure.Extract.ImportResolutionSpec.spec
-  Graphos.Infrastructure.Extract.ResolveSpec.spec
-  Graphos.Infrastructure.Extract.CommandSpec.spec
+  Graphos.Infrastructure.Extract.ResolveConfigSpec.spec
+  Graphos.Infrastructure.Extract.CommandExtractorSpec.spec
   Graphos.Infrastructure.Extract.TreeSitterSpec.spec
   Graphos.Infrastructure.LSP.ClientSpec.spec
   Graphos.Infrastructure.LSP.TransportSpec.spec

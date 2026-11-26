@@ -4,7 +4,7 @@
 -- id bucketing, gating) and the runner itself, spawned against small shell
 -- scripts so the @no shell@ / @timeout@ / @error isolation@ guarantees are
 -- exercised rather than assumed.
-module Graphos.Infrastructure.Extract.CommandSpec (spec) where
+module Graphos.Infrastructure.Extract.CommandExtractorSpec (spec) where
 
 import Control.Monad (forM_)
 import qualified Data.ByteString as BS
@@ -15,12 +15,13 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Short (fromText, toText)
 import System.Directory
-  ( doesFileExist
+  ( createDirectoryIfMissing
+  , doesFileExist
   , getPermissions
   , setPermissions
   , executable
   )
-import System.FilePath ((</>))
+import System.FilePath (takeDirectory, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 
 import Test.Hspec
@@ -31,6 +32,8 @@ import Graphos.Domain.Types
   , Edge(..)
   , EdgeId(..)
   , ExtractionError(..)
+  , ExtractorConfig(..)
+  , ExtractorMode(..)
   , FileType(..)
   , Node(..)
   , Relation(..)
@@ -224,6 +227,11 @@ spec = describe "custom extractors command runner (avi-1766 3.1-3.5)" $ do
           b = outputToExtraction "src/x.pm" (oneNodeOutput "fn:main")
       Map.size (extNodes (mergeExtractions a b)) `shouldBe` 2
 
+    it "keeps distinct files whose names sanitise alike apart" $ do
+      let a = outputToExtraction "src/x y.pl" (oneNodeOutput "fn:main")
+          b = outputToExtraction "src/xy.pl" (oneNodeOutput "fn:main")
+      Map.size (extNodes (mergeExtractions a b)) `shouldBe` 2
+
     it "satisfies id uniqueness for any two distinct source files" $
       property prop_distinctFilesStayDistinct
 
@@ -253,6 +261,36 @@ spec = describe "custom extractors command runner (avi-1766 3.1-3.5)" $ do
 
     it "lets a plain source file through" $
       gateCommandFile root True [] plain `shouldBe` Nothing
+
+  describe "commandSpecFromConfig (8.1)" $ do
+    let entry = ExtractorConfig
+          { ecMode           = ExtractCommand
+          , ecGrammar        = Nothing
+          , ecLanguageId     = Nothing
+          , ecGranularity    = Nothing
+          , ecCommand        = Just ["extract", "{file}"]
+          , ecBatch          = Nothing
+          , ecTimeoutSeconds = Nothing
+          , ecGrammarPath    = Nothing
+          , ecQueries        = Nothing
+          }
+
+    it "applies the documented defaults for omitted fields" $ do
+      let spec' = commandSpecFromConfig entry
+      csArgv spec' `shouldBe` ["extract", "{file}"]
+      csBatch spec' `shouldBe` False
+      csTimeoutSeconds spec' `shouldBe` 60
+      csMaxOutputBytes spec' `shouldBe` defaultMaxCommandOutputBytes
+
+    it "keeps an explicit batch flag and timeout" $ do
+      let spec' = commandSpecFromConfig entry
+            { ecBatch = Just True, ecTimeoutSeconds = Just 5 }
+      csBatch spec' `shouldBe` True
+      csTimeoutSeconds spec' `shouldBe` 5
+
+    it "floors a non-positive timeout instead of disabling the cap" $ do
+      let spec' = commandSpecFromConfig entry { ecTimeoutSeconds = Just 0 }
+      csTimeoutSeconds spec' `shouldBe` 1
 
   describe "runner (3.1)" $ do
     it "runs the argv for one file and decodes its nodes" $
@@ -334,6 +372,24 @@ spec = describe "custom extractors command runner (avi-1766 3.1-3.5)" $ do
           other -> expectationFailure
             ("expected CommandFailed for " ++ fp ++ ", got " ++ show other)
 
+    it "records an error when a batch basename is ambiguous" $
+      -- Two inputs named x.pl share a basename: a record that names only the
+      -- basename cannot be routed, so it must surface as a per-file failure
+      -- rather than silently disappearing.
+      withSystemTempDirectory "graphos-command" $ \root -> do
+        createDirectoryIfMissing True (root </> "a")
+        createDirectoryIfMissing True (root </> "b")
+        script <- writeScript root $ "printf '%s' '" ++
+          "{\"nodes\":[{\"id\":\"fn:x\",\"label\":\"x\",\"source_file\":\"x.pl\"}],\"edges\":[]}'"
+        let files = [root </> "a" </> "x.pl", root </> "b" </> "x.pl"]
+        outcomes <- runCommandExtraction
+          ((specWith [script, "{files}"]) { csBatch = True }) root True [] files
+        forM_ files $ \fp -> case Map.lookup fp outcomes of
+          Just (CommandFailed err) ->
+            T.isInfixOf "no valid node" (eeMessage err) `shouldBe` True
+          other -> expectationFailure
+            ("expected CommandFailed for " ++ fp ++ ", got " ++ show other)
+
 -- ───────────────────────────────────────────────
 -- Properties
 -- ───────────────────────────────────────────────
@@ -341,19 +397,24 @@ spec = describe "custom extractors command runner (avi-1766 3.1-3.5)" $ do
 genPath :: Gen FilePath
 genPath = do
   dir  <- elements ["src", "lib", "app", "a", "b", "src/api", "lib/util"]
-  name <- elements ["x", "y", "main", "util"]
+  -- "x y" and "xy" sanitise to the same stem on purpose: the id bucket must
+  -- still keep those two files apart.
+  name <- elements ["x", "y", "main", "util", "x y", "xy"]
   ext  <- elements [".pl", ".pm", ".php"]
   pure (dir </> name ++ ext)
 
 -- | Two distinct files that emit the same raw id must merge into two nodes.
+-- The guard is only on the inputs being distinct: a bucket collision must make
+-- this /fail/, never be discarded as an assumption.
 prop_distinctFilesStayDistinct :: Property
 prop_distinctFilesStayDistinct =
-  forAll ((,) <$> genPath <*> genPath) $ \(fa, fb) ->
-    commandFileBucket fa /= commandFileBucket fb ==>
-      classify (fa /= fb) "distinct files" $
-        Map.size (extNodes (mergeExtractions
-          (outputToExtraction fa (oneNodeOutput "fn:main"))
-          (outputToExtraction fb (oneNodeOutput "fn:main")))) === 2
+  withMaxSuccess 200 $
+    forAll ((,) <$> genPath <*> genPath) $ \(fa, fb) ->
+      fa /= fb ==>
+        classify (takeDirectory fa == takeDirectory fb) "same directory" $
+          Map.size (extNodes (mergeExtractions
+            (outputToExtraction fa (oneNodeOutput "fn:main"))
+            (outputToExtraction fb (oneNodeOutput "fn:main")))) === 2
 
 -- | Re-qualifying an already qualified extraction changes nothing.
 prop_qualificationIdempotent :: Property

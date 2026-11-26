@@ -15,12 +15,16 @@
 #     queries: ~/.config/graphos/queries/php/         # optional .scm dir
 #   ".pl":
 #     mode: command
-#     command: ["my-perl-extractor", "{file}"]
-#     timeout: 60
+#     command: ["my-perl-extractor", "{file}"]   # {files} for batch mode
+#     batch: false                               # one invocation per file
+#     timeout: 60                                # seconds per invocation
 #
 # resolve:                      # built-in import resolvers per extension
 #   ".java": { kind: package, roots: ["src/main/java"] }
 #   ".php":  { kind: psr4, roots: ["src"] }
+#   ".go":   { kind: path-prefix }
+#
+# A runnable command-extractor example lives in example/custom-extractor/.
 #
 # Override any extension below. Missing extensions use defaults.
 

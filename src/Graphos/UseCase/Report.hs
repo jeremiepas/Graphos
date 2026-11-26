@@ -16,7 +16,7 @@ import Numeric (showFFloat)
 
 import Graphos.Domain.Types
 import Graphos.Domain.Graph (Graph, gNodes, gEdges, neighbors)
-import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCoverage(..))
+import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCoverage(..), summariseExtractionErrors)
 
 -- | Generate a markdown report.
 --
@@ -24,8 +24,8 @@ import Graphos.UseCase.Extract.Core (partitionByExtractor, stubCoverage, StubCov
 -- come from the 'Analysis' record — the values computed once during
 -- clustering/analysis — never recomputed here, so rendering does no
 -- whole-graph work.
-generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> Maybe (Map.Map CommunityId Text) -> Text
-generateReport g analysis config detection mLabels =
+generateReport :: Graph -> Analysis -> PipelineConfig -> Detection -> [ExtractionError] -> Maybe (Map.Map CommunityId Text) -> Text
+generateReport g analysis config detection extractionErrs mLabels =
   let summaryLines =
         [ T.pack $ "Nodes: " ++ show (Map.size (gNodes g))
         , T.pack $ "Edges: " ++ show (Map.size (gEdges g))
@@ -53,6 +53,11 @@ generateReport g analysis config detection mLabels =
           , ""
           ]
        ++ extractionCoverageLines coverage
+       ++ [ ""
+          , "## Extraction Errors"
+          , ""
+          ]
+       ++ extractionErrorLines extractionErrs
        ++ [ ""
           , "## Communities"
           , ""
@@ -145,6 +150,31 @@ extractionCoverageLines sc =
     breakdown
       | null (scStubbedByExt sc) = ""
       | otherwise = " (" ++ intercalate ", " [ ext ++ " " ++ show n | (ext, n) <- scStubbedByExt sc ] ++ ")"
+
+-- | Per-extractor extraction-error roll-up (custom-extractors 7.2).
+--
+-- Bounded: one summary line naming each failing extractor and its count, then
+-- at most 'errorDetailCap' rows of file/extractor/message. An extractor error
+-- never removes a file from the graph (it is stub-extracted), so this section
+-- explains which files are missing structure and why.
+extractionErrorLines :: [ExtractionError] -> [Text]
+extractionErrorLines [] = [ "No extraction errors recorded." ]
+extractionErrorLines errs =
+  [ T.pack $ "Files with extraction errors: " ++ show (length errs)
+      ++ " (" ++ intercalate ", "
+           [ T.unpack name ++ " " ++ show n
+           | (name, n) <- summariseExtractionErrors errs ] ++ ")"
+  , ""
+  , "| File | Extractor | Error |"
+  , "|---|---|---|"
+  ] ++ [ "| " <> mdCell (T.pack (eeFile e)) <> " | " <> mdCell (eeExtractor e)
+       <> " | " <> mdCell (eeMessage e) <> " |"
+       | e <- take errorDetailCap errs ]
+    ++ [ T.pack ("| … | | " ++ show (length errs - errorDetailCap) ++ " more |")
+       | length errs > errorDetailCap ]
+  where
+    errorDetailCap = 20
+    mdCell = T.replace "\n" " " . T.replace "|" "\\|"
 
 -- | Format cohesion score to 2 decimal places
 fmtCohesion :: Double -> String
