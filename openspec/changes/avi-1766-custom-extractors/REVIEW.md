@@ -89,7 +89,7 @@ LIBRARY_PATH=/nix/store/2kdz3m7ic8w226pcvkz1dlg169v91p6a-zlib-1.3.2/lib \
   cabal test all --test-show-details=direct
 ```
 
-Result: build green; `1962 examples, 0 failures, 3 pending`; suite
+Result: build green; `1963 examples, 0 failures, 3 pending`; suite
 `graphos-test: PASS`.
 
 Regression coverage added: per-file fingerprints differ across paths and a
