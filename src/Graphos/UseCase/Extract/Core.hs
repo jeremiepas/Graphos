@@ -18,6 +18,9 @@ module Graphos.UseCase.Extract.Core
   , stubCoverageWarning
   , concatMapM
   , chunkList
+  , summariseExtractionErrors
+  , extractionErrorSummaryLines
+  , isolateFileExtraction
   , ImageSource(..)
   , extractImageSource
   , collectEmbeddedImages
@@ -27,7 +30,7 @@ module Graphos.UseCase.Extract.Core
 
 import Control.Concurrent (newQSemN, waitQSemN, signalQSemN)
 import Control.Concurrent.Async (concurrently, mapConcurrently, mapConcurrently_)
-import Control.Exception (bracket_, evaluate)
+import Control.Exception (SomeAsyncException, SomeException, bracket_, displayException, evaluate, fromException, tryJust)
 import Control.Monad (forM, forM_, unless, void, when)
 import Data.List (nub, nubBy, sortBy, intercalate, maximumBy)
 import Data.Ord (comparing)
@@ -61,7 +64,7 @@ import Graphos.Infrastructure.Extract.Resolve
 import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
   ( QueryKind(..), queryKindFile, resolveRuntimePath )
-import Graphos.UseCase.Extract.LSP (groupByLSPServer, extractGroup)
+import Graphos.UseCase.Extract.LSP (FileGroup, groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter
   ( extractViaTreeSitterFFI, grammarForFile
   , grammarSelectionForFile, hasRuntimeGrammar )
@@ -235,8 +238,12 @@ extractAll appEnv config detection mProvenance = do
 
     extractTS :: FilePath -> IO ()
     extractTS fp = do
-      ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
-      fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+      ext <- isolateFileExtraction lp fp (T.pack (grammarForFile config fp)) $
+               extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
+      -- A failed extraction is never written to the cache: a transient error
+      -- must not pin a stub for the content (parity with the command path).
+      when (null (extractionErrors ext)) $
+        fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
       produce ext
 
     -- One command-mode extension at a time (a batch invocation spans only the
@@ -314,7 +321,7 @@ extractAll appEnv config detection mProvenance = do
         logInfo $ T.pack $ "  LSP server groups: " ++ show numGroups ++ " (lsp-concurrency: " ++ show lspConcurrency ++ ")"
         if numThreads <= 1
           then mapM_ (\grp -> do
-            exts <- extractGroup appEnv absRoot config grp
+            exts <- extractGroupIsolated appEnv absRoot config grp
             mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext >> mergeIntoRunning ext) exts
             mapM_ (\_ -> logProgress) grp
             ) fileGroups
@@ -323,7 +330,7 @@ extractAll appEnv config detection mProvenance = do
             results <- mapConcurrently (\grp -> bracket_
               (waitQSemN sem 1)
               (signalQSemN sem 1)
-              (extractGroup appEnv absRoot config grp)) fileGroups
+              (extractGroupIsolated appEnv absRoot config grp)) fileGroups
             mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate codeNodeMapRef codeEdgeAccRef ext >> mergeIntoRunning ext) (concat results)
             mapM_ (\grp -> mapM_ (\_ -> logProgress) grp) fileGroups
         performGC
@@ -341,9 +348,10 @@ extractAll appEnv config detection mProvenance = do
           logDebug $ T.pack $ "  [office] Starting extraction for " ++ show (length officeFiles) ++ " office files"
           if officeThreadCount <= 1
             then mapM_ (\fp -> do
-              ext <- epExtractOfficeFile ep config fp
+              ext <- isolateFileExtraction lp fp "office" (epExtractOfficeFile ep config fp)
               epPushExtractionStreaming ep config ext
               accumulate officeNodeMapRef officeEdgeAccRef ext
+              mergeIntoRunning ext
               logProgress
               ) officeFiles
             else do
@@ -353,7 +361,7 @@ extractAll appEnv config detection mProvenance = do
                 results <- mapConcurrently (\fp -> bracket_
                   (waitQSemN sem 1)
                   (signalQSemN sem 1)
-                  (epExtractOfficeFile ep config fp)) chunk
+                  (isolateFileExtraction lp fp "office" (epExtractOfficeFile ep config fp))) chunk
                 mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate officeNodeMapRef officeEdgeAccRef ext >> mergeIntoRunning ext) results
                 mapM_ (\_ -> logProgress) chunk
                 n <- readIORef officeNodeMapRef >>= evaluate . Map.size
@@ -368,9 +376,10 @@ extractAll appEnv config detection mProvenance = do
           logDebug $ T.pack $ "  [doc] Starting extraction for " ++ show (length docFiles) ++ " doc files (threads: " ++ show docThreads ++ ")"
           if docThreads <= 1
             then mapM_ (\fp -> do
-              ext <- epExtractDocFile ep fp
+              ext <- isolateFileExtraction lp fp "doc" (epExtractDocFile ep fp)
               epPushExtractionStreaming ep config ext
               accumulate docNodeMapRef docEdgeAccRef ext
+              mergeIntoRunning ext
               logProgress
               ) docFiles
             else do
@@ -380,7 +389,7 @@ extractAll appEnv config detection mProvenance = do
                 results <- mapConcurrently (\fp -> bracket_
                   (waitQSemN sem 1)
                   (signalQSemN sem 1)
-                  (epExtractDocFile ep fp)) chunk
+                  (isolateFileExtraction lp fp "doc" (epExtractDocFile ep fp))) chunk
                 mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate docNodeMapRef docEdgeAccRef ext >> mergeIntoRunning ext) results
                 n <- readIORef docNodeMapRef >>= evaluate . Map.size
                 _ <- evaluate n
@@ -394,7 +403,7 @@ extractAll appEnv config detection mProvenance = do
              logDebug $ T.pack $ "  [image] Starting extraction for " ++ show (length imageFiles) ++ " standalone + " ++ show (length embeddedImagesList) ++ " embedded images (batch: " ++ show imageBatchSize ++ ")"
              let imageChunks = chunkList imageBatchSize allImageSources
              mapM_ (\chunk -> do
-               results <- mapM (extractImageSource appEnv config) chunk
+               results <- mapM (\src -> isolateFileExtraction lp (imageSourcePath src) "image" (extractImageSource appEnv config src)) chunk
                mapM_ (\ext -> do
                  epPushExtractionStreaming ep config ext
                  accumulate imageNodeMapRef imageEdgeAccRef ext
@@ -422,9 +431,10 @@ extractAll appEnv config detection mProvenance = do
                         else atomicModify paperSuccessRef (+ 1)
                 if paperThreadCount <= 1
                   then mapM_ (\fp -> do
-                    ext <- epExtractPdfFile ep config fp
+                    ext <- isolateFileExtraction lp fp "pdf" (epExtractPdfFile ep config fp)
                     epPushExtractionStreaming ep config ext
                     accumulate paperNodeMapRef paperEdgeAccRef ext
+                    mergeIntoRunning ext
                     recordResult ext
                     ) paperFiles
                    else do
@@ -434,7 +444,7 @@ extractAll appEnv config detection mProvenance = do
                       results <- mapConcurrently (\fp -> bracket_
                         (waitQSemN sem 1)
                         (signalQSemN sem 1)
-                         (do ext <- epExtractPdfFile ep config fp
+                         (do ext <- isolateFileExtraction lp fp "pdf" (epExtractPdfFile ep config fp)
                              recordResult ext
                              pure ext)) chunk
                       mapM_ (\ext -> epPushExtractionStreaming ep config ext >> accumulate paperNodeMapRef paperEdgeAccRef ext >> mergeIntoRunning ext) results
@@ -482,7 +492,76 @@ extractAll appEnv config detection mProvenance = do
                        ++ show cacheMisses
 
   logInfo $ T.pack $ "  Extracted " ++ show (Map.size (extractionNodes resolved)) ++ " nodes, " ++ show (Map.size (extractionEdges resolved)) ++ " edges"
+  mapM_ (lpLogWarn lp) (extractionErrorSummaryLines (extractionErrors resolved))
   pure (applyTaggingSources mProvenance resolved)
+
+-- | Group per-file extraction errors by extractor name, most frequent first
+-- (custom-extractors 7.2). Ties are broken alphabetically so the summary is
+-- stable across runs.
+summariseExtractionErrors :: [ExtractionError] -> [(Text, Int)]
+summariseExtractionErrors errs =
+  sortBy compareCount $ Map.toList $ Map.fromListWith (+)
+    [ (eeExtractor e, 1 :: Int) | e <- errs ]
+  where
+    compareCount (n1, c1) (n2, c2) =
+      compare c2 c1 <> compare n1 n2
+
+-- | Render the per-extractor error roll-up for the log and @GRAPH_REPORT.md@
+-- (custom-extractors 7.2): one summary line naming each extractor and its
+-- failure count, followed by at most five representative failures. An empty
+-- list means a clean extraction, so nothing is rendered.
+extractionErrorSummaryLines :: [ExtractionError] -> [Text]
+extractionErrorSummaryLines [] = []
+extractionErrorSummaryLines errs =
+  [ "  [extract] " <> T.pack (show (length errs)) <> " file(s) recorded extraction errors ("
+      <> T.intercalate ", " [ name <> ": " <> T.pack (show n)
+                             | (name, n) <- summariseExtractionErrors errs ]
+      <> ")"
+  ] ++ map detail (take 5 errs)
+    ++ [ "    … and " <> T.pack (show (length errs - 5)) <> " more"
+       | length errs > 5 ]
+  where
+    detail e = "    " <> eeExtractor e <> " " <> T.pack (eeFile e) <> ": " <> eeMessage e
+
+-- | Run one file's extraction in isolation: a synchronous failure becomes a
+-- stub plus an 'ExtractionError' for that file, so one failing extractor can
+-- never abort the build (custom-extractors 7.1, design D8). Thread
+-- cancellation ('SomeAsyncException') is deliberately not caught.
+isolateFileExtraction :: LoggingPort -> FilePath -> Text -> IO Extraction -> IO Extraction
+isolateFileExtraction lp fp extractorName action = do
+  result <- tryJust synchronousFailureText action
+  case result of
+    Right ext -> pure ext
+    Left msg -> do
+      lpLogWarn lp $ T.pack $ "  [" ++ T.unpack extractorName ++ "] " ++ fp ++ ": " ++ T.unpack msg
+      pure (extractionFailure fp extractorName msg)
+
+-- | The text of a synchronous failure, or 'Nothing' for thread cancellation.
+synchronousFailureText :: SomeException -> Maybe Text
+synchronousFailureText e = case fromException e :: Maybe SomeAsyncException of
+  Just _  -> Nothing
+  Nothing -> Just (T.pack (displayException e))
+
+-- | A stub extraction recording one per-file failure (custom-extractors 7.1).
+extractionFailure :: FilePath -> Text -> Text -> Extraction
+extractionFailure fp extractorName msg =
+  (extractionFromLists [makeStubNode fp] [])
+    { extractionErrors = [ExtractionError fp extractorName msg] }
+
+-- | Extract one LSP server group in isolation. A crash while serving a group
+-- becomes a per-file stub with a recorded error for every file in that group,
+-- so one misbehaving server cannot abort the build (custom-extractors 7.1).
+extractGroupIsolated :: AppEnv -> FilePath -> PipelineConfig -> FileGroup -> IO [Extraction]
+extractGroupIsolated appEnv absRoot config grp@(serverCmd, files) = do
+  result <- tryJust synchronousFailureText (extractGroup appEnv absRoot config grp)
+  case result of
+    Right exts -> pure exts
+    Left msg   -> pure [ extractionFailure fp (T.pack serverCmd) msg | fp <- files ]
+
+-- | Path an 'ImageSource' names, used for per-file error reporting.
+imageSourcePath :: ImageSource -> FilePath
+imageSourcePath (StandaloneImage fp) = fp
+imageSourcePath (EmbeddedImage archivePath mediaPath) = archivePath ++ "/" ++ mediaPath
 
 -- | Tag an extraction with multi-source provenance.
 --
@@ -849,13 +928,15 @@ extractChangedFiles appEnv config changedFiles = do
   let (tsFiles, lspFiles, commandFiles, stubFiles) = partitionByExtractor config changedFiles
 
   tsExtractions <- mapM (\fp -> do
-    ext <- extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
-    fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+    ext <- isolateFileExtraction lp fp (T.pack (grammarForFile config fp)) $
+             extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
+    when (null (extractionErrors ext)) $
+      fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
     pure ext) tsFiles
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) tsExtractions
 
   let fileGroups = groupByLSPServer (epLanguageServerCommands ep) lspFiles
-  lspExtractions <- concatMapM (extractGroup appEnv absRoot config) fileGroups
+  lspExtractions <- concatMapM (extractGroupIsolated appEnv absRoot config) fileGroups
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) lspExtractions
 
   -- Command route (custom-extractors 5.1): same gate, same cache write-through
@@ -909,6 +990,7 @@ extractChangedFiles appEnv config changedFiles = do
       ++ ", path-prefix " ++ show (rsPathPrefix resolveStats) ++ "; "
       ++ show (rsDropped resolveStats) ++ " placeholder node(s) dropped)"
   logInfo $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes resolved)) ++ " nodes, " ++ show (Map.size (extractionEdges resolved)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
+  mapM_ (lpLogWarn lp) (extractionErrorSummaryLines (extractionErrors resolved))
   pure resolved
 
 -- | In collapse mode, produce one representative node per detected
@@ -949,7 +1031,7 @@ countExtractedNodes appEnv config fp = do
         else do
           absRoot <- canonicalizePath (cfgInputPath config)
           let groups = groupByLSPServer (epLanguageServerCommands (extractionPort appEnv)) [fp]
-          extractions <- mapM (extractGroup appEnv absRoot config) groups
+          extractions <- mapM (extractGroupIsolated appEnv absRoot config) groups
           pure (List.foldl' mergeExtractions emptyExtraction (concat extractions))
    pure $ length [ () | n <- Map.elems (extractionNodes ext), toText (nodeSourceFile n) == T.pack fp ]
 

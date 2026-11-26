@@ -735,7 +735,8 @@ runPipelineStages appEnv config = do
         exportStart <- getCurrentTime
         createDirectoryIfMissing True (cfgOutputDir configWithStreaming)
         exports <- withHeapGuard lp mBudget "export" $
-          UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming detection llmLabelsResult aggregatesResult
+          UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming detection
+            (extractionErrors extraction) llmLabelsResult aggregatesResult
         exportEnd <- getCurrentTime
         opRecordHistogram op "graphos_export_duration_seconds" (realToFrac (diffUTCTime exportEnd exportStart) :: Double)
         opIncCounter op "graphos_pipeline_steps_total" 1
@@ -998,7 +999,9 @@ runClusterOnlyPipeline appEnv config = catch (do
       lpLogInfo lp "Exporting outputs (--cluster-only)..."
       _ <- withHeapGuard lp (cfgActiveBudgetBytes config) "export" $
         UEP.epExportAll ep (coEnrichedGraph clusterOut) outDir (coAnalysis clusterOut)
-          config (checkpointDetection graph) (coLabels clusterOut) (coAggregates clusterOut)
+          -- A cluster-only run resumes from a checkpoint: extraction errors
+          -- belong to the run that produced it and are not replayed here.
+          config (checkpointDetection graph) [] (coLabels clusterOut) (coAggregates clusterOut)
       exportCommunityGraphIfRequested lp ep config clusterOut
       lpLogInfo lp "  Done (--cluster-only)."
       pure $ Right commCount

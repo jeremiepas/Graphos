@@ -173,7 +173,9 @@ runIncrementalPipeline appEnv config changedFiles = catch (do
   -- (bounded-report-export; previously the report recomputed per community).
   let analysis = analyzeGraph enrichedGraph finalCommMap (scoreAllCohesion enrichedGraph finalCommMap)
   exports <- withHeapGuard lp (cfgActiveBudgetBytes config) "export" $
-    UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts) Nothing []
+    UEP.epExportAll ep enrichedGraph (cfgOutputDir configWithStreaming) analysis configWithStreaming
+      (Detection (length changedFiles) 0 True Nothing Map.empty Map.empty emptyExclusionCounts)
+      (extractionErrors extraction) Nothing []
 
   when (cfgNeo4j configWithStreaming && not (cfgNoCluster configWithStreaming)) $ do
     let n4cfg = gcNeo4j (cfgGraphosConfig configWithStreaming)
@@ -333,7 +335,8 @@ runSingleFilePipeline appEnv config filePath = catch (do
             , detectionClassification = Map.empty
             , detectionExclusions = emptyExclusionCounts
             }
-      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection llmLabels []
+      exports <- UEP.epExportAll ep enrichedGraph (cfgOutputDir config) analysis config detection
+        (extractionErrors (firExtraction fir)) llmLabels []
 
       fspClearCheckpoint fsp (cfgOutputDir config)
       opShutdownObservability op

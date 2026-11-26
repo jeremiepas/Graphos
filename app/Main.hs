@@ -818,7 +818,7 @@ main = do
                         , detectionExclusions = emptyExclusionCounts
                         }
               logInfo env "[merge] Exporting..."
-              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection Nothing []
+              exports <- Export.exportAll (exportPort appEnv) mergedGraph analysis config detection [] Nothing []
               logInfo env "[merge] Merge complete!"
               logInfo env $ T.pack $ "  Nodes: " ++ show (Map.size (gNodes mergedGraph))
               logInfo env $ T.pack $ "  Edges: " ++ show (Map.size (gEdges mergedGraph))

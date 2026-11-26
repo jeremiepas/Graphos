@@ -13,7 +13,7 @@ module Graphos.UseCase.Port.ExportPort
 import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
-import Graphos.Domain.Types (Analysis, CommunityAggregate, CommunityId, PipelineConfig, Detection, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, IncrementalWriter)
+import Graphos.Domain.Types (Analysis, CommunityAggregate, CommunityId, PipelineConfig, Detection, ExtractionError, NodeId, CommunityMap, CohesionMap, Node, Edge, GodNode, IncrementalWriter)
 import Graphos.Domain.Graph (Graph)
 
 -- | A checkpoint snapshot loaded from disk for a resumed / cluster-only run.
@@ -77,5 +77,5 @@ data ExportPort = ExportPort
      -- Returns Left with a reason when the file is missing or unusable.
    , epLoadCheckpoint          :: FilePath -> IO (Either Text LoadedCheckpoint)
     -- | Full export orchestration
-    , epExportAll :: Graph -> FilePath -> Analysis -> PipelineConfig -> Detection -> Maybe (Map CommunityId Text) -> [CommunityAggregate] -> IO ExportResult
+    , epExportAll :: Graph -> FilePath -> Analysis -> PipelineConfig -> Detection -> [ExtractionError] -> Maybe (Map CommunityId Text) -> [CommunityAggregate] -> IO ExportResult
   }

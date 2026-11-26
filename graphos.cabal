@@ -438,6 +438,7 @@ test-suite graphos-test
      Graphos.UseCase.LabelSpec
      Graphos.UseCase.StagingSpec
      Graphos.UseCase.ExtractSpec
+     Graphos.UseCase.ExtractErrorReportingSpec
      Graphos.UseCase.CodeReviewGraphSpec
      Graphos.UseCase.InferSpec
      Graphos.UseCase.InferDocumentSpec

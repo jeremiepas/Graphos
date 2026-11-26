@@ -49,9 +49,9 @@
 
 ## 7. Error recording and reporting
 
-- [ ] 7.1 Append ExtractionError on failures without aborting
-- [ ] 7.2 Summarise per-extractor errors in log/report
-- [ ] 7.3 Check: integration fixture with one failing extractor completes and records error
+- [x] 7.1 Append ExtractionError on failures without aborting
+- [x] 7.2 Summarise per-extractor errors in log/report
+- [x] 7.3 Check: integration fixture with one failing extractor completes and records error
 
 ## 8. Tests and docs
 
