@@ -6,6 +6,8 @@
 -- invariant the custom-extractor work adds:
 --
 --   * command argv / batch / timeout changes invalidate the fingerprint;
+--   * the built-in tree-sitter grammar name participates (a runtime
+--     @grammar_path@ bypasses it, so its label is inert);
 --   * the runtime grammar library and its @.scm@ queries are fingerprinted by
 --     on-disk size+mtime, so replacing either invalidates it;
 --   * declarative @resolve:@ entries participate;
@@ -153,6 +155,36 @@ spec = describe "extraction cache soundness (custom-extractors 5.5)" $ do
       writeFile (qdir </> "definitions.scm") "(function_definition) @definition.function"
       fpWithDefs <- fingerprintOf cfg
       fpEmpty `shouldDiffer` fpWithDefs
+
+  it "changing the built-in tree-sitter grammar name invalidates the fingerprint" $ do
+    let entry grammar = ExtractorConfig
+          { ecMode           = ExtractTreeSitter
+          , ecGrammar        = Just grammar
+          , ecLanguageId     = Just (T.pack grammar)
+          , ecGranularity    = Nothing
+          , ecCommand        = Nothing
+          , ecBatch          = Nothing
+          , ecTimeoutSeconds = Nothing
+          , ecGrammarPath    = Nothing
+          , ecQueries        = Nothing
+          }
+        ts  = pipeline (withExtractor ".ts" (entry "typescript") defaultGraphosConfig)
+        tsx = pipeline (withExtractor ".ts" (entry "tsx") defaultGraphosConfig)
+    fpTS  <- fingerprintOf ts
+    fpTSX <- fingerprintOf tsx
+    fpTS `shouldDiffer` fpTSX
+
+  it "a runtime grammar's name label does not change the fingerprint" $
+    withSystemTempDirectory "graphos-grammar-name" $ \dir -> do
+      let lib = dir </> "tree-sitter-php.so"
+          entry name = (runtimeGrammarExtractor lib Nothing) { ecGrammar = Just name }
+          php  = pipeline (withExtractor ".php" (entry "php") defaultGraphosConfig)
+          php2 = pipeline (withExtractor ".php" (entry "php-label") defaultGraphosConfig)
+      writeFile lib "ABI-9"
+      fpPhp  <- fingerprintOf php
+      fpPhp2 <- fingerprintOf php2
+      -- The runtime library is selected by grammar_path, so the label is inert.
+      fpPhp `shouldBe` fpPhp2
 
   it "changing a resolve entry invalidates the fingerprint" $ do
     let empty = pipeline defaultGraphosConfig

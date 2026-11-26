@@ -715,8 +715,9 @@ stubCoverageWarning sc
 -- | Canonical fingerprint text of every extraction-affecting configuration
 -- value: the effective per-extension granularity under the CLI override, the
 -- extractor mode per extension, the pdf extraction level, the command argv /
--- batch / timeout of every command extractor, the runtime grammar library and
--- query fingerprints, and the declarative @resolve:@ entries. The key-sorting
+-- batch / timeout of every command extractor, the tree-sitter grammar name of
+-- built-in entries, the runtime grammar library and query fingerprints, and
+-- the declarative @resolve:@ entries. The key-sorting
 -- makes the serialization canonical so identical configs always fingerprint
 -- identically.
 --
@@ -773,11 +774,23 @@ extractionConfigFingerprint config = do
       ExtractTreeSitter -> do
         grammarStamp <- maybe (pure "none") fileStamp (ecGrammarPath ec)
         queriesStamp <- maybe (pure "none") queryDirStamp (ecQueries ec)
-        pure $ ";grammarPath=" ++ maybe "none" id (ecGrammarPath ec)
+        pure $ ";grammar=" ++ builtinGrammar ec
+          ++ ";grammarPath=" ++ maybe "none" id (ecGrammarPath ec)
           ++ ";grammarStamp=" ++ grammarStamp
           ++ ";queries=" ++ maybe "none" id (ecQueries ec)
           ++ ";queriesStamp=" ++ queriesStamp
       _ -> pure ""
+
+    -- The declared @grammar@ name selects the compiled-in binding when no
+    -- runtime library is configured ('grammarForFile' → 'getGrammarPtr'), so
+    -- changing it changes the parse of unchanged bytes and must invalidate the
+    -- cache. With a @grammar_path@ the name is bypassed entirely
+    -- ('parseWithConfiguredGrammar' loads the runtime library instead), so it
+    -- is deliberately not fingerprinted there — renaming a runtime grammar's
+    -- label is not an extraction-affecting change.
+    builtinGrammar ec = case ecGrammarPath ec of
+      Just _  -> "runtime"
+      Nothing -> maybe "none" id (ecGrammar ec)
 
     -- One stamp per recognised query file, in a fixed order, so adding,
     -- deleting or editing any of them changes the fingerprint.
