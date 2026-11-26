@@ -87,14 +87,17 @@ effectiveResolveConfigs :: Map String ResolveConfig -> Map String ResolveConfig
 effectiveResolveConfigs user = Map.union user builtinResolveConfigs
 
 -- | One warning per config entry that shadows a built-in resolver, naming the
--- extension and the overridden kind (import-resolution spec: "Resolution
--- precedence").
+-- extension, the resolver that wins and the built-in one it overrides
+-- (import-resolution spec: "Resolution precedence"). The @overridden@ kind is
+-- the built-in's, not the config entry's: a @path-prefix@ entry over a
+-- @.java@ extension overrides the built-in @package@ resolver.
 resolveOverrideWarnings :: Map String ResolveConfig -> [String]
 resolveOverrideWarnings user =
-  [ "resolve[\"" ++ ext ++ "\"]: config overrides the built-in "
-      ++ resolveKindName (rcKind rc) ++ " resolver"
+  [ "resolve[\"" ++ ext ++ "\"]: config " ++ resolveKindName (rcKind rc)
+      ++ " resolver overrides the built-in "
+      ++ resolveKindName (rcKind builtin) ++ " resolver"
   | (ext, rc) <- Map.toAscList user
-  , Map.member ext builtinResolveConfigs ]
+  , Just builtin <- [Map.lookup ext builtinResolveConfigs] ]
 
 -- | The @resolve:@ spelling of a kind (@package@, @psr4@, @module-path@,
 -- @path-prefix@).

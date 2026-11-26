@@ -204,10 +204,28 @@ spec = describe "Declarative import resolution (custom-extractors 6)" $ do
       rsPathPrefix stats `shouldBe` 1
 
   describe "precedence" $ do
-    it "warns when a config entry overrides a built-in resolver, naming extension and kind" $
+    it "warns when a config entry overrides a built-in resolver, naming extension and both kinds" $
       resolveOverrideWarnings
         (Map.fromList [ (".java", ResolveConfig ResolvePathPrefix [] Nothing) ])
-        `shouldBe` ["resolve[\".java\"]: config overrides the built-in path-prefix resolver"]
+        `shouldBe`
+          [ "resolve[\".java\"]: config path-prefix resolver overrides the built-in package resolver" ]
+
+    it "the pass applies the config resolver, not the overridden built-in one" $ do
+      let ex = mkExtraction
+            [ moduleNode "src/main/java/com/example/App.java"
+            , moduleNode "src/main/java/com/example/Foo.java"
+            , moduleNode "other/com/example/Foo.java"
+            , externalNode "com/example/Foo" ]
+            [ importEdge "src/main/java/com/example/App.java" "com/example/Foo" ]
+          cfg = Map.fromList
+            [ (".java", ResolveConfig ResolvePathPrefix ["other"] Nothing) ]
+          (ex', stats) = run cfg Map.empty ex
+      -- The built-in package resolver would pick src/main/java/com/example/Foo.java
+      -- from the dotted spelling; the config path-prefix rule wins instead.
+      targetsOf "src/main/java/com/example/App.java" ex'
+        `shouldBe` ["other/com/example/Foo.java"]
+      rsPathPrefix stats `shouldBe` 1
+      rsPackage stats `shouldBe` 0
 
     it "does not warn for an extension with no built-in resolver" $
       resolveOverrideWarnings

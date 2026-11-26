@@ -893,7 +893,21 @@ extractChangedFiles appEnv config changedFiles = do
   let merged = List.foldl' mergeExtractions emptyExtraction
                   (tsExtractions ++ lspExtractions ++ commandExtractions ++ stubExtractions)
   -- Declarative import resolution over the batch of changed files (6.4).
-  (resolved, _) <- resolveExtraction absRoot (gcResolve (cfgGraphosConfig config)) merged
+  -- The precedence warning is emitted here too (6.3), so a watch/--update run
+  -- surfaces the same "config overrides built-in resolver" notice as a full
+  -- build instead of silently using a different resolver than it reports.
+  let resolveCfg = gcResolve (cfgGraphosConfig config)
+  mapM_ (\msg -> lpLogWarn lp (T.pack ("  [resolve] WARNING: " ++ msg)))
+        (resolveOverrideWarnings resolveCfg)
+  (resolved, resolveStats) <- resolveExtraction absRoot resolveCfg merged
+  when (resolveTotal resolveStats > 0) $
+    logInfo $ T.pack $ "  [resolve] " ++ show (resolveTotal resolveStats)
+      ++ " import target(s) resolved in the changed-file batch"
+      ++ " (package " ++ show (rsPackage resolveStats)
+      ++ ", psr4 " ++ show (rsPSR4 resolveStats)
+      ++ ", module-path " ++ show (rsModulePath resolveStats)
+      ++ ", path-prefix " ++ show (rsPathPrefix resolveStats) ++ "; "
+      ++ show (rsDropped resolveStats) ++ " placeholder node(s) dropped)"
   logInfo $ T.pack $ "  [watch] Extracted " ++ show (Map.size (extractionNodes resolved)) ++ " nodes, " ++ show (Map.size (extractionEdges resolved)) ++ " edges from " ++ show (length changedFiles) ++ " changed files"
   pure resolved
 
