@@ -394,7 +394,7 @@ configDocComments = unlines
   , ""
   , "# ──── Declarative import resolution ───────────"
   , "# Map an extension to a built-in resolver kind: package, psr4, module-path,"
-  , "# or path-prefix. roots are relative to the config directory; every kind"
+  , "# or path-prefix. roots are relative to the project (input) root; every kind"
   , "# accepts them, package/psr4 require them, module-path requires"
   , "# source_of_truth. An unknown kind fails config loading."
   , "# resolve:"

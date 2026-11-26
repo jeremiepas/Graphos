@@ -81,6 +81,14 @@ spec = describe "runtime tree-sitter grammar loader (avi-1766 4.1-4.5)" $ do
             rgeMessage err `shouldSatisfy` T.isInfixOf "not found"
           Right _ -> expectationFailure "expected a missing library to fail"
 
+    it "refuses a grammar path under the sensitive-file policy" $
+      withSystemTempDirectory "graphos-runtime-sensitive" $ \dir -> do
+        let path = dir </> ".ssh" </> "libtree-sitter-x.so"
+        result <- loadRuntimeGrammar path
+        case result of
+          Left err -> rgeMessage err `shouldSatisfy` T.isInfixOf "sensitive"
+          Right _ -> expectationFailure "expected a sensitive grammar path to be refused"
+
   describe "optional runtime queries (4.4)" $ do
     it "loads definitions/imports and warns only about the missing calls kind" $
       withSystemTempDirectory "graphos-queries" $ \dir -> do

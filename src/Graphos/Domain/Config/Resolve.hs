@@ -54,8 +54,8 @@ instance FromJSON ResolveKind where
 -- | Resolution rules for one extension.
 data ResolveConfig = ResolveConfig
   { rcKind          :: ResolveKind
-  , rcRoots         :: [FilePath]       -- ^ source roots, relative to the config directory
-  , rcSourceOfTruth :: Maybe FilePath   -- ^ index file naming modules (module-path only)
+  , rcRoots         :: [FilePath]       -- ^ source roots, relative to the project (input) root
+  , rcSourceOfTruth :: Maybe FilePath   -- ^ index file naming modules (module-path only; relative to the project root)
   } deriving (Eq, Show, Generic)
 
 instance ToJSON ResolveConfig where

@@ -39,6 +39,9 @@ module Graphos.Infrastructure.Extract.Resolve
   , parseModuleIndex
   , loadModuleIndexes
 
+    -- * Paths
+  , absAgainst
+
     -- * The pass
   , ResolveStats(..)
   , resolveTotal

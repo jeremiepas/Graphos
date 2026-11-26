@@ -40,7 +40,7 @@ import Graphos.Domain.Types
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Wiring (productionFileSystemPort)
 import Graphos.UseCase.Extract.Core
-  ( extractionConfigFingerprint, partitionByExtractor )
+  ( extractionConfigFingerprint, fileCacheFingerprint, partitionByExtractor )
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 
 -- ───────────────────────────────────────────────
@@ -200,6 +200,21 @@ spec = describe "extraction cache soundness (custom-extractors 5.5)" $ do
     fpEmpty `shouldDiffer` fpJava
     fpJava  `shouldDiffer` fpKotlin
 
+  it "fingerprints a source-of-truth index against the input root" $
+    withSystemTempDirectory "graphos-sot" $ \dir -> do
+      let sot = dir </> "settings.gradle"
+          cfg = (pipeline defaultGraphosConfig)
+            { cfgInputPath = dir
+            , cfgGraphosConfig = defaultGraphosConfig
+                { gcResolve = Map.fromList
+                    [ (".kt", ResolveConfig ResolveModulePath ["src"]
+                        (Just "settings.gradle")) ] } }
+      writeFile sot "include ':app'\n"
+      fp1 <- fingerprintOf cfg
+      writeFile sot "include ':app', ':core'\n"
+      fp2 <- fingerprintOf cfg
+      fp1 `shouldDiffer` fp2
+
   it "does not serve a cache entry saved under a different config" $
     withSystemTempDirectory "graphos-cache" $ \dir -> do
       let src = dir </> "x.pl"
@@ -211,6 +226,31 @@ spec = describe "extraction cache soundness (custom-extractors 5.5)" $ do
       fspSaveCachedExtraction productionFileSystemPort fpA src ext out
       hitSame <- fspLoadCachedExtraction productionFileSystemPort fpA src out
       hitOther <- fspLoadCachedExtraction productionFileSystemPort fpB src out
+      hitSame `shouldSatisfy` (/= Nothing)
+      hitOther `shouldBe` Nothing
+
+  it "per-file fingerprints distinguish identical content at different paths" $ do
+    fp <- fingerprintOf (pipeline (withCommandExtractor ["perl-extract", "{file}"]))
+    fileCacheFingerprint fp "a/x.pl"
+      `shouldDiffer` fileCacheFingerprint fp "b/x.pl"
+
+  it "does not serve a content-identical file from another path" $
+    withSystemTempDirectory "graphos-cache-path" $ \dir -> do
+      let srcA = dir </> "a" </> "x.pl"
+          srcB = dir </> "b" </> "x.pl"
+          out  = dir </> "out"
+      createDirectoryIfMissing True (dir </> "a")
+      createDirectoryIfMissing True (dir </> "b")
+      writeFile srcA "print 1;\n"
+      writeFile srcB "print 1;\n"   -- identical bytes, distinct source path
+      fp <- fingerprintOf (pipeline (withCommandExtractor ["perl-extract", "{file}"]))
+      let ext = extractionFromLists [makeStubNode srcA] []
+      fspSaveCachedExtraction productionFileSystemPort
+        (fileCacheFingerprint fp srcA) srcA ext out
+      hitSame <- fspLoadCachedExtraction productionFileSystemPort
+        (fileCacheFingerprint fp srcA) srcA out
+      hitOther <- fspLoadCachedExtraction productionFileSystemPort
+        (fileCacheFingerprint fp srcB) srcB out
       hitSame `shouldSatisfy` (/= Nothing)
       hitOther `shouldBe` Nothing
 

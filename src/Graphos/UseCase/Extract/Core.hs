@@ -10,6 +10,7 @@ module Graphos.UseCase.Extract.Core
   , granularityForFile
   , granularityName
   , extractionConfigFingerprint
+  , fileCacheFingerprint
   , isStubExtraction
   , StubCoverage(..)
   , stubCoverage
@@ -60,7 +61,7 @@ import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Infrastructure.Extract.TreeSitter.Convert (makeNodeId)
 import Graphos.Infrastructure.Extract.Resolve
   ( resolveExtraction, resolveOverrideWarnings, resolveTotal
-  , ResolveStats(..) )
+  , ResolveStats(..), absAgainst )
 import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
   ( QueryKind(..), queryKindFile, resolveRuntimePath )
@@ -121,7 +122,7 @@ extractAll appEnv config detection mProvenance = do
         | not cacheEnabled = pure Nothing
         | otherwise = do
             results <- forM files $ \fp -> do
-              mExt <- fspLoadCachedExtraction fsp fingerprint fp (cfgOutputDir config)
+              mExt <- fspLoadCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp (cfgOutputDir config)
               pure (fp, mExt)
             let hits = [(fp, ext) | (fp, Just ext) <- results]
                 misses = [fp | (fp, Nothing) <- results]
@@ -243,7 +244,7 @@ extractAll appEnv config detection mProvenance = do
       -- A failed extraction is never written to the cache: a transient error
       -- must not pin a stub for the content (parity with the command path).
       when (null (extractionErrors ext)) $
-        fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+        fspSaveCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp ext (cfgOutputDir config)
       produce ext
 
     -- One command-mode extension at a time (a batch invocation spans only the
@@ -262,7 +263,7 @@ extractAll appEnv config detection mProvenance = do
 
     handleCommandOutcome :: FilePath -> CommandOutcome -> IO ()
     handleCommandOutcome fp (CommandProduced ext) = do
-      fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+      fspSaveCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp ext (cfgOutputDir config)
       produce ext
     handleCommandOutcome fp (CommandFailed err) = do
       lpLogWarn lp $ T.pack $ "  [command] " ++ fp ++ ": " ++ T.unpack (eeMessage err)
@@ -338,7 +339,7 @@ extractAll appEnv config detection mProvenance = do
         mapM_ (\fp -> do
           logDebug $ T.pack $ "  [stub] " ++ fp
           let ext = extractionFromLists [makeStubNode fp] []
-          fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+          fspSaveCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp ext (cfgOutputDir config)
           produce ext
           logProgress
           ) stubFiles
@@ -879,11 +880,29 @@ extractionConfigFingerprint config = do
       pure (intercalate "," stamps)
 
     resolveEntry (ext, rc) = do
-      sotStamp <- maybe (pure "none") fileStamp (rcSourceOfTruth rc)
+      -- The module index is read against the project root ('loadModuleIndexes'),
+      -- so the stamp must name the same file: a cwd-relative stamp could watch a
+      -- different file (or none) than the one that shaped resolution, leaving a
+      -- stale cache entry.
+      sotStamp <- maybe (pure "none")
+                       (fileStamp . absAgainst (cfgInputPath config))
+                       (rcSourceOfTruth rc)
       pure $ "resolve." ++ ext ++ "=" ++ show (rcKind rc)
         ++ ";roots=" ++ intercalate "," (rcRoots rc)
         ++ ";sourceOfTruth=" ++ maybe "none" id (rcSourceOfTruth rc)
         ++ ";sourceOfTruthStamp=" ++ sotStamp
+
+-- | Per-file cache fingerprint: the pipeline-wide configuration fingerprint
+-- plus the source path.
+--
+-- The extraction cache itself is content-addressed so identical bytes can share
+-- a slot ('Graphos.Infrastructure.FileSystem.Cache'). Per-file products are not
+-- path-independent, though: node ids and @source_file@ are derived from the
+-- path, and command-extractor records embed both. Two distinct files with the
+-- same bytes would therefore collide and receive the wrong path's records, so
+-- the pipeline mixes the path into the fingerprint it hands to the cache.
+fileCacheFingerprint :: Text -> FilePath -> Text
+fileCacheFingerprint configFp fp = configFp <> ";file=" <> T.pack fp
 
 -- | Size+mtime stamp of a runtime input file (grammar library, @.scm@ query,
 -- resolve source-of-truth index). A missing file fingerprints as @missing@, so
@@ -931,7 +950,7 @@ extractChangedFiles appEnv config changedFiles = do
     ext <- isolateFileExtraction lp fp (T.pack (grammarForFile config fp)) $
              extractViaTreeSitterFFI appEnv (granularityForFile config fp) (grammarSelectionForFile config fp) fp
     when (null (extractionErrors ext)) $
-      fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+      fspSaveCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp ext (cfgOutputDir config)
     pure ext) tsFiles
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) tsExtractions
 
@@ -949,7 +968,7 @@ extractChangedFiles appEnv config changedFiles = do
     outcomes <- epExtractCommandFiles ep commandGate ec fps
     forM fps $ \fp -> case Map.lookup fp outcomes of
       Just (CommandProduced ext) -> do
-        fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+        fspSaveCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp ext (cfgOutputDir config)
         pure ext
       Just (CommandFailed err) -> do
         lpLogWarn lp $ T.pack $ "  [command] " ++ fp ++ ": " ++ T.unpack (eeMessage err)
@@ -966,7 +985,7 @@ extractChangedFiles appEnv config changedFiles = do
   stubExtractions <- mapM (\fp -> do
     logDebug $ T.pack $ "  [stub] " ++ fp
     let ext = extractionFromLists [makeStubNode fp] []
-    fspSaveCachedExtraction fsp fingerprint fp ext (cfgOutputDir config)
+    fspSaveCachedExtraction fsp (fileCacheFingerprint fingerprint fp) fp ext (cfgOutputDir config)
     pure ext
     ) stubFiles
   mapM_ (\ext -> epPushExtractionStreaming ep config ext) stubExtractions

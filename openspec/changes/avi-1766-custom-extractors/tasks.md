@@ -62,6 +62,6 @@
 
 ## 9. Review gate
 
-- [ ] 9.1 head-of-graphos architecture review
-- [ ] 9.2 security-expert review (argv, ignore, ABI)
-- [ ] 9.3 Record verification; promote done via run-id PATCH
+- [x] 9.1 head-of-graphos architecture review
+- [x] 9.2 security-expert review (argv, ignore, ABI)
+- [ ] 9.3 Record verification; promote done via run-id PATCH — verification recorded in REVIEW.md; Paperclip run-id PATCH unavailable in the delegate environment

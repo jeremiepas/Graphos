@@ -70,6 +70,8 @@ import TreeSitter.Node (Node(..), TSNode)
 import TreeSitter.Parser (Parser, withParser, ts_parser_set_timeout_micros)
 import TreeSitter.Tree (Tree, ts_tree_delete, withRootNode)
 
+import Graphos.Infrastructure.FileSystem.Sensitive (isSensitive)
+
 -- ───────────────────────────────────────────────
 -- ABI guard
 -- ───────────────────────────────────────────────
@@ -158,23 +160,27 @@ foreign import ccall "dynamic"
 loadRuntimeGrammar :: FilePath -> IO (Either RuntimeGrammarError RuntimeGrammar)
 loadRuntimeGrammar rawPath = do
   path <- resolveRuntimePath rawPath
-  exists <- doesFileExist path
-  if not exists
-    then pure $ Left $ RuntimeGrammarError path "grammar library not found or unreadable"
+  if isSensitive path
+    then pure $ Left $ RuntimeGrammarError path
+      "grammar library path matches the sensitive-file policy; refusing to load it"
     else do
-      opened <- try (dlopen path [RTLD_NOW, RTLD_LOCAL])
-      case opened of
-        Left (e :: SomeException) ->
-          pure $ Left $ RuntimeGrammarError path $
-            "could not open grammar library: " <> T.pack (show e)
-        Right dl -> do
-          loaded <- try (loadFromHandle path dl)
-          case loaded of
+      exists <- doesFileExist path
+      if not exists
+        then pure $ Left $ RuntimeGrammarError path "grammar library not found or unreadable"
+        else do
+          opened <- try (dlopen path [RTLD_NOW, RTLD_LOCAL])
+          case opened of
             Left (e :: SomeException) ->
-              dlclose dl >> pure (Left (RuntimeGrammarError path
-                ("could not resolve grammar entry point: " <> T.pack (show e))))
-            Right (Left err) -> dlclose dl >> pure (Left err)
-            Right (Right rg) -> pure (Right rg)
+              pure $ Left $ RuntimeGrammarError path $
+                "could not open grammar library: " <> T.pack (show e)
+            Right dl -> do
+              loaded <- try (loadFromHandle path dl)
+              case loaded of
+                Left (e :: SomeException) ->
+                  dlclose dl >> pure (Left (RuntimeGrammarError path
+                    ("could not resolve grammar entry point: " <> T.pack (show e))))
+                Right (Left err) -> dlclose dl >> pure (Left err)
+                Right (Right rg) -> pure (Right rg)
   where
     loadFromHandle path dl = do
       _ <- dlerror                      -- clear any stale loader error
