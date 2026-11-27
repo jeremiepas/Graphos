@@ -1,7 +1,7 @@
 cabal-version: 3.0
 name:          graphos
 -- Release policy §2: final cabal version MUST equal the released tag.
-version:       0.3.0.0
+version:       0.3.1.0
 synopsis:      Universal knowledge graph builder using LSP for language-agnostic AST extraction
 description:   Graphos turns any folder of code, docs, papers, or images into a navigable
                knowledge graph with community detection. Unlike tree-sitter based tools,
@@ -156,6 +156,8 @@ library
                       Graphos.UseCase.Port.ExtractionPort
                       Graphos.UseCase.Port.ExportPort
                       Graphos.UseCase.Port.FileSystemPort
+                      Graphos.UseCase.Port.SourceReaderPort
+                      Graphos.UseCase.Source
                       Graphos.UseCase.Port.LoggingPort
                       Graphos.UseCase.Port.ObservabilityPort
                       Graphos.UseCase.Port.LLMPort
@@ -199,6 +201,7 @@ library
                        Graphos.Infrastructure.FileSystem.Fd
                       Graphos.Infrastructure.FileSystem.Watcher
                       Graphos.Infrastructure.FileSystem.Cache
+                      Graphos.Infrastructure.FileSystem.SourceReader
                      Graphos.Infrastructure.FileSystem.Ignore
                      Graphos.Infrastructure.FileSystem.Sensitive
                       Graphos.Infrastructure.FileSystem.Manifest
@@ -444,6 +447,8 @@ test-suite graphos-test
      Graphos.UseCase.InferDocumentSpec
      Graphos.UseCase.DocLinkParitySpec
      Graphos.UseCase.Extract.HaskellSpec
+     Graphos.UseCase.SourceSpec
+     Graphos.Infrastructure.FileSystem.SourceReaderSpec
     Graphos.UseCase.Extract.ImageSpec
     Graphos.UseCase.Extract.CacheSoundnessSpec
     Graphos.UseCase.QuerySpec

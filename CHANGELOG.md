@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+- **`graphos source <node>` prints a node's code.** The command resolves the
+  node like `neighbors`, reads its file under `--root` (default `.`) and prints
+  its numbered lines, with `--context N` and `--json`. It exits non-zero, naming
+  the cause, when the node has no line range, the file is missing or shorter
+  than the node, and warns when the lines no longer match the node's
+  `body_hash` (openspec change `function-source-access`, #298).
+- **Haskell declaration nodes carry `line_start`, `line_end` and `signature`.**
+  The line-based Haskell extractor now records where each top-level
+  declaration starts and ends and its type signature (or first line). On this
+  repository 3,285 Haskell declarations gain a range, all passing the range
+  sanity check; node ids are unchanged. Because colliding ids now merge toward
+  the file that declares the name, 28 nodes change `source_file` and 96
+  `documents` edges move with them. Rebuild Haskell graphs to get the fields;
+  cached Haskell extractions are invalidated by the extraction fingerprint.
+
 ### Changed
 - **The frontend left the Haskell repository.** `studio/` (the Elm Graphos
   Studio SPA) and `assets/viewer/` (the HTML viewer assets) are now owned by the

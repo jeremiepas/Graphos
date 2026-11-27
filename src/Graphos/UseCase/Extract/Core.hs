@@ -65,6 +65,7 @@ import Graphos.Infrastructure.Extract.Resolve
 import Graphos.Infrastructure.Extract.TreeSitter.Core (mkSourceFile)
 import Graphos.Infrastructure.Extract.TreeSitter.RuntimeGrammar
   ( QueryKind(..), queryKindFile, resolveRuntimePath )
+import Graphos.UseCase.Extract.Haskell (haskellDeclsVersion)
 import Graphos.UseCase.Extract.LSP (FileGroup, groupByLSPServer, extractGroup)
 import Graphos.UseCase.Extract.TreeSitter
   ( extractViaTreeSitterFFI, grammarForFile
@@ -825,6 +826,8 @@ extractionConfigFingerprint config = do
           -- bump when tree-sitter node ids/labels/sig scheme changes (AVI-1452)
         , "nodeIdentity=av1452-bounded-ids"
         , "idScheme=3"  -- 3: nameless definitions keyed `anonymous`, nameless const/var lists not emitted
+          -- Haskell declarations carry line range and signature (function-source-access)
+        , "haskellDecls=" ++ haskellDeclsVersion
           -- command extractors change the output of an unchanged file when the
           -- gate or their invocation plan changes (custom-extractors 5.3)
         , "allowCommand=" ++ show (cfgAllowCommandExtractors config)

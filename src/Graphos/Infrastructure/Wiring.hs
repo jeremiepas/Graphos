@@ -11,6 +11,7 @@ module Graphos.Infrastructure.Wiring
   , productionAppEnvWithConfig
   , productionExportPort
   , productionLLMPort
+  , productionSourceReaderPort
     -- * Tree-sitter grammar bindings
   , getGrammarPtr
   ) where
@@ -94,6 +95,8 @@ import qualified Graphos.Infrastructure.Extract.TreeSitter.Vendored as TSVendore
 
 -- UseCase imports (for delegation to sub-modules)
 import Graphos.UseCase.Extract.Haskell (extractHaskellStub)
+import Graphos.UseCase.Port.SourceReaderPort (SourceReaderPort(..))
+import Graphos.Infrastructure.FileSystem.SourceReader (readSourceLines)
 import Graphos.Infrastructure.Extract.Markdown (extractDocFile)
 import Graphos.Infrastructure.Extract.Office (extractOfficeFile)
 import Graphos.Infrastructure.Extract.Image (extractImageFile, extractImageFromBytes)
@@ -412,3 +415,7 @@ getGrammarPtr "cpp"          = Just TSVendored.tree_sitter_cpp
 getGrammarPtr "yaml"         = Just TSVendored.tree_sitter_yaml
 getGrammarPtr "sql"          = Just TSVendored.tree_sitter_sql
 getGrammarPtr _              = Nothing
+
+-- | Production source reader for @graphos source@ (function-source-access).
+productionSourceReaderPort :: SourceReaderPort
+productionSourceReaderPort = SourceReaderPort { srpReadLines = readSourceLines }

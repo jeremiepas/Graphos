@@ -80,6 +80,23 @@ node id or identifier). Flags: `--graph FILE`, `--budget N`, `--json`,
 name. Flags: `--depth N`, `--graph FILE`, `--budget N`, `--json`,
 `--label-width N`, `--edges MODE`.
 
+### `source`
+
+`graphos source NODE` — print the source lines of a node from disk, numbered,
+under a header `<id>  <file>:<start>-<end>`. The node is resolved like
+`neighbors` (id, then exact label, then case-insensitive label); an ambiguous
+name lists the candidates and exits non-zero. Flags: `--root DIR` (the
+directory the graph was built from; source paths are relative to it, default
+`.`), `--context N` (lines before and after, clipped to the file), `--graph FILE`,
+`--json` (one object with `id`, `label`, `kind`, `source_file`, `line_start`,
+`line_end`, `text`, `stale`, or `error` and `message`).
+
+The command exits non-zero, naming the cause, when the node has no line range,
+the file is missing under `--root`, or the file is shorter than the node. When
+the node carries a `body_hash` that no longer matches the lines, they are still
+printed, with a warning that the file changed since the graph was built. Rebuild
+the graph after editing the sources.
+
 ### `push`
 
 `graphos push` — push an existing `graph.json` to Neo4j without re-extracting.
