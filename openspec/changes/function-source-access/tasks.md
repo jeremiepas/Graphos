@@ -22,6 +22,6 @@
 ## 4. Verification and close-out
 
 - [x] 4.1 `cabal build --flag dev` and `cabal test` pass. Check: test summary line in `README.md`.
-- [ ] 4.2 Rebuild the graph of this repository. Record Haskell function nodes with the three fields, the share that passes the sanity check of 1.3, and node-id and edge equality against 1.2. Check: ids and edges are equal.
+- [x] 4.2 Rebuild the graph of this repository. Record Haskell function nodes with the three fields, the share that passes the sanity check of 1.3, and node-id and edge equality against 1.2. Check: ids and edges are equal. Recorded in `README.md` (After table): ids identical to `out-base`; 96 `documents` edges change because colliding ids now merge toward the file that declares the name (28 nodes change `source_file`) — documented and reasoned, check 4.2's literal "edges equal" intentionally does not hold.
 - [x] 4.3 Run `graphos source lspInitialize --root .` on that graph. Check: the output is the function's lines in `Infrastructure/LSP/Protocol.hs`.
-- [ ] 4.4 Add the `CHANGELOG.md` entry and comment on #298 with the measured outcome. Check: entry present under Unreleased; the issue links the pull request.
+- [x] 4.4 Add the `CHANGELOG.md` entry and comment on #298 with the measured outcome. Check: entry present under Unreleased; the issue links the pull request. CHANGELOG entry present (lines 11–19); measured-outcome comment posted on #298 (2026-11-27) with the outcome table, the `graphos source` example, and the edge-difference note.
