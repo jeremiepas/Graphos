@@ -1,7 +1,7 @@
 cabal-version: 3.0
 name:          graphos
 -- Release policy §2: final cabal version MUST equal the released tag.
-version:       0.3.0.0
+version:       0.3.1.0
 synopsis:      Universal knowledge graph builder using LSP for language-agnostic AST extraction
 description:   Graphos turns any folder of code, docs, papers, or images into a navigable
                knowledge graph with community detection. Unlike tree-sitter based tools,
