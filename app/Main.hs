@@ -11,7 +11,7 @@ import Data.Maybe (isJust, fromMaybe)
 import Data.Char (toLower)
 import Data.Aeson (encode, decode)
 import qualified Data.ByteString.Lazy as BL
-import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStrLn, hFlush)
+import System.IO (stdout, BufferMode(..), hSetBuffering, hPutStr, hPutStrLn, hFlush)
 import qualified Data.Text.IO as TIO
 import System.IO (stderr)
 import System.Process (createProcess, proc, waitForProcess)
@@ -50,7 +50,7 @@ import Graphos.UseCase.Subgraph (extractSubgraph, SubgraphConfig(..))
 import Graphos.Infrastructure.Export.JSON (exportSubgraphJSON, exportGraphWithLabels)
 import Graphos.Domain.Types.Pipeline (Neo4jPushMode(..), MemgraphPushMode(..))
 import Graphos.UseCase.Pipeline (runPipeline, runClusterOnlyPipeline, runIncrementalPipeline, runSingleFilePipeline, PipelineResult(..), SingleFileResult(..))
-import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig, productionLLMPort)
+import Graphos.Infrastructure.Wiring (productionAppEnvWithConfig, productionLLMPort, productionSourceReaderPort)
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, loadGraphFromFileStrict, LoadResult(..), validateGraphFile, corruptGraphMessage)
 import Graphos.UseCase.SpecCheck (runSpecCheck', renderSpecReport, reportGates, parseCheckName, filterReport, spofDecisions, srCandidates)
@@ -71,6 +71,7 @@ import Graphos.Domain.Graph.Query (shortestPath)
 import Graphos.Domain.Graph.Analysis (articulationPoints, toCachedFGL)
 import Graphos.Domain.Graph.Index (communityOfNode)
 import Graphos.UseCase.Query.Refine (RefineConfig(..), refineResponse)
+import Graphos.UseCase.Source (readNodeSource, renderSourceText, renderSourceJSON, sourceSucceeded, sourceWarnings)
 import Graphos.UseCase.Query.Render (CommonQueryOpts(..), renderQueryResponseText, renderQueryResponseJSON, renderSymbolResultText, renderSymbolResultJSON, renderNeighborsResultText, renderNeighborsResultJSON, renderPathResultJSON, renderExplainResultJSON, renderAmbiguousText, renderAmbiguousJSON, renderNotFoundText, renderNotFoundJSON, renderMutationResultText, renderMutationResultJSON)
 import Graphos.Infrastructure.Export.PersistMutation (persistMutatedGraph)
 import Graphos.Domain.Community (detectCommunities, scoreAllCohesion, Resolution(..), MergeStrategy(..))
@@ -650,6 +651,38 @@ main = do
                 then putStrLn $ T.unpack $ renderNotFoundJSON nodeArg
                 else putStrLn $ T.unpack $ renderNotFoundText nodeArg
               exitWith (ExitFailure 1)
+
+    SourceCmd nodeArg root context srcOpts -> do
+      let asJson = cqoJson srcOpts
+      loadResult <- loadGraphOpt (cqoStrictGraph srcOpts) (cqoGraphPath srcOpts)
+      case loadResult of
+        Left err -> do
+          hPutStrLn stderr $ "Error: " ++ T.unpack err
+          exitWith (ExitFailure 1)
+        Right loaded -> do
+          let g = lrGraph loaded
+              idx = lrIndex loaded
+          case resolveNodeArg nodeArg g idx of
+            NotFound -> do
+              putStrLn $ T.unpack $ if asJson then renderNotFoundJSON nodeArg else renderNotFoundText nodeArg
+              exitWith (ExitFailure 1)
+            Ambiguous cands -> do
+              putStrLn $ T.unpack $ if asJson then renderAmbiguousJSON cands else renderAmbiguousText cands
+              exitWith (ExitFailure 1)
+            ResolvedSingle nid -> case Map.lookup nid (gNodes g) of
+              Nothing -> do
+                putStrLn $ T.unpack $ if asJson then renderNotFoundJSON nodeArg else renderNotFoundText nodeArg
+                exitWith (ExitFailure 1)
+              Just n -> do
+                result <- readNodeSource productionSourceReaderPort root context n
+                if asJson
+                  then putStrLn (T.unpack (renderSourceJSON result))
+                  else if sourceSucceeded result
+                    then do
+                      putStr (T.unpack (renderSourceText result))
+                      mapM_ (hPutStrLn stderr . T.unpack) (sourceWarnings result)
+                    else hPutStr stderr (T.unpack (renderSourceText result))
+                if sourceSucceeded result then pure () else exitWith (ExitFailure 1)
 
     ResearchCmd termsArg seedsArg graphPath _doHtml doJson termsFileArg labelArg _researchMode commonOpts -> do
       hSetBuffering stdout NoBuffering

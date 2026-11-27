@@ -67,6 +67,7 @@ data Command
   | ExplainCmd Text CommonQueryOpts
   | SymbolsCmd Text CommonQueryOpts
   | NeighborsCmd Text Int CommonQueryOpts
+  | SourceCmd Text FilePath Int CommonQueryOpts
   | PushCmd FilePath String String String Neo4jPushMode Int
   | PushMemgraphCmd FilePath String String String MemgraphPushMode Int
   | MergeCmd FilePath FilePath FilePath EdgeDensity Double Int Int Bool Bool
@@ -371,6 +372,14 @@ neighborsOpts = NeighborsCmd
   <*> option auto (long "depth" <> value 2 <> help "BFS depth (default: 2)")
   <*> commonQueryOptsP
 
+-- | @graphos source <node>@ (function-source-access): print a node's lines.
+sourceOpts :: Parser Command
+sourceOpts = SourceCmd
+  <$> argument str (metavar "NODE")
+  <*> strOption (long "root" <> metavar "DIR" <> value "." <> help "Directory the graph was built from; source paths are resolved against it (default: .)")
+  <*> option auto (long "context" <> metavar "N" <> value 0 <> help "Lines of context before and after the node (default: 0)")
+  <*> commonQueryOptsP
+
 pathOpts :: Parser Command
 pathOpts = PathCmd
   <$> argument str (metavar "FROM")
@@ -503,7 +512,7 @@ migrateGraphOpts = MigrateGraphCmd
 -- reference documents the whole surface.
 subcommandNames :: [Text]
 subcommandNames =
-  [ "query", "cypher", "path", "explain", "symbols", "neighbors"
+  [ "query", "cypher", "path", "explain", "symbols", "neighbors", "source"
   , "push", "push-memgraph", "merge", "ingest", "subgraph", "migrate-graph"
   , "speccheck", "intentcheck", "impact", "view", "clustereval", "lservers"
   , "serve", "init", "install-skill", "research"
@@ -517,6 +526,7 @@ commandOpts = subparser
   <> command "explain" (info (explainOpts <**> helper) (progDesc "Explain a node"))
   <> command "symbols" (info (symbolsOpts <**> helper) (progDesc "Look up an exact symbol by name"))
   <> command "neighbors" (info (neighborsOpts <**> helper) (progDesc "Expand neighborhood around a node"))
+  <> command "source" (info (sourceOpts <**> helper) (progDesc "Print the source lines of a node from disk" <> footer "Example: graphos source lspInitialize --root . --context 2"))
   <> command "push"  (info (pushOpts <**> helper) (progDesc "Push graph.json to Neo4j (no extraction needed)"))
   <> command "push-memgraph" (info (pushMemgraphOpts <**> helper) (progDesc "Push graph.json to Memgraph (no extraction needed)"))
   <> command "merge" (info (mergeOpts <**> helper) (progDesc "Merge two graph.json files into one"))

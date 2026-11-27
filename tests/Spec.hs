@@ -49,6 +49,8 @@ import qualified Graphos.UseCase.InferSpec
 import qualified Graphos.UseCase.InferDocumentSpec
 import qualified Graphos.UseCase.DocLinkParitySpec
 import qualified Graphos.UseCase.Extract.HaskellSpec
+import qualified Graphos.UseCase.SourceSpec
+import qualified Graphos.Infrastructure.FileSystem.SourceReaderSpec
 import qualified Graphos.UseCase.Extract.ImageSpec
 import qualified Graphos.UseCase.Extract.CacheSoundnessSpec
 import qualified Graphos.UseCase.QuerySpec
@@ -170,6 +172,8 @@ main = Test.Hspec.hspec $ do
   Graphos.UseCase.InferDocumentSpec.spec
   Graphos.UseCase.DocLinkParitySpec.spec
   Graphos.UseCase.Extract.HaskellSpec.spec
+  Graphos.UseCase.SourceSpec.spec
+  Graphos.Infrastructure.FileSystem.SourceReaderSpec.spec
   Graphos.UseCase.Extract.ImageSpec.spec
   Graphos.UseCase.Extract.CacheSoundnessSpec.spec
   Graphos.UseCase.QuerySpec.spec
