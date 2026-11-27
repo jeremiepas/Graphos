@@ -1,0 +1,314 @@
+# OpenSpec proposal to release, in the Graphos repository, driven by mnemo
+# (space `graphos`).
+#
+# It leaves: a change in openspec/changes/<change>/ (or reuses one), a worktree
+# under .worktrees/<change> on branch `openspec/<change>`, a draft pull request,
+# the implementation committed atomically on that branch, a review comment on
+# the pull request, an archived change, and a squash merge on main with the
+# `version:` line of graphos.cabal bumped, a `v<version>` tag, and the GitHub
+# release that .github/workflows/release.yml builds from that tag. The worktree
+# and the local branch are removed at the end.
+#
+# Two ways to start, both with the same definition (mnemo has no conditional
+# steps, so the proposal gate is always approved):
+#
+#   # a new proposal
+#   mnemo run openspec-release --param change=my-change --param idea='what to build'
+#
+#   # an existing, fully specified change: the proposal step does not rewrite it
+#   # (openspec status says 4/4), and you approve the gate once
+#   mnemo run openspec-release --param change=my-change --param idea='already specified'
+#
+# Import and run from the Graphos checkout, inside `devenv shell` (cabal, gh and
+# openspec on PATH), with the space config:
+#
+#   export MNEMO_CONFIG=$HOME/.config/mnemo/graphos.yaml
+#   mnemo workflow import .mnemo/workflows/openspec-release.yaml
+#   mnemo run openspec-release --param change=my-change --param idea='...'
+#   # exit 3 at `accept-proposal` and `approve-merge`:
+#   mnemo approve RUN accept-proposal --by NAME && mnemo run --resume RUN
+#   mnemo approve RUN approve-merge --by NAME && mnemo run --resume RUN
+#
+# The delegate instructions are static: mnemo substitutes placeholders only in
+# argv, focus, ask and evidence, never in an instruction. The values a delegate
+# needs travel as card inputs (`context`, `worktree`, `pr`). A retry gets the
+# previous failure on its card without any placeholder.
+#
+# The delegate target is `opencode-deepseek` from ~/.config/mnemo/graphos.yaml.
+# Its argv is the wrapper scripts/mnemo/agent.sh, which enters the worktree
+# recorded by `openspec-release.sh worktree` before it runs `opencode run`:
+# mnemo starts a delegate in the directory it was itself started from (the main
+# checkout), and the proposal step must run there while development and review
+# run in the worktree.
+workflow: openspec-release
+params: [change, idea]
+steps:
+
+  # The parameters as one JSON object, so the proposal, development and review
+  # cards can name the change and the idea (an instruction cannot hold ${...}).
+  - id: context
+    executor: command
+    timeout_seconds: 60
+    argv: [jq, -n, --arg, change, "${change}", --arg, idea, "${idea}", '{change: $change, idea: $idea}']
+    parse: json
+    output:
+      type: object
+      required: [change, idea]
+      properties:
+        change: {type: string}
+        idea: {type: string}
+    evidence:
+      - field_present: change
+      - field_present: idea
+
+  # The tools, the OpenSpec workspace and a clean run state. Nothing is written.
+  - id: prepare
+    executor: command
+    timeout_seconds: 300
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, prepare, "${change}"]
+    evidence:
+      - command_ok: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, prepare, "${change}"]
+
+  # The proposal artifacts. Idempotent: an existing 4/4 change is left as it is,
+  # which is how a run starts at the apply step.
+  - id: proposal
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [context, prepare]
+    inputs:
+      request: context
+    timeout_seconds: 3600
+    output:
+      type: object
+      required: [summary]
+      properties:
+        summary: {type: string}
+    instruction: |
+      You write the OpenSpec proposal of one change in this repository, before any code
+      exists.
+
+      The card's `request` input is a JSON object: `change` is the name of the change and
+      `idea` is what the person wants. Read it first. Where the steps below say <change>,
+      use the value of `change` in the request.
+
+      Do exactly this:
+      1. Run `openspec status --change <change>`. If the change does not exist, run
+         `openspec new change <change>`.
+      2. If and only if the status is incomplete, complete the artifacts in the order it
+         shows (proposal, specs, design, tasks): for each, run
+         `openspec instructions <artifact> --change <change>`, follow it, and write the
+         artifact at the path it names. Write in English. The specs artifact must hold at
+         least one capability at `openspec/changes/<change>/specs/<capability>/spec.md`
+         with `## ADDED Requirements` (or MODIFIED) and at least one `#### Scenario:`.
+      3. When `openspec status --change <change>` says `Progress: 4/4 artifacts complete`
+         and `openspec validate <change> --strict` passes, stop.
+      4. If the status is already 4/4, change nothing: this run starts at the apply step
+         and the person approved the existing proposal.
+      5. Do not write application code, do not touch a file outside
+         `openspec/changes/<change>/`, do not run git, do not commit.
+
+      Answer with one JSON object: {"summary": "<two sentences on what the change proposes>"}.
+      If the card shows that the previous attempt failed, read it and correct it.
+    evidence:
+      - field_present: summary
+      - file_exists: openspec/changes/${change}/proposal.md
+      - command_ok: [openspec, validate, "${change}", --strict]
+      - command_ok: [sh, -c, 'openspec status --change "$1" | grep -q "4/4"', check, "${change}"]
+
+  # A person reads the proposal before any worktree exists.
+  - id: accept-proposal
+    executor: human
+    depends_on: [proposal]
+    instruction: |
+      Read the OpenSpec change of this run — `openspec/changes/<the change named in the
+      run parameters>/`: proposal.md, design.md, specs/ and tasks.md — and the idea the
+      run started with. Approve only when this is what you want developed. Approving
+      creates the worktree, opens the draft pull request and starts the development; it
+      does not merge anything.
+
+  # The worktree on `openspec/<change>`, with the proposal committed on it.
+  - id: worktree
+    executor: command
+    depends_on: [accept-proposal]
+    timeout_seconds: 600
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, worktree, "${change}"]
+    parse: json
+    output:
+      type: object
+      required: [worktree, branch]
+      properties:
+        worktree: {type: string}
+        branch: {type: string}
+    evidence:
+      - field_present: worktree
+      - field_present: branch
+
+  # The draft pull request that carries the proposal.
+  - id: draft-pr
+    executor: command
+    depends_on: [worktree]
+    timeout_seconds: 600
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, draft-pr, "${change}"]
+    parse: json
+    output:
+      type: object
+      required: [number, url]
+      properties:
+        number: {type: integer}
+        url: {type: string}
+    evidence:
+      - field_present: number
+      - field_present: url
+
+  # Development in the worktree, one atomic commit per logical change, pushed.
+  # The timeout covers 4 to 6 task groups of Haskell, each built and tested.
+  - id: develop
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [draft-pr]
+    inputs:
+      request: context
+      worktree: worktree
+      pr: draft-pr
+    timeout_seconds: 10800
+    max_attempts: 2
+    output:
+      type: object
+      required: [head, summary]
+      properties:
+        head: {type: string}
+        summary: {type: string}
+    instruction: |
+      You develop one OpenSpec change. The card carries three inputs: `request` is a JSON
+      object whose `change` field names the change and whose `idea` field is what the
+      person wants; `worktree` holds the worktree path and branch; `pr` holds the draft
+      pull request number. The current directory is already the worktree.
+
+      Read first: the change's `proposal.md`, `design.md`, every `specs/**/spec.md` and
+      `tasks.md` (all under `openspec/changes/<change>/`), then `AGENTS.md`,
+      `openspec/config.yaml` and `devenv.nix`.
+
+      Then implement it:
+      - Run `openspec instructions apply --change <change>` and do the tasks of tasks.md
+        in order, task group 1 first: each change starts with a baseline and failing
+        specs, and its check criteria are written before the code. Tick a task in
+        tasks.md only when its Check holds.
+      - One atomic commit per logical change, with a conventional subject (`feat:`,
+        `fix:`, `refactor:`, `test:`, `docs:`, `chore:`, `build:`, `ci:`, `perf:`).
+        Each commit must build with `cabal build --flag dev` and pass `cabal test`.
+        Never write `fixup!` or `squash!`, never rewrite history.
+      - Respect the layering of `openspec/config.yaml`: Domain has no IO, UseCase has no
+        IO implementation, all side effects live in Infrastructure.
+      - Keep `openspec validate <change> --strict` green. Do not edit proposal.md except
+        to correct a factual error found during the baseline (and say so in the commit),
+        do not modify another change, do not touch `extraction-semantic-enrichment`, do
+        not merge, do not force-push, do not change the CI configuration.
+      - The measurements the tasks ask for (baseline tables, before/after counts) go in
+        `openspec/changes/<change>/README.md` with the command that produced them.
+      - The live-server tests of `lsp-project-session` need `typescript-language-server`
+        on PATH; when it is absent they must be pending, not failing.
+      - Leave the worktree clean and push: `git push origin HEAD`.
+
+      Answer with one JSON object: {"head": "<pushed commit sha>", "summary": "<what is implemented>"}.
+      If the card shows that the previous attempt failed, read it and correct it.
+    evidence:
+      - field_present: head
+      - command_ok: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, check, "${change}"]
+
+  # One review round: review the diff, post the status comment, fix when asked.
+  - id: review
+    executor: delegate
+    target: opencode-deepseek
+    depends_on: [develop]
+    inputs:
+      request: context
+      pr: draft-pr
+    timeout_seconds: 5400
+    max_attempts: 3
+    output:
+      type: object
+      required: [status, reviewed]
+      properties:
+        status: {type: string, enum: [CAN MERGE, IMPROVEMENT, CHANGES]}
+        reviewed: {type: string}
+    instruction: |
+      You review one OpenSpec change on its draft pull request, and you post the review on
+      GitHub. The card carries two inputs: `request` is a JSON object whose `change` field
+      names the change; `pr` holds the pull request number. The current directory is the
+      worktree of the branch.
+
+      1. Read `openspec/changes/<change>/proposal.md`, design.md, specs/** and tasks.md,
+         then the whole diff: `gh pr diff <number>`.
+      2. Check that every task of tasks.md is done or ticked, that the specs are
+         implemented, that the worktree is clean and pushed, and that the CI of
+         `.github/workflows/haskell.yml` is green at HEAD.
+      3. Post exactly one comment with `gh pr comment <number> --body ...`. It lists the
+         findings (blocking and non-blocking) and ends with these two lines:
+           Reviewed commit: `<HEAD sha>`
+           **Status: CAN MERGE**
+         Use `**Status: IMPROVEMENT**` when only non-blocking notes remain, and
+         `**Status: CHANGES**` when something blocks the merge.
+      4. When the status is CHANGES, fix the code yourself, commit atomically, push, and
+         post a new comment with the new status and the new head. Never rewrite history.
+
+      Answer with one JSON object: {"status": "<CAN MERGE|IMPROVEMENT|CHANGES>", "reviewed": "<head sha>"}.
+      If the card shows that the previous attempt failed, read it and correct it.
+    evidence:
+      - field_present: status
+      - command_ok: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, review-gate, "${change}"]
+
+  # The automated gate: review allows the head, GitHub checks green, local suite green.
+  - id: gate
+    executor: command
+    depends_on: [review]
+    timeout_seconds: 3600
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, gate, "${change}"]
+    evidence:
+      - command_ok: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, gate, "${change}"]
+
+  # A person's gate before the irreversible merge.
+  - id: approve-merge
+    executor: human
+    depends_on: [gate]
+    instruction: |
+      The gate passed: the local suite and the GitHub checks are green at the head, the
+      worktree is clean and pushed, and the latest review comment allows the merge.
+      Approve to archive the change, squash-merge the pull request of this run into main,
+      bump the `version:` line of graphos.cabal, tag it `v<version>` and let the Release
+      workflow publish the GitHub release, then remove the worktree and the branch. This
+      cannot be undone: do not approve if you do not want that release.
+
+  # Archive in the worktree, so the archive travels in the same pull request.
+  - id: archive
+    executor: command
+    depends_on: [approve-merge]
+    timeout_seconds: 600
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, archive, "${change}"]
+    evidence:
+      - command_ok: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, archived, "${change}"]
+
+  # Squash merge, version bump, tag, cleanup; the release workflow does the release.
+  - id: merge
+    executor: command
+    depends_on: [archive]
+    timeout_seconds: 1800
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, merge, "${change}"]
+    parse: json
+    output:
+      type: object
+      required: [version, tag]
+      properties:
+        version: {type: string}
+        tag: {type: string}
+    evidence:
+      - field_present: version
+      - field_present: tag
+
+  # The last check, from the main checkout: the tag and the release exist.
+  - id: verify-release
+    executor: command
+    depends_on: [merge]
+    timeout_seconds: 2400
+    argv: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, released, "${change}", "${merge.version}"]
+    evidence:
+      - command_ok: [sh, -c, '"$(git rev-parse --show-toplevel)/scripts/mnemo/openspec-release.sh" "$@"', release, released, "${change}", "${merge.version}"]
