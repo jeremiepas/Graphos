@@ -6,6 +6,9 @@ module Graphos.UseCase.Extract.Haskell
   , parseHaskellModule
   , parseHaskellImports
   , parseHaskellDecls
+  , parseHaskellDeclNames
+  , HaskellDecl(..)
+  , haskellDeclsVersion
   , isTopLevelDecl
   , extractDeclName
   , extractImportName
@@ -21,9 +24,10 @@ module Graphos.UseCase.Extract.Haskell
 import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar, withMVar)
 import Control.Exception (SomeException, catch, try)
 import Control.Monad (filterM)
-import Data.Char (isAlpha, isAlphaNum)
-import Data.List (find, isPrefixOf, isSuffixOf, nub, sort)
+import Data.Char (isAlpha, isAlphaNum, isSpace)
+import Data.List (dropWhileEnd, find, isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 
+import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
@@ -78,7 +82,11 @@ haskellStubNodesWith filePath content resolvedImports =
       hashPrefix = T.pack $ show dirHash
       modName = parseHaskellModule content
       imports = parseHaskellImports content
-      decls = parseHaskellDecls content
+      decls = parseHaskellDeclNames content
+      -- The first top-level declaration of each name gives the node its
+      -- location; names seen only on indented lines keep no range.
+      positions = Map.fromListWith (\_new old -> old)
+        [ (hdName d, d) | d <- parseHaskellDecls content ]
       resolved = resolvedImports
       modNode = case modName of
         Just mn ->
@@ -125,18 +133,20 @@ haskellStubNodesWith filePath content resolvedImports =
         , nodeFileType     = CodeFile
         , nodeSourceFile   = fromText (T.pack filePath)
         , nodeSource       = Nothing
-   , nodeLineStart    = Nothing
-   , nodeCommunityId  = Nothing
-   , nodeDegree       = Nothing
-   , nodeIsBridge     = Nothing
-   , nodeExtra        = Nothing
-        , nodeLineEnd      = Nothing
+        , nodeLineStart    = hdLineStart <$> pos
+        , nodeCommunityId  = Nothing
+        , nodeDegree       = Nothing
+        , nodeIsBridge     = Nothing
+        , nodeExtra        = Nothing
+        , nodeLineEnd      = hdLineEnd <$> pos
         , nodeKind         = Just (fromText declKind')
-        , nodeSignature    = Nothing
-        , nodePresentBits  = bitNodeKind
+        , nodeSignature    = fromText . T.pack . hdSignature <$> pos
+        , nodePresentBits  = bitNodeKind .|. maybe 0 (const locationBits) pos
         }
         | (declName, declKind') <- decls
+        , let pos = Map.lookup declName positions
         ]
+      locationBits = bitNodeLineStart .|. bitNodeLineEnd .|. bitNodeSignature
   in modNode ++ impNodes ++ declNodes
 
 -- | Build edges from Haskell stub nodes: module→import, module→decl.
@@ -195,16 +205,175 @@ extractImportName line =
       name = takeWhile (\c -> isAlphaNum c || c `elem` ("._" :: String)) afterQual
   in if null name then "Unknown" else name
 
--- | Parse top-level declarations from a Haskell source file.
--- Returns @(name, kind)@ pairs for valid declarations only.
-parseHaskellDecls :: String -> [(String, T.Text)]
-parseHaskellDecls content =
+-- | Version of the Haskell declaration output, mixed into the extraction
+-- fingerprint so cached extractions made before a change are not reused.
+-- 2: declaration nodes carry line range and signature (function-source-access).
+haskellDeclsVersion :: String
+haskellDeclsVersion = "2"
+
+-- | Names and kinds of the declaration lines of a Haskell source file, one
+-- pair per matching line (a name may repeat). This list decides the node ids
+-- and is kept as it was before declarations carried positions.
+parseHaskellDeclNames :: String -> [(String, T.Text)]
+parseHaskellDeclNames content =
   [ (name, declKind line)
   | line <- lines content
   , isTopLevelDecl line
   , Just name <- [extractDeclName line]
   ]
 
+-- | A top-level declaration with its location: 1-based first and last line,
+-- and its signature (the type signature when one precedes the definition,
+-- otherwise the first definition line), at most 200 characters.
+data HaskellDecl = HaskellDecl
+  { hdName      :: String
+  , hdKind      :: T.Text
+  , hdLineStart :: Int
+  , hdLineEnd   :: Int
+  , hdSignature :: String
+  } deriving (Eq, Show)
+
+-- | Top-level (column 0) declarations of a Haskell source file, in file order.
+--
+-- A type signature and the clauses of the same name that follow it form one
+-- declaration. A declaration ends at its last non-blank, non-comment line
+-- before the next top-level item, so a comment or pragma that documents the
+-- next declaration never extends the previous one. Declarations inside block
+-- comments are not reported.
+parseHaskellDecls :: String -> [HaskellDecl]
+parseHaskellDecls content = map finish (groupItems items)
+  where
+    classified = classifyLines (map stripCR (lines content))
+    lineCount = length classified
+    byLine = IM.fromList (zip [1 ..] classified)
+    lineAt i = IM.findWithDefault LBlank i byLine
+    items = [ (n, it) | (n, LCode0 l) <- IM.toList byLine, Just it <- [topItem l] ]
+
+    -- A group is a declaration's clause lines; the item after it bounds it.
+    finish (name, kind, clauseLines, next) =
+      let start = minimum clauseLines
+          limit = maybe lineCount (subtract 1) next
+          end = lastContentLine start limit
+          headLast = case filter (> start) clauseLines of
+            (m : _) -> m - 1
+            []      -> end
+      in HaskellDecl
+           { hdName      = name
+           , hdKind      = kind
+           , hdLineStart = start
+           , hdLineEnd   = end
+           , hdSignature = take 200 (signatureOf start headLast kind)
+           }
+
+    groupItems :: [(Int, TopItem)] -> [(String, T.Text, [Int], Maybe Int)]
+    groupItems [] = []
+    groupItems ((_, Boundary) : rest) = groupItems rest
+    groupItems ((n, Decl name kind) : rest) =
+      let (same, others) = span (sameDecl name kind . snd) rest
+          next = fst <$> listToMaybe others
+      in (name, kind, n : map fst same, next) : groupItems others
+
+    -- A type signature and the clauses that follow it share one name.
+    sameDecl name kind (Decl name' kind') =
+      kind == "Function" && kind' == "Function" && name == name'
+    sameDecl _ _ Boundary = False
+
+    lastContentLine start limit =
+      case [ i | i <- [limit, limit - 1 .. start], isContent (lineAt i) ] of
+        (i : _) -> i
+        []      -> start
+
+    signatureOf start headLast kind =
+      let headLines = [ lineText (lineAt i) | i <- [start .. headLast], isContent (lineAt i) ]
+          joined = unwords (concatMap words headLines)
+          isSig = kind == "Function" && "::" `isInfixOf` takeWhile (/= '=') joined
+      in if isSig then joined else trim (lineText (lineAt start))
+
+-- | One column-0 item: a named declaration line, or another top-level line
+-- (import, operator definition, standalone deriving, …) that only ends the
+-- declaration before it.
+data TopItem = Decl String T.Text | Boundary
+
+topItem :: String -> Maybe TopItem
+topItem line
+  | any (`isPrefixOf` line) continuations = Nothing
+  | "module " `isPrefixOf` line || "import " `isPrefixOf` line = Just Boundary
+  | "deriving" `isPrefixOf` line = Just Boundary
+  | otherwise = case line of
+      (c : _) | isAlpha c || c == '(' ->
+        Just (maybe Boundary (\n -> Decl n (declKind line)) (extractDeclName line))
+      _ -> Just Boundary
+  where
+    continuations = ["where", "then", "else", "in "]
+
+-- | A source line, classified for declaration ranges.
+data LineClass
+  = LBlank
+  | LComment String   -- ^ line comment, block comment or pragma
+  | LCpp String       -- ^ preprocessor directive
+  | LCode0 String     -- ^ code starting at column 0
+  | LIndented String  -- ^ indented code
+
+isContent :: LineClass -> Bool
+isContent (LCode0 _)    = True
+isContent (LIndented _) = True
+isContent _             = False
+
+lineText :: LineClass -> String
+lineText c = case c of
+  LBlank      -> ""
+  LComment s  -> s
+  LCpp s      -> s
+  LCode0 s    -> s
+  LIndented s -> s
+
+-- | Classify each line, following the nesting of block comments.
+classifyLines :: [String] -> [LineClass]
+classifyLines = go 0
+  where
+    go :: Int -> [String] -> [LineClass]
+    go _ [] = []
+    go depth (l : ls) =
+      let trimmed = dropWhile isSpace l
+          depth'
+            | depth == 0 && isLineComment trimmed = 0
+            | otherwise = max 0 (depth + countSub "{-" l - countSub "-}" l)
+          cls
+            | depth > 0                     = LComment l
+            | all isSpace l                 = LBlank
+            | "{-" `isPrefixOf` trimmed     = LComment l
+            | isLineComment trimmed         = LComment l
+            | "#" `isPrefixOf` l            = LCpp l
+            | startsWithSpace l             = LIndented l
+            | otherwise                     = LCode0 l
+      in cls : go depth' ls
+
+    startsWithSpace (c : _) = isSpace c
+    startsWithSpace []      = False
+
+    -- "--" followed by more dashes, then anything but a symbol: "-->" is an
+    -- operator, not a comment.
+    isLineComment s =
+      let (dashes, rest) = span (== '-') s
+      in length dashes >= 2 && case rest of
+           (c : _) -> c `notElem` ("!#$%&*+./<=>?@\\^|~:" :: String)
+           []      -> True
+
+countSub :: String -> String -> Int
+countSub pat = go
+  where
+    go [] = 0
+    go s@(_ : rest)
+      | pat `isPrefixOf` s = 1 + go (drop (length pat) s)
+      | otherwise          = go rest
+
+stripCR :: String -> String
+stripCR s = case reverse s of
+  ('\r' : r) -> reverse r
+  _          -> s
+
+trim :: String -> String
+trim = dropWhileEnd isSpace . dropWhile isSpace
 -- | Check if a line is a top-level declaration.
 -- Only column-0 lines beginning with a letter or '(' are considered.
 -- This excludes indented continuations, guards ('|'), braces, string literals,

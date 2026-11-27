@@ -27,6 +27,8 @@ import System.IO.Temp (withSystemTempDirectory)
 
 import Test.Hspec
 
+import Graphos.UseCase.Extract.Haskell (haskellDeclsVersion)
+
 import Graphos.Domain.Config (ResolveConfig(..), ResolveKind(..))
 import Graphos.Domain.Types
   ( ExtractorConfig(..)
@@ -97,6 +99,13 @@ shouldDiffer a b = a `shouldSatisfy` (/= b)
 
 spec :: Spec
 spec = describe "extraction cache soundness (custom-extractors 5.5)" $ do
+
+  it "carries the Haskell declaration version, so pre-range Haskell caches miss (function-source-access 2.3)" $ do
+    fp <- fingerprintOf (pipeline defaultGraphosConfig)
+    -- Fingerprints written before declaration ranges carry no such entry, so
+    -- every one of them differs from this fingerprint.
+    fp `shouldSatisfy` T.isInfixOf (T.pack ("haskellDecls=" ++ haskellDeclsVersion))
+    haskellDeclsVersion `shouldBe` "2"
 
   it "identical configs fingerprint identically" $ do
     let cfg = pipeline (withCommandExtractor ["perl-extract", "{file}"])
