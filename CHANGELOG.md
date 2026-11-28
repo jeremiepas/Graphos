@@ -3,6 +3,24 @@
 ## Unreleased
 
 ### Added
+- **`mode: lsp` keeps its server alive and emits `calls` edges.** `initialize`
+  now sends the real Graphos process id (the constant `42` made
+  `typescript-language-server` exit after 3 s) and declares the `references`
+  and `callHierarchy` client capabilities, so servers advertise call
+  hierarchy. Document URIs are absolute `file://` URIs, and symbol requests
+  are asked at the symbol's name (`selectionRange`). On the
+  `test-corpus/ts-sample` fixture the graph goes from 3 nodes and 0 edges to
+  5 nodes and the 3 expected `calls` edges (openspec change
+  `lsp-project-session`, #293, #294, #295).
+- **Per-server LSP session options in `graphos.yaml`.** Each `lsp:` entry
+  accepts `initialization_options`, `timeout_seconds` (default 300),
+  `call_hierarchy` (`auto` | `on` | `off`), `call_hierarchy_max_symbols`
+  (default 5, 0 = every symbol) and `max_restarts` (default 1). Invalid values
+  fail config loading with a message naming the extension and the key.
+- **A dead language server is reported and restarted.** Its exit status and
+  the file in flight are logged, it is restarted up to `max_restarts` times,
+  and when no restart remains one summary line names the server, the exit
+  status and the number of files not extracted.
 - **`graphos source <node>` prints a node's code.** The command resolves the
   node like `neighbors`, reads its file under `--root` (default `.`) and prints
   its numbered lines, with `--context N` and `--json`. It exits non-zero, naming
@@ -19,6 +37,11 @@
   cached Haskell extractions are invalidated by the extraction fingerprint.
 
 ### Changed
+- **LSP `calls` edges start at the caller's own file.** The source node id of
+  an incoming call is built from `from.uri`, not from the callee's file, so a
+  cross-file caller id changes from "callee file + caller name" to "caller
+  file + caller name". LSP graphs had no `calls` edges before (the server
+  died first), so few stored ids are affected.
 - **The frontend left the Haskell repository.** `studio/` (the Elm Graphos
   Studio SPA) and `assets/viewer/` (the HTML viewer assets) are now owned by the
   separate `graphos-studio` repository, which brings its own Elm 0.19.2
