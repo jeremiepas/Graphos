@@ -17,6 +17,10 @@ module Graphos.Domain.Config
 
     -- * LSP configuration
   , LSPServerConfig(..)
+  , CallHierarchyMode(..)
+  , callHierarchyModeFromText
+  , lspCallHierarchyMode
+  , lspServer
   , defaultLSPServers
   , defaultLanguageIds
 
@@ -104,6 +108,8 @@ module Graphos.Domain.Config
 
      -- * Schema validation (extractors/resolve)
   , configSectionErrors
+  , lspSectionErrors
+  , validateLSPServerEntry
   , validateExtractorEntry
   , validateResolveEntry
 

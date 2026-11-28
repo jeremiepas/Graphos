@@ -20,6 +20,13 @@ module Graphos.Domain.Config.Extraction
 
     -- * LSP configuration
   , LSPServerConfig(..)
+  , CallHierarchyMode(..)
+  , callHierarchyModeFromText
+  , lspCallHierarchyMode
+  , lspServer
+  , defaultLSPTimeoutSeconds
+  , defaultCallHierarchyMaxSymbols
+  , defaultLSPMaxRestarts
   , defaultLSPServers
   , defaultLanguageIds
 
@@ -291,65 +298,130 @@ defaultExtractors = Map.fromList
 -- ───────────────────────────────────────────────
 
 -- | Configuration for a single LSP server.
--- Maps a file extension to a language server command.
+-- Maps a file extension to a language server command, plus the optional
+-- session options of change lsp-project-session (each defaults to the
+-- behaviour before that change when absent from @graphos.yaml@).
 data LSPServerConfig = LSPServerConfig
-  { lspCommand    :: String
-  , lspArgs       :: [String]
-  , lspLanguageId :: Text
+  { lspCommand                 :: String
+  , lspArgs                    :: [String]
+  , lspLanguageId              :: Text
+  , lspInitializationOptions   :: Maybe Value  -- ^ sent verbatim as @initializationOptions@
+  , lspTimeoutSeconds          :: Int          -- ^ initialize timeout (> 0)
+  , lspCallHierarchy           :: Text         -- ^ raw mode; see 'callHierarchyModeFromText'
+  , lspCallHierarchyMaxSymbols :: Int          -- ^ symbols per file asked for incoming calls; 0 = all
+  , lspMaxRestarts             :: Int          -- ^ restarts allowed in one build (>= 0)
   } deriving (Eq, Show, Generic)
 
-instance ToJSON LSPServerConfig where
-  toJSON = genericToJSON defaultOptions { fieldLabelModifier = lowerFirst . drop 3 }
+-- | When call hierarchy requests are sent (see the lsp-edge-extraction spec).
+data CallHierarchyMode
+  = CallHierarchyAuto  -- ^ only when the server advertised @callHierarchyProvider@
+  | CallHierarchyOn    -- ^ regardless of the advertised capability, until MethodNotFound
+  | CallHierarchyOff   -- ^ never
+  deriving (Eq, Show)
 
--- | Custom FromJSON: accept both camelCase and snake_case field names.
--- The YAML config uses snake_case (command, args, language_id).
+-- | Parse the @call_hierarchy@ value; 'Nothing' for an unknown value.
+callHierarchyModeFromText :: Text -> Maybe CallHierarchyMode
+callHierarchyModeFromText t = case t of
+  "auto" -> Just CallHierarchyAuto
+  "on"   -> Just CallHierarchyOn
+  "off"  -> Just CallHierarchyOff
+  _      -> Nothing
+
+-- | The parsed mode of an entry; an invalid value (rejected at validation)
+-- falls back to 'CallHierarchyAuto'.
+lspCallHierarchyMode :: LSPServerConfig -> CallHierarchyMode
+lspCallHierarchyMode = maybe CallHierarchyAuto id . callHierarchyModeFromText . lspCallHierarchy
+
+-- | Defaults of the session options.
+defaultLSPTimeoutSeconds, defaultCallHierarchyMaxSymbols, defaultLSPMaxRestarts :: Int
+defaultLSPTimeoutSeconds       = 300
+defaultCallHierarchyMaxSymbols = 5
+defaultLSPMaxRestarts          = 1
+
+-- | An entry with every session option at its default.
+lspServer :: String -> [String] -> Text -> LSPServerConfig
+lspServer cmd args langId = LSPServerConfig
+  { lspCommand                 = cmd
+  , lspArgs                    = args
+  , lspLanguageId              = langId
+  , lspInitializationOptions   = Nothing
+  , lspTimeoutSeconds          = defaultLSPTimeoutSeconds
+  , lspCallHierarchy           = "auto"
+  , lspCallHierarchyMaxSymbols = defaultCallHierarchyMaxSymbols
+  , lspMaxRestarts             = defaultLSPMaxRestarts
+  }
+
+-- | The three historical keys keep their names (@command@, @args@,
+-- @languageId@); the session options use the snake_case keys of @graphos.yaml@
+-- so the output parses back to the same value.
+instance ToJSON LSPServerConfig where
+  toJSON c = object $
+    [ "command"                    .= lspCommand c
+    , "args"                       .= lspArgs c
+    , "languageId"                 .= lspLanguageId c
+    , "timeout_seconds"            .= lspTimeoutSeconds c
+    , "call_hierarchy"             .= lspCallHierarchy c
+    , "call_hierarchy_max_symbols" .= lspCallHierarchyMaxSymbols c
+    , "max_restarts"               .= lspMaxRestarts c
+    ] ++ maybe [] (\v -> ["initialization_options" .= v]) (lspInitializationOptions c)
+
+-- | The YAML config uses snake_case (@command@, @args@, @language_id@ and
+-- the session options); @languageId@ is accepted too, as 'toJSON' writes it.
 instance FromJSON LSPServerConfig where
-  parseJSON = withObject "LSPServerConfig" $ \v -> LSPServerConfig
-    <$> v .:? "command"     .!= ""
-    <*> v .:? "args"        .!= []
-    <*> v .:? "language_id" .!= "plaintext"
+  parseJSON = withObject "LSPServerConfig" $ \v -> do
+    langSnake <- v .:? "language_id"
+    langCamel <- v .:? "languageId"
+    LSPServerConfig
+      <$> v .:? "command"     .!= ""
+      <*> v .:? "args"        .!= []
+      <*> pure (maybe "plaintext" id (maybe langCamel Just langSnake))
+      <*> v .:? "initialization_options"
+      <*> v .:? "timeout_seconds"            .!= defaultLSPTimeoutSeconds
+      <*> v .:? "call_hierarchy"             .!= "auto"
+      <*> v .:? "call_hierarchy_max_symbols" .!= defaultCallHierarchyMaxSymbols
+      <*> v .:? "max_restarts"               .!= defaultLSPMaxRestarts
 
 -- | Default LSP server configurations (hardcoded fallback).
 -- Users can override these via graphos.yaml.
 defaultLSPServers :: Map String LSPServerConfig
 defaultLSPServers = Map.fromList
-  [ (".ts",    LSPServerConfig "typescript-language-server" ["--stdio"] "typescript")
-  , (".tsx",   LSPServerConfig "typescript-language-server" ["--stdio"] "typescriptreact")
-  , (".js",    LSPServerConfig "typescript-language-server" ["--stdio"] "javascript")
-  , (".jsx",   LSPServerConfig "typescript-language-server" ["--stdio"] "javascriptreact")
-  , (".mjs",   LSPServerConfig "typescript-language-server" ["--stdio"] "javascript")
-  , (".cjs",   LSPServerConfig "typescript-language-server" ["--stdio"] "javascript")
-  , (".py",    LSPServerConfig "pyright-langserver" ["--stdio"] "python")
-  , (".pyw",   LSPServerConfig "pyright-langserver" ["--stdio"] "python")
-  , (".go",    LSPServerConfig "gopls" [] "go")
-  , (".rs",    LSPServerConfig "rust-analyzer" [] "rust")
-  , (".c",     LSPServerConfig "clangd" [] "c")
-  , (".cpp",   LSPServerConfig "clangd" [] "cpp")
-  , (".h",     LSPServerConfig "clangd" [] "c")
-  , (".hpp",   LSPServerConfig "clangd" [] "cpp")
-  , (".java",  LSPServerConfig "jdtls" [] "java")
-  , (".cs",    LSPServerConfig "omnisharp" [] "csharp")
-  , (".rb",    LSPServerConfig "solargraph" ["--stdio"] "ruby")
-  , (".hs",    LSPServerConfig "haskell-language-server" ["--lsp"] "haskell")
-  , (".lhs",   LSPServerConfig "haskell-language-server" ["--lsp"] "haskell")
-  , (".php",   LSPServerConfig "phpactor" ["language-server"] "php")
-  , (".pl",    LSPServerConfig "perlnavigator" [] "perl")
-  , (".pm",    LSPServerConfig "perlnavigator" [] "perl")
-  , (".psgi",  LSPServerConfig "perlnavigator" [] "perl")
-  , (".t",     LSPServerConfig "perlnavigator" [] "perl")
-  , (".swift", LSPServerConfig "sourcekit-lsp" [] "swift")
-  , (".kt",    LSPServerConfig "kotlin-language-server" [] "kotlin")
-  , (".kts",   LSPServerConfig "kotlin-language-server" [] "kotlin")
-  , (".scala", LSPServerConfig "metals" [] "scala")
-  , (".lua",   LSPServerConfig "lua-language-server" [] "lua")
-  , (".zig",   LSPServerConfig "zls" [] "zig")
-  , (".ex",    LSPServerConfig "elixir-ls" [] "elixir")
-  , (".exs",   LSPServerConfig "elixir-ls" [] "elixir")
-  , (".dart",  LSPServerConfig "dart" ["analyze", "--stdio"] "dart")
-  , (".vue",   LSPServerConfig "vue-language-server" [] "vue")
-  , (".svelte",LSPServerConfig "svelte-language-server" [] "svelte")
+  [ (".ts",    lspServer "typescript-language-server" ["--stdio"] "typescript")
+  , (".tsx",   lspServer "typescript-language-server" ["--stdio"] "typescriptreact")
+  , (".js",    lspServer "typescript-language-server" ["--stdio"] "javascript")
+  , (".jsx",   lspServer "typescript-language-server" ["--stdio"] "javascriptreact")
+  , (".mjs",   lspServer "typescript-language-server" ["--stdio"] "javascript")
+  , (".cjs",   lspServer "typescript-language-server" ["--stdio"] "javascript")
+  , (".py",    lspServer "pyright-langserver" ["--stdio"] "python")
+  , (".pyw",   lspServer "pyright-langserver" ["--stdio"] "python")
+  , (".go",    lspServer "gopls" [] "go")
+  , (".rs",    lspServer "rust-analyzer" [] "rust")
+  , (".c",     lspServer "clangd" [] "c")
+  , (".cpp",   lspServer "clangd" [] "cpp")
+  , (".h",     lspServer "clangd" [] "c")
+  , (".hpp",   lspServer "clangd" [] "cpp")
+  , (".java",  lspServer "jdtls" [] "java")
+  , (".cs",    lspServer "omnisharp" [] "csharp")
+  , (".rb",    lspServer "solargraph" ["--stdio"] "ruby")
+  , (".hs",    lspServer "haskell-language-server" ["--lsp"] "haskell")
+  , (".lhs",   lspServer "haskell-language-server" ["--lsp"] "haskell")
+  , (".php",   lspServer "phpactor" ["language-server"] "php")
+  , (".pl",    lspServer "perlnavigator" [] "perl")
+  , (".pm",    lspServer "perlnavigator" [] "perl")
+  , (".psgi",  lspServer "perlnavigator" [] "perl")
+  , (".t",     lspServer "perlnavigator" [] "perl")
+  , (".swift", lspServer "sourcekit-lsp" [] "swift")
+  , (".kt",    lspServer "kotlin-language-server" [] "kotlin")
+  , (".kts",   lspServer "kotlin-language-server" [] "kotlin")
+  , (".scala", lspServer "metals" [] "scala")
+  , (".lua",   lspServer "lua-language-server" [] "lua")
+  , (".zig",   lspServer "zls" [] "zig")
+  , (".ex",    lspServer "elixir-ls" [] "elixir")
+  , (".exs",   lspServer "elixir-ls" [] "elixir")
+  , (".dart",  lspServer "dart" ["analyze", "--stdio"] "dart")
+  , (".vue",   lspServer "vue-language-server" [] "vue")
+  , (".svelte",lspServer "svelte-language-server" [] "svelte")
   -- NEW: Nix and JSON LSP servers
-  , (".nix",   LSPServerConfig "nixd" [] "nix")
+  , (".nix",   lspServer "nixd" [] "nix")
   ]
 
 -- | Default language ID mapping for extensions.

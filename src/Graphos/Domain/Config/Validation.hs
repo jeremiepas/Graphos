@@ -12,10 +12,12 @@ module Graphos.Domain.Config.Validation
     configSectionErrors
   , extractorSectionErrors
   , resolveSectionErrors
+  , lspSectionErrors
 
     -- * Single-entry validation
   , validateExtractorEntry
   , validateResolveEntry
+  , validateLSPServerEntry
   ) where
 
 import Data.Aeson (FromJSON(..), Object, Value(..))
@@ -35,7 +37,8 @@ import Graphos.Domain.Config.Resolve
 -- | Validate both user-declared schema sections of a parsed config document.
 -- Returns every problem found (empty means the document is acceptable).
 configSectionErrors :: Value -> [String]
-configSectionErrors (Object o) = extractorSectionErrors o ++ resolveSectionErrors o
+configSectionErrors (Object o) =
+  extractorSectionErrors o ++ resolveSectionErrors o ++ lspSectionErrors o
 configSectionErrors _          = []
 
 -- | Validate the @extractors:@ mapping: every entry must decode and satisfy
@@ -59,6 +62,17 @@ resolveSectionErrors o = case KeyMap.lookup "resolve" o of
                                 (validateResolveEntry (keyText k)) v)
               (KeyMap.toList entries)
   Just _ -> ["\"resolve\" must be a mapping of file extensions to resolver entries"]
+
+-- | Validate the @lsp:@ mapping: every entry must decode and carry valid
+-- session options (lsp-project-session).
+lspSectionErrors :: Object -> [String]
+lspSectionErrors o = case KeyMap.lookup "lsp" o of
+  Nothing -> []
+  Just (Object entries) ->
+    concatMap (\(k, v) -> withEntry "lsp" (keyText k)
+                                (validateLSPServerEntry (keyText k)) v)
+              (KeyMap.toList entries)
+  Just _ -> ["\"lsp\" must be a mapping of file extensions to server entries"]
 
 -- | Decode one section entry and run its typed validator, prefixing decode
 -- failures with @section["extension"]:@ so the message names the entry.
@@ -160,6 +174,31 @@ validateExtractorEntry ext ec = firstLeft $ case ecMode ec of
       , forbid "stub" "grammar_path" (ecGrammarPath ec)
       , forbid "stub" "queries" (ecQueries ec)
       ]
+
+-- ───────────────────────────────────────────────
+-- LSP server entries
+-- ───────────────────────────────────────────────
+
+-- | Validate the session options of one @lsp:@ entry. Every message names
+-- the extension and the key.
+validateLSPServerEntry :: String -> LSPServerConfig -> Either String ()
+validateLSPServerEntry ext c = firstLeft
+  [ case callHierarchyModeFromText (lspCallHierarchy c) of
+      Just _  -> Right ()
+      Nothing -> Left $ prefix ++ "\"call_hierarchy\" must be one of auto, on, off (got \""
+                   ++ T.unpack (lspCallHierarchy c) ++ "\")"
+  , if lspTimeoutSeconds c <= 0
+      then Left $ prefix ++ "\"timeout_seconds\" must be a positive number of seconds"
+      else Right ()
+  , if lspCallHierarchyMaxSymbols c < 0
+      then Left $ prefix ++ "\"call_hierarchy_max_symbols\" must not be negative"
+      else Right ()
+  , if lspMaxRestarts c < 0
+      then Left $ prefix ++ "\"max_restarts\" must not be negative"
+      else Right ()
+  ]
+  where
+    prefix = "lsp[\"" ++ ext ++ "\"]: "
 
 -- ───────────────────────────────────────────────
 -- Resolve entries
