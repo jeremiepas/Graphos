@@ -1,8 +1,8 @@
 ## 1. Baseline and check criteria (before any code)
 
-- [ ] 1.1 Add a TypeScript fixture under `test-corpus/` with 3 files: a function defined in one file, called from the two others, plus one same-file call. Check: the fixture has a `tsconfig.json` and its expected call pairs are listed in a comment at the top of the spec that will use it.
-- [ ] 1.2 Record the baseline on `main`: build the fixture with `.ts` in `mode: lsp` and note node count, edge count per relation, the last `[lsp]` log lines and the exit status in the change's `README.md`. Check: the note shows the server death and zero `calls` edges, or states what was seen instead.
-- [ ] 1.3 Record the `references` edge count of an existing Haskell fixture in LSP mode on `main`, in the same `README.md`. Check: one number with the command that produced it. If `haskell-language-server` is not installed, say so and mark the comparison in 6.2 as not run.
+- [x] 1.1 Add a TypeScript fixture under `test-corpus/` with 3 files: a function defined in one file, called from the two others, plus one same-file call. Check: the fixture has a `tsconfig.json` and its expected call pairs are listed in a comment at the top of the spec that will use it.
+- [x] 1.2 Record the baseline on `main`: build the fixture with `.ts` in `mode: lsp` and note node count, edge count per relation, the last `[lsp]` log lines and the exit status in the change's `README.md`. Check: the note shows the server death and zero `calls` edges, or states what was seen instead.
+- [x] 1.3 Record the `references` edge count of an existing Haskell fixture in LSP mode on `main`, in the same `README.md`. Check: one number with the command that produced it. If `haskell-language-server` is not installed, say so and mark the comparison in 6.2 as not run.
 - [ ] 1.4 Write the failing specs first, each pending or red on `main`: initialize builder (process id, declared capabilities, `initializationOptions`), URI builder (relative, absolute, `.` and `..` segments), YAML parsing and validation of the 5 keys, incoming-call conversion (cross-file caller, missing `uri`), mode logic (`auto`, `on`, `off`, MethodNotFound), restart loop (recovered, exhausted, disabled). Check: `cabal test` lists them and none passes by accident.
 
 ## 2. Handshake: identity, capabilities, URIs

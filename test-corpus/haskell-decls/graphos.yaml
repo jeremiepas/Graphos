@@ -1,0 +1,7 @@
+# Graphos configuration for the Haskell LSP baseline fixture (task 1.3).
+# `.hs` uses the Language Server Protocol so graphos extracts document symbols and
+# sends textDocument/references; this records the references edge count on `main`.
+extractors:
+  ".hs":
+    mode: lsp
+    language_id: haskell
