@@ -28,7 +28,7 @@ The CLI cannot run from the prebuilt `~/.local/bin/graphos` binary
 **Command** (run from `test-corpus/ts-sample/`):
 
 ```console
-$ export PATH="/tmp/tsbin:$PATH"          # typescript-language-server 5.3.0 (not on PATH)
+$ export PATH="$(nix build --no-link --print-out-paths nixpkgs#typescript-language-server)/bin:$(nix build --no-link --print-out-paths nixpkgs#typescript)/bin:$PATH"          # typescript-language-server 5.3.0 (not on PATH)
 $ cabal exec -- graphos .
 $ echo $?                                 # 0
 ```
@@ -133,22 +133,94 @@ compare against. If `Decls.hs` is given a cabal package context (or the fixture 
 placed in a project), `haskell-language-server` will return its document symbols
 and the comparison can be completed; that is a follow-up, not part of this change.
 
+## Result (after this change)
+
+### 6.2 — TypeScript fixture, `mode: lsp`, `call_hierarchy_max_symbols` 5 and 0
+
+Server: `typescript-language-server` 5.3.0 with TypeScript 5.9.3 (from nixpkgs,
+`nix build nixpkgs#typescript-language-server nixpkgs#typescript`, bin dirs put
+on `PATH`). The fixture was copied to a scratch directory with this
+`graphos.yaml` (cap 5, then cap 0), and built with the worktree's binary:
+
+```yaml
+extractors:
+  ".ts": { mode: lsp, language_id: typescript }
+lsp:
+  ".ts":
+    command: typescript-language-server
+    args: ["--stdio"]
+    language_id: typescript
+    call_hierarchy_max_symbols: 5   # then 0
+```
+
+```
+[lsp] Server capabilities: documentSymbol=True references=True callHierarchy=True workspaceSymbol=True
+[lsp] ./c.ts → 1 nodes, 2 edges
+[lsp] ./b.ts → 1 nodes, 2 edges
+[lsp] ./a.ts → 2 nodes, 12 edges
+Extracted 5 nodes, 16 edges
+Build drops: 13 edges with unknown endpoints
+```
+
+| | Baseline (1.2) | Cap 5 | Cap 0 |
+|---|---|---|---|
+| Server alive for the whole build | no (dies ~3 s after connect) | yes | yes |
+| Nodes (3 functions + `sameFileCaller` + `graphos.yaml`) | 3 | 5 | 5 |
+| `calls` edges in the graph | 0 | 3 | 3 |
+| `calls` edges whose two ends are existing nodes | — | 3 / 3 (100 %) | 3 / 3 (100 %) |
+| Wall-clock time of the build | — | 3.48 s | 3.49 s |
+| Exit status | 0 | 0 | 0 |
+
+The three expected pairs of 1.1 are present at both caps:
+`sameFileCaller → verdict`, `wrap → verdict` (b.ts → a.ts), `main → verdict`
+(c.ts → a.ts). With three functions the cap does not bind, so both runs are
+identical.
+
+Found while measuring: `typescript-language-server` answers
+`prepareCallHierarchy` with `null` at the start of a symbol's `range` (the
+`export` keyword) and with the item at its name. Symbol requests (references
+and call hierarchy) are now asked at `selectionRange.start`, which the parser
+reads from `documentSymbol` (falling back to `range`).
+
+The 13 dropped edges are not `calls` edges and are not introduced by this
+change: the file→symbol `contains` edges start at the bare file stem (`a`,
+`b`, `c`), and the `references` edges end at `ref_<line>` ids; neither is a
+node of the graph. Fixing those id schemes is outside this change.
+
+**Haskell `references` against 1.3: not run.** `haskell-language-server` is not
+on `PATH` in this environment, and the 1.3 baseline is 0 anyway (the server
+returned no symbols for the standalone fixture, which has no cradle).
+
+### 5.4 — Extraction cache fingerprint: no change needed
+
+`extractionConfigFingerprint` keys the per-file extraction cache, and that
+cache is consulted only for tree-sitter and command files
+(`UseCase/Extract/Core.hs`, `consultCache treeSitterFiles` /
+`consultCache commandFiles`). LSP files are extracted on every build, so a
+changed session option can never serve a stale cached file.
+
+### 6.1 — Build and tests
+
+`cabal build --flag dev all` is warning-free (`-Werror`).
+
+`cabal test --flag dev all` (2026-11-28, `typescript-language-server` 5.3.0 on `PATH`):
+
+```
+Finished in 333.4430 seconds
+2036 examples, 0 failures, 4 pending
+Test suite graphos-test: PASS
+```
+
+The live-server spec of task 2.5 (`stays connected 10 s after initialize`) passes
+with the server on `PATH` and is pending without it.
+
 ## How to reproduce
 
 ```bash
 # TypeScript baseline/after — needs typescript-language-server on PATH
-export PATH="/tmp/tsbin:$PATH"
+export PATH="$(nix build --no-link --print-out-paths nixpkgs#typescript-language-server)/bin:$(nix build --no-link --print-out-paths nixpkgs#typescript)/bin:$PATH"
 cd test-corpus/ts-sample && cabal exec -- graphos .
 
 # Haskell baseline — needs haskell-language-server (2.13.0.0)
 cd test-corpus/haskell-decls && cabal exec -- graphos .
 ```
-
-## Close-out checklist (tasks 6.x)
-
-- [ ] 6.1 `cabal build --flag dev` (warning-free) and `cabal test` pass — summary pasted here.
-- [ ] 6.2 Rebuild the TS fixture at `call_hierarchy_max_symbols = 5` and `0`; record node
-      count, `calls` edge count, the share of `calls` edges whose both ends are existing
-      nodes, wall-clock time, and the Haskell `references` count against 1.3 above.
-- [ ] 6.3 Add the `CHANGELOG.md` entry (including the caller node-id change for LSP graphs).
-- [ ] 6.4 Comment on #293, #294, #295 with the measured outcome; close the ones resolved.
