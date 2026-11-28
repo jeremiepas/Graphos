@@ -291,6 +291,20 @@ extractors:               # file extension → extractor config
   #   mode: tree-sitter → grammar_path: path.so, queries: dir (ABI 9-11)
   # ... (see graphos.yaml for full list)
 
+lsp:                      # file extension → language server (used by `mode: lsp`)
+  ".ts":
+    command: typescript-language-server
+    args: ["--stdio"]
+    language_id: typescript
+    # session options (all optional):
+    initialization_options: { tsserver: { maxTsServerMemory: 6144 } }  # sent verbatim
+    timeout_seconds: 300            # initialize timeout (> 0)
+    call_hierarchy: auto            # auto | on | off — when `calls` edges are asked
+    call_hierarchy_max_symbols: 5   # symbols per file asked for callers; 0 = all
+    max_restarts: 1                 # restarts of a dead server per build; 0 = none
+  # When several extensions share one server, the options of the first
+  # extension of the file group apply to the session.
+
 resolve:                  # per-extension built-in import resolver
   ".java": { kind: package, roots: ["src/main/java"] }
   # kinds: package | psr4 | module-path | path-prefix; config overrides built-ins

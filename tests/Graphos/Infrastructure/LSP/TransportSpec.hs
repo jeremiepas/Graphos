@@ -9,6 +9,7 @@ import Graphos.Infrastructure.LSP.Protocol (ServerCapabilities(..), lspShutdown)
 import Graphos.Infrastructure.LSP.Transport
   ( LSPClient(..)
   , LSPClientConfig(..)
+  , defaultLSPConfig
   , isProcessAlive
   , markDisconnected
   , sendLSPMessageSafe
@@ -25,15 +26,17 @@ mkTestClient = do
     }
   idVar <- newMVar 100
   connectedRef <- newIORef True
+  chDisabled <- newIORef False
   pure LSPClient
     { lspHandle     = ph
     , lspStdin      = inh
     , lspStdout     = outh
     , lspStderr     = errh
-    , lspConfig     = LSPClientConfig "" [] "" 5
+    , lspConfig     = (defaultLSPConfig "") { lspTimeout = 5 }
     , lspMessageId  = idVar
     , lspServerCaps = ServerCapabilities False False False False False
     , lspConnected  = connectedRef
+    , lspCallHierarchyDisabled = chDisabled
     }
 
 spec :: Spec

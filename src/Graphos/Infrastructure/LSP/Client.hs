@@ -11,6 +11,7 @@ module Graphos.Infrastructure.LSP.Client
   , connectToLSP
   , disconnectLSP
   , isServerConnected
+  , serverExitStatus
 
     -- * Extraction via LSP
   , extractViaLSP
@@ -41,6 +42,7 @@ import Graphos.Infrastructure.LSP.Transport
   , connectToLSP
   , disconnectLSP
   , isServerConnected
+  , serverExitStatus
   )
 import Graphos.Infrastructure.LSP.CapabilityParse
   ( parseServerCapabilities

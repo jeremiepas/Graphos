@@ -1,0 +1,7 @@
+# Graphos configuration for the TypeScript LSP baseline/after fixture.
+# `.ts` uses the Language Server Protocol so graphos emits real client pid in
+# `initialize`, declares capabilities, and builds references + call-hierarchy edges.
+extractors:
+  ".ts":
+    mode: lsp
+    language_id: typescript

@@ -6,6 +6,8 @@ module Graphos.UseCase.Extract.LSP
   , doExtractWithSharedLSP
   , extractionFromPortSymbols
   , extractFilesWithLSP
+  , SessionOps(..)
+  , extractFilesWithRestart
   , extractFromFile
   ) where
 
@@ -18,7 +20,8 @@ import System.FilePath ((</>))
 
 import Graphos.Domain.Types (PipelineConfig(..), Extraction(..), ExtractionError(..), extractionFromLists)
 import Graphos.UseCase.AppEnv (AppEnv(..))
-import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), LSPHandle(..), SymbolResult(..))
+import Graphos.UseCase.Port.ExtractionPort
+  ( ExtractionPort(..), LSPHandle(..), LSPSessionOptions(..), SymbolResult(..), sessionOptionsFor )
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
 import Graphos.Domain.Graph (makeStubNode)
 
@@ -64,7 +67,9 @@ doExtractWithSharedLSP appEnv absRoot serverCmd files = do
       logDebug = lpLogDebug lp
       logWarn  = lpLogWarn lp
 
-  mbLSPOpts <- epFindLSPServer ep (takeExtension (case files of (f:_) -> f; [] -> ""))
+  -- The options of the first extension of the group apply to the session.
+  let groupExt = takeExtension (case files of (f:_) -> f; [] -> "")
+  mbLSPOpts <- epFindLSPServer ep groupExt
   case mbLSPOpts of
     Nothing -> mapM (\fp -> do
       logWarn $ T.pack $ "  LSP " ++ serverCmd ++ " disappeared for " ++ fp
@@ -72,40 +77,41 @@ doExtractWithSharedLSP appEnv absRoot serverCmd files = do
       ) files
     Just (cmd, args) -> do
       logDebug $ T.pack $ "  [lsp] Connecting to " ++ cmd ++ " for " ++ show (length files) ++ " files"
-      result <- epConnectLSP ep cmd args absRoot
+      let opts = sessionOptionsFor cmd args absRoot (epLSPServerConfig ep groupExt)
+      result <- epConnectLSP ep opts
       case result of
         Left err -> do
           logWarn $ T.pack $ "  [lsp] Connection failed: " ++ T.unpack err
           mapM (\fp -> pure (lspFailure fp ("connection to '" <> T.pack serverCmd <> "' failed: " <> err))) files
-        Right handle -> do
-          hasWsSym <- epHasWorkspaceSymbols ep handle
-          extractions <- if hasWsSym
+        Right handle0 -> do
+          hasWsSym <- epHasWorkspaceSymbols ep handle0
+          (extractions, handle) <- if hasWsSym
             then do
               logInfo $ T.pack $ "  [lsp] Server supports workspace/symbol — using project-level extraction"
-              wsResult <- epExtractWorkspaceSymbols ep handle
+              wsResult <- epExtractWorkspaceSymbols ep handle0
               case wsResult of
                 Right fileMap
                   | not (Map.null fileMap) -> do
                     logInfo $ T.pack $ "  [lsp] workspace/symbol returned symbols across " ++ show (Map.size fileMap) ++ " files"
                     let fileMap' = normalizeWorkspaceFileMap absRoot fileMap
-                    mapM (\fp -> do
+                    fmap (\es -> (es, handle0)) $ mapM (\fp -> do
                       let symResult = Map.findWithDefault (SymbolResult [] []) fp fileMap'
                           base = extractionFromPortSymbols fp symResult
                       if Map.null (extractionNodes base)
                         then do
                           logDebug $ T.pack $ "  [lsp] workspace/symbol yielded 0 nodes for " ++ fp ++ ", falling back to per-file extraction"
-                          epExtractViaLSP ep handle fp
+                          epExtractViaLSP ep handle0 fp
                         else pure base
                       ) files
                   | otherwise -> do
                     logDebug $ T.pack $ "  [lsp] workspace/symbol returned empty — falling back to per-file extraction"
-                    extractFilesWithLSP appEnv handle files
+                    extractFilesWithLSP appEnv opts handle0 files
                 Left err -> do
                   logWarn $ T.pack $ "  [lsp] workspace/symbol failed: " ++ T.unpack err ++ " — falling back to per-file extraction"
-                  extractFilesWithLSP appEnv handle files
+                  extractFilesWithLSP appEnv opts handle0 files
             else do
               logDebug $ T.pack $ "  [lsp] Server does not support workspace/symbol — using per-file extraction"
-              extractFilesWithLSP appEnv handle files
+              extractFilesWithLSP appEnv opts handle0 files
           mapM_ (\(fp, ext) -> do
             let nNodes = Map.size (extractionNodes ext)
                 nEdges = Map.size (extractionEdges ext)
@@ -128,18 +134,84 @@ extractionFromPortSymbols _filePath symResult =
       edges = srEdges symResult
   in extractionFromLists nodes edges
 
--- | Extract files via LSP, short-circuiting when the server dies.
-extractFilesWithLSP :: AppEnv -> LSPHandle -> [FilePath] -> IO [Extraction]
-extractFilesWithLSP _appEnv _ [] = pure []
-extractFilesWithLSP appEnv handle (fp:fps) = do
+-- | Extract files via LSP through one session, restarting a dead server up
+-- to the session's @max_restarts@ (lsp-project-session D6). Returns the
+-- extractions in file order and the handle of the last session, which the
+-- caller disconnects.
+extractFilesWithLSP :: AppEnv -> LSPSessionOptions -> LSPHandle -> [FilePath] -> IO ([Extraction], LSPHandle)
+extractFilesWithLSP appEnv opts handle files =
   let ep = extractionPort appEnv
-  alive <- epIsServerConnected ep handle
-  if not alive
-    then pure [lspFailure f "LSP server disconnected before this file was extracted" | f <- fp:fps]
-    else do
-      ext <- epExtractViaLSP ep handle fp
-      rest <- extractFilesWithLSP appEnv handle fps
-      pure (ext : rest)
+      ops = SessionOps
+        { soExtract    = epExtractViaLSP ep
+        , soConnected  = epIsServerConnected ep
+        , soExitStatus = epServerExitStatus ep
+        , soReconnect  = epConnectLSP ep opts
+        , soDisconnect = epDisconnectLSP ep
+        , soLogWarn    = lpLogWarn (loggingPort appEnv)
+        }
+  in extractFilesWithRestart ops (lsoCommand opts) (lsoMaxRestarts opts) handle files
+
+-- | The session operations the restart loop needs; a record so the loop can
+-- be tested against a fake server.
+data SessionOps h = SessionOps
+  { soExtract    :: h -> FilePath -> IO Extraction
+  , soConnected  :: h -> IO Bool
+  , soExitStatus :: h -> IO (Maybe Int)
+  , soReconnect  :: IO (Either T.Text h)
+  , soDisconnect :: h -> IO ()
+  , soLogWarn    :: T.Text -> IO ()
+  }
+
+-- | Extract @files@ in order. When the server is found dead before or after a
+-- file, that file is the one in flight: the exit status is logged with it,
+-- and while fewer than @maxRestarts@ restarts were used, a new session is
+-- started and the file is extracted again. Otherwise every file from the one
+-- in flight on carries an 'ExtractionError' with source @lsp@, and one
+-- summary line names the server, the last exit status and the count.
+extractFilesWithRestart :: SessionOps h -> String -> Int -> h -> [FilePath] -> IO ([Extraction], h)
+extractFilesWithRestart ops cmd maxRestarts h0 files0 = go h0 (0 :: Int) files0
+  where
+    go h _ [] = pure ([], h)
+    go h used files@(fp : rest) = do
+      alive <- soConnected ops h
+      if not alive
+        then died h used files
+        else do
+          ext <- soExtract ops h fp
+          stillAlive <- soConnected ops h
+          if stillAlive
+            then do
+              (exts, h') <- go h used rest
+              pure (ext : exts, h')
+            else died h used files
+
+    died h _ [] = pure ([], h)
+    died h used files@(fp : _) = do
+      status <- soExitStatus ops h
+      soLogWarn ops $ T.pack $ "[lsp] " ++ cmd ++ " exited with status " ++ showStatus status
+        ++ " while extracting " ++ fp
+      if used < maxRestarts
+        then do
+          soDisconnect ops h
+          reconnected <- soReconnect ops
+          case reconnected of
+            Right h' -> do
+              soLogWarn ops $ T.pack $ "[lsp] restarted " ++ cmd ++ " (restart " ++ show (used + 1)
+                ++ " of " ++ show maxRestarts ++ "), extracting " ++ fp ++ " again"
+              go h' (used + 1) files
+            Left err -> do
+              soLogWarn ops $ "[lsp] restart of " <> T.pack cmd <> " failed: " <> err
+              giveUp h status files
+        else giveUp h status files
+
+    giveUp h status files = do
+      soLogWarn ops $ T.pack $ "[lsp] " ++ cmd ++ ": " ++ show (length files)
+        ++ " files not extracted (last exit status " ++ showStatus status ++ ")"
+      let msg = T.pack $ "LSP server '" ++ cmd ++ "' exited (status " ++ showStatus status
+            ++ ") and no restart remains"
+      pure ([lspFailure f msg | f <- files], h)
+
+    showStatus = maybe "unknown" show
 
 -- | Extract from a single file using LSP (standalone)
 -- | Normalize workspace URI keys to filesystem paths under @absRoot@.
@@ -181,7 +253,7 @@ extractFromFile appEnv filePath = do
       pure (extractionFromLists [makeStubNode filePath] [])
     Just (cmd, args) -> do
       logDebug $ T.pack $ "  [lsp] " ++ filePath ++ " → " ++ cmd ++ " " ++ unwords args
-      result <- epConnectLSP ep cmd args absRoot
+      result <- epConnectLSP ep (sessionOptionsFor cmd args absRoot (epLSPServerConfig ep ext))
       case result of
         Left err -> do
           logWarn $ T.pack $ "  [lsp] Connection failed for " ++ filePath ++ ": " ++ T.unpack err
