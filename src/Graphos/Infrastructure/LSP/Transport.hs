@@ -21,6 +21,8 @@ module Graphos.Infrastructure.LSP.Transport
   , isProcessAlive
   , isServerConnected
   , markDisconnected
+  , serverExitStatus
+  , capabilityLogLine
   ) where
 
 import Control.Concurrent.MVar (MVar, newMVar)
@@ -39,7 +41,15 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import System.Process (ProcessHandle, createProcess, proc, std_in, std_out, std_err, StdStream(CreatePipe), terminateProcess, getProcessExitCode)
 import System.IO (Handle, hFlush, hClose, hGetLine, hIsEOF)
+import System.Exit (ExitCode(..))
+import System.Posix.Process (getProcessID)
 import System.Timeout (timeout)
+
+import Graphos.Domain.Config.Extraction
+  ( CallHierarchyMode(..)
+  , defaultLSPTimeoutSeconds
+  , defaultCallHierarchyMaxSymbols
+  )
 
 import Graphos.Infrastructure.LSP.Protocol
 import Graphos.Infrastructure.LSP.CapabilityParse (parseServerCapabilities)
@@ -48,19 +58,27 @@ import Graphos.Infrastructure.LSP.CapabilityParse (parseServerCapabilities)
 -- LSP Client types
 -- ───────────────────────────────────────────────
 
+-- | One LSP session: the server command and the session options of its
+-- @lsp:@ entry in @graphos.yaml@ (lsp-project-session).
 data LSPClientConfig = LSPClientConfig
-  { lspCommand    :: FilePath
-  , lspArgs       :: [String]
-  , lspRootUri    :: FilePath
-  , lspTimeout    :: Int  -- ^ seconds; HLS needs 300s+ due to cabal v2-repl setup
+  { lspCommand             :: FilePath
+  , lspArgs                :: [String]
+  , lspRootUri             :: FilePath  -- ^ absolute session root (a path, not a URI)
+  , lspTimeout             :: Int       -- ^ initialize timeout, seconds; HLS needs minutes for cabal v2-repl
+  , lspInitOptions         :: Maybe Value  -- ^ @initializationOptions@, sent verbatim when present
+  , lspSessionCallHierarchy :: CallHierarchyMode
+  , lspSessionMaxSymbols   :: Int       -- ^ symbols per file asked for incoming calls; 0 = all
   } deriving (Eq, Show)
 
 defaultLSPConfig :: FilePath -> LSPClientConfig
 defaultLSPConfig root = LSPClientConfig
-  { lspCommand = ""
-  , lspArgs     = []
-  , lspRootUri  = root
-  , lspTimeout  = 300  -- 5 min default; HLS needs time for cabal v2-repl
+  { lspCommand             = ""
+  , lspArgs                = []
+  , lspRootUri             = root
+  , lspTimeout             = defaultLSPTimeoutSeconds
+  , lspInitOptions         = Nothing
+  , lspSessionCallHierarchy = CallHierarchyAuto
+  , lspSessionMaxSymbols   = defaultCallHierarchyMaxSymbols
   }
 
 data LSPClient = LSPClient
@@ -72,6 +90,9 @@ data LSPClient = LSPClient
   , lspMessageId  :: MVar Int
   , lspServerCaps :: ServerCapabilities
   , lspConnected  :: IORef Bool  -- ^ True while the server process is alive and pipes are open
+  , lspCallHierarchyDisabled :: IORef Bool
+    -- ^ set by the first MethodNotFound answer to a call hierarchy request
+    -- in @call_hierarchy: on@ mode; stops the requests for the session
   }
 
 -- ───────────────────────────────────────────────
@@ -119,6 +140,21 @@ isServerConnected client = do
   if not flag
     then pure False
     else isProcessAlive (lspHandle client)
+
+-- | Exit status of the server process, once it has exited.
+serverExitStatus :: LSPClient -> IO (Maybe Int)
+serverExitStatus client = fmap exitCodeInt <$> getProcessExitCode (lspHandle client)
+  where
+    exitCodeInt ExitSuccess     = 0
+    exitCodeInt (ExitFailure n) = n
+
+-- | The connect-time log line: the four capabilities Graphos uses.
+capabilityLogLine :: ServerCapabilities -> String
+capabilityLogLine caps =
+  "[lsp] Server capabilities: documentSymbol=" ++ show (scpDocumentSymbolProvider caps)
+    ++ " references=" ++ show (scpReferencesProvider caps)
+    ++ " callHierarchy=" ++ show (scpCallHierarchyProvider caps)
+    ++ " workspaceSymbol=" ++ show (scpWorkspaceSymbolProvider caps)
 
 -- | Mark the LSP client as disconnected (e.g. after detecting a dead process).
 markDisconnected :: LSPClient -> IO ()
@@ -246,16 +282,17 @@ connectToLSP config = catch (do
 
       idVar <- newMVar 2
       connectedRef <- newIORef True
+      chDisabledRef <- newIORef False
 
-      let initMsg = lspInitialize (lspRootUri config)
+      -- The real pid: a server with a parent-process watchdog exits when
+      -- the pid it was given is not alive (typescript-language-server: 3 s).
+      pid <- getProcessID
+      let initMsg = lspInitialize (fromIntegral pid) (lspInitOptions config) (lspRootUri config)
       sendLSPMessage inh initMsg
 
-      -- HLS needs significantly more time to initialize because it runs
-      -- cabal v2-repl to determine build flags (can take minutes on first run).
-      -- Other LSP servers typically respond within seconds.
-      let initTimeoutMicros = case lspCommand config of
-            cmd | "haskell-language-server" `isInfixOf` cmd -> max (lspTimeout config) 300 * 1000000
-                | otherwise -> lspTimeout config * 1000000
+      -- HLS can take minutes here (cabal v2-repl); the default of 300 s
+      -- covers it, and @timeout_seconds@ tunes it per server.
+      let initTimeoutMicros = lspTimeout config * 1000000
       initResp <- timeout initTimeoutMicros (readLSPResponseForId outh 1)
       case initResp of
         Nothing -> do
@@ -283,8 +320,7 @@ connectToLSP config = catch (do
             putStrLn $ "[lsp] Exit code: " ++ show mec
 
           let caps = parseServerCapabilities respVal
-          putStrLn $ "[lsp] Server capabilities: documentSymbol=" ++ show (scpDocumentSymbolProvider caps)
-                   ++ " workspaceSymbol=" ++ show (scpWorkspaceSymbolProvider caps)
+          putStrLn (capabilityLogLine caps)
 
           putStrLn $ "[lsp] Connected to " ++ lspCommand config
           pure $ Right LSPClient
@@ -296,6 +332,7 @@ connectToLSP config = catch (do
             , lspMessageId  = idVar
             , lspServerCaps = caps
             , lspConnected  = connectedRef
+            , lspCallHierarchyDisabled = chDisabledRef
             }
     _ -> pure $ Left $ T.pack "Failed to create LSP process handles"
   ) $ \(e :: SomeException) -> pure $ Left $ T.pack $ "LSP connection error: " ++ show e

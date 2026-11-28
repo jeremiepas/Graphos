@@ -8,15 +8,20 @@ module Graphos.UseCase.Port.ExtractionPort
   , CommandGate(..)
     -- * Opaque LSP handle
   , LSPHandle(..)
+  , LSPSessionOptions(..)
+  , sessionOptionsFor
   , SymbolResult(..)
   ) where
 
+import Data.Aeson (Value)
 import Data.ByteString (ByteString)
 import Data.Dynamic (Dynamic)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Graphos.Domain.Types (Extraction, Node, Edge)
-import Graphos.Domain.Config.Extraction (ExtractorConfig, Granularity)
+import Graphos.Domain.Config.Extraction
+  ( ExtractorConfig, Granularity, LSPServerConfig(..), CallHierarchyMode, lspCallHierarchyMode
+  , lspServer )
 import Graphos.Domain.Extraction (CommandOutcome)
 import Graphos.Domain.Types.Pipeline (PipelineConfig)
 import Graphos.Infrastructure.FileSystem.Ignore (AnnotatedPattern)
@@ -30,6 +35,35 @@ data LSPHandle = LSPHandle
   , lhArgs :: ![String]
   , lhRootUri :: !String
   }
+
+-- | Everything one LSP session needs: the server, the session root and the
+-- session options of its @lsp:@ entry (lsp-project-session D4).
+data LSPSessionOptions = LSPSessionOptions
+  { lsoCommand                 :: String
+  , lsoArgs                    :: [String]
+  , lsoRoot                    :: FilePath     -- ^ absolute session root
+  , lsoInitializationOptions   :: Maybe Value
+  , lsoTimeoutSeconds          :: Int
+  , lsoCallHierarchy           :: CallHierarchyMode
+  , lsoCallHierarchyMaxSymbols :: Int
+  , lsoMaxRestarts             :: Int
+  } deriving (Eq, Show)
+
+-- | Session options for a resolved server command, from its @lsp:@ entry
+-- (or the defaults when the extension has none).
+sessionOptionsFor :: String -> [String] -> FilePath -> Maybe LSPServerConfig -> LSPSessionOptions
+sessionOptionsFor cmd args root mCfg =
+  let c = maybe (lspServer cmd args "plaintext") id mCfg
+  in LSPSessionOptions
+       { lsoCommand                 = cmd
+       , lsoArgs                    = args
+       , lsoRoot                    = root
+       , lsoInitializationOptions   = lspInitializationOptions c
+       , lsoTimeoutSeconds          = lspTimeoutSeconds c
+       , lsoCallHierarchy           = lspCallHierarchyMode c
+       , lsoCallHierarchyMaxSymbols = lspCallHierarchyMaxSymbols c
+       , lsoMaxRestarts             = lspMaxRestarts c
+       }
 
 -- | Result of workspace symbol extraction.
 data SymbolResult = SymbolResult
@@ -53,9 +87,13 @@ data CommandGate = CommandGate
 data ExtractionPort = ExtractionPort
   { -- LSP lifecycle
     epFindLSPServer        :: String -> IO (Maybe (String, [String]))
-  , epConnectLSP           :: String -> [String] -> String -> IO (Either Text LSPHandle)
+    -- | The @lsp:@ entry of an extension (session options), if any.
+  , epLSPServerConfig      :: String -> Maybe LSPServerConfig
+  , epConnectLSP           :: LSPSessionOptions -> IO (Either Text LSPHandle)
   , epDisconnectLSP        :: LSPHandle -> IO ()
   , epIsServerConnected    :: LSPHandle -> IO Bool
+    -- | Exit status of the server process once it has exited.
+  , epServerExitStatus     :: LSPHandle -> IO (Maybe Int)
     -- LSP extraction
   , epExtractViaLSP        :: LSPHandle -> FilePath -> IO Extraction
   , epHasWorkspaceSymbols  :: LSPHandle -> IO Bool

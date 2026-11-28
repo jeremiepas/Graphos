@@ -31,11 +31,11 @@ import System.IO (hPutStrLn, stderr)
 import Graphos.Domain.Types (Extraction(..), extractionFromLists)
 import Graphos.Domain.Graph (makeStubNode)
 import Graphos.Domain.Types.Pipeline (PipelineConfig(..), Neo4jStreamingConfig(..))
-import Graphos.Domain.Config (GraphosConfig, Granularity, defaultGraphosConfig)
+import Graphos.Domain.Config (GraphosConfig(..), Granularity, defaultGraphosConfig)
 
 import Graphos.UseCase.AppEnv (AppEnv(..))
 import Graphos.UseCase.Load (loadGraphFromFile, LoadResult(..))
-import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..), LSPHandle(..), SymbolResult(..))
+import Graphos.UseCase.Port.ExtractionPort (ExtractionPort(..), CommandGate(..), LSPHandle(..), LSPSessionOptions(..), SymbolResult(..))
 import qualified Graphos.UseCase.Port.ExportPort as UEP
 import Graphos.UseCase.Port.FileSystemPort (FileSystemPort(..))
 import Graphos.UseCase.Port.LoggingPort (LoggingPort(..))
@@ -163,20 +163,24 @@ productionFileSystemPort = FileSystemPort
 productionExtractionPort :: LogEnv -> GraphosConfig -> ExtractionPort
 productionExtractionPort logEnv graphosCfg = ExtractionPort
   { epFindLSPServer = \ext -> Cfg.resolveLSPServer graphosCfg ext
-  , epConnectLSP = \cmd args rootUri -> do
+  , epLSPServerConfig = \ext -> Map.lookup ext (gcLsp graphosCfg)
+  , epConnectLSP = \opts -> do
       let config = LSP.LSPClientConfig
-            { LSP.lspCommand = cmd
-            , LSP.lspArgs    = args
-            , LSP.lspRootUri = rootUri
-            , LSP.lspTimeout  = 300
+            { LSP.lspCommand              = lsoCommand opts
+            , LSP.lspArgs                 = lsoArgs opts
+            , LSP.lspRootUri              = lsoRoot opts
+            , LSP.lspTimeout              = lsoTimeoutSeconds opts
+            , LSP.lspInitOptions          = lsoInitializationOptions opts
+            , LSP.lspSessionCallHierarchy = lsoCallHierarchy opts
+            , LSP.lspSessionMaxSymbols    = lsoCallHierarchyMaxSymbols opts
             }
       result <- LSP.connectToLSP config
       case result of
         Right client -> pure $ Right $ LSPHandle
           { lhHandle = toDyn client
-          , lhCommand = cmd
-          , lhArgs = args
-          , lhRootUri = rootUri
+          , lhCommand = lsoCommand opts
+          , lhArgs = lsoArgs opts
+          , lhRootUri = lsoRoot opts
           }
         Left err -> pure $ Left err
   , epDisconnectLSP = \(LSPHandle dynHandle _ _ _) ->
@@ -187,6 +191,10 @@ productionExtractionPort logEnv graphosCfg = ExtractionPort
       case fromDynamic dynHandle of
         Just client -> LSP.isServerConnected client
         Nothing     -> pure False
+  , epServerExitStatus = \(LSPHandle dynHandle _ _ _) ->
+      case fromDynamic dynHandle of
+        Just client -> LSP.serverExitStatus client
+        Nothing     -> pure Nothing
   , epExtractViaLSP = \(LSPHandle dynHandle _ _ _) fp ->
       case fromDynamic dynHandle of
         Just client -> LSP.extractViaLSP client fp
