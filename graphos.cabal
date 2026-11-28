@@ -496,6 +496,7 @@ test-suite graphos-test
     Graphos.Infrastructure.Extract.TreeSitterSpec
     Graphos.Infrastructure.LSP.ClientSpec
     Graphos.Infrastructure.LSP.TransportSpec
+    Graphos.Infrastructure.LSP.SessionSpec
     Graphos.Infrastructure.LLM.EmbeddingSpec
     Graphos.Domain.EmbeddingSpec
     Graphos.Infrastructure.LLM.EmbeddingCacheSpec

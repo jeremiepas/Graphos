@@ -93,6 +93,7 @@ import qualified Graphos.Infrastructure.Extract.CommandExtractorSpec
 import qualified Graphos.Infrastructure.Extract.TreeSitterSpec
 import qualified Graphos.Infrastructure.LSP.ClientSpec
 import qualified Graphos.Infrastructure.LSP.TransportSpec
+import qualified Graphos.Infrastructure.LSP.SessionSpec
 import qualified Graphos.Infrastructure.LLM.EmbeddingSpec
 import qualified Graphos.Infrastructure.LLM.EmbeddingCacheSpec
 import qualified Graphos.Infrastructure.Observability.SDKSpec
@@ -216,6 +217,7 @@ main = Test.Hspec.hspec $ do
   Graphos.Infrastructure.Extract.TreeSitterSpec.spec
   Graphos.Infrastructure.LSP.ClientSpec.spec
   Graphos.Infrastructure.LSP.TransportSpec.spec
+  Graphos.Infrastructure.LSP.SessionSpec.spec
   Graphos.Infrastructure.LLM.EmbeddingSpec.spec
   Graphos.Infrastructure.LLM.EmbeddingCacheSpec.spec
   Graphos.Infrastructure.Observability.SDKSpec.spec
